@@ -87,6 +87,9 @@ impl FileSystem for MockFileSystem {
     }
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
+        if *self.io_error_on_write.lock().unwrap() {
+            return Err(io::Error::new(ErrorKind::Other, "Mock I/O error on write"));
+        }
         self.files
             .lock()
             .unwrap()
@@ -333,4 +336,56 @@ fn test_list_specs_no_specs_dir() {
 
     let specs = manager.list_specs().unwrap();
     assert!(specs.is_empty());
+}
+
+#[test]
+fn test_remove_spec_success() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "to-remove-api";
+    let spec_path = PathBuf::from(TEST_CONFIG_DIR)
+        .join("specs")
+        .join("to-remove-api.yaml");
+    let cache_path = PathBuf::from(TEST_CONFIG_DIR)
+        .join(".cache")
+        .join("to-remove-api.bin");
+    fs.add_file(&spec_path, "content");
+    fs.add_file(&cache_path, "cached content");
+
+    let result = manager.remove_spec(spec_name);
+    assert!(result.is_ok());
+    assert!(!fs.exists(&spec_path));
+    assert!(!fs.exists(&cache_path));
+}
+
+#[test]
+fn test_remove_spec_not_found() {
+    let (manager, _fs) = setup_manager();
+    let spec_name = "non-existent-api";
+
+    let result = manager.remove_spec(spec_name);
+    assert!(result.is_err());
+    if let Err(Error::Config(msg)) = result {
+        assert!(msg.contains("does not exist"));
+    } else {
+        panic!("Unexpected error type: {:?}", result);
+    }
+}
+
+#[test]
+fn test_remove_spec_io_error() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "io-error-remove-api";
+    let spec_path = PathBuf::from(TEST_CONFIG_DIR)
+        .join("specs")
+        .join("io-error-remove-api.yaml");
+    fs.add_file(&spec_path, "content");
+    fs.set_io_error_on_write(true); // Simulate I/O error on remove
+
+    let result = manager.remove_spec(spec_name);
+    assert!(result.is_err());
+    if let Err(Error::Io(err)) = result {
+        assert!(err.to_string().contains("Mock I/O error on write"));
+    } else {
+        panic!("Unexpected error type: {:?}", result);
+    }
 }

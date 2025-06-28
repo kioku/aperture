@@ -89,6 +89,27 @@ impl<F: FileSystem> ConfigManager<F> {
         }
         Ok(specs)
     }
+
+    /// Removes an API specification from the configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec does not exist or cannot be removed.
+    pub fn remove_spec(&self, name: &str) -> Result<(), Error> {
+        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
+        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
+
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::Config(format!("Spec '{name}' does not exist.")));
+        }
+
+        self.fs.remove_file(&spec_path)?;
+        if self.fs.exists(&cache_path) {
+            self.fs.remove_file(&cache_path)?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Gets the default configuration directory path.
