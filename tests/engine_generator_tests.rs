@@ -69,20 +69,32 @@ fn test_generate_command_tree_structure() {
     assert_eq!(command.get_name(), "api");
     assert_eq!(command.get_version(), Some("1.0.0"));
 
-    // Check that subcommands exist
+    // Check that subcommands exist based on tags
     let subcommands: Vec<_> = command.get_subcommands().collect();
-    assert_eq!(subcommands.len(), 1);
+    assert_eq!(subcommands.len(), 2); // get-user and create-user have different tags
 
-    let default_group = subcommands.first().unwrap();
-    assert_eq!(default_group.get_name(), "default");
+    // Find the subcommands by name
+    let subcommand_names: Vec<&str> = subcommands.iter().map(|cmd| cmd.get_name()).collect();
+    assert!(subcommand_names.contains(&"get-user"));
+    assert!(subcommand_names.contains(&"create-user"));
 
-    // Check operation subcommands
-    let operations: Vec<_> = default_group.get_subcommands().collect();
-    assert_eq!(operations.len(), 2);
+    // Check the get-user group has the correct operation
+    let get_user_group = subcommands
+        .iter()
+        .find(|cmd| cmd.get_name() == "get-user")
+        .unwrap();
+    let get_user_operations: Vec<_> = get_user_group.get_subcommands().collect();
+    assert_eq!(get_user_operations.len(), 1);
+    assert_eq!(get_user_operations[0].get_name(), "get-user-by-id");
 
-    let operation_names: Vec<&str> = operations.iter().map(|cmd| cmd.get_name()).collect();
-    assert!(operation_names.contains(&"get-user"));
-    assert!(operation_names.contains(&"create-user"));
+    // Check the create-user group has the correct operation
+    let create_user_group = subcommands
+        .iter()
+        .find(|cmd| cmd.get_name() == "create-user")
+        .unwrap();
+    let create_user_operations: Vec<_> = create_user_group.get_subcommands().collect();
+    assert_eq!(create_user_operations.len(), 1);
+    assert_eq!(create_user_operations[0].get_name(), "create-user");
 }
 
 #[test]
@@ -93,4 +105,103 @@ fn test_generate_command_basic_functionality() {
     // Basic smoke test to ensure the command can be built
     assert!(!command.get_name().is_empty());
     assert!(command.get_subcommands().count() > 0);
+}
+
+#[test]
+fn test_kebab_case_conversion() {
+    let spec = CachedSpec {
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "users".to_string(),
+            description: Some("User operations".to_string()),
+            operation_id: "getUserProfile".to_string(),
+            method: "GET".to_string(),
+            path: "/users/{id}/profile".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+        }],
+    };
+
+    let command = generate_command_tree(&spec);
+    let users_group = command.get_subcommands().next().unwrap();
+    let operation = users_group.get_subcommands().next().unwrap();
+
+    // Should convert getUserProfile to get-user-profile
+    assert_eq!(operation.get_name(), "get-user-profile");
+}
+
+#[test]
+fn test_parameter_generation() {
+    let spec = create_test_spec();
+    let command = generate_command_tree(&spec);
+
+    // Find the get-user operation
+    let get_user_group = command
+        .get_subcommands()
+        .find(|cmd| cmd.get_name() == "get-user")
+        .unwrap();
+    let get_user_op = get_user_group
+        .get_subcommands()
+        .find(|cmd| cmd.get_name() == "get-user-by-id")
+        .unwrap();
+
+    // Check arguments were created
+    let args: Vec<_> = get_user_op.get_arguments().collect();
+    assert!(args.len() >= 3); // id (path), include (query), x-request-id (header)
+
+    // Check specific arguments
+    assert!(args.iter().any(|arg| arg.get_id() == "id"));
+    assert!(args.iter().any(|arg| arg.get_id() == "include"));
+    assert!(args.iter().any(|arg| arg.get_id() == "x-request-id"));
+}
+
+#[test]
+fn test_fallback_to_default_tag() {
+    let spec = CachedSpec {
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "".to_string(), // Empty tag should fallback to "default"
+            description: Some("Test operation".to_string()),
+            operation_id: "testOp".to_string(),
+            method: "GET".to_string(),
+            path: "/test".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+        }],
+    };
+
+    let command = generate_command_tree(&spec);
+    let subcommands: Vec<_> = command.get_subcommands().collect();
+
+    assert_eq!(subcommands.len(), 1);
+    assert_eq!(subcommands[0].get_name(), "default");
+}
+
+#[test]
+fn test_fallback_to_http_method() {
+    let spec = CachedSpec {
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "ops".to_string(),
+            description: Some("Test operation".to_string()),
+            operation_id: "".to_string(), // Empty operationId should fallback to method
+            method: "POST".to_string(),
+            path: "/test".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+        }],
+    };
+
+    let command = generate_command_tree(&spec);
+    let ops_group = command.get_subcommands().next().unwrap();
+    let operation = ops_group.get_subcommands().next().unwrap();
+
+    // Should use lowercase HTTP method as fallback
+    assert_eq!(operation.get_name(), "post");
 }

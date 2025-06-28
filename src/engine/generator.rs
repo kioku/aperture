@@ -1,5 +1,28 @@
-use crate::cache::models::CachedSpec;
+use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use clap::{Arg, ArgAction, Command};
+use std::collections::HashMap;
+
+/// Converts a string to kebab-case
+fn to_kebab_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut prev_lowercase = false;
+
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_uppercase() && i > 0 && prev_lowercase {
+            result.push('-');
+        }
+        result.push(ch.to_ascii_lowercase());
+        prev_lowercase = ch.is_lowercase();
+    }
+
+    result
+}
+
+/// Converts a String to a static string slice by leaking memory
+/// This is necessary for clap's lifetime requirements
+fn to_static_str(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
 
 /// Generates a dynamic CLI command tree from a cached `OpenAPI` specification.
 ///
@@ -19,32 +42,121 @@ use clap::{Arg, ArgAction, Command};
 /// # Errors
 /// This function does not return errors as the spec has already been validated
 #[must_use]
-pub fn generate_command_tree(_spec: &CachedSpec) -> Command {
-    // For now, create a simple placeholder command tree
-    // This will be expanded in future iterations
-    Command::new("api")
-        .version("1.0.0")
-        .about("Generated API CLI")
-        .subcommand(
-            Command::new("default")
-                .about("Default operations")
-                .subcommand(
-                    Command::new("get-user").about("Get user by ID").arg(
-                        Arg::new("id")
-                            .help("User ID")
-                            .value_name("ID")
-                            .required(true)
-                            .action(ArgAction::Set),
-                    ),
-                )
-                .subcommand(
-                    Command::new("create-user").about("Create a new user").arg(
-                        Arg::new("body")
-                            .long("body")
-                            .help("Request body as JSON")
-                            .value_name("JSON")
-                            .action(ArgAction::Set),
-                    ),
-                ),
-        )
+pub fn generate_command_tree(spec: &CachedSpec) -> Command {
+    let mut root_command = Command::new("api")
+        .version(to_static_str(spec.version.clone()))
+        .about(format!("CLI for {} API", spec.name));
+
+    // Group commands by their tag (namespace)
+    let mut command_groups: HashMap<String, Vec<&CachedCommand>> = HashMap::new();
+
+    for command in &spec.commands {
+        // Use the command name (first tag) or "default" as fallback
+        let group_name = if command.name.is_empty() {
+            "default".to_string()
+        } else {
+            command.name.clone()
+        };
+
+        command_groups.entry(group_name).or_default().push(command);
+    }
+
+    // Build subcommands for each group
+    for (group_name, commands) in command_groups {
+        let group_name_static = to_static_str(group_name.clone());
+        let mut group_command = Command::new(group_name_static)
+            .about(format!("{} operations", capitalize_first(&group_name)));
+
+        // Add operations as subcommands
+        for cached_command in commands {
+            let subcommand_name = if cached_command.operation_id.is_empty() {
+                // Fallback to HTTP method if no operationId
+                cached_command.method.to_lowercase()
+            } else {
+                to_kebab_case(&cached_command.operation_id)
+            };
+
+            let subcommand_name_static = to_static_str(subcommand_name);
+            let mut operation_command = Command::new(subcommand_name_static)
+                .about(cached_command.description.clone().unwrap_or_default());
+
+            // Add parameters as CLI arguments
+            for param in &cached_command.parameters {
+                let arg = create_arg_from_parameter(param);
+                operation_command = operation_command.arg(arg);
+            }
+
+            // Add request body argument if present
+            if let Some(request_body) = &cached_command.request_body {
+                operation_command = operation_command.arg(
+                    Arg::new("body")
+                        .long("body")
+                        .help("Request body as JSON")
+                        .value_name("JSON")
+                        .required(request_body.required)
+                        .action(ArgAction::Set),
+                );
+            }
+
+            group_command = group_command.subcommand(operation_command);
+        }
+
+        root_command = root_command.subcommand(group_command);
+    }
+
+    root_command
+}
+
+/// Creates a clap Arg from a `CachedParameter`
+fn create_arg_from_parameter(param: &CachedParameter) -> Arg {
+    let param_name_static = to_static_str(param.name.clone());
+    let mut arg = Arg::new(param_name_static);
+
+    match param.location.as_str() {
+        "path" => {
+            // Path parameters are positional arguments
+            let value_name = to_static_str(param.name.to_uppercase());
+            arg = arg
+                .help(format!("{} parameter", param.name))
+                .value_name(value_name)
+                .required(param.required)
+                .action(ArgAction::Set);
+        }
+        "query" | "header" => {
+            // Query and header parameters are flags
+            let long_name = to_static_str(param.name.clone());
+            let value_name = to_static_str(param.name.to_uppercase());
+            arg = arg
+                .long(long_name)
+                .help(format!(
+                    "{} {} parameter",
+                    capitalize_first(&param.location),
+                    param.name
+                ))
+                .value_name(value_name)
+                .required(param.required)
+                .action(ArgAction::Set);
+        }
+        _ => {
+            // Unknown location, treat as flag
+            let long_name = to_static_str(param.name.clone());
+            let value_name = to_static_str(param.name.to_uppercase());
+            arg = arg
+                .long(long_name)
+                .help(format!("{} parameter", param.name))
+                .value_name(value_name)
+                .required(param.required)
+                .action(ArgAction::Set);
+        }
+    }
+
+    arg
+}
+
+/// Capitalizes the first letter of a string
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + chars.as_str()
+    })
 }
