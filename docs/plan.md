@@ -108,7 +108,7 @@ All development will adhere to the following principles:
   - **Test:** Write extensive integration tests for `add_spec`. Use mock files: a valid spec, a spec with unsupported features, a spec with command collisions. Assert that the cache is created successfully or that the correct, specific `Error` variant is returned.
   - **Commit:** `feat(config): Implement 'config add' spec validation and caching`
 
-- `[ ]` **Task 3.3: Implement `config list`, `remove`, `edit`**
+- `[x]` **Task 3.3: Implement `config list`, `remove`, `edit`**
 
   - **Action:** In `config/manager.rs`, implement the remaining management functions. These will primarily interact with the file system abstraction.
   - **Test:** Write unit tests for each function, using a mocked file system to verify that the correct files are read, deleted, or that the correct editor command is generated.
