@@ -114,7 +114,7 @@ All development will adhere to the following principles:
   - **Test:** Write unit tests for each function, using a mocked file system to verify that the correct files are read, deleted, or that the correct editor command is generated.
   - **Commit:** `feat(config): Implement 'list', 'remove', and 'edit' subcommands`
 
-- `[ ]` **Task 3.4: Build the `config` CLI**
+- `[x]` **Task 3.4: Build the `config` CLI**
   - **Action:** In `src/cli.rs`, use `clap` to build the `aperture config` command and its subcommands (`add`, `list`, etc.), wiring them to the `config::manager` functions.
   - **Test:** Use the `assert_cmd` crate to write end-to-end tests. For example, run `aperture config list` and assert the output.
   - **Commit:** `feat(cli): Build clap interface for config command suite`
