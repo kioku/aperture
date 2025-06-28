@@ -97,7 +97,7 @@ All development will adhere to the following principles:
   - **Test:** Write unit tests for the default implementation.
   - **Commit:** `feat(fs): Create file system abstraction for testability`
 
-- `[ ]` **Task 3.2: Implement `config add` Logic**
+- `[x]` **Task 3.2: Implement `config add` Logic**
 
   - **Action:** Create `src/config/manager.rs`. Implement the `add_spec` function. This function will:
     1. Fetch the spec from a file or URL.
