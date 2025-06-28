@@ -301,3 +301,36 @@ paths: {}
         panic!("Unexpected error type: {:?}", result);
     }
 }
+
+#[test]
+fn test_list_specs_empty_dir() {
+    let (manager, _fs) = setup_manager();
+    let specs = manager.list_specs().unwrap();
+    assert!(specs.is_empty());
+}
+
+#[test]
+fn test_list_specs_multiple_specs() {
+    let (manager, fs) = setup_manager();
+    let specs_dir = PathBuf::from(TEST_CONFIG_DIR).join("specs");
+    fs.add_file(&specs_dir.join("api1.yaml"), "content");
+    fs.add_file(&specs_dir.join("api2.yaml"), "content");
+    fs.add_file(&specs_dir.join("api3.json"), "content"); // Should be ignored
+    fs.add_dir(&specs_dir.join("subdir")); // Should be ignored
+
+    let mut specs = manager.list_specs().unwrap();
+    specs.sort();
+
+    assert_eq!(specs, vec!["api1".to_string(), "api2".to_string()]);
+}
+
+#[test]
+fn test_list_specs_no_specs_dir() {
+    let fs = MockFileSystem::new();
+    let config_dir = PathBuf::from(TEST_CONFIG_DIR);
+    // Do not add specs directory
+    let manager = ConfigManager::with_fs(fs.clone(), config_dir);
+
+    let specs = manager.list_specs().unwrap();
+    assert!(specs.is_empty());
+}

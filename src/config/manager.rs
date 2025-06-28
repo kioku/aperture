@@ -62,6 +62,33 @@ impl<F: FileSystem> ConfigManager<F> {
 
         Ok(())
     }
+
+    /// Lists all registered API contexts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the specs directory cannot be read.
+    pub fn list_specs(&self) -> Result<Vec<String>, Error> {
+        let specs_dir = self.config_dir.join("specs");
+        if !self.fs.exists(&specs_dir) {
+            return Ok(Vec::new());
+        }
+
+        let mut specs = Vec::new();
+        for entry in self.fs.read_dir(&specs_dir)? {
+            if self.fs.is_file(&entry) {
+                if let Some(file_name) = entry.file_name().and_then(|s| s.to_str()) {
+                    if std::path::Path::new(file_name)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml"))
+                    {
+                        specs.push(file_name.trim_end_matches(".yaml").to_string());
+                    }
+                }
+            }
+        }
+        Ok(specs)
+    }
 }
 
 /// Gets the default configuration directory path.
