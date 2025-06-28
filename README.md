@@ -4,28 +4,129 @@ Aperture is a command-line interface (CLI) that dynamically generates commands f
 
 ## Features
 
-- **OpenAPI-Native:** Directly consumes standard OpenAPI 3.x documents.
-- **Dynamic & Performant:** Generates commands at runtime from cached API specifications.
-- **Agent-First Design:** Optimized for programmatic use with structured I/O and actionable errors.
-- **Secure & Robust:** Enforces separation of configuration from secrets.
+- **OpenAPI-Native:** Directly consumes standard OpenAPI 3.x documents as the single source of truth
+- **Dynamic & Performant:** Generates commands at runtime from pre-validated, cached API specifications
+- **Agent-First Design:** Optimized for programmatic use with structured I/O, JSON output modes, and actionable errors
+- **Secure & Robust:** Enforces strict separation of configuration from secrets using environment variables
+- **Spec Validation:** Validates OpenAPI specs during registration with clear error messages for unsupported features
+
+## Architecture
+
+Aperture follows a two-phase approach:
+
+1. **Setup Phase** (`aperture config add`): Parses, validates, and caches OpenAPI specifications
+2. **Runtime Phase** (`aperture <context> <command>`): Loads cached specs for fast command generation and execution
+
+### Configuration Structure
+
+```
+~/.config/aperture/
+├── specs/           # Original OpenAPI specification files
+├── .cache/          # Pre-processed binary cache files
+└── config.toml      # Global configuration (optional)
+```
+
+### Security Model
+
+Authentication is handled through custom `x-aperture-secret` extensions in OpenAPI specs that map security schemes to environment variables:
+
+```yaml
+components:
+  securitySchemes:
+    apiToken:
+      type: http
+      scheme: bearer
+      x-aperture-secret:
+        source: env
+        name: API_TOKEN
+```
 
 ## Getting Started
 
-*(More detailed instructions will be provided here upon release.)*
+*(More detailed installation and usage instructions will be provided upon release.)*
+
+### Basic Usage
+
+```bash
+# Register an API specification
+aperture config add my-api ./openapi.yml
+
+# List available APIs
+aperture config list
+
+# Execute API commands (dynamically generated from spec)
+aperture my-api users list
+aperture my-api users create --name "John Doe" --email "john@example.com"
+```
+
+### Agent-Friendly Features
+
+```bash
+# Get JSON description of all available commands
+aperture my-api --describe-json
+
+# Output errors as structured JSON
+aperture my-api --json-errors users list
+
+# Preview request without execution
+aperture my-api --dry-run users create --name "Test"
+
+# Add idempotency key for safe retries
+aperture my-api --idempotency-key "unique-key" users create --name "Test"
+```
 
 ## Development
 
-This project is built with Rust. Ensure you have Rust and Cargo installed.
+This project is built with Rust and follows Test-Driven Development practices.
 
-To run tests:
+### Prerequisites
+
+- Rust (latest stable version)
+- Cargo
+
+### Development Commands
 
 ```bash
+# Build the project
+cargo build
+
+# Run all tests
 cargo test
-```
 
-To check formatting and linting:
+# Run tests for specific module
+cargo test config_manager
 
-```bash
+# Format code
+cargo fmt
+
+# Check formatting and linting
 cargo fmt --check
 cargo clippy -- -D warnings
+
+# Run with debug output
+RUST_LOG=debug cargo run -- config list
 ```
+
+### Testing
+
+The project uses comprehensive testing strategies:
+
+- **Unit Tests**: Located in `tests/` directory
+- **Integration Tests**: End-to-end CLI testing using `assert_cmd`
+- **HTTP Mocking**: API interaction testing using `wiremock`
+
+```bash
+# Run integration tests
+cargo test --test integration_tests
+
+# Run with HTTP mocking
+cargo test --test executor_tests
+```
+
+## Project Status
+
+This project is currently in active development. See [docs/plan.md](docs/plan.md) for detailed implementation progress and [docs/architecture.md](docs/architecture.md) for the complete software design specification.
+
+## License
+
+Licensed under the MIT License. See [LICENSE](LICENSE) for details.
