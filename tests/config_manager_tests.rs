@@ -389,3 +389,380 @@ fn test_remove_spec_io_error() {
         panic!("Unexpected error type: {:?}", result);
     }
 }
+
+// --- Tests for OpenAPI validation and caching ---
+
+#[test]
+fn test_add_spec_with_valid_api_key_security() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "api-key-api";
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: API Key API
+  version: 1.0.0
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      x-aperture-secret:
+        source: env
+        name: API_KEY
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        '200':
+          description: Success
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/api_key_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+
+    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    assert!(result.is_ok());
+
+    // Verify both spec and cache files were created
+    let spec_path = PathBuf::from(TEST_CONFIG_DIR)
+        .join("specs")
+        .join("api-key-api.yaml");
+    let cache_path = PathBuf::from(TEST_CONFIG_DIR)
+        .join(".cache")
+        .join("api-key-api.bin");
+
+    assert!(fs.exists(&spec_path));
+    assert!(fs.exists(&cache_path));
+}
+
+#[test]
+fn test_add_spec_with_valid_bearer_token_security() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "bearer-api";
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Bearer Token API
+  version: 1.0.0
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      x-aperture-secret:
+        source: env
+        name: BEARER_TOKEN
+paths:
+  /data:
+    post:
+      operationId: createData
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Created
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/bearer_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+
+    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_add_spec_rejects_oauth2_security() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "oauth2-api";
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: OAuth2 API
+  version: 1.0.0
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/auth
+          tokenUrl: https://example.com/token
+          scopes:
+            read: Read access
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        '200':
+          description: Success
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/oauth2_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+
+    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    assert!(result.is_err());
+    if let Err(Error::Config(msg)) = result {
+        assert!(msg.contains("OAuth2 security scheme"));
+        assert!(msg.contains("not supported"));
+    } else {
+        panic!("Unexpected error type: {:?}", result);
+    }
+}
+
+#[test]
+fn test_add_spec_rejects_openid_connect_security() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "openid-api";
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: OpenID Connect API
+  version: 1.0.0
+components:
+  securitySchemes:
+    openId:
+      type: openIdConnect
+      openIdConnectUrl: https://example.com/.well-known/openid_configuration
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        '200':
+          description: Success
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/openid_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+
+    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    assert!(result.is_err());
+    if let Err(Error::Config(msg)) = result {
+        assert!(msg.contains("OpenID Connect security scheme"));
+        assert!(msg.contains("not supported"));
+    } else {
+        panic!("Unexpected error type: {:?}", result);
+    }
+}
+
+#[test]
+fn test_add_spec_rejects_unsupported_http_scheme() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "basic-auth-api";
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Basic Auth API
+  version: 1.0.0
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        '200':
+          description: Success
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/basic_auth_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+
+    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    assert!(result.is_err());
+    if let Err(Error::Config(msg)) = result {
+        assert!(msg.contains("Unsupported HTTP scheme 'basic'"));
+        assert!(msg.contains("Only 'bearer' is supported"));
+    } else {
+        panic!("Unexpected error type: {:?}", result);
+    }
+}
+
+#[test]
+fn test_add_spec_rejects_unsupported_request_body_content_type() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "xml-api";
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: XML API
+  version: 1.0.0
+paths:
+  /data:
+    post:
+      operationId: createData
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: Created
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/xml_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+
+    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    assert!(result.is_err());
+    if let Err(Error::Config(msg)) = result {
+        assert!(msg.contains("Unsupported request body content type 'application/xml'"));
+        assert!(msg.contains("Only 'application/json' is supported"));
+    } else {
+        panic!("Unexpected error type: {:?}", result);
+    }
+}
+
+#[test]
+fn test_add_spec_requires_json_content_type() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "no-json-api";
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: No JSON API
+  version: 1.0.0
+paths:
+  /data:
+    post:
+      operationId: createData
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: Created
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/no_json_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+
+    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    assert!(result.is_err());
+    if let Err(Error::Config(msg)) = result {
+        assert!(msg.contains("Unsupported request body content type 'text/plain'"));
+        assert!(msg.contains("Only 'application/json' is supported"));
+    } else {
+        panic!("Unexpected error type: {:?}", result);
+    }
+}
+
+#[test]
+fn test_add_spec_caching_creates_correct_structure() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "caching-test-api";
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Caching Test API
+  version: 2.1.0
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      summary: List all users
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success
+  /users/{id}:
+    get:
+      operationId: getUser
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+        '404':
+          description: Not found
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/caching_test_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+
+    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    assert!(result.is_ok());
+
+    // Verify cache file was created
+    let cache_path = PathBuf::from(TEST_CONFIG_DIR)
+        .join(".cache")
+        .join("caching-test-api.bin");
+
+    assert!(fs.exists(&cache_path));
+
+    // Verify cache file contains serialized data (should be non-empty binary)
+    let cache_content = fs.files.lock().unwrap().get(&cache_path).cloned();
+    assert!(cache_content.is_some());
+    let cache_data = cache_content.unwrap();
+    assert!(!cache_data.is_empty());
+
+    // Verify it's valid bincode by attempting to deserialize
+    let cached_spec: Result<aperture::cache::models::CachedSpec, _> =
+        bincode::deserialize(&cache_data);
+    assert!(cached_spec.is_ok());
+
+    let spec = cached_spec.unwrap();
+    assert_eq!(spec.name, "caching-test-api");
+    assert_eq!(spec.version, "2.1.0");
+    assert_eq!(spec.commands.len(), 2);
+
+    // Verify command names are converted to kebab-case
+    let mut command_names: Vec<_> = spec.commands.iter().map(|c| c.name.clone()).collect();
+    command_names.sort();
+    assert_eq!(command_names, vec!["get-user", "list-users"]);
+}
+
+#[test]
+fn test_add_spec_operation_id_fallback_to_method() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "no-operation-id-api";
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: No Operation ID API
+  version: 1.0.0
+paths:
+  /data:
+    get:
+      summary: Get data without operationId
+      responses:
+        '200':
+          description: Success
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/no_operation_id_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+
+    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    assert!(result.is_ok());
+
+    // Verify cache was created with method name as command
+    let cache_path = PathBuf::from(TEST_CONFIG_DIR)
+        .join(".cache")
+        .join("no-operation-id-api.bin");
+
+    let cache_data = fs.files.lock().unwrap().get(&cache_path).cloned().unwrap();
+    let cached_spec: aperture::cache::models::CachedSpec =
+        bincode::deserialize(&cache_data).unwrap();
+
+    assert_eq!(cached_spec.commands.len(), 1);
+    assert_eq!(cached_spec.commands[0].name, "get");
+    assert_eq!(cached_spec.commands[0].method, "GET");
+}
