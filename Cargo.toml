@@ -19,6 +19,7 @@ toml = "0.8.23"
 [dev-dependencies]
 assert_cmd = "2.0.17"
 wiremock = "0.6.4"
+aperture = { path = "." }
 
 [lints.clippy]
 pedantic = "warn"

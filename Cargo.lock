@@ -87,6 +87,7 @@ name = "aperture"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aperture",
  "assert_cmd",
  "clap",
  "oas3",
