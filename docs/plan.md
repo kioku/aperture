@@ -19,34 +19,34 @@ All development will adhere to the following principles:
 **Dependencies:** None. This is the starting point.
 **Parallelization:** These tasks are sequential.
 
-- `[ ]` **Task 1.1: Initialize Project & Dependencies**
+- `[x]` **Task 1.1: Initialize Project & Dependencies**
 
   - **Action:** Create a new binary Rust project: `cargo new --bin aperture`.
   - **Action:** Add all core dependencies to `Cargo.toml` as identified in the SDD: `clap`, `serde`, `serde_yaml`, `serde_json`, `oas3`, `reqwest`, `tokio`, `thiserror`, `anyhow`, `shellexpand`, `toml`. Add development dependencies: `wiremock`, `assert_cmd`.
   - **Verification:** `cargo build` completes successfully.
   - **Commit:** `chore: Initialise project and add dependencies`
 
-- `[ ]` **Task 1.2: Configure Toolchain & Formatter**
+- `[x]` **Task 1.2: Configure Toolchain & Formatter**
 
   - **Action:** Create a `rust-toolchain.toml` file to pin the Rust version for consistency.
   - **Action:** Create a `rustfmt.toml` file to enforce a consistent code style.
   - **Verification:** `cargo fmt` runs and formats the default `main.rs`.
   - **Commit:** `chore: Configure rust toolchain and formatter`
 
-- `[ ]` **Task 1.3: Configure Linter (Clippy)**
+- `[x]` **Task 1.3: Configure Linter (Clippy)**
 
   - **Action:** Add a `[lints.clippy]` section to `Cargo.toml` to enforce strict linting rules (e.g., `pedantic`, `nursery`).
   - **Verification:** `cargo clippy -- -D warnings` runs without errors on the default project.
   - **Commit:** `chore: Configure strict clippy linting rules`
 
-- `[ ]` **Task 1.4: Implement Git Hooks**
+- `[x]` **Task 1.4: Implement Git Hooks**
 
   - **Action:** Integrate `husky` to manage git hooks.
   - **Action:** Create a `pre-commit` hook that runs `cargo fmt --check && cargo clippy --no-deps -- -D warnings && cargo test`.
   - **Verification:** Make a non-compliant change; `git commit` should fail. Fix the change; `git commit` should succeed.
   - **Commit:** `chore: Implement pre-commit hooks for quality gates`
 
-- `[ ]` **Task 1.5: Setup Continuous Integration (CI)**
+- `[x]` **Task 1.5: Setup Continuous Integration (CI)**
   - **Action:** Create a GitHub Actions workflow file (`.github/workflows/ci.yml`).
   - **Action:** The CI job will run on every push and pull request, executing the same checks as the pre-commit hook on a matrix of platforms (Linux, macOS, Windows).
   - **Verification:** Push the initial commits to a new GitHub repository. The CI action should trigger and pass.
