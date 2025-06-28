@@ -78,7 +78,7 @@ All development will adhere to the following principles:
   - **Test:** Write a unit test to deserialize a sample YAML snippet of a `securityScheme` containing the `x-aperture-secret` extension.
   - **Commit:** `feat(config): Implement security and secret source models`
 
-- `[ ]` **Task 2.4: Implement Internal Cached Spec Representation**
+- `[x]` **Task 2.4: Implement Internal Cached Spec Representation**
   - **Action:** In a new `src/cache/models.rs`, define the simplified structs that will be stored in the binary cache file. These will be derived from the `oas3` types but optimized for quick loading. They should be serializable with `serde`.
   - **Test:** Write a unit test to serialize and then deserialize a sample cached struct to ensure correctness.
   - **Commit:** `feat(cache): Define data models for cached spec representation`
