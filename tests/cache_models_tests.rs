@@ -1,7 +1,6 @@
 use aperture::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec,
 };
-use serde_json::json;
 
 #[test]
 fn test_cached_spec_serialization_deserialization() {
@@ -20,7 +19,7 @@ fn test_cached_spec_serialization_deserialization() {
                         name: "id".to_string(),
                         location: "path".to_string(),
                         required: true,
-                        schema: Some(json!({ "type": "string" })),
+                        schema: Some(r#"{"type": "string"}"#.to_string()),
                     },
                     CachedParameter {
                         name: "token".to_string(),
@@ -33,7 +32,8 @@ fn test_cached_spec_serialization_deserialization() {
                 responses: vec![CachedResponse {
                     status_code: "200".to_string(),
                     content: Some(
-                        json!({ "type": "object", "properties": { "id": { "type": "string" } } }),
+                        r#"{"type": "object", "properties": {"id": {"type": "string"}}}"#
+                            .to_string(),
                     ),
                 }],
             },
@@ -45,7 +45,8 @@ fn test_cached_spec_serialization_deserialization() {
                 path: "/users".to_string(),
                 parameters: vec![],
                 request_body: Some(CachedRequestBody {
-                    content: json!({ "type": "object", "properties": { "name": { "type": "string" } } }),
+                    content: r#"{"type": "object", "properties": {"name": {"type": "string"}}}"#
+                        .to_string(),
                     required: true,
                 }),
                 responses: vec![CachedResponse {

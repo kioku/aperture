@@ -24,17 +24,17 @@ pub struct CachedParameter {
     pub name: String,
     pub location: String,
     pub required: bool,
-    pub schema: Option<serde_json::Value>,
+    pub schema: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedRequestBody {
-    pub content: serde_json::Value,
+    pub content: String,
     pub required: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedResponse {
     pub status_code: String,
-    pub content: Option<serde_json::Value>,
+    pub content: Option<String>,
 }

@@ -389,7 +389,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 .as_ref()
                 .and_then(|req_body_ref| match req_body_ref {
                     ReferenceOr::Item(req_body) => Some(CachedRequestBody {
-                        content: serde_json::Value::Object(serde_json::Map::new()), // Simplified
+                        content: "application/json".to_string(), // Simplified - store content type
                         required: req_body.required,
                     }),
                     ReferenceOr::Reference { .. } => None,
