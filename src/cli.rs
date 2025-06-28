@@ -15,6 +15,14 @@ pub enum Commands {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+    /// Execute API operations for a specific context
+    Api {
+        /// Name of the API specification context
+        context: String,
+        /// Remaining arguments will be parsed dynamically
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
