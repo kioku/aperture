@@ -2,6 +2,7 @@ use crate::error::Error;
 use crate::fs::{FileSystem, OsFileSystem};
 use openapiv3::OpenAPI;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub struct ConfigManager<F: FileSystem> {
     fs: F,
@@ -109,6 +110,33 @@ impl<F: FileSystem> ConfigManager<F> {
         }
 
         Ok(())
+    }
+
+    /// Opens an API specification in the default editor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The spec does not exist.
+    /// - The `$EDITOR` environment variable is not set.
+    /// - The editor command fails to execute.
+    pub fn edit_spec(&self, name: &str) -> Result<(), Error> {
+        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
+
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::Config(format!("Spec '{name}' does not exist.")));
+        }
+
+        let editor = std::env::var("EDITOR")
+            .map_err(|_| Error::Config("EDITOR environment variable not set.".to_string()))?;
+
+        Command::new(editor)
+            .arg(&spec_path)
+            .status()
+            .map_err(Error::Io)?
+            .success()
+            .then_some(()) // Convert bool to Option<()>
+            .ok_or_else(|| Error::Config(format!("Editor command failed for spec '{name}'.")))
     }
 }
 
