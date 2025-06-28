@@ -60,19 +60,19 @@ All development will adhere to the following principles:
 **Dependencies:** Phase 1 complete.
 **Parallelization:** All tasks in this phase are independent and can be worked on in parallel.
 
-- `[ ]` **Task 2.1: Define Core Error Type**
+- `[x]` **Task 2.1: Define Core Error Type**
 
   - **Action:** Create `src/error.rs`. Define a top-level `Error` enum using `thiserror` that will aggregate all possible failures (I/O, parsing, network, etc.).
   - **Test:** Create a `tests/error_tests.rs` file. Write unit tests to ensure error variants format into the expected user-facing messages.
   - **Commit:** `feat(error): Define core application error enum`
 
-- `[ ]` **Task 2.2: Implement Global Configuration Models**
+- `[x]` **Task 2.2: Implement Global Configuration Models**
 
   - **Action:** Create `src/config/models.rs`. Implement `GlobalConfig` to represent `config.toml`.
   - **Test:** In a unit test, provide a sample TOML string and use `toml::from_str` to deserialize it. Assert that the resulting struct has the correct field values.
   - **Commit:** `feat(config): Implement data model for config.toml`
 
-- `[ ]` **Task 2.3: Implement Security & Secret Models**
+- `[x]` **Task 2.3: Implement Security & Secret Models**
 
   - **Action:** In `src/config/models.rs`, implement the `SecretSource` and other structs required for the `x-aperture-secret` extension.
   - **Test:** Write a unit test to deserialize a sample YAML snippet of a `securityScheme` containing the `x-aperture-secret` extension.
@@ -91,7 +91,7 @@ All development will adhere to the following principles:
 **Dependencies:** Phase 2 complete.
 **Parallelization:** The `add`, `list`, and `remove` commands can be developed in parallel after the file system abstraction is in place.
 
-- `[ ]` **Task 3.1: Create File System Abstraction**
+- `[x]` **Task 3.1: Create File System Abstraction**
 
   - **Action:** Create `src/fs.rs`. Define a `FileSystem` trait and a default implementation using `std::fs`. This allows for mocking in tests.
   - **Test:** Write unit tests for the default implementation.
