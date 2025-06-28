@@ -1,4 +1,5 @@
-use aperture::config::models::GlobalConfig;
+use aperture::config::models::{ApertureSecret, GlobalConfig, SecretSource};
+use serde_yaml;
 
 #[test]
 fn test_global_config_deserialization() {
@@ -48,4 +49,17 @@ fn test_global_config_agent_defaults_only() {
 
     assert_eq!(config.default_timeout_secs, 30);
     assert_eq!(config.agent_defaults.json_errors, true);
+}
+
+#[test]
+fn test_aperture_secret_deserialization() {
+    let yaml_str = r#"
+        source: env
+        name: MY_API_KEY
+    "#;
+
+    let secret: ApertureSecret = serde_yaml::from_str(yaml_str).unwrap();
+
+    assert_eq!(secret.source, SecretSource::Env);
+    assert_eq!(secret.name, "MY_API_KEY");
 }

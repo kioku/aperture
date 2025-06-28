@@ -26,3 +26,17 @@ impl Default for GlobalConfig {
         }
     }
 }
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApertureSecret {
+    pub source: SecretSource,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SecretSource {
+    Env,
+    // Keychain, // Future option
+}
