@@ -303,6 +303,16 @@ impl<F: FileSystem> ConfigManager<F> {
         // Extract version from info
         let version = spec.info.version.clone();
 
+        // Extract server URLs
+        let servers: Vec<String> = spec
+            .servers
+            .iter()
+            .map(|server| server.url.clone())
+            .collect();
+
+        // Use the first server as the default base URL
+        let base_url = servers.first().cloned();
+
         // Process all operations
         for (path, path_item_ref) in &spec.paths.paths {
             if let ReferenceOr::Item(path_item) = path_item_ref {
@@ -330,6 +340,8 @@ impl<F: FileSystem> ConfigManager<F> {
             name: name.to_string(),
             version,
             commands,
+            base_url,
+            servers,
         }
     }
 
