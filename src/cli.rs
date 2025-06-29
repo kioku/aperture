@@ -13,9 +13,29 @@ use std::path::PathBuf;
                   Examples:\n  \
                   aperture config add myapi api-spec.yaml\n  \
                   aperture api myapi users get-user --id 123\n  \
-                  aperture config list"
+                  aperture config list\n\n\
+                  Agent-friendly features:\n  \
+                  aperture api myapi --describe-json    # Get capability manifest\n  \
+                  aperture --json-errors api myapi ...  # Structured error output\n  \
+                  aperture api myapi --dry-run ...      # Show request without executing"
 )]
 pub struct Cli {
+    /// Output a JSON manifest of all available commands and parameters
+    #[arg(long, global = true, help = "Output capability manifest as JSON")]
+    pub describe_json: bool,
+
+    /// Output all errors as structured JSON to stderr
+    #[arg(long, global = true, help = "Output errors in JSON format")]
+    pub json_errors: bool,
+
+    /// Show the HTTP request that would be made without executing it
+    #[arg(long, global = true, help = "Show request details without executing")]
+    pub dry_run: bool,
+
+    /// Set the Idempotency-Key header for safe retries
+    #[arg(long, global = true, value_name = "KEY", help = "Set idempotency key header")]
+    pub idempotency_key: Option<String>,
+
     #[command(subcommand)]
     pub command: Commands,
 }
