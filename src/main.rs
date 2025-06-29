@@ -76,6 +76,10 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     };
     let cache_dir = config_dir.join(".cache");
 
+    // Create config manager and load global config
+    let manager = ConfigManager::with_fs(OsFileSystem, config_dir);
+    let global_config = manager.load_global_config().ok();
+
     // Load the cached spec for the context
     let spec = loader::load_cached_spec(&cache_dir, context).map_err(|e| match e {
         Error::Io(_) => Error::Config(format!(
@@ -88,7 +92,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
 
     // Handle --describe-json flag - output capability manifest and exit
     if cli.describe_json {
-        let manifest = agent::generate_capability_manifest(&spec)?;
+        let manifest = agent::generate_capability_manifest(&spec, global_config.as_ref())?;
         println!("{manifest}");
         return Ok(());
     }
@@ -110,9 +114,10 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     executor::execute_request(
         &spec,
         &matches,
-        None, // base_url (None = use environment variable)
+        None, // base_url (None = use BaseUrlResolver)
         cli.dry_run,
         cli.idempotency_key.as_deref(),
+        global_config.as_ref(),
     )
     .await
     .map_err(|e| match &e {

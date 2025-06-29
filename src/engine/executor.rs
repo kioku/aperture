@@ -1,4 +1,6 @@
 use crate::cache::models::{CachedCommand, CachedSpec};
+use crate::config::models::GlobalConfig;
+use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
 use clap::ArgMatches;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -14,9 +16,10 @@ use std::str::FromStr;
 /// # Arguments
 /// * `spec` - The cached specification containing operation details
 /// * `matches` - Parsed CLI arguments from clap
-/// * `base_url` - Optional base URL override. If None, uses `APERTURE_BASE_URL` env var
+/// * `base_url` - Optional base URL override. If None, uses `BaseUrlResolver`
 /// * `dry_run` - If true, show request details without executing
 /// * `idempotency_key` - Optional idempotency key for safe retries
+/// * `global_config` - Optional global configuration for URL resolution
 ///
 /// # Returns
 /// * `Ok(())` - Request executed successfully or dry-run completed
@@ -33,18 +36,19 @@ pub async fn execute_request(
     base_url: Option<&str>,
     dry_run: bool,
     idempotency_key: Option<&str>,
+    global_config: Option<&GlobalConfig>,
 ) -> Result<(), Error> {
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
 
-    // Get base URL from parameter, environment, or default
-    let base_url = base_url.map_or_else(
-        || {
-            std::env::var("APERTURE_BASE_URL")
-                .unwrap_or_else(|_| "https://api.example.com".to_string())
-        },
-        str::to_string,
-    );
+    // Resolve base URL using the new priority hierarchy
+    let resolver = BaseUrlResolver::new(spec);
+    let resolver = if let Some(config) = global_config {
+        resolver.with_global_config(config)
+    } else {
+        resolver
+    };
+    let base_url = resolver.resolve(base_url);
 
     // Build the full URL with path parameters
     let url = build_url(&base_url, &operation.path, operation, matches)?;

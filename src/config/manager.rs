@@ -1,4 +1,5 @@
 use crate::cache::models::CachedSpec;
+use crate::config::models::GlobalConfig;
 use crate::error::Error;
 use crate::fs::{FileSystem, OsFileSystem};
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
@@ -150,6 +151,21 @@ impl<F: FileSystem> ConfigManager<F> {
             .success()
             .then_some(()) // Convert bool to Option<()>
             .ok_or_else(|| Error::Config(format!("Editor command failed for spec '{name}'.")))
+    }
+
+    /// Loads the global configuration from `config.toml`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration file exists but cannot be read or parsed.
+    pub fn load_global_config(&self) -> Result<GlobalConfig, Error> {
+        let config_path = self.config_dir.join("config.toml");
+        if self.fs.exists(&config_path) {
+            let content = self.fs.read_to_string(&config_path)?;
+            toml::from_str(&content).map_err(|e| Error::Config(format!("Invalid config.toml: {e}")))
+        } else {
+            Ok(GlobalConfig::default())
+        }
     }
 
     /// Validates an `OpenAPI` specification against Aperture's supported features.
