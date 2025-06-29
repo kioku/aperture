@@ -18,29 +18,33 @@ fn to_kebab_case(s: &str) -> String {
     result
 }
 
-/// Converts a String to a static string slice by leaking memory
-/// This is necessary for clap's lifetime requirements
+/// Converts a String to a 'static str by leaking it
+///
+/// This is necessary for clap's API which requires 'static strings.
+/// In a CLI context, this is acceptable as the program runs once and exits.
 fn to_static_str(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
 
-/// Generates a dynamic CLI command tree from a cached `OpenAPI` specification.
+/// Generates a dynamic clap command tree from a cached `OpenAPI` specification.
 ///
-/// This function transforms the cached spec into a `clap::Command` structure following
-/// the command generation rules defined in SDD §5.1:
-/// - Namespace from `tags` (first tag becomes command group)
-/// - Subcommand from kebab-cased `operationId`
-/// - Parameters become CLI flags/arguments by location (path/query/header)
-/// - Fallbacks for missing tags (→ "default") and operationIds (→ HTTP method)
+/// This function creates a hierarchical command structure based on the `OpenAPI` spec:
+/// - Root command: "api"
+/// - Tag groups: Operations are grouped by their tags (e.g., "users", "posts")
+/// - Operations: Individual API operations as subcommands under their tag group
 ///
 /// # Arguments
-/// * `spec` - The cached specification to generate commands from
+/// * `spec` - The cached `OpenAPI` specification
 ///
 /// # Returns
-/// A configured `clap::Command` tree ready for parsing CLI arguments
+/// A clap Command configured with all operations from the spec
 ///
-/// # Errors
-/// This function does not return errors as the spec has already been validated
+/// # Example
+/// For an API with a "users" tag containing "getUser" and "createUser" operations:
+/// ```text
+/// api users get-user <args>
+/// api users create-user <args>
+/// ```
 #[must_use]
 pub fn generate_command_tree(spec: &CachedSpec) -> Command {
     let mut root_command = Command::new("api")
@@ -157,6 +161,6 @@ fn create_arg_from_parameter(param: &CachedParameter) -> Arg {
 fn capitalize_first(s: &str) -> String {
     let mut chars = s.chars();
     chars.next().map_or_else(String::new, |first| {
-        first.to_uppercase().collect::<String>() + chars.as_str()
+        first.to_uppercase().chain(chars).collect()
     })
 }

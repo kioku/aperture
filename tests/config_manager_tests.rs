@@ -724,10 +724,19 @@ paths:
     assert_eq!(spec.version, "2.1.0");
     assert_eq!(spec.commands.len(), 2);
 
-    // Verify command names are converted to kebab-case
-    let mut command_names: Vec<_> = spec.commands.iter().map(|c| c.name.clone()).collect();
-    command_names.sort();
-    assert_eq!(command_names, vec!["get-user", "list-users"]);
+    // Verify commands have tag names (default since no tags in spec)
+    let mut command_tags: Vec<_> = spec.commands.iter().map(|c| c.name.clone()).collect();
+    command_tags.sort();
+    assert_eq!(command_tags, vec!["default", "default"]);
+
+    // Verify operation IDs are preserved
+    let mut operation_ids: Vec<_> = spec
+        .commands
+        .iter()
+        .map(|c| c.operation_id.clone())
+        .collect();
+    operation_ids.sort();
+    assert_eq!(operation_ids, vec!["getUser", "listUsers"]);
 }
 
 #[test]
@@ -763,6 +772,7 @@ paths:
         bincode::deserialize(&cache_data).unwrap();
 
     assert_eq!(cached_spec.commands.len(), 1);
-    assert_eq!(cached_spec.commands[0].name, "get");
+    assert_eq!(cached_spec.commands[0].name, "default"); // No tags, so default
+    assert_eq!(cached_spec.commands[0].operation_id, "get"); // Falls back to method
     assert_eq!(cached_spec.commands[0].method, "GET");
 }

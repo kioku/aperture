@@ -343,24 +343,18 @@ impl<F: FileSystem> ConfigManager<F> {
             CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
         };
 
-        // Generate command name from operationId or fallback to method
+        // Get the first tag as the group name, or use "default" if no tags
+        let tag_name = operation
+            .tags
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "default".to_string());
+
+        // Generate operation_id from operationId or fallback to method
         let operation_id = operation
             .operation_id
             .clone()
             .unwrap_or_else(|| method.to_string());
-
-        // Convert to kebab-case for command name
-        let command_name = operation_id
-            .chars()
-            .enumerate()
-            .map(|(i, c)| {
-                if c.is_uppercase() && i > 0 {
-                    format!("-{}", c.to_lowercase())
-                } else {
-                    c.to_lowercase().to_string()
-                }
-            })
-            .collect::<String>();
 
         // Transform parameters
         let mut parameters = Vec::new();
@@ -405,7 +399,7 @@ impl<F: FileSystem> ConfigManager<F> {
         }
 
         CachedCommand {
-            name: command_name,
+            name: tag_name,
             description: operation.summary.clone(),
             operation_id,
             method: method.to_uppercase(),

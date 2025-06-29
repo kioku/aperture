@@ -9,7 +9,7 @@ fn create_test_spec() -> CachedSpec {
         version: "1.0.0".to_string(),
         commands: vec![
             CachedCommand {
-                name: "get-user".to_string(),
+                name: "users".to_string(), // This is the tag/group name
                 description: Some("Get user by ID".to_string()),
                 operation_id: "getUserById".to_string(),
                 method: "GET".to_string(),
@@ -41,7 +41,7 @@ fn create_test_spec() -> CachedSpec {
                 }],
             },
             CachedCommand {
-                name: "create-user".to_string(),
+                name: "users".to_string(), // Same tag/group
                 description: None,
                 operation_id: "createUser".to_string(),
                 method: "POST".to_string(),
@@ -71,30 +71,21 @@ fn test_generate_command_tree_structure() {
 
     // Check that subcommands exist based on tags
     let subcommands: Vec<_> = command.get_subcommands().collect();
-    assert_eq!(subcommands.len(), 2); // get-user and create-user have different tags
+    assert_eq!(subcommands.len(), 1); // Only one group: "users"
 
-    // Find the subcommands by name
-    let subcommand_names: Vec<&str> = subcommands.iter().map(|cmd| cmd.get_name()).collect();
-    assert!(subcommand_names.contains(&"get-user"));
-    assert!(subcommand_names.contains(&"create-user"));
-
-    // Check the get-user group has the correct operation
-    let get_user_group = subcommands
+    // Find the users group
+    let users_group = subcommands
         .iter()
-        .find(|cmd| cmd.get_name() == "get-user")
+        .find(|cmd| cmd.get_name() == "users")
         .unwrap();
-    let get_user_operations: Vec<_> = get_user_group.get_subcommands().collect();
-    assert_eq!(get_user_operations.len(), 1);
-    assert_eq!(get_user_operations[0].get_name(), "get-user-by-id");
 
-    // Check the create-user group has the correct operation
-    let create_user_group = subcommands
-        .iter()
-        .find(|cmd| cmd.get_name() == "create-user")
-        .unwrap();
-    let create_user_operations: Vec<_> = create_user_group.get_subcommands().collect();
-    assert_eq!(create_user_operations.len(), 1);
-    assert_eq!(create_user_operations[0].get_name(), "create-user");
+    // Check the users group has both operations
+    let user_operations: Vec<_> = users_group.get_subcommands().collect();
+    assert_eq!(user_operations.len(), 2);
+
+    let operation_names: Vec<&str> = user_operations.iter().map(|cmd| cmd.get_name()).collect();
+    assert!(operation_names.contains(&"get-user-by-id"));
+    assert!(operation_names.contains(&"create-user"));
 }
 
 #[test]
@@ -138,11 +129,11 @@ fn test_parameter_generation() {
     let command = generate_command_tree(&spec);
 
     // Find the get-user operation
-    let get_user_group = command
+    let users_group = command
         .get_subcommands()
-        .find(|cmd| cmd.get_name() == "get-user")
+        .find(|cmd| cmd.get_name() == "users")
         .unwrap();
-    let get_user_op = get_user_group
+    let get_user_op = users_group
         .get_subcommands()
         .find(|cmd| cmd.get_name() == "get-user-by-id")
         .unwrap();
