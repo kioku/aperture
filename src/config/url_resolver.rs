@@ -7,22 +7,24 @@ pub struct BaseUrlResolver<'a> {
     spec: &'a CachedSpec,
     /// Global configuration containing API overrides
     global_config: Option<&'a GlobalConfig>,
-    /// Current environment (from APERTURE_ENV)
-    environment: Option<String>,
+    /// Optional environment override (if None, reads from `APERTURE_ENV` at resolve time)
+    environment_override: Option<String>,
 }
 
 impl<'a> BaseUrlResolver<'a> {
     /// Creates a new URL resolver for the given spec
-    pub fn new(spec: &'a CachedSpec) -> Self {
+    #[must_use]
+    pub const fn new(spec: &'a CachedSpec) -> Self {
         Self {
             spec,
             global_config: None,
-            environment: std::env::var("APERTURE_ENV").ok(),
+            environment_override: None,
         }
     }
 
     /// Sets the global configuration for API-specific overrides
     #[must_use]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn with_global_config(mut self, config: &'a GlobalConfig) -> Self {
         self.global_config = Some(config);
         self
@@ -31,7 +33,7 @@ impl<'a> BaseUrlResolver<'a> {
     /// Sets the environment explicitly (overrides `APERTURE_ENV`)
     #[must_use]
     pub fn with_environment(mut self, env: Option<String>) -> Self {
-        self.environment = env;
+        self.environment_override = env;
         self
     }
 
@@ -57,8 +59,13 @@ impl<'a> BaseUrlResolver<'a> {
         if let Some(config) = self.global_config {
             if let Some(api_config) = config.api_configs.get(&self.spec.name) {
                 // Check environment-specific URL first
-                if let Some(env) = &self.environment {
-                    if let Some(env_url) = api_config.environment_urls.get(env) {
+                let env_to_check = self.environment_override.as_ref().map_or_else(
+                    || std::env::var("APERTURE_ENV").unwrap_or_default(),
+                    std::clone::Clone::clone,
+                );
+
+                if !env_to_check.is_empty() {
+                    if let Some(env_url) = api_config.environment_urls.get(&env_to_check) {
                         return env_url.clone();
                     }
                 }
@@ -92,6 +99,10 @@ mod tests {
     use super::*;
     use crate::cache::models::CachedSpec;
     use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    // Static mutex to ensure only one test can modify environment variables at a time
+    static ENV_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     fn create_test_spec(name: &str, base_url: Option<&str>) -> CachedSpec {
         CachedSpec {
@@ -103,118 +114,143 @@ mod tests {
         }
     }
 
+    /// Test harness to isolate environment variable changes with mutual exclusion
+    fn test_with_env_isolation<F>(test_fn: F)
+    where
+        F: FnOnce() + std::panic::UnwindSafe,
+    {
+        // Acquire mutex to prevent parallel env var access
+        let _guard = ENV_TEST_MUTEX.lock().unwrap();
+
+        // Store original value
+        let original_value = std::env::var("APERTURE_BASE_URL").ok();
+
+        // Clean up first
+        std::env::remove_var("APERTURE_BASE_URL");
+
+        // Run the test with panic protection
+        let result = std::panic::catch_unwind(test_fn);
+
+        // Always restore original state, even if test panicked
+        if let Some(original) = original_value {
+            std::env::set_var("APERTURE_BASE_URL", original);
+        } else {
+            std::env::remove_var("APERTURE_BASE_URL");
+        }
+
+        // Drop the guard before re-panicking to release the mutex
+        drop(_guard);
+
+        // Re-panic if the test failed
+        if let Err(panic_info) = result {
+            std::panic::resume_unwind(panic_info);
+        }
+    }
+
     #[test]
     fn test_priority_1_explicit_url() {
-        // Clean env first
-        std::env::remove_var("APERTURE_BASE_URL");
-        
-        let spec = create_test_spec("test-api", Some("https://spec.example.com"));
-        let resolver = BaseUrlResolver::new(&spec);
+        test_with_env_isolation(|| {
+            let spec = create_test_spec("test-api", Some("https://spec.example.com"));
+            let resolver = BaseUrlResolver::new(&spec);
 
-        assert_eq!(
-            resolver.resolve(Some("https://explicit.example.com")),
-            "https://explicit.example.com"
-        );
+            assert_eq!(
+                resolver.resolve(Some("https://explicit.example.com")),
+                "https://explicit.example.com"
+            );
+        });
     }
 
     #[test]
     fn test_priority_2_env_var() {
-        // Clean up first
-        std::env::remove_var("APERTURE_BASE_URL");
-        
-        let spec = create_test_spec("test-api", Some("https://spec.example.com"));
-        
-        // Set env var before creating resolver
-        std::env::set_var("APERTURE_BASE_URL", "https://env.example.com");
-        
-        let resolver = BaseUrlResolver::new(&spec);
+        // Use a custom test harness to isolate environment variables
+        test_with_env_isolation(|| {
+            let spec = create_test_spec("test-api", Some("https://spec.example.com"));
 
-        assert_eq!(resolver.resolve(None), "https://env.example.com");
+            // Set env var
+            std::env::set_var("APERTURE_BASE_URL", "https://env.example.com");
 
-        // Clean up
-        std::env::remove_var("APERTURE_BASE_URL");
+            let resolver = BaseUrlResolver::new(&spec);
+
+            assert_eq!(resolver.resolve(None), "https://env.example.com");
+        });
     }
 
     #[test]
     fn test_priority_3_api_config_override() {
-        // Clean env first
-        std::env::remove_var("APERTURE_BASE_URL");
-        
-        let spec = create_test_spec("test-api", Some("https://spec.example.com"));
+        test_with_env_isolation(|| {
+            let spec = create_test_spec("test-api", Some("https://spec.example.com"));
 
-        let mut api_configs = HashMap::new();
-        api_configs.insert(
-            "test-api".to_string(),
-            ApiConfig {
-                base_url_override: Some("https://config.example.com".to_string()),
-                environment_urls: HashMap::new(),
-            },
-        );
+            let mut api_configs = HashMap::new();
+            api_configs.insert(
+                "test-api".to_string(),
+                ApiConfig {
+                    base_url_override: Some("https://config.example.com".to_string()),
+                    environment_urls: HashMap::new(),
+                },
+            );
 
-        let global_config = GlobalConfig {
-            api_configs,
-            ..Default::default()
-        };
+            let global_config = GlobalConfig {
+                api_configs,
+                ..Default::default()
+            };
 
-        let resolver = BaseUrlResolver::new(&spec).with_global_config(&global_config);
+            let resolver = BaseUrlResolver::new(&spec).with_global_config(&global_config);
 
-        assert_eq!(resolver.resolve(None), "https://config.example.com");
+            assert_eq!(resolver.resolve(None), "https://config.example.com");
+        });
     }
 
     #[test]
     fn test_priority_3_environment_specific() {
-        // Clean env first
-        std::env::remove_var("APERTURE_BASE_URL");
-        
-        let spec = create_test_spec("test-api", Some("https://spec.example.com"));
+        test_with_env_isolation(|| {
+            let spec = create_test_spec("test-api", Some("https://spec.example.com"));
 
-        let mut environment_urls = HashMap::new();
-        environment_urls.insert(
-            "staging".to_string(),
-            "https://staging.example.com".to_string(),
-        );
-        environment_urls.insert("prod".to_string(), "https://prod.example.com".to_string());
+            let mut environment_urls = HashMap::new();
+            environment_urls.insert(
+                "staging".to_string(),
+                "https://staging.example.com".to_string(),
+            );
+            environment_urls.insert("prod".to_string(), "https://prod.example.com".to_string());
 
-        let mut api_configs = HashMap::new();
-        api_configs.insert(
-            "test-api".to_string(),
-            ApiConfig {
-                base_url_override: Some("https://config.example.com".to_string()),
-                environment_urls,
-            },
-        );
+            let mut api_configs = HashMap::new();
+            api_configs.insert(
+                "test-api".to_string(),
+                ApiConfig {
+                    base_url_override: Some("https://config.example.com".to_string()),
+                    environment_urls,
+                },
+            );
 
-        let global_config = GlobalConfig {
-            api_configs,
-            ..Default::default()
-        };
+            let global_config = GlobalConfig {
+                api_configs,
+                ..Default::default()
+            };
 
-        let resolver = BaseUrlResolver::new(&spec)
-            .with_global_config(&global_config)
-            .with_environment(Some("staging".to_string()));
+            let resolver = BaseUrlResolver::new(&spec)
+                .with_global_config(&global_config)
+                .with_environment(Some("staging".to_string()));
 
-        assert_eq!(resolver.resolve(None), "https://staging.example.com");
+            assert_eq!(resolver.resolve(None), "https://staging.example.com");
+        });
     }
 
     #[test]
     fn test_priority_4_spec_default() {
-        // Clean env first
-        std::env::remove_var("APERTURE_BASE_URL");
+        test_with_env_isolation(|| {
+            let spec = create_test_spec("test-api", Some("https://spec.example.com"));
+            let resolver = BaseUrlResolver::new(&spec);
 
-        let spec = create_test_spec("test-api", Some("https://spec.example.com"));
-        let resolver = BaseUrlResolver::new(&spec);
-
-        assert_eq!(resolver.resolve(None), "https://spec.example.com");
+            assert_eq!(resolver.resolve(None), "https://spec.example.com");
+        });
     }
 
     #[test]
     fn test_priority_5_fallback() {
-        // Clean env first
-        std::env::remove_var("APERTURE_BASE_URL");
+        test_with_env_isolation(|| {
+            let spec = create_test_spec("test-api", None);
+            let resolver = BaseUrlResolver::new(&spec);
 
-        let spec = create_test_spec("test-api", None);
-        let resolver = BaseUrlResolver::new(&spec);
-
-        assert_eq!(resolver.resolve(None), "https://api.example.com");
+            assert_eq!(resolver.resolve(None), "https://api.example.com");
+        });
     }
 }
