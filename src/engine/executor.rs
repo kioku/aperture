@@ -54,12 +54,13 @@ pub async fn execute_request(
 
     // Build headers including authentication and idempotency
     let mut headers = build_headers(operation, matches)?;
-    
+
     // Add idempotency key if provided
     if let Some(key) = idempotency_key {
         headers.insert(
             HeaderName::from_static("idempotency-key"),
-            HeaderValue::from_str(key).map_err(|_| Error::Config("Invalid idempotency key".to_string()))?,
+            HeaderValue::from_str(key)
+                .map_err(|_| Error::Config("Invalid idempotency key".to_string()))?,
         );
     }
 

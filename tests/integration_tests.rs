@@ -494,18 +494,24 @@ paths:
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     // Parse the JSON output to verify structure
     let manifest: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(manifest["api"]["name"].as_str().unwrap(), "test-api");
     assert_eq!(manifest["api"]["version"].as_str().unwrap(), "1.0.0");
     assert!(manifest["commands"]["users"].is_array());
-    
+
     let users_commands = manifest["commands"]["users"].as_array().unwrap();
     assert_eq!(users_commands.len(), 1);
-    assert_eq!(users_commands[0]["name"].as_str().unwrap(), "get-user-by-id");
+    assert_eq!(
+        users_commands[0]["name"].as_str().unwrap(),
+        "get-user-by-id"
+    );
     assert_eq!(users_commands[0]["method"].as_str().unwrap(), "GET");
-    assert_eq!(users_commands[0]["operation_id"].as_str().unwrap(), "getUserById");
+    assert_eq!(
+        users_commands[0]["operation_id"].as_str().unwrap(),
+        "getUserById"
+    );
 }
 
 #[tokio::test]
@@ -523,11 +529,14 @@ async fn test_json_errors_flag() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     // Parse the JSON error output
     let error: serde_json::Value = serde_json::from_str(&stderr).unwrap();
     assert_eq!(error["error_type"].as_str().unwrap(), "Configuration");
-    assert!(error["message"].as_str().unwrap().contains("No cached spec found"));
+    assert!(error["message"]
+        .as_str()
+        .unwrap()
+        .contains("No cached spec found"));
 }
 
 #[tokio::test]
@@ -590,14 +599,14 @@ paths:
             "users",
             "create-user",
             "--body",
-            "{\"name\":\"John\"}"
+            "{\"name\":\"John\"}",
         ])
         .output()
         .unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     // Parse the dry-run JSON output
     let dry_run_info: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(dry_run_info["dry_run"].as_bool().unwrap(), true);
@@ -660,14 +669,14 @@ paths:
             "--idempotency-key",
             "my-unique-key-123",
             "users",
-            "create-user"
+            "create-user",
         ])
         .output()
         .unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     // Parse the dry-run JSON output to check headers
     let dry_run_info: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let headers = &dry_run_info["headers"];

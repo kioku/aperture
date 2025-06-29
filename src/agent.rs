@@ -1,4 +1,4 @@
-use crate::cache::models::{CachedSpec, CachedCommand, CachedParameter, CachedRequestBody};
+use crate::cache::models::{CachedCommand, CachedParameter, CachedRequestBody, CachedSpec};
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -119,7 +119,10 @@ pub fn generate_capability_manifest(spec: &CachedSpec) -> Result<String, Error> 
         };
 
         let command_info = convert_cached_command_to_info(cached_command);
-        command_groups.entry(group_name).or_default().push(command_info);
+        command_groups
+            .entry(group_name)
+            .or_default()
+            .push(command_info);
     }
 
     // Create the manifest
@@ -174,7 +177,10 @@ fn convert_cached_parameter_to_info(cached_param: &CachedParameter) -> Parameter
         name: cached_param.name.clone(),
         location: cached_param.location.clone(),
         required: cached_param.required,
-        param_type: cached_param.schema.clone().unwrap_or_else(|| "string".to_string()),
+        param_type: cached_param
+            .schema
+            .clone()
+            .unwrap_or_else(|| "string".to_string()),
         description: None, // Not available in cached parameter
     }
 }
@@ -184,14 +190,14 @@ fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> Reque
     RequestBodyInfo {
         required: cached_body.required,
         content_type: cached_body.content.clone(), // Using content field as content_type
-        description: None, // Not available in cached request body
+        description: None,                         // Not available in cached request body
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::models::{CachedSpec, CachedCommand, CachedParameter};
+    use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 
     #[test]
     fn test_to_kebab_case() {
@@ -206,25 +212,21 @@ mod tests {
         let spec = CachedSpec {
             name: "Test API".to_string(),
             version: "1.0.0".to_string(),
-            commands: vec![
-                CachedCommand {
-                    name: "users".to_string(),
-                    operation_id: "getUserById".to_string(),
-                    method: "GET".to_string(),
-                    path: "/users/{id}".to_string(),
-                    description: Some("Get user by ID".to_string()),
-                    parameters: vec![
-                        CachedParameter {
-                            name: "id".to_string(),
-                            location: "path".to_string(),
-                            required: true,
-                            schema: Some("string".to_string()),
-                        }
-                    ],
-                    request_body: None,
-                    responses: vec![],
-                }
-            ],
+            commands: vec![CachedCommand {
+                name: "users".to_string(),
+                operation_id: "getUserById".to_string(),
+                method: "GET".to_string(),
+                path: "/users/{id}".to_string(),
+                description: Some("Get user by ID".to_string()),
+                parameters: vec![CachedParameter {
+                    name: "id".to_string(),
+                    location: "path".to_string(),
+                    required: true,
+                    schema: Some("string".to_string()),
+                }],
+                request_body: None,
+                responses: vec![],
+            }],
         };
 
         let manifest_json = generate_capability_manifest(&spec).unwrap();
@@ -233,7 +235,7 @@ mod tests {
         assert_eq!(manifest.api.name, "Test API");
         assert_eq!(manifest.api.version, "1.0.0");
         assert!(manifest.commands.contains_key("users"));
-        
+
         let users_commands = &manifest.commands["users"];
         assert_eq!(users_commands.len(), 1);
         assert_eq!(users_commands[0].name, "get-user-by-id");

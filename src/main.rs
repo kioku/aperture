@@ -56,7 +56,10 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 println!("Opened spec '{name}' in editor.");
             }
         },
-        Commands::Api { ref context, ref args } => {
+        Commands::Api {
+            ref context,
+            ref args,
+        } => {
             execute_api_command(context, args.clone(), &cli).await?;
         }
     }
@@ -105,8 +108,8 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
 
     // Execute the request with agent flags
     executor::execute_request(
-        &spec, 
-        &matches, 
+        &spec,
+        &matches,
         None, // base_url (None = use environment variable)
         cli.dry_run,
         cli.idempotency_key.as_deref(),

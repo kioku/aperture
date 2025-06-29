@@ -33,7 +33,12 @@ pub struct Cli {
     pub dry_run: bool,
 
     /// Set the Idempotency-Key header for safe retries
-    #[arg(long, global = true, value_name = "KEY", help = "Set idempotency key header")]
+    #[arg(
+        long,
+        global = true,
+        value_name = "KEY",
+        help = "Set idempotency key header"
+    )]
     pub idempotency_key: Option<String>,
 
     #[command(subcommand)]
