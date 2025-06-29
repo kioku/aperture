@@ -14,6 +14,7 @@ use std::str::FromStr;
 /// # Arguments
 /// * `spec` - The cached specification containing operation details
 /// * `matches` - Parsed CLI arguments from clap
+/// * `base_url` - Optional base URL override. If None, uses `APERTURE_BASE_URL` env var
 ///
 /// # Returns
 /// * `Ok(())` - Request executed successfully
@@ -21,13 +22,22 @@ use std::str::FromStr;
 ///
 /// # Errors
 /// Returns errors for authentication failures, network issues, or response validation
-pub async fn execute_request(spec: &CachedSpec, matches: &ArgMatches) -> Result<(), Error> {
+pub async fn execute_request(
+    spec: &CachedSpec,
+    matches: &ArgMatches,
+    base_url: Option<&str>,
+) -> Result<(), Error> {
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
 
-    // TODO: Get base URL from spec or environment
-    let base_url = std::env::var("APERTURE_BASE_URL")
-        .unwrap_or_else(|_| "https://api.example.com".to_string());
+    // Get base URL from parameter, environment, or default
+    let base_url = base_url.map_or_else(
+        || {
+            std::env::var("APERTURE_BASE_URL")
+                .unwrap_or_else(|_| "https://api.example.com".to_string())
+        },
+        str::to_string,
+    );
 
     // Build the full URL with path parameters
     let url = build_url(&base_url, &operation.path, operation, matches)?;

@@ -78,8 +78,8 @@ async fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Err
         .try_get_matches_from(std::iter::once("api".to_string()).chain(args))
         .map_err(|e| Error::Config(format!("Command parsing failed: {e}")))?;
 
-    // Execute the request
-    executor::execute_request(&spec, &matches).await?;
+    // Execute the request (None = use environment variable)
+    executor::execute_request(&spec, &matches, None).await?;
 
     Ok(())
 }

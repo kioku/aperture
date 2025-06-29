@@ -1,6 +1,3 @@
-// Note: These tests modify environment variables and should be run with --test-threads=1
-// to avoid interference between tests.
-
 use aperture::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use aperture::engine::executor::execute_request;
 use clap::{Arg, Command};
@@ -44,9 +41,6 @@ async fn test_execute_request_basic_get() {
         .mount(&mock_server)
         .await;
 
-    // Set the base URL to our mock server
-    std::env::set_var("APERTURE_BASE_URL", mock_server.uri());
-
     let spec = create_test_spec();
 
     // Create command tree to match our generator's output
@@ -57,8 +51,8 @@ async fn test_execute_request_basic_get() {
 
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "123"]);
 
-    // Execute the request
-    let result = execute_request(&spec, &matches).await;
+    // Execute the request with mock server URL
+    let result = execute_request(&spec, &matches, Some(&mock_server.uri())).await;
     assert!(result.is_ok());
 }
 
@@ -92,8 +86,6 @@ async fn test_execute_request_with_query_params() {
         .mount(&mock_server)
         .await;
 
-    std::env::set_var("APERTURE_BASE_URL", mock_server.uri());
-
     let command = Command::new("api").subcommand(
         Command::new("users")
             .subcommand(Command::new("list-users").arg(Arg::new("limit").long("limit"))),
@@ -101,7 +93,7 @@ async fn test_execute_request_with_query_params() {
 
     let matches = command.get_matches_from(vec!["api", "users", "list-users", "--limit", "10"]);
 
-    let result = execute_request(&spec, &matches).await;
+    let result = execute_request(&spec, &matches, Some(&mock_server.uri())).await;
     assert!(result.is_ok());
 }
 
@@ -117,8 +109,6 @@ async fn test_execute_request_error_response() {
         .mount(&mock_server)
         .await;
 
-    std::env::set_var("APERTURE_BASE_URL", mock_server.uri());
-
     let spec = create_test_spec();
 
     let command = Command::new("api").subcommand(
@@ -128,7 +118,7 @@ async fn test_execute_request_error_response() {
 
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "999"]);
 
-    let result = execute_request(&spec, &matches).await;
+    let result = execute_request(&spec, &matches, Some(&mock_server.uri())).await;
     assert!(result.is_err());
 
     if let Err(e) = result {
