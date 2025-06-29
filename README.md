@@ -59,6 +59,35 @@ aperture my-api users list
 aperture my-api users create --name "John Doe" --email "john@example.com"
 ```
 
+### Base URL Management
+
+Aperture provides flexible base URL configuration for different environments:
+
+```bash
+# Set a custom base URL for an API (overrides spec and environment variables)
+aperture config set-url my-api https://api.example.com
+
+# Configure environment-specific URLs
+aperture config set-url my-api --env staging https://staging.example.com
+aperture config set-url my-api --env prod https://prod.example.com
+
+# View current URL configuration
+aperture config get-url my-api
+
+# List all configured URLs across APIs
+aperture config list-urls
+
+# Use environment-specific URL
+APERTURE_ENV=staging aperture my-api users list
+```
+
+**URL Resolution Priority:**
+1. Explicit test parameter (for testing)
+2. Per-API configuration (with environment support)
+3. `APERTURE_BASE_URL` environment variable (global override)
+4. OpenAPI spec server URL (default)
+5. Fallback URL (`https://api.example.com`)
+
 ### Agent-Friendly Features
 
 ```bash
