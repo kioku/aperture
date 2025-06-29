@@ -1,8 +1,11 @@
 use crate::cache::models::CachedSpec;
-use crate::config::models::GlobalConfig;
+use crate::config::models::{ApiConfig, GlobalConfig};
+use crate::config::url_resolver::BaseUrlResolver;
+use crate::engine::loader;
 use crate::error::Error;
 use crate::fs::{FileSystem, OsFileSystem};
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -166,6 +169,161 @@ impl<F: FileSystem> ConfigManager<F> {
         } else {
             Ok(GlobalConfig::default())
         }
+    }
+
+    /// Saves the global configuration to `config.toml`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration cannot be serialized or written.
+    pub fn save_global_config(&self, config: &GlobalConfig) -> Result<(), Error> {
+        let config_path = self.config_dir.join("config.toml");
+
+        // Ensure config directory exists
+        self.fs.create_dir_all(&self.config_dir)?;
+
+        let content = toml::to_string_pretty(config)
+            .map_err(|e| Error::Config(format!("Failed to serialize config: {e}")))?;
+
+        self.fs.write_all(&config_path, content.as_bytes())?;
+        Ok(())
+    }
+
+    /// Sets the base URL for an API specification.
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    /// * `url` - The base URL to set
+    /// * `environment` - Optional environment name for environment-specific URLs
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    pub fn set_url(
+        &self,
+        api_name: &str,
+        url: &str,
+        environment: Option<&str>,
+    ) -> Result<(), Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::Config(format!(
+                "API specification '{api_name}' not found."
+            )));
+        }
+
+        // Load current config
+        let mut config = self.load_global_config()?;
+
+        // Get or create API config
+        let api_config = config
+            .api_configs
+            .entry(api_name.to_string())
+            .or_insert_with(|| ApiConfig {
+                base_url_override: None,
+                environment_urls: HashMap::new(),
+            });
+
+        // Set the URL
+        if let Some(env) = environment {
+            api_config
+                .environment_urls
+                .insert(env.to_string(), url.to_string());
+        } else {
+            api_config.base_url_override = Some(url.to_string());
+        }
+
+        // Save updated config
+        self.save_global_config(&config)?;
+        Ok(())
+    }
+
+    /// Gets the base URL configuration for an API specification.
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    ///
+    /// # Returns
+    /// A tuple of (`base_url_override`, `environment_urls`, `resolved_url`)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist.
+    #[allow(clippy::type_complexity)]
+    pub fn get_url(
+        &self,
+        api_name: &str,
+    ) -> Result<(Option<String>, HashMap<String, String>, String), Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::Config(format!(
+                "API specification '{api_name}' not found."
+            )));
+        }
+
+        // Load the cached spec to get its base URL
+        let cache_dir = self.config_dir.join(".cache");
+        let cached_spec = loader::load_cached_spec(&cache_dir, api_name).ok();
+
+        // Load global config
+        let config = self.load_global_config()?;
+
+        // Get API config
+        let api_config = config.api_configs.get(api_name);
+
+        let base_url_override = api_config.and_then(|c| c.base_url_override.clone());
+        let environment_urls = api_config
+            .map(|c| c.environment_urls.clone())
+            .unwrap_or_default();
+
+        // Resolve the URL that would actually be used
+        let resolved_url = cached_spec.map_or_else(
+            || "https://api.example.com".to_string(),
+            |spec| {
+                let resolver = BaseUrlResolver::new(&spec);
+                let resolver = if api_config.is_some() {
+                    resolver.with_global_config(&config)
+                } else {
+                    resolver
+                };
+                resolver.resolve(None)
+            },
+        );
+
+        Ok((base_url_override, environment_urls, resolved_url))
+    }
+
+    /// Lists all configured base URLs across all API specifications.
+    ///
+    /// # Returns
+    /// A map of API names to their URL configurations
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded.
+    #[allow(clippy::type_complexity)]
+    pub fn list_urls(
+        &self,
+    ) -> Result<HashMap<String, (Option<String>, HashMap<String, String>)>, Error> {
+        let config = self.load_global_config()?;
+
+        let mut result = HashMap::new();
+        for (api_name, api_config) in config.api_configs {
+            result.insert(
+                api_name,
+                (api_config.base_url_override, api_config.environment_urls),
+            );
+        }
+
+        Ok(result)
     }
 
     /// Validates an `OpenAPI` specification against Aperture's supported features.

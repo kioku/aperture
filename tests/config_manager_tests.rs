@@ -155,6 +155,21 @@ fn setup_manager() -> (ConfigManager<MockFileSystem>, MockFileSystem) {
     (manager, fs)
 }
 
+fn create_minimal_spec() -> &'static str {
+    r#"
+openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /test:
+    get:
+      responses:
+        '200':
+          description: Success
+"#
+}
+
 #[test]
 fn test_add_spec_new() {
     let (manager, fs) = setup_manager();
@@ -775,4 +790,166 @@ paths:
     assert_eq!(cached_spec.commands[0].name, "default"); // No tags, so default
     assert_eq!(cached_spec.commands[0].operation_id, "get"); // Falls back to method
     assert_eq!(cached_spec.commands[0].method, "GET");
+}
+
+#[test]
+fn test_set_url_base_override() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "test-api";
+
+    // First add a spec
+    let spec_content = create_minimal_spec();
+    let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+    manager.add_spec(spec_name, &temp_spec_path, false).unwrap();
+
+    // Set base URL
+    let result = manager.set_url(spec_name, "https://custom.example.com", None);
+    assert!(result.is_ok());
+
+    // Verify config was saved
+    let config_path = PathBuf::from(TEST_CONFIG_DIR).join("config.toml");
+    assert!(fs.exists(&config_path));
+
+    // Load and check config
+    let config = manager.load_global_config().unwrap();
+    assert!(config.api_configs.contains_key(spec_name));
+    let api_config = &config.api_configs[spec_name];
+    assert_eq!(
+        api_config.base_url_override,
+        Some("https://custom.example.com".to_string())
+    );
+}
+
+#[test]
+fn test_set_url_environment_specific() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "test-api";
+
+    // First add a spec
+    let spec_content = create_minimal_spec();
+    let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+    manager.add_spec(spec_name, &temp_spec_path, false).unwrap();
+
+    // Set environment-specific URLs
+    manager
+        .set_url(spec_name, "https://staging.example.com", Some("staging"))
+        .unwrap();
+    manager
+        .set_url(spec_name, "https://prod.example.com", Some("prod"))
+        .unwrap();
+
+    // Load and check config
+    let config = manager.load_global_config().unwrap();
+    let api_config = &config.api_configs[spec_name];
+    assert_eq!(
+        api_config.environment_urls.get("staging"),
+        Some(&"https://staging.example.com".to_string())
+    );
+    assert_eq!(
+        api_config.environment_urls.get("prod"),
+        Some(&"https://prod.example.com".to_string())
+    );
+}
+
+#[test]
+fn test_set_url_spec_not_found() {
+    let (manager, _fs) = setup_manager();
+
+    let result = manager.set_url("nonexistent", "https://example.com", None);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("not found"));
+}
+
+#[test]
+fn test_get_url_returns_config() {
+    let (manager, fs) = setup_manager();
+    let spec_name = "test-api";
+
+    // First add a spec with base URL
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /test:
+    get:
+      responses:
+        '200':
+          description: Success
+"#;
+    let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
+    fs.add_file(&temp_spec_path, spec_content);
+    manager.add_spec(spec_name, &temp_spec_path, false).unwrap();
+
+    // Set some URLs
+    manager
+        .set_url(spec_name, "https://override.example.com", None)
+        .unwrap();
+    manager
+        .set_url(spec_name, "https://dev.example.com", Some("dev"))
+        .unwrap();
+
+    // Get URL config - this will fail to load cached spec but should still return config
+    let result = manager.get_url(spec_name);
+    assert!(result.is_ok());
+    let (base_override, env_urls, _resolved) = result.unwrap();
+
+    assert_eq!(
+        base_override,
+        Some("https://override.example.com".to_string())
+    );
+    assert_eq!(
+        env_urls.get("dev"),
+        Some(&"https://dev.example.com".to_string())
+    );
+    // Note: resolved URL will be fallback since cached spec can't be loaded in test environment
+}
+
+#[test]
+fn test_list_urls_shows_all_configs() {
+    let (manager, fs) = setup_manager();
+
+    // Add two specs
+    let spec_content = create_minimal_spec();
+    let temp_spec_path1 = PathBuf::from("/tmp/api1.yaml");
+    let temp_spec_path2 = PathBuf::from("/tmp/api2.yaml");
+    fs.add_file(&temp_spec_path1, spec_content);
+    fs.add_file(&temp_spec_path2, spec_content);
+
+    manager.add_spec("api1", &temp_spec_path1, false).unwrap();
+    manager.add_spec("api2", &temp_spec_path2, false).unwrap();
+
+    // Set URLs for both
+    manager
+        .set_url("api1", "https://api1.example.com", None)
+        .unwrap();
+    manager
+        .set_url("api2", "https://api2.example.com", None)
+        .unwrap();
+    manager
+        .set_url("api2", "https://api2-prod.example.com", Some("prod"))
+        .unwrap();
+
+    // List URLs
+    let all_urls = manager.list_urls().unwrap();
+
+    assert_eq!(all_urls.len(), 2);
+    assert!(all_urls.contains_key("api1"));
+    assert!(all_urls.contains_key("api2"));
+
+    let (api1_base, api1_envs) = &all_urls["api1"];
+    assert_eq!(api1_base, &Some("https://api1.example.com".to_string()));
+    assert!(api1_envs.is_empty());
+
+    let (api2_base, api2_envs) = &all_urls["api2"];
+    assert_eq!(api2_base, &Some("https://api2.example.com".to_string()));
+    assert_eq!(
+        api2_envs.get("prod"),
+        Some(&"https://api2-prod.example.com".to_string())
+    );
 }
