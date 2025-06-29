@@ -19,3 +19,15 @@ pub enum Error {
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
 }
+
+impl Error {
+    /// Add context to an error for better user messaging
+    #[must_use]
+    pub fn with_context(self, context: &str) -> Self {
+        match self {
+            Self::Network(e) => Self::Config(format!("{context}: {e}")),
+            Self::Io(e) => Self::Config(format!("{context}: {e}")),
+            _ => self,
+        }
+    }
+}

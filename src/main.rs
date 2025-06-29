@@ -22,7 +22,7 @@ async fn main() {
     );
 
     if let Err(e) = run_command(cli, &manager).await {
-        eprintln!("Error: {e}");
+        print_error(&e);
         std::process::exit(1);
     }
 }
@@ -72,7 +72,14 @@ async fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Err
     let cache_dir = config_dir.join(".cache");
 
     // Load the cached spec for the context
-    let spec = loader::load_cached_spec(&cache_dir, context)?;
+    let spec = loader::load_cached_spec(&cache_dir, context).map_err(|e| match e {
+        Error::Io(_) => Error::Config(format!(
+            "API specification '{context}' not found.\n\n\
+                Hint: Use 'aperture config list' to see available specifications\n\
+                      or 'aperture config add {context} <file>' to add this specification."
+        )),
+        _ => e,
+    })?;
 
     // Generate the dynamic command tree
     let command = generator::generate_command_tree(&spec);
@@ -80,10 +87,85 @@ async fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Err
     // Parse the arguments against the dynamic command
     let matches = command
         .try_get_matches_from(std::iter::once("api".to_string()).chain(args))
-        .map_err(|e| Error::Config(format!("Command parsing failed: {e}")))?;
+        .map_err(|e| {
+            Error::Config(format!(
+                "Invalid command for API '{context}': {e}\n\n\
+                Hint: Use 'aperture api {context} --help' to see available commands."
+            ))
+        })?;
 
     // Execute the request (None = use environment variable)
-    executor::execute_request(&spec, &matches, None).await?;
+    executor::execute_request(&spec, &matches, None)
+        .await
+        .map_err(|e| match &e {
+            Error::Network(req_err) => {
+                if req_err.is_connect() {
+                    e.with_context("Failed to connect to API server")
+                } else if req_err.is_timeout() {
+                    e.with_context("Request timed out")
+                } else {
+                    e
+                }
+            }
+            _ => e,
+        })?;
 
     Ok(())
+}
+
+/// Prints a user-friendly error message with context and suggestions
+fn print_error(error: &Error) {
+    match error {
+        Error::Config(msg) => {
+            eprintln!("🚫 Configuration Error\n{msg}");
+        }
+        Error::Io(io_err) => match io_err.kind() {
+            std::io::ErrorKind::NotFound => {
+                eprintln!("🚫 File Not Found\n{io_err}\n\nHint: Check that the file path is correct and the file exists.");
+            }
+            std::io::ErrorKind::PermissionDenied => {
+                eprintln!("🚫 Permission Denied\n{io_err}\n\nHint: Check file permissions or run with appropriate privileges.");
+            }
+            _ => {
+                eprintln!("🚫 File System Error\n{io_err}");
+            }
+        },
+        Error::Network(req_err) => {
+            if req_err.is_connect() {
+                eprintln!("🌐 Connection Error\n{req_err}\n\nHint: Check that the API server is running and accessible.");
+            } else if req_err.is_timeout() {
+                eprintln!("⏱️ Request Timeout\n{req_err}\n\nHint: The API server may be slow or unresponsive. Try again later.");
+            } else if req_err.is_status() {
+                if let Some(status) = req_err.status() {
+                    match status.as_u16() {
+                        401 => eprintln!("🔐 Authentication Error (401)\n{req_err}\n\nHint: Check your API credentials and authentication configuration."),
+                        403 => eprintln!("🚫 Authorization Error (403)\n{req_err}\n\nHint: Your credentials may be valid but lack permission for this operation."),
+                        404 => eprintln!("❓ Resource Not Found (404)\n{req_err}\n\nHint: Check that the API endpoint and parameters are correct."),
+                        429 => eprintln!("🐌 Rate Limited (429)\n{req_err}\n\nHint: You're making requests too quickly. Wait before trying again."),
+                        500..=599 => eprintln!("🔥 Server Error ({})\n{req_err}\n\nHint: The API server is experiencing issues. Try again later.", status.as_u16()),
+                        _ => eprintln!("🌐 HTTP Error ({})\n{req_err}", status.as_u16()),
+                    }
+                } else {
+                    eprintln!("🌐 HTTP Error\n{req_err}");
+                }
+            } else {
+                eprintln!("🌐 Network Error\n{req_err}");
+            }
+        }
+        Error::Yaml(yaml_err) => {
+            eprintln!("📄 YAML Parsing Error\n{yaml_err}\n\nHint: Check that your OpenAPI specification is valid YAML syntax.");
+        }
+        Error::Json(json_err) => {
+            eprintln!("📄 JSON Parsing Error\n{json_err}\n\nHint: Check that your request body or response contains valid JSON.");
+        }
+        Error::Validation(msg) => {
+            eprintln!("✅ Validation Error\n{msg}\n\nHint: Check that your OpenAPI specification follows the required format.");
+        }
+        Error::Toml(toml_err) => {
+            eprintln!("📄 TOML Parsing Error\n{toml_err}\n\nHint: Check that your configuration file is valid TOML syntax.");
+        }
+        Error::Anyhow(err) => {
+            eprintln!("💥 Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
+        }
+    }
 }

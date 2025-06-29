@@ -340,7 +340,9 @@ fn test_help_output() {
         .args(&["config", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Manage API specifications"))
+        .stdout(predicate::str::contains(
+            "Manage your collection of OpenAPI specifications",
+        ))
         .stdout(predicate::str::contains("add"))
         .stdout(predicate::str::contains("list"))
         .stdout(predicate::str::contains("remove"))
