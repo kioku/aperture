@@ -39,8 +39,8 @@ impl<'a> BaseUrlResolver<'a> {
 
     /// Resolves the base URL according to the priority hierarchy:
     /// 1. Explicit parameter (for testing)
-    /// 2. Environment variable: `APERTURE_BASE_URL`
-    /// 3. Per-API config override with environment support
+    /// 2. Per-API config override with environment support
+    /// 3. Environment variable: `APERTURE_BASE_URL`
     /// 4. Cached spec default
     /// 5. Fallback: <https://api.example.com>
     #[must_use]
@@ -50,12 +50,7 @@ impl<'a> BaseUrlResolver<'a> {
             return url.to_string();
         }
 
-        // Priority 2: Environment variable
-        if let Ok(url) = std::env::var("APERTURE_BASE_URL") {
-            return url;
-        }
-
-        // Priority 3: Per-API config override
+        // Priority 2: Per-API config override
         if let Some(config) = self.global_config {
             if let Some(api_config) = config.api_configs.get(&self.spec.name) {
                 // Check environment-specific URL first
@@ -75,6 +70,11 @@ impl<'a> BaseUrlResolver<'a> {
                     return override_url.clone();
                 }
             }
+        }
+
+        // Priority 3: Environment variable
+        if let Ok(url) = std::env::var("APERTURE_BASE_URL") {
+            return url;
         }
 
         // Priority 4: Cached spec default
@@ -161,22 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn test_priority_2_env_var() {
-        // Use a custom test harness to isolate environment variables
-        test_with_env_isolation(|| {
-            let spec = create_test_spec("test-api", Some("https://spec.example.com"));
-
-            // Set env var
-            std::env::set_var("APERTURE_BASE_URL", "https://env.example.com");
-
-            let resolver = BaseUrlResolver::new(&spec);
-
-            assert_eq!(resolver.resolve(None), "https://env.example.com");
-        });
-    }
-
-    #[test]
-    fn test_priority_3_api_config_override() {
+    fn test_priority_2_api_config_override() {
         test_with_env_isolation(|| {
             let spec = create_test_spec("test-api", Some("https://spec.example.com"));
 
@@ -201,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn test_priority_3_environment_specific() {
+    fn test_priority_2_environment_specific() {
         test_with_env_isolation(|| {
             let spec = create_test_spec("test-api", Some("https://spec.example.com"));
 
@@ -231,6 +216,51 @@ mod tests {
                 .with_environment(Some("staging".to_string()));
 
             assert_eq!(resolver.resolve(None), "https://staging.example.com");
+        });
+    }
+
+    #[test]
+    fn test_priority_config_override_beats_env_var() {
+        // Test that config override takes precedence over environment variable
+        test_with_env_isolation(|| {
+            let spec = create_test_spec("test-api", Some("https://spec.example.com"));
+
+            // Set env var
+            std::env::set_var("APERTURE_BASE_URL", "https://env.example.com");
+
+            let mut api_configs = HashMap::new();
+            api_configs.insert(
+                "test-api".to_string(),
+                ApiConfig {
+                    base_url_override: Some("https://config.example.com".to_string()),
+                    environment_urls: HashMap::new(),
+                },
+            );
+
+            let global_config = GlobalConfig {
+                api_configs,
+                ..Default::default()
+            };
+
+            let resolver = BaseUrlResolver::new(&spec).with_global_config(&global_config);
+
+            // Config override should win over env var
+            assert_eq!(resolver.resolve(None), "https://config.example.com");
+        });
+    }
+
+    #[test]
+    fn test_priority_3_env_var() {
+        // Use a custom test harness to isolate environment variables
+        test_with_env_isolation(|| {
+            let spec = create_test_spec("test-api", Some("https://spec.example.com"));
+
+            // Set env var
+            std::env::set_var("APERTURE_BASE_URL", "https://env.example.com");
+
+            let resolver = BaseUrlResolver::new(&spec);
+
+            assert_eq!(resolver.resolve(None), "https://env.example.com");
         });
     }
 
