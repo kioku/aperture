@@ -63,8 +63,12 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
 }
 
 async fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Error> {
-    // Get the cache directory
-    let config_dir = get_config_dir()?;
+    // Get the cache directory - respecting APERTURE_CONFIG_DIR if set
+    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+        PathBuf::from(dir)
+    } else {
+        get_config_dir()?
+    };
     let cache_dir = config_dir.join(".cache");
 
     // Load the cached spec for the context
