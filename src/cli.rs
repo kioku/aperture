@@ -130,4 +130,43 @@ pub enum ConfigCommands {
         /// Name of the API specification to edit
         name: String,
     },
+    /// Set base URL for an API specification
+    #[command(long_about = "Set the base URL for an API specification.\n\n\
+                      This overrides the base URL from the OpenAPI spec and the\n\
+                      APERTURE_BASE_URL environment variable. You can set a general\n\
+                      override or environment-specific URLs.\n\n\
+                      Examples:\n  \
+                      aperture config set-url myapi https://api.example.com\n  \
+                      aperture config set-url myapi --env staging https://staging.example.com\n  \
+                      aperture config set-url myapi --env prod https://prod.example.com")]
+    SetUrl {
+        /// Name of the API specification
+        name: String,
+        /// The base URL to set
+        url: String,
+        /// Set URL for a specific environment (e.g., dev, staging, prod)
+        #[arg(long, value_name = "ENV", help = "Set URL for specific environment")]
+        env: Option<String>,
+    },
+    /// Get base URL configuration for an API specification
+    #[command(
+        long_about = "Display the base URL configuration for an API specification.\n\n\
+                      Shows the configured base URL override and any environment-specific\n\
+                      URLs. Also displays what URL would be used based on current\n\
+                      environment settings.\n\n\
+                      Example:\n  \
+                      aperture config get-url myapi"
+    )]
+    GetUrl {
+        /// Name of the API specification
+        name: String,
+    },
+    /// List all configured base URLs
+    #[command(
+        long_about = "Display all configured base URLs across all API specifications.\n\n\
+                      Shows general overrides and environment-specific configurations\n\
+                      for each registered API. Useful for reviewing your URL settings\n\
+                      at a glance."
+    )]
+    ListUrls {},
 }

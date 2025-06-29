@@ -55,6 +55,58 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 manager.edit_spec(&name)?;
                 println!("Opened spec '{name}' in editor.");
             }
+            ConfigCommands::SetUrl { name, url, env } => {
+                manager.set_url(&name, &url, env.as_deref())?;
+                if let Some(environment) = env {
+                    println!("Set base URL for '{name}' in environment '{environment}': {url}");
+                } else {
+                    println!("Set base URL for '{name}': {url}");
+                }
+            }
+            ConfigCommands::GetUrl { name } => {
+                let (base_override, env_urls, resolved) = manager.get_url(&name)?;
+
+                println!("Base URL configuration for '{name}':");
+                if let Some(base) = base_override {
+                    println!("  Base override: {base}");
+                } else {
+                    println!("  Base override: (none)");
+                }
+
+                if !env_urls.is_empty() {
+                    println!("  Environment URLs:");
+                    for (env, url) in env_urls {
+                        println!("    {env}: {url}");
+                    }
+                }
+
+                println!("\nResolved URL (current): {resolved}");
+
+                if let Ok(current_env) = std::env::var("APERTURE_ENV") {
+                    println!("(Using APERTURE_ENV={current_env})");
+                }
+            }
+            ConfigCommands::ListUrls {} => {
+                let all_urls = manager.list_urls()?;
+
+                if all_urls.is_empty() {
+                    println!("No base URLs configured.");
+                } else {
+                    println!("Configured base URLs:");
+                    for (api_name, (base_override, env_urls)) in all_urls {
+                        println!("\n{api_name}:");
+                        if let Some(base) = base_override {
+                            println!("  Base override: {base}");
+                        }
+                        if !env_urls.is_empty() {
+                            println!("  Environment URLs:");
+                            for (env, url) in env_urls {
+                                println!("    {env}: {url}");
+                            }
+                        }
+                    }
+                }
+            }
         },
         Commands::Api {
             ref context,
@@ -76,6 +128,10 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     };
     let cache_dir = config_dir.join(".cache");
 
+    // Create config manager and load global config
+    let manager = ConfigManager::with_fs(OsFileSystem, config_dir);
+    let global_config = manager.load_global_config().ok();
+
     // Load the cached spec for the context
     let spec = loader::load_cached_spec(&cache_dir, context).map_err(|e| match e {
         Error::Io(_) => Error::Config(format!(
@@ -88,7 +144,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
 
     // Handle --describe-json flag - output capability manifest and exit
     if cli.describe_json {
-        let manifest = agent::generate_capability_manifest(&spec)?;
+        let manifest = agent::generate_capability_manifest(&spec, global_config.as_ref())?;
         println!("{manifest}");
         return Ok(());
     }
@@ -110,9 +166,10 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     executor::execute_request(
         &spec,
         &matches,
-        None, // base_url (None = use environment variable)
+        None, // base_url (None = use BaseUrlResolver)
         cli.dry_run,
         cli.idempotency_key.as_deref(),
+        global_config.as_ref(),
     )
     .await
     .map_err(|e| match &e {

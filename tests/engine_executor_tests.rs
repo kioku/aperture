@@ -1,6 +1,8 @@
 use aperture::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture::config::models::{ApiConfig, GlobalConfig};
 use aperture::engine::executor::execute_request;
 use clap::{Arg, Command};
+use std::collections::HashMap;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -23,6 +25,8 @@ fn create_test_spec() -> CachedSpec {
             request_body: None,
             responses: vec![],
         }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     }
 }
 
@@ -52,7 +56,8 @@ async fn test_execute_request_basic_get() {
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "123"]);
 
     // Execute the request with mock server URL
-    let result = execute_request(&spec, &matches, Some(&mock_server.uri()), false, None).await;
+    let result =
+        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
     assert!(result.is_ok());
 }
 
@@ -78,6 +83,8 @@ async fn test_execute_request_with_query_params() {
             request_body: None,
             responses: vec![],
         }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     };
 
     Mock::given(method("GET"))
@@ -93,7 +100,8 @@ async fn test_execute_request_with_query_params() {
 
     let matches = command.get_matches_from(vec!["api", "users", "list-users", "--limit", "10"]);
 
-    let result = execute_request(&spec, &matches, Some(&mock_server.uri()), false, None).await;
+    let result =
+        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
     assert!(result.is_ok());
 }
 
@@ -118,7 +126,8 @@ async fn test_execute_request_error_response() {
 
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "999"]);
 
-    let result = execute_request(&spec, &matches, Some(&mock_server.uri()), false, None).await;
+    let result =
+        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
     assert!(result.is_err());
 
     if let Err(e) = result {
@@ -126,4 +135,69 @@ async fn test_execute_request_error_response() {
         assert!(error_msg.contains("404"));
         assert!(error_msg.contains(r#""error":"User not found"#));
     }
+}
+
+#[tokio::test]
+async fn test_execute_request_with_global_config_base_url() {
+    let mock_server = MockServer::start().await;
+
+    // Configure mock response
+    Mock::given(method("GET"))
+        .and(path("/users/123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "123",
+            "name": "Test User"
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    // Create spec WITHOUT base_url (this should force use of global config)
+    let spec = CachedSpec {
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "users".to_string(),
+            description: Some("Get user by ID".to_string()),
+            operation_id: "getUserById".to_string(),
+            method: "GET".to_string(),
+            path: "/users/{id}".to_string(),
+            parameters: vec![CachedParameter {
+                name: "id".to_string(),
+                location: "path".to_string(),
+                required: true,
+                schema: None,
+            }],
+            request_body: None,
+            responses: vec![],
+        }],
+        base_url: None, // No base URL in spec
+        servers: vec![],
+    };
+
+    // Create global config with API override
+    let mut api_configs = HashMap::new();
+    api_configs.insert(
+        "test-api".to_string(),
+        ApiConfig {
+            base_url_override: Some(mock_server.uri()),
+            environment_urls: HashMap::new(),
+        },
+    );
+
+    let global_config = GlobalConfig {
+        api_configs,
+        ..Default::default()
+    };
+
+    let command = Command::new("api").subcommand(
+        Command::new("users")
+            .subcommand(Command::new("get-user-by-id").arg(Arg::new("id").required(true))),
+    );
+
+    let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "123"]);
+
+    // Execute the request with global config providing the base URL
+    let result = execute_request(&spec, &matches, None, false, None, Some(&global_config)).await;
+    assert!(result.is_ok());
 }

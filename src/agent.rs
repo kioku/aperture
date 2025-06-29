@@ -1,4 +1,6 @@
 use crate::cache::models::{CachedCommand, CachedParameter, CachedRequestBody, CachedSpec};
+use crate::config::models::GlobalConfig;
+use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -100,6 +102,7 @@ fn to_kebab_case(s: &str) -> String {
 ///
 /// # Arguments
 /// * `spec` - The cached API specification
+/// * `global_config` - Optional global configuration for URL resolution
 ///
 /// # Returns
 /// * `Ok(String)` - JSON-formatted capability manifest
@@ -107,7 +110,10 @@ fn to_kebab_case(s: &str) -> String {
 ///
 /// # Errors
 /// Returns an error if JSON serialization fails
-pub fn generate_capability_manifest(spec: &CachedSpec) -> Result<String, Error> {
+pub fn generate_capability_manifest(
+    spec: &CachedSpec,
+    global_config: Option<&GlobalConfig>,
+) -> Result<String, Error> {
     let mut command_groups: HashMap<String, Vec<CommandInfo>> = HashMap::new();
 
     // Group commands by their tag (namespace) and convert to CommandInfo
@@ -125,13 +131,22 @@ pub fn generate_capability_manifest(spec: &CachedSpec) -> Result<String, Error> 
             .push(command_info);
     }
 
+    // Resolve base URL using the same priority hierarchy as executor
+    let resolver = BaseUrlResolver::new(spec);
+    let resolver = if let Some(config) = global_config {
+        resolver.with_global_config(config)
+    } else {
+        resolver
+    };
+    let base_url = resolver.resolve(None);
+
     // Create the manifest
     let manifest = ApiCapabilityManifest {
         api: ApiInfo {
             name: spec.name.clone(),
             version: spec.version.clone(),
             description: None, // Not available in cached spec
-            base_url: "https://api.example.com".to_string(), // Default, can be overridden by env var
+            base_url,
         },
         commands: command_groups,
         security: None, // TODO: Extract security information from spec
@@ -227,9 +242,11 @@ mod tests {
                 request_body: None,
                 responses: vec![],
             }],
+            base_url: Some("https://test-api.example.com".to_string()),
+            servers: vec!["https://test-api.example.com".to_string()],
         };
 
-        let manifest_json = generate_capability_manifest(&spec).unwrap();
+        let manifest_json = generate_capability_manifest(&spec, None).unwrap();
         let manifest: ApiCapabilityManifest = serde_json::from_str(&manifest_json).unwrap();
 
         assert_eq!(manifest.api.name, "Test API");

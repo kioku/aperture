@@ -55,6 +55,8 @@ fn test_cached_spec_serialization_deserialization() {
                 }],
             },
         ],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     };
 
     // Test serialization

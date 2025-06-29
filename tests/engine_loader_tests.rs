@@ -26,6 +26,8 @@ fn create_test_cached_spec() -> CachedSpec {
                 content: Some(r#"{"type": "array"}"#.to_string()),
             }],
         }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     }
 }
 

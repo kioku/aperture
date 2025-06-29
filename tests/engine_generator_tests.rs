@@ -57,6 +57,8 @@ fn create_test_spec() -> CachedSpec {
                 }],
             },
         ],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     }
 }
 
@@ -113,6 +115,8 @@ fn test_kebab_case_conversion() {
             request_body: None,
             responses: vec![],
         }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     };
 
     let command = generate_command_tree(&spec);
@@ -163,6 +167,8 @@ fn test_fallback_to_default_tag() {
             request_body: None,
             responses: vec![],
         }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     };
 
     let command = generate_command_tree(&spec);
@@ -187,6 +193,8 @@ fn test_fallback_to_http_method() {
             request_body: None,
             responses: vec![],
         }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     };
 
     let command = generate_command_tree(&spec);

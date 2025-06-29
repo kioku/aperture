@@ -5,6 +5,10 @@ pub struct CachedSpec {
     pub name: String,
     pub version: String,
     pub commands: Vec<CachedCommand>,
+    /// Base URL extracted from the first server in the `OpenAPI` spec
+    pub base_url: Option<String>,
+    /// All server URLs from the `OpenAPI` spec for future multi-environment support
+    pub servers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]

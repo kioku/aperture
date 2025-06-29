@@ -66,6 +66,9 @@ RUST_LOG=debug cargo run -- config list
 
 # Test with wiremock for HTTP mocking
 cargo test --test executor_tests
+
+# Test base URL management functionality
+cargo test --test base_url_integration_tests
 ```
 
 ## Configuration Management
