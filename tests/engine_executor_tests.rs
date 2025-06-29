@@ -52,7 +52,7 @@ async fn test_execute_request_basic_get() {
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "123"]);
 
     // Execute the request with mock server URL
-    let result = execute_request(&spec, &matches, Some(&mock_server.uri())).await;
+    let result = execute_request(&spec, &matches, Some(&mock_server.uri()), false, None).await;
     assert!(result.is_ok());
 }
 
@@ -93,7 +93,7 @@ async fn test_execute_request_with_query_params() {
 
     let matches = command.get_matches_from(vec!["api", "users", "list-users", "--limit", "10"]);
 
-    let result = execute_request(&spec, &matches, Some(&mock_server.uri())).await;
+    let result = execute_request(&spec, &matches, Some(&mock_server.uri()), false, None).await;
     assert!(result.is_ok());
 }
 
@@ -118,7 +118,7 @@ async fn test_execute_request_error_response() {
 
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "999"]);
 
-    let result = execute_request(&spec, &matches, Some(&mock_server.uri())).await;
+    let result = execute_request(&spec, &matches, Some(&mock_server.uri()), false, None).await;
     assert!(result.is_err());
 
     if let Err(e) = result {

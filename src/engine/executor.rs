@@ -15,17 +15,24 @@ use std::str::FromStr;
 /// * `spec` - The cached specification containing operation details
 /// * `matches` - Parsed CLI arguments from clap
 /// * `base_url` - Optional base URL override. If None, uses `APERTURE_BASE_URL` env var
+/// * `dry_run` - If true, show request details without executing
+/// * `idempotency_key` - Optional idempotency key for safe retries
 ///
 /// # Returns
-/// * `Ok(())` - Request executed successfully
+/// * `Ok(())` - Request executed successfully or dry-run completed
 /// * `Err(Error)` - Request failed or validation error
 ///
 /// # Errors
 /// Returns errors for authentication failures, network issues, or response validation
+///
+/// # Panics
+/// Panics if JSON serialization of dry-run information fails (extremely unlikely)
 pub async fn execute_request(
     spec: &CachedSpec,
     matches: &ArgMatches,
     base_url: Option<&str>,
+    dry_run: bool,
+    idempotency_key: Option<&str>,
 ) -> Result<(), Error> {
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
@@ -45,13 +52,22 @@ pub async fn execute_request(
     // Create HTTP client
     let client = reqwest::Client::new();
 
-    // Build headers including authentication
-    let headers = build_headers(operation, matches)?;
+    // Build headers including authentication and idempotency
+    let mut headers = build_headers(operation, matches)?;
+    
+    // Add idempotency key if provided
+    if let Some(key) = idempotency_key {
+        headers.insert(
+            HeaderName::from_static("idempotency-key"),
+            HeaderValue::from_str(key).map_err(|_| Error::Config("Invalid idempotency key".to_string()))?,
+        );
+    }
 
     // Build request
     let method = Method::from_str(&operation.method)
         .map_err(|_| Error::Config(format!("Invalid HTTP method: {}", operation.method)))?;
 
+    let headers_clone = headers.clone(); // For dry-run output
     let mut request = client.request(method.clone(), &url).headers(headers);
 
     // Add request body if present
@@ -68,6 +84,19 @@ pub async fn execute_request(
                 .map_err(|e| Error::Config(format!("Invalid JSON body: {e}")))?;
             request = request.json(&json_body);
         }
+    }
+
+    // Handle dry-run mode - show request details without executing
+    if dry_run {
+        let dry_run_info = serde_json::json!({
+            "dry_run": true,
+            "method": operation.method,
+            "url": url,
+            "headers": headers_clone.iter().map(|(k, v)| (k.as_str(), v.to_str().unwrap_or("<binary>"))).collect::<std::collections::HashMap<_, _>>(),
+            "operation_id": operation.operation_id
+        });
+        println!("{}", serde_json::to_string_pretty(&dry_run_info).unwrap());
+        return Ok(());
     }
 
     // Execute request
