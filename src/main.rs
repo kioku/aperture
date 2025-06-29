@@ -6,7 +6,8 @@ use aperture::fs::OsFileSystem;
 use clap::Parser;
 use std::path::PathBuf;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     let manager = std::env::var("APERTURE_CONFIG_DIR").map_or_else(
@@ -20,13 +21,13 @@ fn main() {
         |config_dir| ConfigManager::with_fs(OsFileSystem, PathBuf::from(config_dir)),
     );
 
-    if let Err(e) = run_command(cli, &manager) {
+    if let Err(e) = run_command(cli, &manager).await {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
 }
 
-fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
+async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
     match cli.command {
         Commands::Config { command } => match command {
             ConfigCommands::Add { name, file, force } => {
@@ -54,14 +55,14 @@ fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<(), Er
             }
         },
         Commands::Api { context, args } => {
-            execute_api_command(&context, args)?;
+            execute_api_command(&context, args).await?;
         }
     }
 
     Ok(())
 }
 
-fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Error> {
+async fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Error> {
     // Get the cache directory
     let config_dir = get_config_dir()?;
     let cache_dir = config_dir.join(".cache");
@@ -78,7 +79,7 @@ fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Error> {
         .map_err(|e| Error::Config(format!("Command parsing failed: {e}")))?;
 
     // Execute the request
-    executor::execute_request(&spec, &matches)?;
+    executor::execute_request(&spec, &matches).await?;
 
     Ok(())
 }
