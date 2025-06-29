@@ -9,7 +9,7 @@ fn create_test_spec() -> CachedSpec {
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![CachedCommand {
-            name: "users".to_string(),
+            name: "users".to_string(), // This is the tag name
             description: Some("Get user by ID".to_string()),
             operation_id: "getUserById".to_string(),
             method: "GET".to_string(),
