@@ -2,6 +2,15 @@
 name = "aperture"
 version = "0.1.0"
 edition = "2021"
+description = "Dynamic CLI generator for OpenAPI specifications"
+license = "MIT"
+repository = "https://github.com/kioku/aperture"
+homepage = "https://github.com/kioku/aperture"
+documentation = "https://github.com/kioku/aperture"
+keywords = ["api", "cli", "openapi", "agent", "automation"]
+categories = ["command-line-utilities", "web-programming", "api-bindings"]
+authors = ["Aperture Contributors"]
+readme = "README.md"
 
 [dependencies]
 anyhow = "1.0.98"
@@ -31,3 +40,11 @@ tokio = { version = "1.45.1", features = ["rt", "macros", "test-util"] }
 [lints.clippy]
 pedantic = "warn"
 nursery = "warn"
+
+# Simple release configuration
+[package.metadata.release]
+# Publish to crates.io
+publish = true
+# Create and push git tags
+tag = true
+push = true

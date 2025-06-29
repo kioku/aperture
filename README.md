@@ -41,9 +41,22 @@ components:
         name: API_TOKEN
 ```
 
-## Getting Started
+## Installation
 
-*(More detailed installation and usage instructions will be provided upon release.)*
+### Using Cargo (Recommended)
+
+```bash
+cargo install aperture
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/kioku/aperture.git
+cd aperture
+cargo install --path .
+
+## Getting Started
 
 ### Basic Usage
 
