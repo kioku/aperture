@@ -1,3 +1,4 @@
+use aperture::agent;
 use aperture::cli::{Cli, Commands, ConfigCommands};
 use aperture::config::manager::{get_config_dir, ConfigManager};
 use aperture::engine::{executor, generator, loader};
@@ -9,12 +10,13 @@ use std::path::PathBuf;
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let json_errors = cli.json_errors;
 
     let manager = std::env::var("APERTURE_CONFIG_DIR").map_or_else(
         |_| match ConfigManager::new() {
             Ok(manager) => manager,
             Err(e) => {
-                eprintln!("Error: {e}");
+                print_error_with_json(&e, json_errors);
                 std::process::exit(1);
             }
         },
@@ -22,7 +24,7 @@ async fn main() {
     );
 
     if let Err(e) = run_command(cli, &manager).await {
-        print_error(&e);
+        print_error_with_json(&e, json_errors);
         std::process::exit(1);
     }
 }
@@ -54,15 +56,15 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 println!("Opened spec '{name}' in editor.");
             }
         },
-        Commands::Api { context, args } => {
-            execute_api_command(&context, args).await?;
+        Commands::Api { ref context, ref args } => {
+            execute_api_command(context, args.clone(), &cli).await?;
         }
     }
 
     Ok(())
 }
 
-async fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Error> {
+async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
     // Get the cache directory - respecting APERTURE_CONFIG_DIR if set
     let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
         PathBuf::from(dir)
@@ -81,6 +83,13 @@ async fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Err
         _ => e,
     })?;
 
+    // Handle --describe-json flag - output capability manifest and exit
+    if cli.describe_json {
+        let manifest = agent::generate_capability_manifest(&spec)?;
+        println!("{manifest}");
+        return Ok(());
+    }
+
     // Generate the dynamic command tree
     let command = generator::generate_command_tree(&spec);
 
@@ -94,23 +103,44 @@ async fn execute_api_command(context: &str, args: Vec<String>) -> Result<(), Err
             ))
         })?;
 
-    // Execute the request (None = use environment variable)
-    executor::execute_request(&spec, &matches, None)
-        .await
-        .map_err(|e| match &e {
-            Error::Network(req_err) => {
-                if req_err.is_connect() {
-                    e.with_context("Failed to connect to API server")
-                } else if req_err.is_timeout() {
-                    e.with_context("Request timed out")
-                } else {
-                    e
-                }
+    // Execute the request with agent flags
+    executor::execute_request(
+        &spec, 
+        &matches, 
+        None, // base_url (None = use environment variable)
+        cli.dry_run,
+        cli.idempotency_key.as_deref(),
+    )
+    .await
+    .map_err(|e| match &e {
+        Error::Network(req_err) => {
+            if req_err.is_connect() {
+                e.with_context("Failed to connect to API server")
+            } else if req_err.is_timeout() {
+                e.with_context("Request timed out")
+            } else {
+                e
             }
-            _ => e,
-        })?;
+        }
+        _ => e,
+    })?;
 
     Ok(())
+}
+
+/// Prints an error message, either as JSON or user-friendly format
+fn print_error_with_json(error: &Error, json_format: bool) {
+    if json_format {
+        let json_error = error.to_json();
+        if let Ok(json_output) = serde_json::to_string_pretty(&json_error) {
+            eprintln!("{json_output}");
+        } else {
+            // Fallback to regular error if JSON serialization fails
+            print_error(error);
+        }
+    } else {
+        print_error(error);
+    }
 }
 
 /// Prints a user-friendly error message with context and suggestions
