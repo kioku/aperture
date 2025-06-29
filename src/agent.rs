@@ -131,7 +131,10 @@ pub fn generate_capability_manifest(spec: &CachedSpec) -> Result<String, Error> 
             name: spec.name.clone(),
             version: spec.version.clone(),
             description: None, // Not available in cached spec
-            base_url: "https://api.example.com".to_string(), // Default, can be overridden by env var
+            base_url: spec
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "https://api.example.com".to_string()),
         },
         commands: command_groups,
         security: None, // TODO: Extract security information from spec
@@ -227,6 +230,8 @@ mod tests {
                 request_body: None,
                 responses: vec![],
             }],
+            base_url: Some("https://test-api.example.com".to_string()),
+            servers: vec!["https://test-api.example.com".to_string()],
         };
 
         let manifest_json = generate_capability_manifest(&spec).unwrap();

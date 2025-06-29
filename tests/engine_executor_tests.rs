@@ -23,6 +23,8 @@ fn create_test_spec() -> CachedSpec {
             request_body: None,
             responses: vec![],
         }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     }
 }
 
@@ -78,6 +80,8 @@ async fn test_execute_request_with_query_params() {
             request_body: None,
             responses: vec![],
         }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
     };
 
     Mock::given(method("GET"))
