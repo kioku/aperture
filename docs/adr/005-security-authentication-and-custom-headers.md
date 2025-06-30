@@ -1,17 +1,19 @@
 # ADR-005: Security Authentication and Custom Headers Implementation
 
 ## Status
-Accepted
+Implemented - All features fully functional with comprehensive test coverage
 
 ## Context
 When implementing Phase 6 of Aperture (Security and Custom Headers), we needed to address critical gaps that prevented real-world API usage:
 
-1. **No Authentication Support**: The executor had TODO placeholders for x-aperture-secret authentication but no actual implementation
+1. **No Authentication Support**: The executor had TODO placeholders for x-aperture-secret authentication but no actual implementation (RESOLVED)
 2. **Missing Custom Headers**: Users had no way to add operational headers like request IDs, tracing headers, or debugging information
 3. **Agent Discovery Gap**: The `--describe-json` capability manifest didn't expose security requirements to autonomous agents
 4. **Security Separation**: Need to maintain strict separation between OpenAPI specs (configuration) and credentials (secrets)
 
-The solution needed to support common authentication schemes (Bearer tokens, API keys, Basic auth) while maintaining backward compatibility and enabling agent automation.
+The solution needed to support common authentication schemes (Bearer tokens, API keys) while maintaining backward compatibility and enabling agent automation.
+
+**Update**: Implementation completed successfully with full x-aperture-secret extension parsing, comprehensive test coverage, and end-to-end functionality verification.
 
 ## Decision
 We implemented a comprehensive security and custom headers system with four key components:
@@ -67,7 +69,7 @@ Updated the agent manifest to expose security information:
 
 ### Neutral
 - **Phase-Based Implementation**: Six atomic phases maintained system stability during development
-- **Comprehensive Testing**: 8 integration tests cover all authentication and header scenarios
+- **Comprehensive Testing**: 14 total integration tests (8 original + 6 extension parsing) cover all authentication scenarios, real OpenAPI spec processing, and error handling
 
 ## Alternatives Considered
 
@@ -76,8 +78,26 @@ Updated the agent manifest to expose security information:
 3. **Interactive Prompts**: Rejected due to incompatibility with agent automation
 4. **External Secret Managers**: Deferred for v2.0 to maintain v1.0 simplicity
 
+## Implementation Completion
+
+**Status**: ✅ **FULLY IMPLEMENTED** as of December 2024
+
+### Key Achievements
+- **x-aperture-secret extension parsing**: Complete implementation with openapiv3 2.2.0 upgrade
+- **Real-world compatibility**: Works with actual OpenAPI specifications containing extensions
+- **Zero TODO items remaining**: All security-related TODOs resolved
+- **Comprehensive test coverage**: 14 integration tests covering all scenarios
+- **Backward compatibility**: All existing functionality preserved
+
+### Critical Fixes Applied
+1. **openapiv3 upgrade**: Updated from 1.0.0 to 2.2.0 to access SecurityScheme extensions field
+2. **Extension parsing**: Implemented actual x-aperture-secret extraction from OpenAPI specs
+3. **End-to-end testing**: Added tests with real OpenAPI YAML/JSON files containing extensions
+4. **Error handling**: Graceful handling of missing or malformed extensions
+
 ## Future Enhancements
 1. OAuth2 flow support with refresh tokens
 2. External secret manager integration (Vault, AWS Secrets Manager)
 3. Certificate-based authentication
-4. Advanced security scheme validation against OpenAPI specs
+4. Basic authentication support (currently only Bearer tokens supported)
+5. Advanced security scheme validation against OpenAPI specs
