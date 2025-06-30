@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use aperture::error::Error;
+use aperture_cli::error::Error;
 
 #[test]
 fn test_io_error_display() {

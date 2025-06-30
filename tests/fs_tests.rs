@@ -1,4 +1,4 @@
-use aperture::fs::{FileSystem, OsFileSystem};
+use aperture_cli::fs::{FileSystem, OsFileSystem};
 use std::fs;
 use std::path::PathBuf;
 

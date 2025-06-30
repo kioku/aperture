@@ -1,6 +1,6 @@
-use aperture::cache::models::{CachedCommand, CachedParameter, CachedSpec};
-use aperture::config::models::{ApiConfig, GlobalConfig};
-use aperture::engine::executor::execute_request;
+use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture_cli::config::models::{ApiConfig, GlobalConfig};
+use aperture_cli::engine::executor::execute_request;
 use clap::{Arg, Command};
 use std::collections::HashMap;
 use wiremock::matchers::{method, path};

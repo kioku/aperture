@@ -1,9 +1,9 @@
-use aperture::agent;
-use aperture::cli::{Cli, Commands, ConfigCommands};
-use aperture::config::manager::{get_config_dir, ConfigManager};
-use aperture::engine::{executor, generator, loader};
-use aperture::error::Error;
-use aperture::fs::OsFileSystem;
+use aperture_cli::agent;
+use aperture_cli::cli::{Cli, Commands, ConfigCommands};
+use aperture_cli::config::manager::{get_config_dir, ConfigManager};
+use aperture_cli::engine::{executor, generator, loader};
+use aperture_cli::error::Error;
+use aperture_cli::fs::OsFileSystem;
 use clap::Parser;
 use std::path::PathBuf;
 

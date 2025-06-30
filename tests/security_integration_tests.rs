@@ -1,7 +1,7 @@
-use aperture::cache::models::{
+use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
 };
-use aperture::engine::executor::execute_request;
+use aperture_cli::engine::executor::execute_request;
 use clap::{Arg, Command};
 use std::collections::HashMap;
 use wiremock::matchers::{header, method, path};

@@ -1,6 +1,6 @@
-use aperture::cache::models::{CachedCommand, CachedParameter, CachedResponse, CachedSpec};
-use aperture::engine::loader::load_cached_spec;
-use aperture::error::Error;
+use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedResponse, CachedSpec};
+use aperture_cli::engine::loader::load_cached_spec;
+use aperture_cli::error::Error;
 use std::collections::HashMap;
 use std::fs;
 use tempfile::TempDir;

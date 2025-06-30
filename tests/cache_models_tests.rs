@@ -1,4 +1,4 @@
-use aperture::cache::models::{
+use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec,
 };
 use std::collections::HashMap;

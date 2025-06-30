@@ -1,8 +1,8 @@
-use aperture::cache::models::CachedApertureSecret;
-use aperture::config::manager::ConfigManager;
-use aperture::engine::executor::execute_request;
-use aperture::engine::loader::load_cached_spec;
-use aperture::fs::OsFileSystem;
+use aperture_cli::cache::models::CachedApertureSecret;
+use aperture_cli::config::manager::ConfigManager;
+use aperture_cli::engine::executor::execute_request;
+use aperture_cli::engine::loader::load_cached_spec;
+use aperture_cli::fs::OsFileSystem;
 use clap::{Arg, Command};
 use std::path::Path;
 use tempfile::TempDir;

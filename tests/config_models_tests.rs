@@ -1,4 +1,4 @@
-use aperture::config::models::{ApertureSecret, GlobalConfig, SecretSource};
+use aperture_cli::config::models::{ApertureSecret, GlobalConfig, SecretSource};
 use serde_yaml;
 
 #[test]

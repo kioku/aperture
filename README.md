@@ -46,7 +46,7 @@ components:
 ### Using Cargo (Recommended)
 
 ```bash
-cargo install aperture
+cargo install aperture-cli
 ```
 
 ### Build from Source

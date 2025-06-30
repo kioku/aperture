@@ -1,5 +1,5 @@
 [package]
-name = "aperture"
+name = "aperture-cli"
 version = "0.1.0"
 edition = "2021"
 description = "Dynamic CLI generator for OpenAPI specifications"
@@ -11,6 +11,10 @@ keywords = ["api", "cli", "openapi", "agent", "automation"]
 categories = ["command-line-utilities", "web-programming", "api-bindings"]
 authors = ["Claudiu Ivan <contact@claudiu-ivan.com>"]
 readme = "README.md"
+
+[[bin]]
+name = "aperture"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.98"
@@ -31,7 +35,7 @@ urlencoding = "2.1.3"
 [dev-dependencies]
 assert_cmd = "2.0.17"
 wiremock = "0.6.4"
-aperture = { path = "." }
+aperture-cli = { path = "." }
 predicates = "3.1.3"
 tempfile = "3.15.0"
 serde_json = "1.0.140"

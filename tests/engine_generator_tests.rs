@@ -1,7 +1,7 @@
-use aperture::cache::models::{
+use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec,
 };
-use aperture::engine::generator::generate_command_tree;
+use aperture_cli::engine::generator::generate_command_tree;
 use std::collections::HashMap;
 
 fn create_test_spec() -> CachedSpec {

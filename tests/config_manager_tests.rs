@@ -1,6 +1,6 @@
-use aperture::config::manager::ConfigManager;
-use aperture::error::Error;
-use aperture::fs::FileSystem;
+use aperture_cli::config::manager::ConfigManager;
+use aperture_cli::error::Error;
+use aperture_cli::fs::FileSystem;
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -730,7 +730,7 @@ paths:
     assert!(!cache_data.is_empty());
 
     // Verify it's valid bincode by attempting to deserialize
-    let cached_spec: Result<aperture::cache::models::CachedSpec, _> =
+    let cached_spec: Result<aperture_cli::cache::models::CachedSpec, _> =
         bincode::deserialize(&cache_data);
     assert!(cached_spec.is_ok());
 
@@ -783,7 +783,7 @@ paths:
         .join("no-operation-id-api.bin");
 
     let cache_data = fs.files.lock().unwrap().get(&cache_path).cloned().unwrap();
-    let cached_spec: aperture::cache::models::CachedSpec =
+    let cached_spec: aperture_cli::cache::models::CachedSpec =
         bincode::deserialize(&cache_data).unwrap();
 
     assert_eq!(cached_spec.commands.len(), 1);
