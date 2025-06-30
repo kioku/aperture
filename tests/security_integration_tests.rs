@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn create_secure_test_spec() -> CachedSpec {
+fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> CachedSpec {
     let mut security_schemes = HashMap::new();
 
     // Add Bearer token authentication
@@ -21,7 +21,7 @@ fn create_secure_test_spec() -> CachedSpec {
             parameter_name: Some("Authorization".to_string()),
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),
-                name: "TEST_API_TOKEN".to_string(), // Unique name for tests
+                name: bearer_env_var.to_string(),
             }),
         },
     );
@@ -37,7 +37,7 @@ fn create_secure_test_spec() -> CachedSpec {
             parameter_name: Some("X-API-Key".to_string()),
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),
-                name: "TEST_API_KEY".to_string(), // Unique name for tests
+                name: api_key_env_var.to_string(),
             }),
         },
     );
@@ -94,11 +94,13 @@ fn create_secure_test_spec() -> CachedSpec {
 #[tokio::test]
 async fn test_bearer_token_authentication() {
     let mock_server = MockServer::start().await;
+    let bearer_env = "BEARER_AUTH_TEST_TOKEN";
+    let api_key_env = "BEARER_AUTH_TEST_API_KEY";
 
     // Clean up any existing env var first
-    std::env::remove_var("TEST_API_TOKEN");
+    std::env::remove_var(bearer_env);
     // Set up environment variable
-    std::env::set_var("TEST_API_TOKEN", "secret-bearer-token");
+    std::env::set_var(bearer_env, "secret-bearer-token");
 
     // Configure mock to expect Bearer token
     Mock::given(method("GET"))
@@ -112,7 +114,7 @@ async fn test_bearer_token_authentication() {
         .mount(&mock_server)
         .await;
 
-    let spec = create_secure_test_spec();
+    let spec = create_secure_test_spec(bearer_env, api_key_env);
 
     let command = Command::new("api").subcommand(
         Command::new("users")
@@ -126,15 +128,17 @@ async fn test_bearer_token_authentication() {
     assert!(result.is_ok());
 
     // Clean up
-    std::env::remove_var("TEST_API_TOKEN");
+    std::env::remove_var(bearer_env);
 }
 
 #[tokio::test]
 async fn test_api_key_authentication() {
     let mock_server = MockServer::start().await;
+    let bearer_env = "API_KEY_TEST_BEARER";
+    let api_key_env = "API_KEY_TEST_KEY";
 
     // Set up environment variable
-    std::env::set_var("TEST_API_KEY", "my-secret-api-key");
+    std::env::set_var(api_key_env, "my-secret-api-key");
 
     // Configure mock to expect API key header
     Mock::given(method("GET"))
@@ -147,7 +151,7 @@ async fn test_api_key_authentication() {
         .mount(&mock_server)
         .await;
 
-    let spec = create_secure_test_spec();
+    let spec = create_secure_test_spec(bearer_env, api_key_env);
 
     let command =
         Command::new("api").subcommand(Command::new("data").subcommand(Command::new("get-data")));
@@ -159,18 +163,20 @@ async fn test_api_key_authentication() {
     assert!(result.is_ok());
 
     // Clean up
-    std::env::remove_var("TEST_API_KEY");
+    std::env::remove_var(api_key_env);
 }
 
 #[tokio::test]
 async fn test_missing_authentication_environment_variable() {
     let mock_server = MockServer::start().await;
+    let bearer_env = "MISSING_AUTH_TEST_TOKEN";
+    let api_key_env = "MISSING_AUTH_TEST_KEY";
 
     // Ensure the environment variable is not set (multiple remove attempts for safety)
-    std::env::remove_var("TEST_API_TOKEN");
-    std::env::remove_var("TEST_API_TOKEN");
+    std::env::remove_var(bearer_env);
+    std::env::remove_var(bearer_env);
 
-    let spec = create_secure_test_spec();
+    let spec = create_secure_test_spec(bearer_env, api_key_env);
 
     let command = Command::new("api").subcommand(
         Command::new("users")
@@ -186,7 +192,7 @@ async fn test_missing_authentication_environment_variable() {
         Ok(_) => panic!("Expected error but got success"),
         Err(e) => {
             let error_msg = e.to_string();
-            assert!(error_msg.contains("Environment variable 'TEST_API_TOKEN'"));
+            assert!(error_msg.contains(&format!("Environment variable '{}'", bearer_env)));
             assert!(error_msg.contains("is not set"));
         }
     }
@@ -195,6 +201,8 @@ async fn test_missing_authentication_environment_variable() {
 #[tokio::test]
 async fn test_custom_headers_with_literal_values() {
     let mock_server = MockServer::start().await;
+    let bearer_env = "LITERAL_HEADERS_TEST_TOKEN";
+    let api_key_env = "LITERAL_HEADERS_TEST_KEY";
 
     // Configure mock to expect custom headers
     Mock::given(method("GET"))
@@ -208,7 +216,7 @@ async fn test_custom_headers_with_literal_values() {
         .mount(&mock_server)
         .await;
 
-    let spec = create_secure_test_spec();
+    let spec = create_secure_test_spec(bearer_env, api_key_env);
 
     let command = Command::new("api").subcommand(
         Command::new("public").subcommand(
@@ -239,10 +247,14 @@ async fn test_custom_headers_with_literal_values() {
 #[tokio::test]
 async fn test_custom_headers_with_environment_variable_expansion() {
     let mock_server = MockServer::start().await;
+    let bearer_env = "ENV_HEADERS_TEST_TOKEN";
+    let api_key_env = "ENV_HEADERS_TEST_KEY";
+    let request_id_env = "ENV_HEADERS_REQUEST_ID";
+    let client_version_env = "ENV_HEADERS_CLIENT_VERSION";
 
     // Set up environment variables
-    std::env::set_var("REQUEST_ID", "env-request-id-123");
-    std::env::set_var("CLIENT_VERSION", "2.1.0");
+    std::env::set_var(request_id_env, "env-request-id-123");
+    std::env::set_var(client_version_env, "2.1.0");
 
     // Configure mock to expect headers with expanded values
     Mock::given(method("GET"))
@@ -256,7 +268,7 @@ async fn test_custom_headers_with_environment_variable_expansion() {
         .mount(&mock_server)
         .await;
 
-    let spec = create_secure_test_spec();
+    let spec = create_secure_test_spec(bearer_env, api_key_env);
 
     let command = Command::new("api").subcommand(
         Command::new("public").subcommand(
@@ -274,9 +286,9 @@ async fn test_custom_headers_with_environment_variable_expansion() {
         "public",
         "get-public-data",
         "--header",
-        "X-Request-ID: ${REQUEST_ID}",
+        &format!("X-Request-ID: ${{{}}}", request_id_env),
         "-H",
-        "X-Client-Version: ${CLIENT_VERSION}",
+        &format!("X-Client-Version: ${{{}}}", client_version_env),
     ]);
 
     let result =
@@ -284,17 +296,20 @@ async fn test_custom_headers_with_environment_variable_expansion() {
     assert!(result.is_ok());
 
     // Clean up
-    std::env::remove_var("REQUEST_ID");
-    std::env::remove_var("CLIENT_VERSION");
+    std::env::remove_var(request_id_env);
+    std::env::remove_var(client_version_env);
 }
 
 #[tokio::test]
 async fn test_authentication_and_custom_headers_combined() {
     let mock_server = MockServer::start().await;
+    let bearer_env = "COMBINED_TEST_BEARER_TOKEN";
+    let api_key_env = "COMBINED_TEST_API_KEY";
+    let trace_id_env = "COMBINED_TEST_TRACE_ID";
 
     // Set up environment variables
-    std::env::set_var("TEST_API_TOKEN", "combined-test-token");
-    std::env::set_var("TEST_TRACE_ID", "trace-abc-123");
+    std::env::set_var(bearer_env, "combined-test-token");
+    std::env::set_var(trace_id_env, "trace-abc-123");
 
     // Configure mock to expect both authentication and custom headers
     Mock::given(method("GET"))
@@ -310,7 +325,7 @@ async fn test_authentication_and_custom_headers_combined() {
         .mount(&mock_server)
         .await;
 
-    let spec = create_secure_test_spec();
+    let spec = create_secure_test_spec(bearer_env, api_key_env);
 
     let command = Command::new("api").subcommand(
         Command::new("users").subcommand(
@@ -331,7 +346,7 @@ async fn test_authentication_and_custom_headers_combined() {
         "get-user-by-id",
         "999",
         "--header",
-        "X-Trace-ID: ${TEST_TRACE_ID}",
+        &format!("X-Trace-ID: ${{{}}}", trace_id_env),
         "-H",
         "X-Custom: custom-value",
     ]);
@@ -341,13 +356,15 @@ async fn test_authentication_and_custom_headers_combined() {
     assert!(result.is_ok());
 
     // Clean up
-    std::env::remove_var("TEST_API_TOKEN");
-    std::env::remove_var("TEST_TRACE_ID");
+    std::env::remove_var(bearer_env);
+    std::env::remove_var(trace_id_env);
 }
 
 #[tokio::test]
 async fn test_invalid_custom_header_format() {
-    let spec = create_secure_test_spec();
+    let bearer_env = "INVALID_HEADER_TEST_TOKEN";
+    let api_key_env = "INVALID_HEADER_TEST_KEY";
+    let spec = create_secure_test_spec(bearer_env, api_key_env);
 
     let command = Command::new("api").subcommand(
         Command::new("public").subcommand(
@@ -378,7 +395,9 @@ async fn test_invalid_custom_header_format() {
 
 #[tokio::test]
 async fn test_empty_header_name() {
-    let spec = create_secure_test_spec();
+    let bearer_env = "EMPTY_HEADER_TEST_TOKEN";
+    let api_key_env = "EMPTY_HEADER_TEST_KEY";
+    let spec = create_secure_test_spec(bearer_env, api_key_env);
 
     let command = Command::new("api").subcommand(
         Command::new("public").subcommand(
