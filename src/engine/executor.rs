@@ -279,7 +279,50 @@ fn build_headers(
         }
     }
 
+    // Add custom headers from --header/-H flags
+    // Use try_get_many to avoid panic when header arg doesn't exist
+    if let Ok(Some(custom_headers)) = current_matches.try_get_many::<String>("header") {
+        for header_str in custom_headers {
+            let (name, value) = parse_custom_header(header_str)?;
+            let header_name = HeaderName::from_str(&name)
+                .map_err(|e| Error::Config(format!("Invalid header name '{name}': {e}")))?;
+            let header_value = HeaderValue::from_str(&value)
+                .map_err(|e| Error::Config(format!("Invalid header value for '{name}': {e}")))?;
+            headers.insert(header_name, header_value);
+        }
+    }
+
     Ok(headers)
+}
+
+/// Parses a custom header string in the format "Name: Value" or "Name:Value"
+fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
+    // Find the colon separator
+    let colon_pos = header_str.find(':').ok_or_else(|| {
+        Error::Config(format!(
+            "Invalid header format '{header_str}'. Expected 'Name: Value'"
+        ))
+    })?;
+
+    let name = header_str[..colon_pos].trim();
+    let value = header_str[colon_pos + 1..].trim();
+
+    if name.is_empty() {
+        return Err(Error::Config(format!(
+            "Invalid header format '{header_str}'. Header name cannot be empty"
+        )));
+    }
+
+    // Support environment variable expansion in header values
+    let expanded_value = if value.starts_with("${") && value.ends_with('}') {
+        // Extract environment variable name
+        let var_name = &value[2..value.len() - 1];
+        std::env::var(var_name).unwrap_or_else(|_| value.to_string())
+    } else {
+        value.to_string()
+    };
+
+    Ok((name.to_string(), expanded_value))
 }
 
 /// Adds an authentication header based on a security scheme
