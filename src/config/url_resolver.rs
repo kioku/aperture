@@ -1,9 +1,6 @@
 use crate::cache::models::CachedSpec;
 use crate::config::models::{ApiConfig, GlobalConfig};
 
-#[cfg(test)]
-use std::collections::HashMap;
-
 /// Resolves the base URL for an API based on a priority hierarchy
 pub struct BaseUrlResolver<'a> {
     /// The cached API specification

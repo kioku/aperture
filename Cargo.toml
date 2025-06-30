@@ -9,7 +9,7 @@ homepage = "https://github.com/kioku/aperture"
 documentation = "https://github.com/kioku/aperture"
 keywords = ["api", "cli", "openapi", "agent", "automation"]
 categories = ["command-line-utilities", "web-programming", "api-bindings"]
-authors = ["Aperture Contributors"]
+authors = ["Claudiu Ivan <contact@claudiu-ivan.com>"]
 readme = "README.md"
 
 [dependencies]
