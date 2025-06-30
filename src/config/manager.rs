@@ -1,4 +1,4 @@
-use crate::cache::models::CachedSpec;
+use crate::cache::models::{CachedApertureSecret, CachedSecurityScheme, CachedSpec};
 use crate::config::models::{ApiConfig, GlobalConfig};
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::engine::loader;
@@ -487,6 +487,9 @@ impl<F: FileSystem> ConfigManager<F> {
         // Use the first server as the default base URL
         let base_url = servers.first().cloned();
 
+        // Extract security schemes with x-aperture-secret extensions
+        let security_schemes = Self::extract_security_schemes(spec);
+
         // Process all operations
         for (path, path_item_ref) in &spec.paths.paths {
             if let ReferenceOr::Item(path_item) = path_item_ref {
@@ -516,7 +519,7 @@ impl<F: FileSystem> ConfigManager<F> {
             commands,
             base_url,
             servers,
-            security_schemes: HashMap::new(), // TODO: Will be populated in Phase 2
+            security_schemes,
         }
     }
 
@@ -596,6 +599,90 @@ impl<F: FileSystem> ConfigManager<F> {
             responses,
             security_requirements: Vec::new(), // TODO: Will be populated in Phase 2
         }
+    }
+
+    /// Extracts security schemes from `OpenAPI` spec, processing `x-aperture-secret` extensions
+    fn extract_security_schemes(spec: &OpenAPI) -> HashMap<String, CachedSecurityScheme> {
+        let mut security_schemes = HashMap::new();
+
+        if let Some(components) = &spec.components {
+            for (scheme_name, scheme_ref) in &components.security_schemes {
+                if let ReferenceOr::Item(scheme) = scheme_ref {
+                    if let Some(cached_scheme) =
+                        Self::transform_security_scheme(scheme_name, scheme)
+                    {
+                        security_schemes.insert(scheme_name.clone(), cached_scheme);
+                    }
+                }
+                // Note: ReferenceOr::Reference cases are already rejected in validate_spec
+            }
+        }
+
+        security_schemes
+    }
+
+    /// Transforms an `OpenAPI` `SecurityScheme` into a `CachedSecurityScheme`
+    fn transform_security_scheme(
+        name: &str,
+        scheme: &SecurityScheme,
+    ) -> Option<CachedSecurityScheme> {
+        match scheme {
+            SecurityScheme::APIKey {
+                location,
+                name: param_name,
+                ..
+            } => {
+                // TODO: Extract x-aperture-secret extension from raw scheme data
+                // For now, create scheme without aperture_secret mapping
+                Some(CachedSecurityScheme {
+                    name: name.to_string(),
+                    scheme_type: "apiKey".to_string(),
+                    scheme: None,
+                    location: Some(match location {
+                        openapiv3::APIKeyLocation::Query => "query".to_string(),
+                        openapiv3::APIKeyLocation::Header => "header".to_string(),
+                        openapiv3::APIKeyLocation::Cookie => "cookie".to_string(),
+                    }),
+                    parameter_name: Some(param_name.clone()),
+                    aperture_secret: None, // TODO: Parse from extensions
+                })
+            }
+            SecurityScheme::HTTP {
+                scheme: http_scheme,
+                ..
+            } => {
+                // TODO: Extract x-aperture-secret extension from raw scheme data
+                // For now, create scheme without aperture_secret mapping
+                Some(CachedSecurityScheme {
+                    name: name.to_string(),
+                    scheme_type: "http".to_string(),
+                    scheme: Some(http_scheme.clone()),
+                    location: Some("header".to_string()), // HTTP auth always goes in header
+                    parameter_name: Some("Authorization".to_string()),
+                    aperture_secret: None, // TODO: Parse from extensions
+                })
+            }
+            // OAuth2 and OpenID Connect are rejected in validate_spec, but handle gracefully
+            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => {
+                None // These are not supported in v1.0
+            }
+        }
+    }
+
+    /// Parses the `x-aperture-secret` extension value into a `CachedApertureSecret`
+    #[allow(dead_code)] // TODO: Will be used in Phase 3 for x-aperture-secret parsing
+    fn parse_aperture_secret_extension(value: &serde_json::Value) -> Option<CachedApertureSecret> {
+        // The extension should be an object with "source" and "name" fields
+        if let Some(obj) = value.as_object() {
+            let source = obj.get("source")?.as_str()?.to_string();
+            let name = obj.get("name")?.as_str()?.to_string();
+
+            // Currently only "env" source is supported
+            if source == "env" {
+                return Some(CachedApertureSecret { source, name });
+            }
+        }
+        None
     }
 }
 
