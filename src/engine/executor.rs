@@ -1,4 +1,4 @@
-use crate::cache::models::{CachedCommand, CachedSpec};
+use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
@@ -57,7 +57,7 @@ pub async fn execute_request(
     let client = reqwest::Client::new();
 
     // Build headers including authentication and idempotency
-    let mut headers = build_headers(operation, matches)?;
+    let mut headers = build_headers(spec, operation, matches)?;
 
     // Add idempotency key if provided
     if let Some(key) = idempotency_key {
@@ -240,7 +240,11 @@ fn build_url(
 }
 
 /// Builds headers including authentication
-fn build_headers(operation: &CachedCommand, matches: &ArgMatches) -> Result<HeaderMap, Error> {
+fn build_headers(
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+    matches: &ArgMatches,
+) -> Result<HeaderMap, Error> {
     let mut headers = HeaderMap::new();
 
     // Add default headers
@@ -268,10 +272,128 @@ fn build_headers(operation: &CachedCommand, matches: &ArgMatches) -> Result<Head
         }
     }
 
-    // TODO: Add authentication headers based on x-aperture-secret
-    // This would require access to the original OpenAPI spec security schemes
+    // Add authentication headers based on security requirements
+    for security_scheme_name in &operation.security_requirements {
+        if let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) {
+            add_authentication_header(&mut headers, security_scheme)?;
+        }
+    }
+
+    // Add custom headers from --header/-H flags
+    // Use try_get_many to avoid panic when header arg doesn't exist
+    if let Ok(Some(custom_headers)) = current_matches.try_get_many::<String>("header") {
+        for header_str in custom_headers {
+            let (name, value) = parse_custom_header(header_str)?;
+            let header_name = HeaderName::from_str(&name)
+                .map_err(|e| Error::Config(format!("Invalid header name '{name}': {e}")))?;
+            let header_value = HeaderValue::from_str(&value)
+                .map_err(|e| Error::Config(format!("Invalid header value for '{name}': {e}")))?;
+            headers.insert(header_name, header_value);
+        }
+    }
 
     Ok(headers)
+}
+
+/// Parses a custom header string in the format "Name: Value" or "Name:Value"
+fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
+    // Find the colon separator
+    let colon_pos = header_str.find(':').ok_or_else(|| {
+        Error::Config(format!(
+            "Invalid header format '{header_str}'. Expected 'Name: Value'"
+        ))
+    })?;
+
+    let name = header_str[..colon_pos].trim();
+    let value = header_str[colon_pos + 1..].trim();
+
+    if name.is_empty() {
+        return Err(Error::Config(format!(
+            "Invalid header format '{header_str}'. Header name cannot be empty"
+        )));
+    }
+
+    // Support environment variable expansion in header values
+    let expanded_value = if value.starts_with("${") && value.ends_with('}') {
+        // Extract environment variable name
+        let var_name = &value[2..value.len() - 1];
+        std::env::var(var_name).unwrap_or_else(|_| value.to_string())
+    } else {
+        value.to_string()
+    };
+
+    Ok((name.to_string(), expanded_value))
+}
+
+/// Adds an authentication header based on a security scheme
+fn add_authentication_header(
+    headers: &mut HeaderMap,
+    security_scheme: &CachedSecurityScheme,
+) -> Result<(), Error> {
+    // Only process schemes that have aperture_secret mappings
+    if let Some(aperture_secret) = &security_scheme.aperture_secret {
+        // Read the secret from the environment variable
+        let secret_value = std::env::var(&aperture_secret.name).map_err(|_| {
+            Error::Config(format!(
+                "Environment variable '{}' required for authentication '{}' is not set",
+                aperture_secret.name, security_scheme.name
+            ))
+        })?;
+
+        // Build the appropriate header based on scheme type
+        match security_scheme.scheme_type.as_str() {
+            "apiKey" => {
+                if let (Some(location), Some(param_name)) =
+                    (&security_scheme.location, &security_scheme.parameter_name)
+                {
+                    if location == "header" {
+                        let header_name = HeaderName::from_str(param_name).map_err(|e| {
+                            Error::Config(format!("Invalid header name '{param_name}': {e}"))
+                        })?;
+                        let header_value = HeaderValue::from_str(&secret_value).map_err(|e| {
+                            Error::Config(format!("Invalid header value for '{param_name}': {e}"))
+                        })?;
+                        headers.insert(header_name, header_value);
+                    }
+                    // Note: query and cookie locations are handled differently in request building
+                }
+            }
+            "http" => {
+                if let Some(scheme) = &security_scheme.scheme {
+                    match scheme.as_str() {
+                        "bearer" => {
+                            let auth_value = format!("Bearer {secret_value}");
+                            let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
+                                Error::Config(format!("Invalid Authorization header value: {e}"))
+                            })?;
+                            headers.insert("Authorization", header_value);
+                        }
+                        "basic" => {
+                            // Basic auth expects "username:password" format in the secret
+                            let auth_value = format!("Basic {secret_value}");
+                            let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
+                                Error::Config(format!("Invalid Authorization header value: {e}"))
+                            })?;
+                            headers.insert("Authorization", header_value);
+                        }
+                        _ => {
+                            return Err(Error::Config(format!(
+                                "Unsupported HTTP authentication scheme: {scheme}"
+                            )));
+                        }
+                    }
+                }
+            }
+            _ => {
+                return Err(Error::Config(format!(
+                    "Unsupported security scheme type: {}",
+                    security_scheme.scheme_type
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Converts a string to kebab-case (copied from generator.rs)

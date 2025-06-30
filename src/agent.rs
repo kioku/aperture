@@ -149,7 +149,7 @@ pub fn generate_capability_manifest(
             base_url,
         },
         commands: command_groups,
-        security: None, // TODO: Extract security information from spec
+        security: extract_security_info(spec),
     };
 
     // Serialize to JSON
@@ -209,6 +209,59 @@ fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> Reque
     }
 }
 
+/// Extracts security information from the cached spec for the capability manifest
+fn extract_security_info(spec: &CachedSpec) -> Option<SecurityInfo> {
+    if spec.security_schemes.is_empty() {
+        return None;
+    }
+
+    // For now, we'll create a summary of all available security schemes
+    // In a real implementation, you might want to be more specific about which
+    // schemes are required for which operations
+    let mut details = HashMap::new();
+    let mut primary_scheme_type = String::new();
+
+    for (name, scheme) in &spec.security_schemes {
+        details.insert(format!("{name}_type"), scheme.scheme_type.clone());
+
+        if let Some(location) = &scheme.location {
+            details.insert(format!("{name}_location"), location.clone());
+        }
+
+        if let Some(param_name) = &scheme.parameter_name {
+            details.insert(format!("{name}_parameter"), param_name.clone());
+        }
+
+        if let Some(http_scheme) = &scheme.scheme {
+            details.insert(format!("{name}_scheme"), http_scheme.clone());
+        }
+
+        // Add information about x-aperture-secret mapping if present
+        if let Some(aperture_secret) = &scheme.aperture_secret {
+            details.insert(format!("{name}_env_var"), aperture_secret.name.clone());
+            details.insert(format!("{name}_source"), aperture_secret.source.clone());
+        }
+
+        // Use the first scheme as the primary type for the summary
+        if primary_scheme_type.is_empty() {
+            primary_scheme_type.clone_from(&scheme.scheme_type);
+        }
+    }
+
+    // Add a summary of available schemes
+    let scheme_names: Vec<String> = spec.security_schemes.keys().cloned().collect();
+    details.insert("available_schemes".to_string(), scheme_names.join(", "));
+
+    Some(SecurityInfo {
+        scheme_type: if primary_scheme_type.is_empty() {
+            "mixed".to_string()
+        } else {
+            primary_scheme_type
+        },
+        details,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +277,24 @@ mod tests {
 
     #[test]
     fn test_generate_capability_manifest() {
+        use crate::cache::models::{CachedApertureSecret, CachedSecurityScheme};
+
+        let mut security_schemes = HashMap::new();
+        security_schemes.insert(
+            "bearerAuth".to_string(),
+            CachedSecurityScheme {
+                name: "bearerAuth".to_string(),
+                scheme_type: "http".to_string(),
+                scheme: Some("bearer".to_string()),
+                location: Some("header".to_string()),
+                parameter_name: Some("Authorization".to_string()),
+                aperture_secret: Some(CachedApertureSecret {
+                    source: "env".to_string(),
+                    name: "API_TOKEN".to_string(),
+                }),
+            },
+        );
+
         let spec = CachedSpec {
             name: "Test API".to_string(),
             version: "1.0.0".to_string(),
@@ -241,9 +312,11 @@ mod tests {
                 }],
                 request_body: None,
                 responses: vec![],
+                security_requirements: vec!["bearerAuth".to_string()],
             }],
             base_url: Some("https://test-api.example.com".to_string()),
             servers: vec!["https://test-api.example.com".to_string()],
+            security_schemes,
         };
 
         let manifest_json = generate_capability_manifest(&spec, None).unwrap();
@@ -259,5 +332,14 @@ mod tests {
         assert_eq!(users_commands[0].method, "GET");
         assert_eq!(users_commands[0].parameters.len(), 1);
         assert_eq!(users_commands[0].parameters[0].name, "id");
+
+        // Test security information extraction
+        assert!(manifest.security.is_some());
+        let security = manifest.security.unwrap();
+        assert_eq!(security.scheme_type, "http");
+        assert!(security.details.contains_key("bearerAuth_type"));
+        assert_eq!(security.details["bearerAuth_type"], "http");
+        assert!(security.details.contains_key("bearerAuth_env_var"));
+        assert_eq!(security.details["bearerAuth_env_var"], "API_TOKEN");
     }
 }

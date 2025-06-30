@@ -1,0 +1,39 @@
+openapi: 3.0.0
+info:
+  title: API Key Test API
+  version: 1.0.0
+  description: API for testing API key authentication with x-aperture-secret extension
+
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key authentication
+      x-aperture-secret:
+        source: env
+        name: TEST_API_KEY
+
+paths:
+  /data:
+    get:
+      summary: Get sensitive data
+      operationId: getData
+      tags:
+        - data
+      security:
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: Sensitive data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: string
+
+servers:
+  - url: https://api.example.com

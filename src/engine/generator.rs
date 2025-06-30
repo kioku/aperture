@@ -102,6 +102,16 @@ pub fn generate_command_tree(spec: &CachedSpec) -> Command {
                 );
             }
 
+            // Add custom header support
+            operation_command = operation_command.arg(
+                Arg::new("header")
+                    .long("header")
+                    .short('H')
+                    .help("Pass custom header(s) to the request. Format: 'Name: Value'. Can be used multiple times.")
+                    .value_name("HEADER")
+                    .action(ArgAction::Append),
+            );
+
             group_command = group_command.subcommand(operation_command);
         }
 
