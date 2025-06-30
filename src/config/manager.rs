@@ -490,6 +490,17 @@ impl<F: FileSystem> ConfigManager<F> {
         // Extract security schemes with x-aperture-secret extensions
         let security_schemes = Self::extract_security_schemes(spec);
 
+        // Extract global security requirements
+        let global_security_requirements: Vec<String> =
+            spec.security
+                .as_ref()
+                .map_or_else(Vec::new, |security_reqs| {
+                    security_reqs
+                        .iter()
+                        .flat_map(|security_req| security_req.keys().cloned())
+                        .collect()
+                });
+
         // Process all operations
         for (path, path_item_ref) in &spec.paths.paths {
             if let ReferenceOr::Item(path_item) = path_item_ref {
@@ -506,7 +517,12 @@ impl<F: FileSystem> ConfigManager<F> {
 
                 for (method, operation_opt) in operations {
                     if let Some(operation) = operation_opt {
-                        let cached_command = Self::transform_operation(path, method, operation);
+                        let cached_command = Self::transform_operation(
+                            path,
+                            method,
+                            operation,
+                            &global_security_requirements,
+                        );
                         commands.push(cached_command);
                     }
                 }
@@ -528,6 +544,7 @@ impl<F: FileSystem> ConfigManager<F> {
         path: &str,
         method: &str,
         operation: &Operation,
+        global_security_requirements: &[String],
     ) -> crate::cache::models::CachedCommand {
         use crate::cache::models::{
             CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
@@ -588,17 +605,16 @@ impl<F: FileSystem> ConfigManager<F> {
             });
         }
 
-        // Extract security requirements from operation
-        let security_requirements =
-            operation
-                .security
-                .as_ref()
-                .map_or_else(Vec::new, |security_reqs| {
-                    security_reqs
-                        .iter()
-                        .flat_map(|security_req| security_req.keys().cloned())
-                        .collect()
-                });
+        // Extract security requirements from operation, fallback to global security
+        let security_requirements = operation.security.as_ref().map_or_else(
+            || global_security_requirements.to_vec(), // Fallback to global security
+            |security_reqs| {
+                security_reqs
+                    .iter()
+                    .flat_map(|security_req| security_req.keys().cloned())
+                    .collect()
+            },
+        );
 
         CachedCommand {
             name: tag_name,
