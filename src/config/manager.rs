@@ -588,6 +588,18 @@ impl<F: FileSystem> ConfigManager<F> {
             });
         }
 
+        // Extract security requirements from operation
+        let security_requirements =
+            operation
+                .security
+                .as_ref()
+                .map_or_else(Vec::new, |security_reqs| {
+                    security_reqs
+                        .iter()
+                        .flat_map(|security_req| security_req.keys().cloned())
+                        .collect()
+                });
+
         CachedCommand {
             name: tag_name,
             description: operation.summary.clone(),
@@ -597,7 +609,7 @@ impl<F: FileSystem> ConfigManager<F> {
             parameters,
             request_body,
             responses,
-            security_requirements: Vec::new(), // TODO: Will be populated in Phase 2
+            security_requirements,
         }
     }
 
