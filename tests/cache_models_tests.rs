@@ -1,6 +1,7 @@
 use aperture::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec,
 };
+use std::collections::HashMap;
 
 #[test]
 fn test_cached_spec_serialization_deserialization() {
@@ -36,6 +37,7 @@ fn test_cached_spec_serialization_deserialization() {
                             .to_string(),
                     ),
                 }],
+                security_requirements: vec![],
             },
             CachedCommand {
                 name: "create-user".to_string(),
@@ -53,10 +55,12 @@ fn test_cached_spec_serialization_deserialization() {
                     status_code: "201".to_string(),
                     content: None,
                 }],
+                security_requirements: vec![],
             },
         ],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
     };
 
     // Test serialization

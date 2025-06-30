@@ -1,6 +1,7 @@
 use aperture::cache::models::{CachedCommand, CachedParameter, CachedResponse, CachedSpec};
 use aperture::engine::loader::load_cached_spec;
 use aperture::error::Error;
+use std::collections::HashMap;
 use std::fs;
 use tempfile::TempDir;
 
@@ -25,9 +26,11 @@ fn create_test_cached_spec() -> CachedSpec {
                 status_code: "200".to_string(),
                 content: Some(r#"{"type": "array"}"#.to_string()),
             }],
+            security_requirements: vec![],
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
     }
 }
 

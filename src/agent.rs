@@ -241,9 +241,11 @@ mod tests {
                 }],
                 request_body: None,
                 responses: vec![],
+                security_requirements: vec![],
             }],
             base_url: Some("https://test-api.example.com".to_string()),
             servers: vec!["https://test-api.example.com".to_string()],
+            security_schemes: HashMap::new(),
         };
 
         let manifest_json = generate_capability_manifest(&spec, None).unwrap();

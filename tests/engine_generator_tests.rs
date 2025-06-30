@@ -2,6 +2,7 @@ use aperture::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec,
 };
 use aperture::engine::generator::generate_command_tree;
+use std::collections::HashMap;
 
 fn create_test_spec() -> CachedSpec {
     CachedSpec {
@@ -39,6 +40,7 @@ fn create_test_spec() -> CachedSpec {
                     status_code: "200".to_string(),
                     content: Some(r#"{"type": "object"}"#.to_string()),
                 }],
+                security_requirements: vec![],
             },
             CachedCommand {
                 name: "users".to_string(), // Same tag/group
@@ -55,10 +57,12 @@ fn create_test_spec() -> CachedSpec {
                     status_code: "201".to_string(),
                     content: None,
                 }],
+                security_requirements: vec![],
             },
         ],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
     }
 }
 
@@ -114,9 +118,11 @@ fn test_kebab_case_conversion() {
             parameters: vec![],
             request_body: None,
             responses: vec![],
+            security_requirements: vec![],
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
     };
 
     let command = generate_command_tree(&spec);
@@ -166,9 +172,11 @@ fn test_fallback_to_default_tag() {
             parameters: vec![],
             request_body: None,
             responses: vec![],
+            security_requirements: vec![],
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
     };
 
     let command = generate_command_tree(&spec);
@@ -192,9 +200,11 @@ fn test_fallback_to_http_method() {
             parameters: vec![],
             request_body: None,
             responses: vec![],
+            security_requirements: vec![],
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
     };
 
     let command = generate_command_tree(&spec);

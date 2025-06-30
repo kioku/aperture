@@ -516,6 +516,7 @@ impl<F: FileSystem> ConfigManager<F> {
             commands,
             base_url,
             servers,
+            security_schemes: HashMap::new(), // TODO: Will be populated in Phase 2
         }
     }
 
@@ -593,6 +594,7 @@ impl<F: FileSystem> ConfigManager<F> {
             parameters,
             request_body,
             responses,
+            security_requirements: Vec::new(), // TODO: Will be populated in Phase 2
         }
     }
 }
