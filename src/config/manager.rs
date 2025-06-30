@@ -642,10 +642,14 @@ impl<F: FileSystem> ConfigManager<F> {
             SecurityScheme::APIKey {
                 location,
                 name: param_name,
+                extensions,
                 ..
             } => {
-                // TODO: Extract x-aperture-secret extension from raw scheme data
-                // For now, create scheme without aperture_secret mapping
+                // Extract x-aperture-secret extension from raw scheme data
+                let aperture_secret = extensions
+                    .get("x-aperture-secret")
+                    .and_then(Self::parse_aperture_secret_extension);
+
                 Some(CachedSecurityScheme {
                     name: name.to_string(),
                     scheme_type: "apiKey".to_string(),
@@ -656,22 +660,26 @@ impl<F: FileSystem> ConfigManager<F> {
                         openapiv3::APIKeyLocation::Cookie => "cookie".to_string(),
                     }),
                     parameter_name: Some(param_name.clone()),
-                    aperture_secret: None, // TODO: Parse from extensions
+                    aperture_secret,
                 })
             }
             SecurityScheme::HTTP {
                 scheme: http_scheme,
+                extensions,
                 ..
             } => {
-                // TODO: Extract x-aperture-secret extension from raw scheme data
-                // For now, create scheme without aperture_secret mapping
+                // Extract x-aperture-secret extension from raw scheme data
+                let aperture_secret = extensions
+                    .get("x-aperture-secret")
+                    .and_then(Self::parse_aperture_secret_extension);
+
                 Some(CachedSecurityScheme {
                     name: name.to_string(),
                     scheme_type: "http".to_string(),
                     scheme: Some(http_scheme.clone()),
                     location: Some("header".to_string()), // HTTP auth always goes in header
                     parameter_name: Some("Authorization".to_string()),
-                    aperture_secret: None, // TODO: Parse from extensions
+                    aperture_secret,
                 })
             }
             // OAuth2 and OpenID Connect are rejected in validate_spec, but handle gracefully
@@ -682,7 +690,6 @@ impl<F: FileSystem> ConfigManager<F> {
     }
 
     /// Parses the `x-aperture-secret` extension value into a `CachedApertureSecret`
-    #[allow(dead_code)] // TODO: Will be used in Phase 3 for x-aperture-secret parsing
     fn parse_aperture_secret_extension(value: &serde_json::Value) -> Option<CachedApertureSecret> {
         // The extension should be an object with "source" and "name" fields
         if let Some(obj) = value.as_object() {
