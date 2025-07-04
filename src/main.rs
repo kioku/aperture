@@ -224,117 +224,117 @@ fn print_error_with_json(error: &Error, json_format: bool) {
 fn print_error(error: &Error) {
     match error {
         Error::Config(msg) => {
-            eprintln!("🚫 Configuration Error\n{msg}");
+            eprintln!("Configuration Error\n{msg}");
         }
         Error::Io(io_err) => match io_err.kind() {
             std::io::ErrorKind::NotFound => {
-                eprintln!("🚫 File Not Found\n{io_err}\n\nHint: Check that the file path is correct and the file exists.");
+                eprintln!("File Not Found\n{io_err}\n\nHint: Check that the file path is correct and the file exists.");
             }
             std::io::ErrorKind::PermissionDenied => {
-                eprintln!("🚫 Permission Denied\n{io_err}\n\nHint: Check file permissions or run with appropriate privileges.");
+                eprintln!("Permission Denied\n{io_err}\n\nHint: Check file permissions or run with appropriate privileges.");
             }
             _ => {
-                eprintln!("🚫 File System Error\n{io_err}");
+                eprintln!("File System Error\n{io_err}");
             }
         },
         Error::Network(req_err) => {
             if req_err.is_connect() {
-                eprintln!("🌐 Connection Error\n{req_err}\n\nHint: Check that the API server is running and accessible.");
+                eprintln!("Connection Error\n{req_err}\n\nHint: Check that the API server is running and accessible.");
             } else if req_err.is_timeout() {
-                eprintln!("⏱️ Request Timeout\n{req_err}\n\nHint: The API server may be slow or unresponsive. Try again later.");
+                eprintln!("Request Timeout\n{req_err}\n\nHint: The API server may be slow or unresponsive. Try again later.");
             } else if req_err.is_status() {
                 if let Some(status) = req_err.status() {
                     match status.as_u16() {
-                        401 => eprintln!("🔐 Authentication Error (401)\n{req_err}\n\nHint: Check your API credentials and authentication configuration."),
-                        403 => eprintln!("🚫 Authorization Error (403)\n{req_err}\n\nHint: Your credentials may be valid but lack permission for this operation."),
-                        404 => eprintln!("❓ Resource Not Found (404)\n{req_err}\n\nHint: Check that the API endpoint and parameters are correct."),
-                        429 => eprintln!("🐌 Rate Limited (429)\n{req_err}\n\nHint: You're making requests too quickly. Wait before trying again."),
-                        500..=599 => eprintln!("🔥 Server Error ({})\n{req_err}\n\nHint: The API server is experiencing issues. Try again later.", status.as_u16()),
-                        _ => eprintln!("🌐 HTTP Error ({})\n{req_err}", status.as_u16()),
+                        401 => eprintln!("Authentication Error (401)\n{req_err}\n\nHint: Check your API credentials and authentication configuration."),
+                        403 => eprintln!("Authorization Error (403)\n{req_err}\n\nHint: Your credentials may be valid but lack permission for this operation."),
+                        404 => eprintln!("Resource Not Found (404)\n{req_err}\n\nHint: Check that the API endpoint and parameters are correct."),
+                        429 => eprintln!("Rate Limited (429)\n{req_err}\n\nHint: You're making requests too quickly. Wait before trying again."),
+                        500..=599 => eprintln!("Server Error ({})\n{req_err}\n\nHint: The API server is experiencing issues. Try again later.", status.as_u16()),
+                        _ => eprintln!("HTTP Error ({})\n{req_err}", status.as_u16()),
                     }
                 } else {
-                    eprintln!("🌐 HTTP Error\n{req_err}");
+                    eprintln!("HTTP Error\n{req_err}");
                 }
             } else {
-                eprintln!("🌐 Network Error\n{req_err}");
+                eprintln!("Network Error\n{req_err}");
             }
         }
         Error::Yaml(yaml_err) => {
-            eprintln!("📄 YAML Parsing Error\n{yaml_err}\n\nHint: Check that your OpenAPI specification is valid YAML syntax.");
+            eprintln!("YAML Parsing Error\n{yaml_err}\n\nHint: Check that your OpenAPI specification is valid YAML syntax.");
         }
         Error::Json(json_err) => {
-            eprintln!("📄 JSON Parsing Error\n{json_err}\n\nHint: Check that your request body or response contains valid JSON.");
+            eprintln!("JSON Parsing Error\n{json_err}\n\nHint: Check that your request body or response contains valid JSON.");
         }
         Error::Validation(msg) => {
-            eprintln!("✅ Validation Error\n{msg}\n\nHint: Check that your OpenAPI specification follows the required format.");
+            eprintln!("Validation Error\n{msg}\n\nHint: Check that your OpenAPI specification follows the required format.");
         }
         Error::Toml(toml_err) => {
-            eprintln!("📄 TOML Parsing Error\n{toml_err}\n\nHint: Check that your configuration file is valid TOML syntax.");
+            eprintln!("TOML Parsing Error\n{toml_err}\n\nHint: Check that your configuration file is valid TOML syntax.");
         }
         Error::SpecNotFound { name } => {
-            eprintln!("🔍 API Specification Not Found\n{error}\n\nHint: Use 'aperture config list' to see available specifications\n      or 'aperture config add {name} <file>' to add this specification.");
+            eprintln!("API Specification Not Found\n{error}\n\nHint: Use 'aperture config list' to see available specifications\n      or 'aperture config add {name} <file>' to add this specification.");
         }
         Error::SpecAlreadyExists { .. } => {
-            eprintln!("📝 Specification Already Exists\n{error}");
+            eprintln!("Specification Already Exists\n{error}");
         }
         Error::CachedSpecNotFound { .. } => {
-            eprintln!("🔍 Cached Specification Not Found\n{error}");
+            eprintln!("Cached Specification Not Found\n{error}");
         }
         Error::CachedSpecCorrupted { .. } => {
-            eprintln!("💔 Cached Specification Corrupted\n{error}\n\nHint: Try removing and re-adding the specification.");
+            eprintln!("Cached Specification Corrupted\n{error}\n\nHint: Try removing and re-adding the specification.");
         }
         Error::SecretNotSet { env_var, .. } => {
-            eprintln!("🔑 Authentication Secret Not Set\n{error}\n\nHint: Set the environment variable: export {env_var}=<your-secret>");
+            eprintln!("Authentication Secret Not Set\n{error}\n\nHint: Set the environment variable: export {env_var}=<your-secret>");
         }
         Error::InvalidHeaderFormat { .. }
         | Error::InvalidHeaderName { .. }
         | Error::InvalidHeaderValue { .. }
         | Error::EmptyHeaderName => {
-            eprintln!("📋 Invalid Header\n{error}");
+            eprintln!("Invalid Header\n{error}");
         }
         Error::EditorNotSet => {
             eprintln!(
-                "📝 Editor Not Set\n{error}\n\nHint: Set your preferred editor: export EDITOR=vim"
+                "Editor Not Set\n{error}\n\nHint: Set your preferred editor: export EDITOR=vim"
             );
         }
         Error::EditorFailed { .. } => {
-            eprintln!("📝 Editor Failed\n{error}");
+            eprintln!("Editor Failed\n{error}");
         }
         Error::InvalidHttpMethod { .. } => {
-            eprintln!("🚫 Invalid HTTP Method\n{error}");
+            eprintln!("Invalid HTTP Method\n{error}");
         }
         Error::MissingPathParameter { .. } => {
-            eprintln!("🔗 Missing Path Parameter\n{error}");
+            eprintln!("Missing Path Parameter\n{error}");
         }
         Error::UnsupportedAuthScheme { .. } | Error::UnsupportedSecurityScheme { .. } => {
-            eprintln!("🔐 Unsupported Security Scheme\n{error}");
+            eprintln!("Unsupported Security Scheme\n{error}");
         }
         Error::SerializationError { .. } => {
-            eprintln!("💾 Serialization Error\n{error}");
+            eprintln!("Serialization Error\n{error}");
         }
         Error::InvalidConfig { .. } => {
-            eprintln!("⚙️  Invalid Configuration\n{error}\n\nHint: Check the TOML syntax in your configuration file.");
+            eprintln!("Invalid Configuration\n{error}\n\nHint: Check the TOML syntax in your configuration file.");
         }
         Error::HomeDirectoryNotFound => {
-            eprintln!("🏠 Home Directory Not Found\n{error}\n\nHint: Ensure HOME environment variable is set.");
+            eprintln!("Home Directory Not Found\n{error}\n\nHint: Ensure HOME environment variable is set.");
         }
         Error::InvalidJsonBody { .. } => {
-            eprintln!("📄 Invalid JSON Body\n{error}\n\nHint: Check your JSON syntax and ensure all quotes are properly escaped.");
+            eprintln!("Invalid JSON Body\n{error}\n\nHint: Check your JSON syntax and ensure all quotes are properly escaped.");
         }
         Error::RequestFailed { .. } | Error::ResponseReadError { .. } => {
-            eprintln!("🌐 Request Failed\n{error}");
+            eprintln!("Request Failed\n{error}");
         }
         Error::HttpError { status, .. } => {
-            eprintln!("🌐 HTTP Error ({status})\n{error}");
+            eprintln!("HTTP Error ({status})\n{error}");
         }
         Error::InvalidCommand { context, .. } => {
-            eprintln!("❌ Invalid Command\n{error}\n\nHint: Use 'aperture api {context} --help' to see available commands.");
+            eprintln!("Invalid Command\n{error}\n\nHint: Use 'aperture api {context} --help' to see available commands.");
         }
         Error::OperationNotFound => {
-            eprintln!("🔍 Operation Not Found\n{error}\n\nHint: Check that the command matches an available operation.");
+            eprintln!("Operation Not Found\n{error}\n\nHint: Check that the command matches an available operation.");
         }
         Error::InvalidIdempotencyKey => {
-            eprintln!("🔑 Invalid Idempotency Key\n{error}\n\nHint: Idempotency key must be a valid header value.");
+            eprintln!("Invalid Idempotency Key\n{error}\n\nHint: Idempotency key must be a valid header value.");
         }
         Error::Anyhow(err) => {
             eprintln!("💥 Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
