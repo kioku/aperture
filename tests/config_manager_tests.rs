@@ -521,7 +521,7 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
+    if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("OAuth2 security scheme"));
         assert!(msg.contains("not supported"));
     } else {
@@ -556,7 +556,7 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
+    if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("OpenID Connect security scheme"));
         assert!(msg.contains("not supported"));
     } else {
@@ -591,7 +591,7 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
+    if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("Unsupported HTTP scheme 'basic'"));
         assert!(msg.contains("Only 'bearer' is supported"));
     } else {
@@ -627,7 +627,7 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
+    if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("Unsupported request body content type 'application/xml'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
@@ -663,7 +663,7 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
+    if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("Unsupported request body content type 'text/plain'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
@@ -788,7 +788,7 @@ paths:
 
     assert_eq!(cached_spec.commands.len(), 1);
     assert_eq!(cached_spec.commands[0].name, "default"); // No tags, so default
-    assert_eq!(cached_spec.commands[0].operation_id, "get"); // Falls back to method
+    assert_eq!(cached_spec.commands[0].operation_id, "GET_/data"); // Falls back to method_path
     assert_eq!(cached_spec.commands[0].method, "GET");
 }
 
