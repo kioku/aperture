@@ -134,11 +134,9 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
 
     // Load the cached spec for the context
     let spec = loader::load_cached_spec(&cache_dir, context).map_err(|e| match e {
-        Error::Io(_) => Error::Config(format!(
-            "API specification '{context}' not found.\n\n\
-                Hint: Use 'aperture config list' to see available specifications\n\
-                      or 'aperture config add {context} <file>' to add this specification."
-        )),
+        Error::Io(_) => Error::SpecNotFound {
+            name: context.to_string(),
+        },
         _ => e,
     })?;
 
@@ -155,11 +153,9 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     // Parse the arguments against the dynamic command
     let matches = command
         .try_get_matches_from(std::iter::once("api".to_string()).chain(args))
-        .map_err(|e| {
-            Error::Config(format!(
-                "Invalid command for API '{context}': {e}\n\n\
-                Hint: Use 'aperture api {context} --help' to see available commands."
-            ))
+        .map_err(|e| Error::InvalidCommand {
+            context: context.to_string(),
+            reason: e.to_string(),
         })?;
 
     // Execute the request with agent flags
@@ -204,6 +200,7 @@ fn print_error_with_json(error: &Error, json_format: bool) {
 }
 
 /// Prints a user-friendly error message with context and suggestions
+#[allow(clippy::too_many_lines)]
 fn print_error(error: &Error) {
     match error {
         Error::Config(msg) => {
@@ -253,6 +250,71 @@ fn print_error(error: &Error) {
         }
         Error::Toml(toml_err) => {
             eprintln!("📄 TOML Parsing Error\n{toml_err}\n\nHint: Check that your configuration file is valid TOML syntax.");
+        }
+        Error::SpecNotFound { name } => {
+            eprintln!("🔍 API Specification Not Found\n{error}\n\nHint: Use 'aperture config list' to see available specifications\n      or 'aperture config add {name} <file>' to add this specification.");
+        }
+        Error::SpecAlreadyExists { .. } => {
+            eprintln!("📝 Specification Already Exists\n{error}");
+        }
+        Error::CachedSpecNotFound { .. } => {
+            eprintln!("🔍 Cached Specification Not Found\n{error}");
+        }
+        Error::CachedSpecCorrupted { .. } => {
+            eprintln!("💔 Cached Specification Corrupted\n{error}\n\nHint: Try removing and re-adding the specification.");
+        }
+        Error::SecretNotSet { env_var, .. } => {
+            eprintln!("🔑 Authentication Secret Not Set\n{error}\n\nHint: Set the environment variable: export {env_var}=<your-secret>");
+        }
+        Error::InvalidHeaderFormat { .. }
+        | Error::InvalidHeaderName { .. }
+        | Error::InvalidHeaderValue { .. }
+        | Error::EmptyHeaderName => {
+            eprintln!("📋 Invalid Header\n{error}");
+        }
+        Error::EditorNotSet => {
+            eprintln!(
+                "📝 Editor Not Set\n{error}\n\nHint: Set your preferred editor: export EDITOR=vim"
+            );
+        }
+        Error::EditorFailed { .. } => {
+            eprintln!("📝 Editor Failed\n{error}");
+        }
+        Error::InvalidHttpMethod { .. } => {
+            eprintln!("🚫 Invalid HTTP Method\n{error}");
+        }
+        Error::MissingPathParameter { .. } => {
+            eprintln!("🔗 Missing Path Parameter\n{error}");
+        }
+        Error::UnsupportedAuthScheme { .. } | Error::UnsupportedSecurityScheme { .. } => {
+            eprintln!("🔐 Unsupported Security Scheme\n{error}");
+        }
+        Error::SerializationError { .. } => {
+            eprintln!("💾 Serialization Error\n{error}");
+        }
+        Error::InvalidConfig { .. } => {
+            eprintln!("⚙️  Invalid Configuration\n{error}\n\nHint: Check the TOML syntax in your configuration file.");
+        }
+        Error::HomeDirectoryNotFound => {
+            eprintln!("🏠 Home Directory Not Found\n{error}\n\nHint: Ensure HOME environment variable is set.");
+        }
+        Error::InvalidJsonBody { .. } => {
+            eprintln!("📄 Invalid JSON Body\n{error}\n\nHint: Check your JSON syntax and ensure all quotes are properly escaped.");
+        }
+        Error::RequestFailed { .. } | Error::ResponseReadError { .. } => {
+            eprintln!("🌐 Request Failed\n{error}");
+        }
+        Error::HttpError { status, .. } => {
+            eprintln!("🌐 HTTP Error ({status})\n{error}");
+        }
+        Error::InvalidCommand { context, .. } => {
+            eprintln!("❌ Invalid Command\n{error}\n\nHint: Use 'aperture api {context} --help' to see available commands.");
+        }
+        Error::OperationNotFound => {
+            eprintln!("🔍 Operation Not Found\n{error}\n\nHint: Check that the command matches an available operation.");
+        }
+        Error::InvalidIdempotencyKey => {
+            eprintln!("🔑 Invalid Idempotency Key\n{error}\n\nHint: Idempotency key must be a valid header value.");
         }
         Error::Anyhow(err) => {
             eprintln!("💥 Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");

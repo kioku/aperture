@@ -17,6 +17,64 @@ pub enum Error {
     Config(String),
     #[error("Validation error: {0}")]
     Validation(String),
+
+    // Specific error variants for better error handling
+    #[error("API specification '{name}' not found")]
+    SpecNotFound { name: String },
+    #[error("API specification '{name}' already exists. Use --force to overwrite")]
+    SpecAlreadyExists { name: String },
+    #[error("No cached spec found for '{name}'. Run 'aperture config add {name}' first")]
+    CachedSpecNotFound { name: String },
+    #[error("Failed to deserialize cached spec '{name}': {reason}. The cache may be corrupted")]
+    CachedSpecCorrupted { name: String, reason: String },
+    #[error(
+        "Environment variable '{env_var}' required for authentication '{scheme_name}' is not set"
+    )]
+    SecretNotSet {
+        scheme_name: String,
+        env_var: String,
+    },
+    #[error("Invalid header format '{header}'. Expected 'Name: Value'")]
+    InvalidHeaderFormat { header: String },
+    #[error("Invalid header name '{name}': {reason}")]
+    InvalidHeaderName { name: String, reason: String },
+    #[error("Invalid header value for '{name}': {reason}")]
+    InvalidHeaderValue { name: String, reason: String },
+    #[error("EDITOR environment variable not set")]
+    EditorNotSet,
+    #[error("Editor command failed for spec '{name}'")]
+    EditorFailed { name: String },
+    #[error("Invalid HTTP method: {method}")]
+    InvalidHttpMethod { method: String },
+    #[error("Missing path parameter: {name}")]
+    MissingPathParameter { name: String },
+    #[error("Unsupported HTTP authentication scheme: {scheme}")]
+    UnsupportedAuthScheme { scheme: String },
+    #[error("Unsupported security scheme type: {scheme_type}")]
+    UnsupportedSecurityScheme { scheme_type: String },
+    #[error("Failed to serialize cached spec: {reason}")]
+    SerializationError { reason: String },
+    #[error("Invalid config.toml: {reason}")]
+    InvalidConfig { reason: String },
+    #[error("Could not determine home directory")]
+    HomeDirectoryNotFound,
+    #[error("Invalid JSON body: {reason}")]
+    InvalidJsonBody { reason: String },
+    #[error("Request failed: {reason}")]
+    RequestFailed { reason: String },
+    #[error("Failed to read response: {reason}")]
+    ResponseReadError { reason: String },
+    #[error("Request failed with status {status}: {body}")]
+    HttpError { status: u16, body: String },
+    #[error("Invalid command for API '{context}': {reason}")]
+    InvalidCommand { context: String, reason: String },
+    #[error("Could not find operation from command path")]
+    OperationNotFound,
+    #[error("Invalid idempotency key")]
+    InvalidIdempotencyKey,
+    #[error("Header name cannot be empty")]
+    EmptyHeaderName,
+
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
 }
@@ -27,6 +85,8 @@ pub struct JsonError {
     pub error_type: String,
     pub message: String,
     pub context: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl Error {
@@ -42,9 +102,12 @@ impl Error {
 
     /// Convert error to JSON representation for structured output
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn to_json(&self) -> JsonError {
-        let (error_type, message, context) = match self {
-            Self::Config(msg) => ("Configuration", msg.clone(), None),
+        use serde_json::json;
+
+        let (error_type, message, context, details) = match self {
+            Self::Config(msg) => ("Configuration", msg.clone(), None, None),
             Self::Io(io_err) => {
                 let context = match io_err.kind() {
                     std::io::ErrorKind::NotFound => {
@@ -59,6 +122,7 @@ impl Error {
                     "FileSystem",
                     io_err.to_string(),
                     context.map(str::to_string),
+                    None,
                 )
             }
             Self::Network(req_err) => {
@@ -84,17 +148,19 @@ impl Error {
                 } else {
                     None
                 };
-                ("Network", req_err.to_string(), context.map(str::to_string))
+                ("Network", req_err.to_string(), context.map(str::to_string), None)
             }
             Self::Yaml(yaml_err) => (
                 "YAMLParsing",
                 yaml_err.to_string(),
                 Some("Check that your OpenAPI specification is valid YAML syntax.".to_string()),
+                None,
             ),
             Self::Json(json_err) => (
                 "JSONParsing",
                 json_err.to_string(),
                 Some("Check that your request body or response contains valid JSON.".to_string()),
+                None,
             ),
             Self::Validation(msg) => (
                 "Validation",
@@ -103,11 +169,163 @@ impl Error {
                     "Check that your OpenAPI specification follows the required format."
                         .to_string(),
                 ),
+                None,
             ),
             Self::Toml(toml_err) => (
                 "TOMLParsing",
                 toml_err.to_string(),
                 Some("Check that your configuration file is valid TOML syntax.".to_string()),
+                None,
+            ),
+            Self::SpecNotFound { name } => (
+                "SpecNotFound",
+                format!("API specification '{name}' not found"),
+                Some("Use 'aperture config list' to see available specifications.".to_string()),
+                Some(json!({ "spec_name": name })),
+            ),
+            Self::SpecAlreadyExists { name } => (
+                "SpecAlreadyExists",
+                format!("API specification '{name}' already exists. Use --force to overwrite"),
+                None,
+                Some(json!({ "spec_name": name })),
+            ),
+            Self::CachedSpecNotFound { name } => (
+                "CachedSpecNotFound",
+                format!("No cached spec found for '{name}'. Run 'aperture config add {name}' first"),
+                None,
+                Some(json!({ "spec_name": name })),
+            ),
+            Self::CachedSpecCorrupted { name, reason } => (
+                "CachedSpecCorrupted",
+                format!("Failed to deserialize cached spec '{name}': {reason}. The cache may be corrupted"),
+                Some("Try removing and re-adding the specification.".to_string()),
+                Some(json!({ "spec_name": name, "corruption_reason": reason })),
+            ),
+            Self::SecretNotSet { scheme_name, env_var } => (
+                "SecretNotSet",
+                format!("Environment variable '{env_var}' required for authentication '{scheme_name}' is not set"),
+                Some(format!("Set the environment variable: export {env_var}=<your-secret>")),
+                Some(json!({ "scheme_name": scheme_name, "env_var": env_var })),
+            ),
+            Self::InvalidHeaderFormat { header } => (
+                "InvalidHeaderFormat",
+                format!("Invalid header format '{header}'. Expected 'Name: Value'"),
+                None,
+                Some(json!({ "header": header })),
+            ),
+            Self::InvalidHeaderName { name, reason } => (
+                "InvalidHeaderName",
+                format!("Invalid header name '{name}': {reason}"),
+                None,
+                Some(json!({ "name": name, "reason": reason })),
+            ),
+            Self::InvalidHeaderValue { name, reason } => (
+                "InvalidHeaderValue",
+                format!("Invalid header value for '{name}': {reason}"),
+                None,
+                Some(json!({ "name": name, "reason": reason })),
+            ),
+            Self::EditorNotSet => (
+                "EditorNotSet",
+                "EDITOR environment variable not set".to_string(),
+                Some("Set your preferred editor: export EDITOR=vim".to_string()),
+                None,
+            ),
+            Self::EditorFailed { name } => (
+                "EditorFailed",
+                format!("Editor command failed for spec '{name}'"),
+                None,
+                Some(json!({ "spec_name": name })),
+            ),
+            Self::InvalidHttpMethod { method } => (
+                "InvalidHttpMethod",
+                format!("Invalid HTTP method: {method}"),
+                None,
+                Some(json!({ "method": method })),
+            ),
+            Self::MissingPathParameter { name } => (
+                "MissingPathParameter",
+                format!("Missing path parameter: {name}"),
+                None,
+                Some(json!({ "parameter_name": name })),
+            ),
+            Self::UnsupportedAuthScheme { scheme } => (
+                "UnsupportedAuthScheme",
+                format!("Unsupported HTTP authentication scheme: {scheme}"),
+                Some("Only 'bearer' and 'basic' schemes are supported.".to_string()),
+                Some(json!({ "scheme": scheme })),
+            ),
+            Self::UnsupportedSecurityScheme { scheme_type } => (
+                "UnsupportedSecurityScheme",
+                format!("Unsupported security scheme type: {scheme_type}"),
+                Some("Only 'apiKey' and 'http' security schemes are supported.".to_string()),
+                Some(json!({ "scheme_type": scheme_type })),
+            ),
+            Self::SerializationError { reason } => (
+                "SerializationError",
+                format!("Failed to serialize cached spec: {reason}"),
+                None,
+                Some(json!({ "reason": reason })),
+            ),
+            Self::InvalidConfig { reason } => (
+                "InvalidConfig",
+                format!("Invalid config.toml: {reason}"),
+                Some("Check the TOML syntax in your configuration file.".to_string()),
+                Some(json!({ "reason": reason })),
+            ),
+            Self::HomeDirectoryNotFound => (
+                "HomeDirectoryNotFound",
+                "Could not determine home directory".to_string(),
+                Some("Ensure HOME environment variable is set.".to_string()),
+                None,
+            ),
+            Self::InvalidJsonBody { reason } => (
+                "InvalidJsonBody",
+                format!("Invalid JSON body: {reason}"),
+                Some("Check your JSON syntax and ensure all quotes are properly escaped.".to_string()),
+                Some(json!({ "reason": reason })),
+            ),
+            Self::RequestFailed { reason } => (
+                "RequestFailed",
+                format!("Request failed: {reason}"),
+                None,
+                Some(json!({ "reason": reason })),
+            ),
+            Self::ResponseReadError { reason } => (
+                "ResponseReadError",
+                format!("Failed to read response: {reason}"),
+                None,
+                Some(json!({ "reason": reason })),
+            ),
+            Self::HttpError { status, body } => (
+                "HttpError",
+                format!("Request failed with status {status}: {body}"),
+                None,
+                Some(json!({ "status": status, "body": body })),
+            ),
+            Self::InvalidCommand { context, reason } => (
+                "InvalidCommand",
+                format!("Invalid command for API '{context}': {reason}"),
+                Some("Use --help to see available commands.".to_string()),
+                Some(json!({ "context": context, "reason": reason })),
+            ),
+            Self::OperationNotFound => (
+                "OperationNotFound",
+                "Could not find operation from command path".to_string(),
+                Some("Check that the command matches an available operation.".to_string()),
+                None,
+            ),
+            Self::InvalidIdempotencyKey => (
+                "InvalidIdempotencyKey",
+                "Invalid idempotency key".to_string(),
+                Some("Idempotency key must be a valid header value.".to_string()),
+                None,
+            ),
+            Self::EmptyHeaderName => (
+                "EmptyHeaderName",
+                "Header name cannot be empty".to_string(),
+                None,
+                None,
             ),
             Self::Anyhow(err) => (
                 "Unexpected",
@@ -116,6 +334,7 @@ impl Error {
                     "This may be a bug. Please report it with the command you were running."
                         .to_string(),
                 ),
+                None,
             ),
         };
 
@@ -123,6 +342,7 @@ impl Error {
             error_type: error_type.to_string(),
             message,
             context,
+            details,
         }
     }
 }
