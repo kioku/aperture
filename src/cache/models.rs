@@ -84,7 +84,7 @@ pub struct CachedSecurityScheme {
 }
 
 /// Cached representation of x-aperture-secret extension
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
 pub struct CachedApertureSecret {
     /// Source of the secret (currently only "env" supported)
     pub source: String,
