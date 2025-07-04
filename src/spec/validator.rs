@@ -41,20 +41,9 @@ impl SpecValidator {
         // Validate operations
         for (path, path_item_ref) in spec.paths.iter() {
             if let ReferenceOr::Item(path_item) = path_item_ref {
-                let operations = [
-                    ("get", &path_item.get),
-                    ("post", &path_item.post),
-                    ("put", &path_item.put),
-                    ("delete", &path_item.delete),
-                    ("patch", &path_item.patch),
-                    ("head", &path_item.head),
-                    ("options", &path_item.options),
-                    ("trace", &path_item.trace),
-                ];
-
-                for (method, operation_opt) in operations {
+                for (method, operation_opt) in crate::spec::http_methods_iter(path_item) {
                     if let Some(operation) = operation_opt {
-                        Self::validate_operation(path, method, operation)?;
+                        Self::validate_operation(path, &method.to_lowercase(), operation)?;
                     }
                 }
             }

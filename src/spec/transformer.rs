@@ -46,18 +46,7 @@ impl SpecTransformer {
         for (path, path_item) in spec.paths.iter() {
             if let ReferenceOr::Item(item) = path_item {
                 // Process each HTTP method
-                let operations = [
-                    ("GET", &item.get),
-                    ("POST", &item.post),
-                    ("PUT", &item.put),
-                    ("DELETE", &item.delete),
-                    ("PATCH", &item.patch),
-                    ("HEAD", &item.head),
-                    ("OPTIONS", &item.options),
-                    ("TRACE", &item.trace),
-                ];
-
-                for (method, operation) in operations {
+                for (method, operation) in crate::spec::http_methods_iter(item) {
                     if let Some(op) = operation {
                         let command = Self::transform_operation(
                             method,
