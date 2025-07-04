@@ -6,25 +6,58 @@ use std::collections::HashMap;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+// Helper macros for creating test data
+macro_rules! cached_parameter {
+    ($name:expr, $location:expr, $required:expr) => {
+        CachedParameter {
+            name: $name.to_string(),
+            location: $location.to_string(),
+            required: $required,
+            description: None,
+            schema: Some(r#"{"type": "string"}"#.to_string()),
+            schema_type: Some("string".to_string()),
+            format: None,
+            default_value: None,
+            enum_values: vec![],
+            example: None,
+        }
+    };
+}
+
+macro_rules! cached_command {
+    ($name:expr, $op_id:expr, $method:expr, $path:expr, $params:expr) => {
+        CachedCommand {
+            name: $name.to_string(),
+            description: None,
+            summary: None,
+            operation_id: $op_id.to_string(),
+            method: $method.to_string(),
+            path: $path.to_string(),
+            parameters: $params,
+            request_body: None,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec![$name.to_string()],
+            deprecated: false,
+            external_docs_url: None,
+        }
+    };
+}
+
 fn create_test_spec() -> CachedSpec {
     CachedSpec {
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
-        commands: vec![CachedCommand {
-            name: "users".to_string(), // This is the tag name
-            description: Some("Get user by ID".to_string()),
-            operation_id: "getUserById".to_string(),
-            method: "GET".to_string(),
-            path: "/users/{id}".to_string(),
-            parameters: vec![CachedParameter {
-                name: "id".to_string(),
-                location: "path".to_string(),
-                required: true,
-                schema: None,
-            }],
-            request_body: None,
-            responses: vec![],
-            security_requirements: vec![],
+        commands: vec![{
+            let mut cmd = cached_command!(
+                "users",
+                "getUserById",
+                "GET",
+                "/users/{id}",
+                vec![cached_parameter!("id", "path", true)]
+            );
+            cmd.description = Some("Get user by ID".to_string());
+            cmd
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -70,21 +103,16 @@ async fn test_execute_request_with_query_params() {
     let spec = CachedSpec {
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
-        commands: vec![CachedCommand {
-            name: "users".to_string(),
-            description: Some("List users".to_string()),
-            operation_id: "listUsers".to_string(),
-            method: "GET".to_string(),
-            path: "/users".to_string(),
-            parameters: vec![CachedParameter {
-                name: "limit".to_string(),
-                location: "query".to_string(),
-                required: false,
-                schema: None,
-            }],
-            request_body: None,
-            responses: vec![],
-            security_requirements: vec![],
+        commands: vec![{
+            let mut cmd = cached_command!(
+                "users",
+                "listUsers",
+                "GET",
+                "/users",
+                vec![cached_parameter!("limit", "query", false)]
+            );
+            cmd.description = Some("List users".to_string());
+            cmd
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -160,21 +188,16 @@ async fn test_execute_request_with_global_config_base_url() {
     let spec = CachedSpec {
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
-        commands: vec![CachedCommand {
-            name: "users".to_string(),
-            description: Some("Get user by ID".to_string()),
-            operation_id: "getUserById".to_string(),
-            method: "GET".to_string(),
-            path: "/users/{id}".to_string(),
-            parameters: vec![CachedParameter {
-                name: "id".to_string(),
-                location: "path".to_string(),
-                required: true,
-                schema: None,
-            }],
-            request_body: None,
-            responses: vec![],
-            security_requirements: vec![],
+        commands: vec![{
+            let mut cmd = cached_command!(
+                "users",
+                "getUserById",
+                "GET",
+                "/users/{id}",
+                vec![cached_parameter!("id", "path", true)]
+            );
+            cmd.description = Some("Get user by ID".to_string());
+            cmd
         }],
         base_url: None, // No base URL in spec
         servers: vec![],

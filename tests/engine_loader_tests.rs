@@ -12,6 +12,7 @@ fn create_test_cached_spec() -> CachedSpec {
         commands: vec![CachedCommand {
             name: "users".to_string(),
             description: Some("User management operations".to_string()),
+            summary: None,
             operation_id: "listUsers".to_string(),
             method: "GET".to_string(),
             path: "/users".to_string(),
@@ -19,14 +20,25 @@ fn create_test_cached_spec() -> CachedSpec {
                 name: "limit".to_string(),
                 location: "query".to_string(),
                 required: false,
+                description: None,
                 schema: Some(r#"{"type": "integer"}"#.to_string()),
+                schema_type: Some("integer".to_string()),
+                format: None,
+                default_value: None,
+                enum_values: vec![],
+                example: None,
             }],
             request_body: None,
             responses: vec![CachedResponse {
                 status_code: "200".to_string(),
-                content: Some(r#"{"type": "array"}"#.to_string()),
+                description: None,
+                content_type: Some("application/json".to_string()),
+                schema: Some(r#"{"type": "array"}"#.to_string()),
             }],
             security_requirements: vec![],
+            tags: vec!["users".to_string()],
+            deprecated: false,
+            external_docs_url: None,
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -65,11 +77,10 @@ fn test_load_cached_spec_file_not_found() {
     let result = load_cached_spec(cache_dir, "nonexistent-api");
 
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
-        assert!(msg.contains("No cached spec found"));
-        assert!(msg.contains("nonexistent-api"));
+    if let Err(Error::CachedSpecNotFound { name }) = result {
+        assert_eq!(name, "nonexistent-api");
     } else {
-        panic!("Expected Config error");
+        panic!("Expected CachedSpecNotFound error, got: {:?}", result);
     }
 }
 
@@ -85,10 +96,11 @@ fn test_load_cached_spec_corrupted_data() {
     let result = load_cached_spec(cache_dir, "corrupted-api");
 
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
-        assert!(msg.contains("Failed to deserialize"));
-        assert!(msg.contains("corrupted"));
+    if let Err(Error::CachedSpecCorrupted { name, reason }) = result {
+        assert_eq!(name, "corrupted-api");
+        // Bincode error messages vary, just ensure we got a deserialization error
+        assert!(!reason.is_empty());
     } else {
-        panic!("Expected Config error");
+        panic!("Expected CachedSpecCorrupted error, got: {:?}", result);
     }
 }

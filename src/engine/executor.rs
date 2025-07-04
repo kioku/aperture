@@ -63,14 +63,14 @@ pub async fn execute_request(
     if let Some(key) = idempotency_key {
         headers.insert(
             HeaderName::from_static("idempotency-key"),
-            HeaderValue::from_str(key)
-                .map_err(|_| Error::Config("Invalid idempotency key".to_string()))?,
+            HeaderValue::from_str(key).map_err(|_| Error::InvalidIdempotencyKey)?,
         );
     }
 
     // Build request
-    let method = Method::from_str(&operation.method)
-        .map_err(|_| Error::Config(format!("Invalid HTTP method: {}", operation.method)))?;
+    let method = Method::from_str(&operation.method).map_err(|_| Error::InvalidHttpMethod {
+        method: operation.method.clone(),
+    })?;
 
     let headers_clone = headers.clone(); // For dry-run output
     let mut request = client.request(method.clone(), &url).headers(headers);
@@ -85,8 +85,10 @@ pub async fn execute_request(
     // Only check for body if the operation expects one
     if operation.request_body.is_some() {
         if let Some(body_value) = current_matches.get_one::<String>("body") {
-            let json_body: Value = serde_json::from_str(body_value)
-                .map_err(|e| Error::Config(format!("Invalid JSON body: {e}")))?;
+            let json_body: Value =
+                serde_json::from_str(body_value).map_err(|e| Error::InvalidJsonBody {
+                    reason: e.to_string(),
+                })?;
             request = request.json(&json_body);
         }
     }
@@ -106,28 +108,28 @@ pub async fn execute_request(
 
     // Execute request
     println!("Executing {method} {url}");
-    let response = request
-        .send()
-        .await
-        .map_err(|e| Error::Config(format!("Request failed: {e}")))?;
+    let response = request.send().await.map_err(|e| Error::RequestFailed {
+        reason: e.to_string(),
+    })?;
 
     let status = response.status();
     let response_text = response
         .text()
         .await
-        .map_err(|e| Error::Config(format!("Failed to read response: {e}")))?;
+        .map_err(|e| Error::ResponseReadError {
+            reason: e.to_string(),
+        })?;
 
     // Check if request was successful
     if !status.is_success() {
-        return Err(Error::Config(format!(
-            "Request failed with status {}: {}",
-            status,
-            if response_text.is_empty() {
-                "(empty response)"
+        return Err(Error::HttpError {
+            status: status.as_u16(),
+            body: if response_text.is_empty() {
+                "(empty response)".to_string()
             } else {
-                &response_text
-            }
-        )));
+                response_text
+            },
+        });
     }
 
     // Print response
@@ -173,9 +175,7 @@ fn find_operation<'a>(
         }
     }
 
-    Err(Error::Config(
-        "Could not find operation from command path".to_string(),
-    ))
+    Err(Error::OperationNotFound)
 }
 
 /// Builds the full URL with path parameters substituted
@@ -206,9 +206,9 @@ fn build_url(
                 url.replace_range(open_pos..=close_pos, value);
                 start = open_pos + value.len();
             } else {
-                return Err(Error::Config(format!(
-                    "Missing path parameter: {param_name}"
-                )));
+                return Err(Error::MissingPathParameter {
+                    name: param_name.to_string(),
+                });
             }
         } else {
             break;
@@ -261,12 +261,16 @@ fn build_headers(
     for param in &operation.parameters {
         if param.location == "header" {
             if let Some(value) = current_matches.get_one::<String>(&param.name) {
-                let header_name = HeaderName::from_str(&param.name).map_err(|e| {
-                    Error::Config(format!("Invalid header name {}: {e}", param.name))
-                })?;
-                let header_value = HeaderValue::from_str(value).map_err(|e| {
-                    Error::Config(format!("Invalid header value for {}: {e}", param.name))
-                })?;
+                let header_name =
+                    HeaderName::from_str(&param.name).map_err(|e| Error::InvalidHeaderName {
+                        name: param.name.clone(),
+                        reason: e.to_string(),
+                    })?;
+                let header_value =
+                    HeaderValue::from_str(value).map_err(|e| Error::InvalidHeaderValue {
+                        name: param.name.clone(),
+                        reason: e.to_string(),
+                    })?;
                 headers.insert(header_name, header_value);
             }
         }
@@ -284,10 +288,16 @@ fn build_headers(
     if let Ok(Some(custom_headers)) = current_matches.try_get_many::<String>("header") {
         for header_str in custom_headers {
             let (name, value) = parse_custom_header(header_str)?;
-            let header_name = HeaderName::from_str(&name)
-                .map_err(|e| Error::Config(format!("Invalid header name '{name}': {e}")))?;
-            let header_value = HeaderValue::from_str(&value)
-                .map_err(|e| Error::Config(format!("Invalid header value for '{name}': {e}")))?;
+            let header_name =
+                HeaderName::from_str(&name).map_err(|e| Error::InvalidHeaderName {
+                    name: name.clone(),
+                    reason: e.to_string(),
+                })?;
+            let header_value =
+                HeaderValue::from_str(&value).map_err(|e| Error::InvalidHeaderValue {
+                    name: name.clone(),
+                    reason: e.to_string(),
+                })?;
             headers.insert(header_name, header_value);
         }
     }
@@ -298,19 +308,17 @@ fn build_headers(
 /// Parses a custom header string in the format "Name: Value" or "Name:Value"
 fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
     // Find the colon separator
-    let colon_pos = header_str.find(':').ok_or_else(|| {
-        Error::Config(format!(
-            "Invalid header format '{header_str}'. Expected 'Name: Value'"
-        ))
-    })?;
+    let colon_pos = header_str
+        .find(':')
+        .ok_or_else(|| Error::InvalidHeaderFormat {
+            header: header_str.to_string(),
+        })?;
 
     let name = header_str[..colon_pos].trim();
     let value = header_str[colon_pos + 1..].trim();
 
     if name.is_empty() {
-        return Err(Error::Config(format!(
-            "Invalid header format '{header_str}'. Header name cannot be empty"
-        )));
+        return Err(Error::EmptyHeaderName);
     }
 
     // Support environment variable expansion in header values
@@ -333,12 +341,11 @@ fn add_authentication_header(
     // Only process schemes that have aperture_secret mappings
     if let Some(aperture_secret) = &security_scheme.aperture_secret {
         // Read the secret from the environment variable
-        let secret_value = std::env::var(&aperture_secret.name).map_err(|_| {
-            Error::Config(format!(
-                "Environment variable '{}' required for authentication '{}' is not set",
-                aperture_secret.name, security_scheme.name
-            ))
-        })?;
+        let secret_value =
+            std::env::var(&aperture_secret.name).map_err(|_| Error::SecretNotSet {
+                scheme_name: security_scheme.name.clone(),
+                env_var: aperture_secret.name.clone(),
+            })?;
 
         // Build the appropriate header based on scheme type
         match security_scheme.scheme_type.as_str() {
@@ -348,10 +355,16 @@ fn add_authentication_header(
                 {
                     if location == "header" {
                         let header_name = HeaderName::from_str(param_name).map_err(|e| {
-                            Error::Config(format!("Invalid header name '{param_name}': {e}"))
+                            Error::InvalidHeaderName {
+                                name: param_name.clone(),
+                                reason: e.to_string(),
+                            }
                         })?;
                         let header_value = HeaderValue::from_str(&secret_value).map_err(|e| {
-                            Error::Config(format!("Invalid header value for '{param_name}': {e}"))
+                            Error::InvalidHeaderValue {
+                                name: param_name.clone(),
+                                reason: e.to_string(),
+                            }
                         })?;
                         headers.insert(header_name, header_value);
                     }
@@ -364,7 +377,10 @@ fn add_authentication_header(
                         "bearer" => {
                             let auth_value = format!("Bearer {secret_value}");
                             let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
-                                Error::Config(format!("Invalid Authorization header value: {e}"))
+                                Error::InvalidHeaderValue {
+                                    name: "Authorization".to_string(),
+                                    reason: e.to_string(),
+                                }
                             })?;
                             headers.insert("Authorization", header_value);
                         }
@@ -372,23 +388,25 @@ fn add_authentication_header(
                             // Basic auth expects "username:password" format in the secret
                             let auth_value = format!("Basic {secret_value}");
                             let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
-                                Error::Config(format!("Invalid Authorization header value: {e}"))
+                                Error::InvalidHeaderValue {
+                                    name: "Authorization".to_string(),
+                                    reason: e.to_string(),
+                                }
                             })?;
                             headers.insert("Authorization", header_value);
                         }
                         _ => {
-                            return Err(Error::Config(format!(
-                                "Unsupported HTTP authentication scheme: {scheme}"
-                            )));
+                            return Err(Error::UnsupportedAuthScheme {
+                                scheme: scheme.clone(),
+                            });
                         }
                     }
                 }
             }
             _ => {
-                return Err(Error::Config(format!(
-                    "Unsupported security scheme type: {}",
-                    security_scheme.scheme_type
-                )));
+                return Err(Error::UnsupportedSecurityScheme {
+                    scheme_type: security_scheme.scheme_type.clone(),
+                });
             }
         }
     }

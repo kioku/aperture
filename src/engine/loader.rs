@@ -23,18 +23,17 @@ pub fn load_cached_spec<P: AsRef<Path>>(
 
     // Check if the cache file exists
     if !cache_path.exists() {
-        return Err(Error::Config(format!(
-            "No cached spec found for '{spec_name}'. Run 'aperture config add {spec_name}' first.",
-        )));
+        return Err(Error::CachedSpecNotFound {
+            name: spec_name.to_string(),
+        });
     }
 
     // Read the binary cache file
     let cache_data = fs::read(&cache_path).map_err(Error::Io)?;
 
     // Deserialize using bincode
-    bincode::deserialize(&cache_data).map_err(|e| {
-        Error::Config(format!(
-            "Failed to deserialize cached spec '{spec_name}': {e}. The cache may be corrupted.",
-        ))
+    bincode::deserialize(&cache_data).map_err(|e| Error::CachedSpecCorrupted {
+        name: spec_name.to_string(),
+        reason: e.to_string(),
     })
 }

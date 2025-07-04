@@ -1,7 +1,10 @@
-use crate::cache::models::{CachedCommand, CachedParameter, CachedRequestBody, CachedSpec};
+use crate::cache::models::{
+    CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedSpec,
+};
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
+use openapiv3::{OpenAPI, Operation, Parameter as OpenApiParameter, ReferenceOr, SecurityScheme};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -13,8 +16,8 @@ pub struct ApiCapabilityManifest {
     pub api: ApiInfo,
     /// Available command groups organized by tags
     pub commands: HashMap<String, Vec<CommandInfo>>,
-    /// Security requirements for this API
-    pub security: Option<SecurityInfo>,
+    /// Security schemes available for this API
+    pub security_schemes: HashMap<String, SecuritySchemeInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,12 +42,27 @@ pub struct CommandInfo {
     pub path: String,
     /// Operation description
     pub description: Option<String>,
+    /// Operation summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     /// Operation ID from the `OpenAPI` spec
     pub operation_id: String,
     /// Parameters for this operation
     pub parameters: Vec<ParameterInfo>,
     /// Request body information if applicable
     pub request_body: Option<RequestBodyInfo>,
+    /// Security requirements for this operation
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub security_requirements: Vec<String>,
+    /// Tags associated with this operation
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
+    /// Whether this operation is deprecated
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub deprecated: bool,
+    /// External documentation URL
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_docs_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,6 +77,18 @@ pub struct ParameterInfo {
     pub param_type: String,
     /// Parameter description
     pub description: Option<String>,
+    /// Parameter format (e.g., int32, int64, date-time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// Default value if specified
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+    /// Enumeration of valid values
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub enum_values: Vec<String>,
+    /// Example value
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub example: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -69,14 +99,50 @@ pub struct RequestBodyInfo {
     pub content_type: String,
     /// Description of the request body
     pub description: Option<String>,
+    /// Example of the request body
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub example: Option<String>,
 }
 
+/// Detailed, parsable security scheme description
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SecurityInfo {
-    /// Type of security scheme (apiKey, http)
+pub struct SecuritySchemeInfo {
+    /// Type of security scheme (http, apiKey)
+    #[serde(rename = "type")]
     pub scheme_type: String,
-    /// Additional security details
-    pub details: HashMap<String, String>,
+    /// Optional description of the security scheme
+    pub description: Option<String>,
+    /// Detailed scheme configuration
+    #[serde(flatten)]
+    pub details: SecuritySchemeDetails,
+    /// Aperture-specific secret mapping
+    #[serde(rename = "x-aperture-secret", skip_serializing_if = "Option::is_none")]
+    pub aperture_secret: Option<CachedApertureSecret>,
+}
+
+/// Detailed security scheme configuration
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "scheme", rename_all = "camelCase")]
+pub enum SecuritySchemeDetails {
+    /// HTTP authentication scheme (e.g., bearer, basic)
+    #[serde(rename = "bearer")]
+    HttpBearer {
+        /// Optional bearer token format
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bearer_format: Option<String>,
+    },
+    /// HTTP basic authentication
+    #[serde(rename = "basic")]
+    HttpBasic,
+    /// API Key authentication
+    #[serde(rename = "apiKey")]
+    ApiKey {
+        /// Location of the API key (header, query, cookie)
+        #[serde(rename = "in")]
+        location: String,
+        /// Name of the parameter/header
+        name: String,
+    },
 }
 
 /// Converts a kebab-case string from operationId to a CLI command name
@@ -93,6 +159,96 @@ fn to_kebab_case(s: &str) -> String {
     }
 
     result
+}
+
+/// Generates a capability manifest from an `OpenAPI` specification.
+///
+/// This function creates a comprehensive JSON description of all available commands,
+/// parameters, and security requirements directly from the original `OpenAPI` spec,
+/// preserving all metadata that might be lost in the cached representation.
+///
+/// # Arguments
+/// * `api_name` - The name of the API context
+/// * `spec` - The original `OpenAPI` specification
+/// * `global_config` - Optional global configuration for URL resolution
+///
+/// # Returns
+/// * `Ok(String)` - JSON-formatted capability manifest
+/// * `Err(Error)` - If JSON serialization fails
+///
+/// # Errors
+/// Returns an error if JSON serialization fails
+pub fn generate_capability_manifest_from_openapi(
+    api_name: &str,
+    spec: &OpenAPI,
+    global_config: Option<&GlobalConfig>,
+) -> Result<String, Error> {
+    // First, convert the OpenAPI spec to a temporary CachedSpec for URL resolution
+    let base_url = spec.servers.first().map(|s| s.url.clone());
+    let servers: Vec<String> = spec.servers.iter().map(|s| s.url.clone()).collect();
+
+    let temp_cached_spec = CachedSpec {
+        name: api_name.to_string(),
+        version: spec.info.version.clone(),
+        commands: vec![], // We'll generate commands directly from OpenAPI
+        base_url,
+        servers,
+        security_schemes: HashMap::new(), // We'll extract these directly too
+    };
+
+    // Resolve base URL using the same priority hierarchy as executor
+    let resolver = BaseUrlResolver::new(&temp_cached_spec);
+    let resolver = if let Some(config) = global_config {
+        resolver.with_global_config(config)
+    } else {
+        resolver
+    };
+    let resolved_base_url = resolver.resolve(None);
+
+    // Extract commands directly from OpenAPI spec
+    let mut command_groups: HashMap<String, Vec<CommandInfo>> = HashMap::new();
+
+    for (path, path_item) in &spec.paths.paths {
+        if let ReferenceOr::Item(item) = path_item {
+            // Process each HTTP method
+            for (method, operation) in crate::spec::http_methods_iter(item) {
+                if let Some(op) = operation {
+                    let command_info =
+                        convert_openapi_operation_to_info(method, path, op, spec.security.as_ref());
+
+                    // Group by first tag or "default"
+                    let group_name = op
+                        .tags
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "default".to_string());
+
+                    command_groups
+                        .entry(group_name)
+                        .or_default()
+                        .push(command_info);
+                }
+            }
+        }
+    }
+
+    // Extract security schemes directly from OpenAPI
+    let security_schemes = extract_security_schemes_from_openapi(spec);
+
+    // Create the manifest
+    let manifest = ApiCapabilityManifest {
+        api: ApiInfo {
+            name: spec.info.title.clone(),
+            version: spec.info.version.clone(),
+            description: spec.info.description.clone(),
+            base_url: resolved_base_url,
+        },
+        commands: command_groups,
+        security_schemes,
+    };
+
+    // Serialize to JSON
+    serde_json::to_string_pretty(&manifest).map_err(Error::Json)
 }
 
 /// Generates a capability manifest from a cached API specification.
@@ -149,7 +305,7 @@ pub fn generate_capability_manifest(
             base_url,
         },
         commands: command_groups,
-        security: extract_security_info(spec),
+        security_schemes: extract_security_schemes(spec),
     };
 
     // Serialize to JSON
@@ -180,9 +336,14 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
         method: cached_command.method.clone(),
         path: cached_command.path.clone(),
         description: cached_command.description.clone(),
+        summary: cached_command.summary.clone(),
         operation_id: cached_command.operation_id.clone(),
         parameters,
         request_body,
+        security_requirements: cached_command.security_requirements.clone(),
+        tags: cached_command.tags.clone(),
+        deprecated: cached_command.deprecated,
+        external_docs_url: cached_command.external_docs_url.clone(),
     }
 }
 
@@ -193,10 +354,14 @@ fn convert_cached_parameter_to_info(cached_param: &CachedParameter) -> Parameter
         location: cached_param.location.clone(),
         required: cached_param.required,
         param_type: cached_param
-            .schema
+            .schema_type
             .clone()
             .unwrap_or_else(|| "string".to_string()),
-        description: None, // Not available in cached parameter
+        description: cached_param.description.clone(),
+        format: cached_param.format.clone(),
+        default_value: cached_param.default_value.clone(),
+        enum_values: cached_param.enum_values.clone(),
+        example: cached_param.example.clone(),
     }
 }
 
@@ -204,61 +369,326 @@ fn convert_cached_parameter_to_info(cached_param: &CachedParameter) -> Parameter
 fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> RequestBodyInfo {
     RequestBodyInfo {
         required: cached_body.required,
-        content_type: cached_body.content.clone(), // Using content field as content_type
-        description: None,                         // Not available in cached request body
+        content_type: cached_body.content_type.clone(),
+        description: cached_body.description.clone(),
+        example: cached_body.example.clone(),
     }
 }
 
-/// Extracts security information from the cached spec for the capability manifest
-fn extract_security_info(spec: &CachedSpec) -> Option<SecurityInfo> {
-    if spec.security_schemes.is_empty() {
-        return None;
-    }
-
-    // For now, we'll create a summary of all available security schemes
-    // In a real implementation, you might want to be more specific about which
-    // schemes are required for which operations
-    let mut details = HashMap::new();
-    let mut primary_scheme_type = String::new();
+/// Extracts security schemes from the cached spec for the capability manifest
+fn extract_security_schemes(spec: &CachedSpec) -> HashMap<String, SecuritySchemeInfo> {
+    let mut security_schemes = HashMap::new();
 
     for (name, scheme) in &spec.security_schemes {
-        details.insert(format!("{name}_type"), scheme.scheme_type.clone());
+        let details = match scheme.scheme_type.as_str() {
+            "http" => {
+                scheme.scheme.as_ref().map_or(
+                    SecuritySchemeDetails::HttpBearer {
+                        bearer_format: None,
+                    },
+                    |http_scheme| match http_scheme.as_str() {
+                        "bearer" => SecuritySchemeDetails::HttpBearer {
+                            bearer_format: scheme.bearer_format.clone(),
+                        },
+                        "basic" => SecuritySchemeDetails::HttpBasic,
+                        _ => {
+                            // For other HTTP schemes, default to bearer
+                            SecuritySchemeDetails::HttpBearer {
+                                bearer_format: None,
+                            }
+                        }
+                    },
+                )
+            }
+            "apiKey" => SecuritySchemeDetails::ApiKey {
+                location: scheme
+                    .location
+                    .clone()
+                    .unwrap_or_else(|| "header".to_string()),
+                name: scheme
+                    .parameter_name
+                    .clone()
+                    .unwrap_or_else(|| "Authorization".to_string()),
+            },
+            _ => {
+                // Default to bearer for unknown types
+                SecuritySchemeDetails::HttpBearer {
+                    bearer_format: None,
+                }
+            }
+        };
 
-        if let Some(location) = &scheme.location {
-            details.insert(format!("{name}_location"), location.clone());
+        let scheme_info = SecuritySchemeInfo {
+            scheme_type: scheme.scheme_type.clone(),
+            description: scheme.description.clone(),
+            details,
+            aperture_secret: scheme.aperture_secret.clone(),
+        };
+
+        security_schemes.insert(name.clone(), scheme_info);
+    }
+
+    security_schemes
+}
+
+/// Converts an `OpenAPI` operation to `CommandInfo` with full metadata
+fn convert_openapi_operation_to_info(
+    method: &str,
+    path: &str,
+    operation: &Operation,
+    global_security: Option<&Vec<openapiv3::SecurityRequirement>>,
+) -> CommandInfo {
+    let command_name = operation
+        .operation_id
+        .as_ref()
+        .map_or_else(|| method.to_lowercase(), |op_id| to_kebab_case(op_id));
+
+    // Extract parameters with full metadata
+    let parameters: Vec<ParameterInfo> = operation
+        .parameters
+        .iter()
+        .filter_map(|param_ref| {
+            if let ReferenceOr::Item(param) = param_ref {
+                Some(convert_openapi_parameter_to_info(param))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Extract request body info
+    let request_body = operation.request_body.as_ref().and_then(|rb_ref| {
+        if let ReferenceOr::Item(body) = rb_ref {
+            // Prefer JSON content if available
+            let content_type = if body.content.contains_key("application/json") {
+                "application/json"
+            } else {
+                body.content.keys().next().map(String::as_str)?
+            };
+
+            let media_type = body.content.get(content_type)?;
+            let example = media_type
+                .example
+                .as_ref()
+                .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
+
+            Some(RequestBodyInfo {
+                required: body.required,
+                content_type: content_type.to_string(),
+                description: body.description.clone(),
+                example,
+            })
+        } else {
+            None
         }
+    });
 
-        if let Some(param_name) = &scheme.parameter_name {
-            details.insert(format!("{name}_parameter"), param_name.clone());
-        }
+    // Extract security requirements
+    let security_requirements = operation.security.as_ref().map_or_else(
+        || {
+            global_security.map_or(vec![], |reqs| {
+                reqs.iter().flat_map(|req| req.keys().cloned()).collect()
+            })
+        },
+        |op_security| {
+            op_security
+                .iter()
+                .flat_map(|req| req.keys().cloned())
+                .collect()
+        },
+    );
 
-        if let Some(http_scheme) = &scheme.scheme {
-            details.insert(format!("{name}_scheme"), http_scheme.clone());
-        }
+    CommandInfo {
+        name: command_name,
+        method: method.to_uppercase(),
+        path: path.to_string(),
+        description: operation.description.clone(),
+        summary: operation.summary.clone(),
+        operation_id: operation.operation_id.clone().unwrap_or_default(),
+        parameters,
+        request_body,
+        security_requirements,
+        tags: operation.tags.clone(),
+        deprecated: operation.deprecated,
+        external_docs_url: operation
+            .external_docs
+            .as_ref()
+            .map(|docs| docs.url.clone()),
+    }
+}
 
-        // Add information about x-aperture-secret mapping if present
-        if let Some(aperture_secret) = &scheme.aperture_secret {
-            details.insert(format!("{name}_env_var"), aperture_secret.name.clone());
-            details.insert(format!("{name}_source"), aperture_secret.source.clone());
-        }
+/// Converts an `OpenAPI` parameter to `ParameterInfo` with full metadata
+fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo {
+    let (param_data, location_str) = match param {
+        OpenApiParameter::Query { parameter_data, .. } => (parameter_data, "query"),
+        OpenApiParameter::Header { parameter_data, .. } => (parameter_data, "header"),
+        OpenApiParameter::Path { parameter_data, .. } => (parameter_data, "path"),
+        OpenApiParameter::Cookie { parameter_data, .. } => (parameter_data, "cookie"),
+    };
 
-        // Use the first scheme as the primary type for the summary
-        if primary_scheme_type.is_empty() {
-            primary_scheme_type.clone_from(&scheme.scheme_type);
+    // Extract schema information
+    let (schema_type, format, default_value, enum_values, example) =
+        if let openapiv3::ParameterSchemaOrContent::Schema(schema_ref) = &param_data.format {
+            match schema_ref {
+                ReferenceOr::Item(schema) => {
+                    let (schema_type, format, enums) = match &schema.schema_kind {
+                        openapiv3::SchemaKind::Type(type_val) => match type_val {
+                            openapiv3::Type::String(string_type) => {
+                                let enum_values: Vec<String> = string_type
+                                    .enumeration
+                                    .iter()
+                                    .filter_map(|v| v.as_ref())
+                                    .map(|v| {
+                                        serde_json::to_string(v).unwrap_or_else(|_| v.to_string())
+                                    })
+                                    .collect();
+                                ("string".to_string(), None, enum_values)
+                            }
+                            openapiv3::Type::Number(_) => ("number".to_string(), None, vec![]),
+                            openapiv3::Type::Integer(_) => ("integer".to_string(), None, vec![]),
+                            openapiv3::Type::Boolean(_) => ("boolean".to_string(), None, vec![]),
+                            openapiv3::Type::Array(_) => ("array".to_string(), None, vec![]),
+                            openapiv3::Type::Object(_) => ("object".to_string(), None, vec![]),
+                        },
+                        _ => ("string".to_string(), None, vec![]),
+                    };
+
+                    let default_value = schema
+                        .schema_data
+                        .default
+                        .as_ref()
+                        .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.to_string()));
+
+                    (Some(schema_type), format, default_value, enums, None)
+                }
+                ReferenceOr::Reference { .. } => {
+                    (Some("string".to_string()), None, None, vec![], None)
+                }
+            }
+        } else {
+            (Some("string".to_string()), None, None, vec![], None)
+        };
+
+    // Extract example from parameter data
+    let example = param_data
+        .example
+        .as_ref()
+        .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()))
+        .or(example);
+
+    ParameterInfo {
+        name: param_data.name.clone(),
+        location: location_str.to_string(),
+        required: param_data.required,
+        param_type: schema_type.unwrap_or_else(|| "string".to_string()),
+        description: param_data.description.clone(),
+        format,
+        default_value,
+        enum_values,
+        example,
+    }
+}
+
+/// Extracts security schemes directly from `OpenAPI` spec
+fn extract_security_schemes_from_openapi(spec: &OpenAPI) -> HashMap<String, SecuritySchemeInfo> {
+    let mut security_schemes = HashMap::new();
+
+    if let Some(components) = &spec.components {
+        for (name, scheme_ref) in &components.security_schemes {
+            if let ReferenceOr::Item(scheme) = scheme_ref {
+                if let Some(scheme_info) = convert_openapi_security_scheme(name, scheme) {
+                    security_schemes.insert(name.clone(), scheme_info);
+                }
+            }
         }
     }
 
-    // Add a summary of available schemes
-    let scheme_names: Vec<String> = spec.security_schemes.keys().cloned().collect();
-    details.insert("available_schemes".to_string(), scheme_names.join(", "));
+    security_schemes
+}
 
-    Some(SecurityInfo {
-        scheme_type: if primary_scheme_type.is_empty() {
-            "mixed".to_string()
-        } else {
-            primary_scheme_type
-        },
-        details,
+/// Converts an `OpenAPI` security scheme to `SecuritySchemeInfo`
+fn convert_openapi_security_scheme(
+    _name: &str,
+    scheme: &SecurityScheme,
+) -> Option<SecuritySchemeInfo> {
+    match scheme {
+        SecurityScheme::APIKey {
+            location,
+            name: param_name,
+            description,
+            ..
+        } => {
+            let location_str = match location {
+                openapiv3::APIKeyLocation::Query => "query",
+                openapiv3::APIKeyLocation::Header => "header",
+                openapiv3::APIKeyLocation::Cookie => "cookie",
+            };
+
+            let aperture_secret = extract_aperture_secret_from_extensions(scheme);
+
+            Some(SecuritySchemeInfo {
+                scheme_type: "apiKey".to_string(),
+                description: description.clone(),
+                details: SecuritySchemeDetails::ApiKey {
+                    location: location_str.to_string(),
+                    name: param_name.clone(),
+                },
+                aperture_secret,
+            })
+        }
+        SecurityScheme::HTTP {
+            scheme: http_scheme,
+            bearer_format,
+            description,
+            ..
+        } => {
+            let details = match http_scheme.as_str() {
+                "bearer" => SecuritySchemeDetails::HttpBearer {
+                    bearer_format: bearer_format.clone(),
+                },
+                "basic" => SecuritySchemeDetails::HttpBasic,
+                _ => SecuritySchemeDetails::HttpBearer {
+                    bearer_format: None,
+                },
+            };
+
+            let aperture_secret = extract_aperture_secret_from_extensions(scheme);
+
+            Some(SecuritySchemeInfo {
+                scheme_type: "http".to_string(),
+                description: description.clone(),
+                details,
+                aperture_secret,
+            })
+        }
+        SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+    }
+}
+
+/// Extracts x-aperture-secret extension from a security scheme's extensions
+fn extract_aperture_secret_from_extensions(
+    scheme: &SecurityScheme,
+) -> Option<CachedApertureSecret> {
+    let extensions = match scheme {
+        SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. } => {
+            extensions
+        }
+        SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => return None,
+    };
+
+    extensions.get("x-aperture-secret").and_then(|value| {
+        if let Some(obj) = value.as_object() {
+            let source = obj.get("source")?.as_str()?;
+            let name = obj.get("name")?.as_str()?;
+
+            if source == "env" {
+                return Some(CachedApertureSecret {
+                    source: source.to_string(),
+                    name: name.to_string(),
+                });
+            }
+        }
+        None
     })
 }
 
@@ -288,6 +718,8 @@ mod tests {
                 scheme: Some("bearer".to_string()),
                 location: Some("header".to_string()),
                 parameter_name: Some("Authorization".to_string()),
+                description: None,
+                bearer_format: None,
                 aperture_secret: Some(CachedApertureSecret {
                     source: "env".to_string(),
                     name: "API_TOKEN".to_string(),
@@ -300,19 +732,29 @@ mod tests {
             version: "1.0.0".to_string(),
             commands: vec![CachedCommand {
                 name: "users".to_string(),
+                description: Some("Get user by ID".to_string()),
+                summary: None,
                 operation_id: "getUserById".to_string(),
                 method: "GET".to_string(),
                 path: "/users/{id}".to_string(),
-                description: Some("Get user by ID".to_string()),
                 parameters: vec![CachedParameter {
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
+                    description: None,
                     schema: Some("string".to_string()),
+                    schema_type: Some("string".to_string()),
+                    format: None,
+                    default_value: None,
+                    enum_values: vec![],
+                    example: None,
                 }],
                 request_body: None,
                 responses: vec![],
                 security_requirements: vec!["bearerAuth".to_string()],
+                tags: vec!["users".to_string()],
+                deprecated: false,
+                external_docs_url: None,
             }],
             base_url: Some("https://test-api.example.com".to_string()),
             servers: vec!["https://test-api.example.com".to_string()],
@@ -334,12 +776,17 @@ mod tests {
         assert_eq!(users_commands[0].parameters[0].name, "id");
 
         // Test security information extraction
-        assert!(manifest.security.is_some());
-        let security = manifest.security.unwrap();
-        assert_eq!(security.scheme_type, "http");
-        assert!(security.details.contains_key("bearerAuth_type"));
-        assert_eq!(security.details["bearerAuth_type"], "http");
-        assert!(security.details.contains_key("bearerAuth_env_var"));
-        assert_eq!(security.details["bearerAuth_env_var"], "API_TOKEN");
+        assert!(!manifest.security_schemes.is_empty());
+        assert!(manifest.security_schemes.contains_key("bearerAuth"));
+        let bearer_auth = &manifest.security_schemes["bearerAuth"];
+        assert_eq!(bearer_auth.scheme_type, "http");
+        assert!(matches!(
+            &bearer_auth.details,
+            SecuritySchemeDetails::HttpBearer { .. }
+        ));
+        assert!(bearer_auth.aperture_secret.is_some());
+        let aperture_secret = bearer_auth.aperture_secret.as_ref().unwrap();
+        assert_eq!(aperture_secret.name, "API_TOKEN");
+        assert_eq!(aperture_secret.source, "env");
     }
 }

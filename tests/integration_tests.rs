@@ -25,7 +25,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_API_KEY
+        source: env
+        name: TEST_API_KEY
 paths:
   /users/{id}:
     get:
@@ -120,7 +121,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths: {}
 ",
     )
@@ -204,7 +206,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users:
     post:
@@ -270,7 +273,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users/{id}:
     get:
@@ -368,7 +372,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /search:
     get:
@@ -456,7 +461,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users/{id}:
     get:
@@ -497,7 +503,7 @@ paths:
 
     // Parse the JSON output to verify structure
     let manifest: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(manifest["api"]["name"].as_str().unwrap(), "test-api");
+    assert_eq!(manifest["api"]["name"].as_str().unwrap(), "Test API");
     assert_eq!(manifest["api"]["version"].as_str().unwrap(), "1.0.0");
     assert!(manifest["commands"]["users"].is_array());
 
@@ -532,7 +538,7 @@ async fn test_json_errors_flag() {
 
     // Parse the JSON error output
     let error: serde_json::Value = serde_json::from_str(&stderr).unwrap();
-    assert_eq!(error["error_type"].as_str().unwrap(), "Configuration");
+    assert_eq!(error["error_type"].as_str().unwrap(), "CachedSpecNotFound");
     assert!(error["message"]
         .as_str()
         .unwrap()
@@ -559,7 +565,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users:
     post:
@@ -635,7 +642,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users:
     post:

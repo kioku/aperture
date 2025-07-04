@@ -18,6 +18,7 @@ pub struct CachedSpec {
 pub struct CachedCommand {
     pub name: String,
     pub description: Option<String>,
+    pub summary: Option<String>,
     pub operation_id: String,
     pub method: String,
     pub path: String,
@@ -26,6 +27,12 @@ pub struct CachedCommand {
     pub responses: Vec<CachedResponse>,
     /// Security requirements for this operation (references to security scheme names)
     pub security_requirements: Vec<String>,
+    /// All tags associated with this operation
+    pub tags: Vec<String>,
+    /// Whether this operation is deprecated
+    pub deprecated: bool,
+    /// External documentation URL if available
+    pub external_docs_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -33,19 +40,30 @@ pub struct CachedParameter {
     pub name: String,
     pub location: String,
     pub required: bool,
+    pub description: Option<String>,
     pub schema: Option<String>,
+    pub schema_type: Option<String>,
+    pub format: Option<String>,
+    pub default_value: Option<String>,
+    pub enum_values: Vec<String>,
+    pub example: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedRequestBody {
-    pub content: String,
+    pub content_type: String,
+    pub schema: String,
     pub required: bool,
+    pub description: Option<String>,
+    pub example: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedResponse {
     pub status_code: String,
-    pub content: Option<String>,
+    pub description: Option<String>,
+    pub content_type: Option<String>,
+    pub schema: Option<String>,
 }
 
 /// Cached representation of a security scheme with x-aperture-secret mapping
@@ -61,12 +79,16 @@ pub struct CachedSecurityScheme {
     pub location: Option<String>,
     /// Parameter name for apiKey schemes (e.g., "Authorization", "X-API-Key")
     pub parameter_name: Option<String>,
+    /// Description of the security scheme from `OpenAPI` spec
+    pub description: Option<String>,
+    /// Bearer format for HTTP bearer schemes (e.g., "JWT")
+    pub bearer_format: Option<String>,
     /// x-aperture-secret mapping for environment variable resolution
     pub aperture_secret: Option<CachedApertureSecret>,
 }
 
 /// Cached representation of x-aperture-secret extension
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
 pub struct CachedApertureSecret {
     /// Source of the secret (currently only "env" supported)
     pub source: String,

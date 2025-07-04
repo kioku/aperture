@@ -215,10 +215,10 @@ paths: {}
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
-        assert!(msg.contains("already exists"));
+    if let Err(Error::SpecAlreadyExists { name }) = result {
+        assert_eq!(name, spec_name);
     } else {
-        panic!("Unexpected error type");
+        panic!("Unexpected error type: {:?}", result);
     }
     // Ensure content was not overwritten
     assert_eq!(
@@ -379,8 +379,8 @@ fn test_remove_spec_not_found() {
 
     let result = manager.remove_spec(spec_name);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
-        assert!(msg.contains("does not exist"));
+    if let Err(Error::SpecNotFound { name }) = result {
+        assert_eq!(name, spec_name);
     } else {
         panic!("Unexpected error type: {:?}", result);
     }
@@ -521,7 +521,7 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
+    if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("OAuth2 security scheme"));
         assert!(msg.contains("not supported"));
     } else {
@@ -556,7 +556,7 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
+    if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("OpenID Connect security scheme"));
         assert!(msg.contains("not supported"));
     } else {
@@ -567,17 +567,17 @@ paths:
 #[test]
 fn test_add_spec_rejects_unsupported_http_scheme() {
     let (manager, fs) = setup_manager();
-    let spec_name = "basic-auth-api";
+    let spec_name = "digest-auth-api";
     let spec_content = r#"
 openapi: 3.0.0
 info:
-  title: Basic Auth API
+  title: Digest Auth API
   version: 1.0.0
 components:
   securitySchemes:
-    basicAuth:
+    digestAuth:
       type: http
-      scheme: basic
+      scheme: digest
 paths:
   /users:
     get:
@@ -586,14 +586,14 @@ paths:
         '200':
           description: Success
 "#;
-    let temp_spec_path = PathBuf::from("/tmp/basic_auth_api.yaml");
+    let temp_spec_path = PathBuf::from("/tmp/digest_auth_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
-        assert!(msg.contains("Unsupported HTTP scheme 'basic'"));
-        assert!(msg.contains("Only 'bearer' is supported"));
+    if let Err(Error::Validation(msg)) = result {
+        assert!(msg.contains("Unsupported HTTP scheme 'digest'"));
+        assert!(msg.contains("Only 'bearer' and 'basic' are supported"));
     } else {
         panic!("Unexpected error type: {:?}", result);
     }
@@ -627,7 +627,7 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
+    if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("Unsupported request body content type 'application/xml'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
@@ -663,7 +663,7 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
+    if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("Unsupported request body content type 'text/plain'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
@@ -788,7 +788,7 @@ paths:
 
     assert_eq!(cached_spec.commands.len(), 1);
     assert_eq!(cached_spec.commands[0].name, "default"); // No tags, so default
-    assert_eq!(cached_spec.commands[0].operation_id, "get"); // Falls back to method
+    assert_eq!(cached_spec.commands[0].operation_id, "GET_/data"); // Falls back to method_path
     assert_eq!(cached_spec.commands[0].method, "GET");
 }
 

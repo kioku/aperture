@@ -1,0 +1,56 @@
+#![allow(dead_code)]
+use aperture_cli::cache::models::{
+    CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
+};
+
+pub fn test_parameter(name: &str, location: &str, required: bool) -> CachedParameter {
+    CachedParameter {
+        name: name.to_string(),
+        location: location.to_string(),
+        required,
+        description: None,
+        schema: Some(r#"{"type": "string"}"#.to_string()),
+        schema_type: Some("string".to_string()),
+        format: None,
+        default_value: None,
+        enum_values: vec![],
+        example: None,
+    }
+}
+
+pub fn test_response(status_code: &str) -> CachedResponse {
+    CachedResponse {
+        status_code: status_code.to_string(),
+        description: None,
+        content_type: Some("application/json".to_string()),
+        schema: Some(r#"{"type": "object"}"#.to_string()),
+    }
+}
+
+pub fn test_request_body() -> CachedRequestBody {
+    CachedRequestBody {
+        content_type: "application/json".to_string(),
+        schema: r#"{"type": "object"}"#.to_string(),
+        required: true,
+        description: None,
+        example: None,
+    }
+}
+
+pub fn test_command(name: &str, operation_id: &str, method: &str, path: &str) -> CachedCommand {
+    CachedCommand {
+        name: name.to_string(),
+        description: None,
+        summary: None,
+        operation_id: operation_id.to_string(),
+        method: method.to_string(),
+        path: path.to_string(),
+        parameters: vec![],
+        request_body: None,
+        responses: vec![test_response("200")],
+        security_requirements: vec![],
+        tags: vec![name.to_string()],
+        deprecated: false,
+        external_docs_url: None,
+    }
+}

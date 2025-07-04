@@ -4,61 +4,121 @@ use aperture_cli::cache::models::{
 use aperture_cli::engine::generator::generate_command_tree;
 use std::collections::HashMap;
 
+// Helper macros for creating test data with default values
+macro_rules! cached_parameter {
+    ($name:expr, $location:expr, $required:expr) => {
+        CachedParameter {
+            name: $name.to_string(),
+            location: $location.to_string(),
+            required: $required,
+            description: None,
+            schema: Some(r#"{"type": "string"}"#.to_string()),
+            schema_type: Some("string".to_string()),
+            format: None,
+            default_value: None,
+            enum_values: vec![],
+            example: None,
+        }
+    };
+    ($name:expr, $location:expr, $required:expr, $schema:expr) => {
+        CachedParameter {
+            name: $name.to_string(),
+            location: $location.to_string(),
+            required: $required,
+            description: None,
+            schema: Some($schema.to_string()),
+            schema_type: Some("string".to_string()),
+            format: None,
+            default_value: None,
+            enum_values: vec![],
+            example: None,
+        }
+    };
+}
+
+macro_rules! cached_response {
+    ($status:expr) => {
+        CachedResponse {
+            status_code: $status.to_string(),
+            description: None,
+            content_type: Some("application/json".to_string()),
+            schema: Some(r#"{"type": "object"}"#.to_string()),
+        }
+    };
+}
+
+macro_rules! cached_request_body {
+    () => {
+        CachedRequestBody {
+            content_type: "application/json".to_string(),
+            schema: r#"{"type": "object"}"#.to_string(),
+            required: true,
+            description: None,
+            example: None,
+        }
+    };
+    ($required:expr) => {
+        CachedRequestBody {
+            content_type: "application/json".to_string(),
+            schema: r#"{"type": "object"}"#.to_string(),
+            required: $required,
+            description: None,
+            example: None,
+        }
+    };
+}
+
+macro_rules! cached_command {
+    ($name:expr, $op_id:expr, $method:expr, $path:expr, $params:expr, $body:expr, $responses:expr) => {
+        CachedCommand {
+            name: $name.to_string(),
+            description: None,
+            summary: None,
+            operation_id: $op_id.to_string(),
+            method: $method.to_string(),
+            path: $path.to_string(),
+            parameters: $params,
+            request_body: $body,
+            responses: $responses,
+            security_requirements: vec![],
+            tags: vec![$name.to_string()],
+            deprecated: false,
+            external_docs_url: None,
+        }
+    };
+}
+
 fn create_test_spec() -> CachedSpec {
     CachedSpec {
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![
-            CachedCommand {
-                name: "users".to_string(), // This is the tag/group name
-                description: Some("Get user by ID".to_string()),
-                operation_id: "getUserById".to_string(),
-                method: "GET".to_string(),
-                path: "/users/{id}".to_string(),
-                parameters: vec![
-                    CachedParameter {
-                        name: "id".to_string(),
-                        location: "path".to_string(),
-                        required: true,
-                        schema: Some(r#"{"type": "string"}"#.to_string()),
-                    },
-                    CachedParameter {
-                        name: "include".to_string(),
-                        location: "query".to_string(),
-                        required: false,
-                        schema: Some(r#"{"type": "string"}"#.to_string()),
-                    },
-                    CachedParameter {
-                        name: "x-request-id".to_string(),
-                        location: "header".to_string(),
-                        required: false,
-                        schema: None,
-                    },
-                ],
-                request_body: None,
-                responses: vec![CachedResponse {
-                    status_code: "200".to_string(),
-                    content: Some(r#"{"type": "object"}"#.to_string()),
-                }],
-                security_requirements: vec![],
+            {
+                let mut cmd = cached_command!(
+                    "users",
+                    "getUserById",
+                    "GET",
+                    "/users/{id}",
+                    vec![
+                        cached_parameter!("id", "path", true),
+                        cached_parameter!("include", "query", false),
+                        cached_parameter!("x-request-id", "header", false),
+                    ],
+                    None,
+                    vec![cached_response!("200")]
+                );
+                cmd.description = Some("Get user by ID".to_string());
+                cmd
             },
-            CachedCommand {
-                name: "users".to_string(), // Same tag/group
-                description: None,
-                operation_id: "createUser".to_string(),
-                method: "POST".to_string(),
-                path: "/users".to_string(),
-                parameters: vec![],
-                request_body: Some(CachedRequestBody {
-                    content: "application/json".to_string(),
-                    required: true,
-                }),
-                responses: vec![CachedResponse {
-                    status_code: "201".to_string(),
-                    content: None,
-                }],
-                security_requirements: vec![],
-            },
+            cached_command!(
+                "users",
+                "createUser",
+                "POST",
+                "/users",
+                vec![],
+                Some(cached_request_body!()),
+                vec![cached_response!("201")]
+            ),
         ],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -109,16 +169,18 @@ fn test_kebab_case_conversion() {
     let spec = CachedSpec {
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
-        commands: vec![CachedCommand {
-            name: "users".to_string(),
-            description: Some("User operations".to_string()),
-            operation_id: "getUserProfile".to_string(),
-            method: "GET".to_string(),
-            path: "/users/{id}/profile".to_string(),
-            parameters: vec![],
-            request_body: None,
-            responses: vec![],
-            security_requirements: vec![],
+        commands: vec![{
+            let mut cmd = cached_command!(
+                "users",
+                "getUserProfile",
+                "GET",
+                "/users/{id}/profile",
+                vec![],
+                None,
+                vec![]
+            );
+            cmd.description = Some("User operations".to_string());
+            cmd
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -163,16 +225,18 @@ fn test_fallback_to_default_tag() {
     let spec = CachedSpec {
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
-        commands: vec![CachedCommand {
-            name: "".to_string(), // Empty tag should fallback to "default"
-            description: Some("Test operation".to_string()),
-            operation_id: "testOp".to_string(),
-            method: "GET".to_string(),
-            path: "/test".to_string(),
-            parameters: vec![],
-            request_body: None,
-            responses: vec![],
-            security_requirements: vec![],
+        commands: vec![{
+            let mut cmd = cached_command!(
+                "", // Empty tag should fallback to "default"
+                "testOp",
+                "GET",
+                "/test",
+                vec![],
+                None,
+                vec![]
+            );
+            cmd.description = Some("Test operation".to_string());
+            cmd
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -191,16 +255,18 @@ fn test_fallback_to_http_method() {
     let spec = CachedSpec {
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
-        commands: vec![CachedCommand {
-            name: "ops".to_string(),
-            description: Some("Test operation".to_string()),
-            operation_id: "".to_string(), // Empty operationId should fallback to method
-            method: "POST".to_string(),
-            path: "/test".to_string(),
-            parameters: vec![],
-            request_body: None,
-            responses: vec![],
-            security_requirements: vec![],
+        commands: vec![{
+            let mut cmd = cached_command!(
+                "ops",
+                "", // Empty operationId should fallback to method
+                "POST",
+                "/test",
+                vec![],
+                None,
+                vec![]
+            );
+            cmd.description = Some("Test operation".to_string());
+            cmd
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
