@@ -215,10 +215,10 @@ paths: {}
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
-        assert!(msg.contains("already exists"));
+    if let Err(Error::SpecAlreadyExists { name }) = result {
+        assert_eq!(name, spec_name);
     } else {
-        panic!("Unexpected error type");
+        panic!("Unexpected error type: {:?}", result);
     }
     // Ensure content was not overwritten
     assert_eq!(
@@ -379,8 +379,8 @@ fn test_remove_spec_not_found() {
 
     let result = manager.remove_spec(spec_name);
     assert!(result.is_err());
-    if let Err(Error::Config(msg)) = result {
-        assert!(msg.contains("does not exist"));
+    if let Err(Error::SpecNotFound { name }) = result {
+        assert_eq!(name, spec_name);
     } else {
         panic!("Unexpected error type: {:?}", result);
     }

@@ -52,9 +52,9 @@ impl<F: FileSystem> ConfigManager<F> {
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
 
         if self.fs.exists(&spec_path) && !force {
-            return Err(Error::Config(format!(
-                "Spec '{name}' already exists. Use --force to overwrite."
-            )));
+            return Err(Error::SpecAlreadyExists {
+                name: name.to_string(),
+            });
         }
 
         let content = self.fs.read_to_string(file_path)?;
@@ -76,8 +76,10 @@ impl<F: FileSystem> ConfigManager<F> {
         self.fs.write_all(&spec_path, content.as_bytes())?;
 
         // Serialize and write cached representation
-        let cached_data = bincode::serialize(&cached_spec)
-            .map_err(|e| Error::Config(format!("Failed to serialize cached spec: {e}")))?;
+        let cached_data =
+            bincode::serialize(&cached_spec).map_err(|e| Error::SerializationError {
+                reason: e.to_string(),
+            })?;
         self.fs.write_all(&cache_path, &cached_data)?;
 
         Ok(())
@@ -120,7 +122,9 @@ impl<F: FileSystem> ConfigManager<F> {
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
 
         if !self.fs.exists(&spec_path) {
-            return Err(Error::Config(format!("Spec '{name}' does not exist.")));
+            return Err(Error::SpecNotFound {
+                name: name.to_string(),
+            });
         }
 
         self.fs.remove_file(&spec_path)?;
@@ -143,11 +147,12 @@ impl<F: FileSystem> ConfigManager<F> {
         let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
 
         if !self.fs.exists(&spec_path) {
-            return Err(Error::Config(format!("Spec '{name}' does not exist.")));
+            return Err(Error::SpecNotFound {
+                name: name.to_string(),
+            });
         }
 
-        let editor = std::env::var("EDITOR")
-            .map_err(|_| Error::Config("EDITOR environment variable not set.".to_string()))?;
+        let editor = std::env::var("EDITOR").map_err(|_| Error::EditorNotSet)?;
 
         Command::new(editor)
             .arg(&spec_path)
@@ -155,7 +160,9 @@ impl<F: FileSystem> ConfigManager<F> {
             .map_err(Error::Io)?
             .success()
             .then_some(()) // Convert bool to Option<()>
-            .ok_or_else(|| Error::Config(format!("Editor command failed for spec '{name}'.")))
+            .ok_or_else(|| Error::EditorFailed {
+                name: name.to_string(),
+            })
     }
 
     /// Loads the global configuration from `config.toml`.
@@ -167,7 +174,9 @@ impl<F: FileSystem> ConfigManager<F> {
         let config_path = self.config_dir.join("config.toml");
         if self.fs.exists(&config_path) {
             let content = self.fs.read_to_string(&config_path)?;
-            toml::from_str(&content).map_err(|e| Error::Config(format!("Invalid config.toml: {e}")))
+            toml::from_str(&content).map_err(|e| Error::InvalidConfig {
+                reason: e.to_string(),
+            })
         } else {
             Ok(GlobalConfig::default())
         }
@@ -184,8 +193,9 @@ impl<F: FileSystem> ConfigManager<F> {
         // Ensure config directory exists
         self.fs.create_dir_all(&self.config_dir)?;
 
-        let content = toml::to_string_pretty(config)
-            .map_err(|e| Error::Config(format!("Failed to serialize config: {e}")))?;
+        let content = toml::to_string_pretty(config).map_err(|e| Error::SerializationError {
+            reason: format!("Failed to serialize config: {e}"),
+        })?;
 
         self.fs.write_all(&config_path, content.as_bytes())?;
         Ok(())
@@ -213,9 +223,9 @@ impl<F: FileSystem> ConfigManager<F> {
             .join("specs")
             .join(format!("{api_name}.yaml"));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::Config(format!(
-                "API specification '{api_name}' not found."
-            )));
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
         }
 
         // Load current config
@@ -266,9 +276,9 @@ impl<F: FileSystem> ConfigManager<F> {
             .join("specs")
             .join(format!("{api_name}.yaml"));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::Config(format!(
-                "API specification '{api_name}' not found."
-            )));
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
         }
 
         // Load the cached spec to get its base URL
@@ -335,8 +345,7 @@ impl<F: FileSystem> ConfigManager<F> {
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn get_config_dir() -> Result<PathBuf, Error> {
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| Error::Config("Could not determine home directory.".to_string()))?;
+    let home_dir = dirs::home_dir().ok_or_else(|| Error::HomeDirectoryNotFound)?;
     let config_dir = home_dir.join(".config").join("aperture");
     Ok(config_dir)
 }

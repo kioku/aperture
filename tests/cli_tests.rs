@@ -72,7 +72,7 @@ fn test_config_add_existing_spec_no_force() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "Spec 'my-api' already exists. Use --force to overwrite.",
+            "API specification 'my-api' already exists. Use --force to overwrite",
         ));
 
     assert_eq!(
@@ -193,7 +193,7 @@ fn test_config_remove_spec_not_found() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "Spec 'non-existent-api' does not exist.",
+            "API specification 'non-existent-api' not found",
         ));
 }
 
@@ -240,7 +240,7 @@ fn test_config_edit_spec_not_found() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "Spec 'non-existent-api' does not exist.",
+            "API specification 'non-existent-api' not found",
         ));
 }
 
@@ -264,6 +264,6 @@ fn test_config_edit_no_editor_env() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "EDITOR environment variable not set.",
+            "EDITOR environment variable not set",
         ));
 }
