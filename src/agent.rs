@@ -193,10 +193,10 @@ fn convert_cached_parameter_to_info(cached_param: &CachedParameter) -> Parameter
         location: cached_param.location.clone(),
         required: cached_param.required,
         param_type: cached_param
-            .schema
+            .schema_type
             .clone()
             .unwrap_or_else(|| "string".to_string()),
-        description: None, // Not available in cached parameter
+        description: cached_param.description.clone(),
     }
 }
 
@@ -204,8 +204,8 @@ fn convert_cached_parameter_to_info(cached_param: &CachedParameter) -> Parameter
 fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> RequestBodyInfo {
     RequestBodyInfo {
         required: cached_body.required,
-        content_type: cached_body.content.clone(), // Using content field as content_type
-        description: None,                         // Not available in cached request body
+        content_type: cached_body.content_type.clone(),
+        description: cached_body.description.clone(),
     }
 }
 
@@ -300,19 +300,29 @@ mod tests {
             version: "1.0.0".to_string(),
             commands: vec![CachedCommand {
                 name: "users".to_string(),
+                description: Some("Get user by ID".to_string()),
+                summary: None,
                 operation_id: "getUserById".to_string(),
                 method: "GET".to_string(),
                 path: "/users/{id}".to_string(),
-                description: Some("Get user by ID".to_string()),
                 parameters: vec![CachedParameter {
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
+                    description: None,
                     schema: Some("string".to_string()),
+                    schema_type: Some("string".to_string()),
+                    format: None,
+                    default_value: None,
+                    enum_values: vec![],
+                    example: None,
                 }],
                 request_body: None,
                 responses: vec![],
                 security_requirements: vec!["bearerAuth".to_string()],
+                tags: vec!["users".to_string()],
+                deprecated: false,
+                external_docs_url: None,
             }],
             base_url: Some("https://test-api.example.com".to_string()),
             servers: vec!["https://test-api.example.com".to_string()],

@@ -3,6 +3,7 @@ use crate::cache::models::{
     CachedSecurityScheme, CachedSpec,
 };
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
+use serde_json;
 use std::collections::HashMap;
 
 /// Transforms `OpenAPI` specifications into Aperture's cached format
@@ -123,9 +124,46 @@ impl SpecTransformer {
             .responses
             .responses
             .iter()
-            .map(|(code, _)| CachedResponse {
-                status_code: code.to_string(),
-                content: None, // Simplified for now
+            .map(|(code, response_ref)| {
+                match response_ref {
+                    ReferenceOr::Item(response) => {
+                        // Get description
+                        let description = if response.description.is_empty() {
+                            None
+                        } else {
+                            Some(response.description.clone())
+                        };
+
+                        // Get first content type and schema if available
+                        let (content_type, schema) =
+                            if let Some((ct, media_type)) = response.content.iter().next() {
+                                let schema = media_type.schema.as_ref().and_then(|schema_ref| {
+                                    match schema_ref {
+                                        ReferenceOr::Item(schema) => {
+                                            serde_json::to_string(schema).ok()
+                                        }
+                                        ReferenceOr::Reference { .. } => None,
+                                    }
+                                });
+                                (Some(ct.clone()), schema)
+                            } else {
+                                (None, None)
+                            };
+
+                        CachedResponse {
+                            status_code: code.to_string(),
+                            description,
+                            content_type,
+                            schema,
+                        }
+                    }
+                    ReferenceOr::Reference { .. } => CachedResponse {
+                        status_code: code.to_string(),
+                        description: None,
+                        content_type: None,
+                        schema: None,
+                    },
+                }
             })
             .collect();
 
@@ -143,6 +181,7 @@ impl SpecTransformer {
         CachedCommand {
             name,
             description: operation.description.clone(),
+            summary: operation.summary.clone(),
             operation_id,
             method: method.to_uppercase(),
             path: path.to_string(),
@@ -150,6 +189,12 @@ impl SpecTransformer {
             request_body,
             responses,
             security_requirements,
+            tags: operation.tags.clone(),
+            deprecated: operation.deprecated,
+            external_docs_url: operation
+                .external_docs
+                .as_ref()
+                .map(|docs| docs.url.clone()),
         }
     }
 
@@ -162,11 +207,103 @@ impl SpecTransformer {
             Parameter::Cookie { parameter_data, .. } => (parameter_data, "cookie"),
         };
 
+        // Extract schema information from parameter
+        let (schema_json, schema_type, format, default_value, enum_values) =
+            if let openapiv3::ParameterSchemaOrContent::Schema(schema_ref) = &param_data.format {
+                match schema_ref {
+                    ReferenceOr::Item(schema) => {
+                        let schema_json = serde_json::to_string(schema).ok();
+
+                        // Extract type information
+                        let (schema_type, format, default, enums) = match &schema.schema_kind {
+                            openapiv3::SchemaKind::Type(type_val) => {
+                                match type_val {
+                                    openapiv3::Type::String(string_type) => {
+                                        let enum_values: Vec<String> = string_type
+                                            .enumeration
+                                            .iter()
+                                            .filter_map(|v| v.as_ref())
+                                            .map(|v| {
+                                                serde_json::to_string(v)
+                                                    .unwrap_or_else(|_| v.to_string())
+                                            })
+                                            .collect();
+                                        // TODO: Extract format when we understand VariantOrUnknownOrEmpty better
+                                        ("string".to_string(), None, None, enum_values)
+                                    }
+                                    openapiv3::Type::Number(_) => {
+                                        ("number".to_string(), None, None, vec![])
+                                    }
+                                    openapiv3::Type::Integer(_) => {
+                                        ("integer".to_string(), None, None, vec![])
+                                    }
+                                    openapiv3::Type::Boolean(_) => {
+                                        ("boolean".to_string(), None, None, vec![])
+                                    }
+                                    openapiv3::Type::Array(_) => {
+                                        ("array".to_string(), None, None, vec![])
+                                    }
+                                    openapiv3::Type::Object(_) => {
+                                        ("object".to_string(), None, None, vec![])
+                                    }
+                                }
+                            }
+                            _ => ("string".to_string(), None, None, vec![]),
+                        };
+
+                        // Extract default value if present
+                        let default_value =
+                            schema.schema_data.default.as_ref().map(|v| {
+                                serde_json::to_string(v).unwrap_or_else(|_| v.to_string())
+                            });
+
+                        (
+                            schema_json,
+                            Some(schema_type),
+                            format,
+                            default_value.or(default),
+                            enums,
+                        )
+                    }
+                    ReferenceOr::Reference { .. } => {
+                        // For references, use basic defaults
+                        (
+                            Some(r#"{"type": "string"}"#.to_string()),
+                            Some("string".to_string()),
+                            None,
+                            None,
+                            vec![],
+                        )
+                    }
+                }
+            } else {
+                // No schema provided, use defaults
+                (
+                    Some(r#"{"type": "string"}"#.to_string()),
+                    Some("string".to_string()),
+                    None,
+                    None,
+                    vec![],
+                )
+            };
+
+        // Extract example value
+        let example = param_data
+            .example
+            .as_ref()
+            .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
+
         CachedParameter {
             name: param_data.name.clone(),
             location: location_str.to_string(),
             required: param_data.required,
-            schema: None, // Simplified for now - will be enhanced in Phase 3
+            description: param_data.description.clone(),
+            schema: schema_json,
+            schema_type,
+            format,
+            default_value,
+            enum_values,
+            example,
         }
     }
 
@@ -176,16 +313,35 @@ impl SpecTransformer {
     ) -> Option<CachedRequestBody> {
         match request_body {
             ReferenceOr::Item(body) => {
-                // For now, we'll just note if JSON content is expected
-                let content = if body.content.contains_key("application/json") {
-                    "application/json".to_string()
+                // Prefer JSON content if available
+                let content_type = if body.content.contains_key("application/json") {
+                    "application/json"
                 } else {
-                    body.content.keys().next()?.clone()
+                    body.content.keys().next()?
                 };
 
+                // Extract schema and example from the content
+                let media_type = body.content.get(content_type)?;
+                let schema = media_type
+                    .schema
+                    .as_ref()
+                    .and_then(|schema_ref| match schema_ref {
+                        ReferenceOr::Item(schema) => serde_json::to_string(schema).ok(),
+                        ReferenceOr::Reference { .. } => None,
+                    })
+                    .unwrap_or_else(|| "{}".to_string());
+
+                let example = media_type
+                    .example
+                    .as_ref()
+                    .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
+
                 Some(CachedRequestBody {
-                    content,
+                    content_type: content_type.to_string(),
+                    schema,
                     required: body.required,
+                    description: body.description.clone(),
+                    example,
                 })
             }
             ReferenceOr::Reference { .. } => None, // Skip references for now

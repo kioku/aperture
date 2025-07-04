@@ -7,6 +7,44 @@ use std::collections::HashMap;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+// Helper macros for creating test data
+macro_rules! cached_parameter {
+    ($name:expr, $location:expr, $required:expr) => {
+        CachedParameter {
+            name: $name.to_string(),
+            location: $location.to_string(),
+            required: $required,
+            description: None,
+            schema: Some(r#"{"type": "string"}"#.to_string()),
+            schema_type: Some("string".to_string()),
+            format: None,
+            default_value: None,
+            enum_values: vec![],
+            example: None,
+        }
+    };
+}
+
+macro_rules! cached_command {
+    ($name:expr, $op_id:expr, $method:expr, $path:expr, $params:expr, $security:expr) => {
+        CachedCommand {
+            name: $name.to_string(),
+            description: None,
+            summary: None,
+            operation_id: $op_id.to_string(),
+            method: $method.to_string(),
+            path: $path.to_string(),
+            parameters: $params,
+            request_body: None,
+            responses: vec![],
+            security_requirements: $security,
+            tags: vec![$name.to_string()],
+            deprecated: false,
+            external_docs_url: None,
+        }
+    };
+}
+
 fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> CachedSpec {
     let mut security_schemes = HashMap::new();
 
@@ -46,43 +84,41 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
         name: "secure-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![
-            CachedCommand {
-                name: "users".to_string(),
-                description: Some("Get user by ID".to_string()),
-                operation_id: "getUserById".to_string(),
-                method: "GET".to_string(),
-                path: "/users/{id}".to_string(),
-                parameters: vec![CachedParameter {
-                    name: "id".to_string(),
-                    location: "path".to_string(),
-                    required: true,
-                    schema: None,
-                }],
-                request_body: None,
-                responses: vec![],
-                security_requirements: vec!["bearerAuth".to_string()],
+            {
+                let mut cmd = cached_command!(
+                    "users",
+                    "getUserById",
+                    "GET",
+                    "/users/{id}",
+                    vec![cached_parameter!("id", "path", true)],
+                    vec!["bearerAuth".to_string()]
+                );
+                cmd.description = Some("Get user by ID".to_string());
+                cmd
             },
-            CachedCommand {
-                name: "data".to_string(),
-                description: Some("Get data".to_string()),
-                operation_id: "getData".to_string(),
-                method: "GET".to_string(),
-                path: "/data".to_string(),
-                parameters: vec![],
-                request_body: None,
-                responses: vec![],
-                security_requirements: vec!["apiKeyAuth".to_string()],
+            {
+                let mut cmd = cached_command!(
+                    "data",
+                    "getData",
+                    "GET",
+                    "/data",
+                    vec![],
+                    vec!["apiKeyAuth".to_string()]
+                );
+                cmd.description = Some("Get data".to_string());
+                cmd
             },
-            CachedCommand {
-                name: "public".to_string(),
-                description: Some("Get public data".to_string()),
-                operation_id: "getPublicData".to_string(),
-                method: "GET".to_string(),
-                path: "/public".to_string(),
-                parameters: vec![],
-                request_body: None,
-                responses: vec![],
-                security_requirements: vec![], // No authentication required
+            {
+                let mut cmd = cached_command!(
+                    "public",
+                    "getPublicData",
+                    "GET",
+                    "/public",
+                    vec![],
+                    vec![] // No authentication required
+                );
+                cmd.description = Some("Get public data".to_string());
+                cmd
             },
         ],
         base_url: Some("https://api.example.com".to_string()),

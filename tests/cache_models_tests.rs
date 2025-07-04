@@ -1,7 +1,8 @@
-use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec,
-};
+use aperture_cli::cache::models::{CachedCommand, CachedResponse, CachedSpec};
 use std::collections::HashMap;
+
+mod test_helpers;
+use test_helpers::*;
 
 #[test]
 fn test_cached_spec_serialization_deserialization() {
@@ -12,50 +13,40 @@ fn test_cached_spec_serialization_deserialization() {
             CachedCommand {
                 name: "get-user".to_string(),
                 description: Some("Get user by ID".to_string()),
+                summary: None,
                 operation_id: "getUserById".to_string(),
                 method: "get".to_string(),
                 path: "/users/{id}".to_string(),
                 parameters: vec![
-                    CachedParameter {
-                        name: "id".to_string(),
-                        location: "path".to_string(),
-                        required: true,
-                        schema: Some(r#"{"type": "string"}"#.to_string()),
-                    },
-                    CachedParameter {
-                        name: "token".to_string(),
-                        location: "header".to_string(),
-                        required: false,
-                        schema: None,
-                    },
+                    test_parameter("id", "path", true),
+                    test_parameter("token", "header", false),
                 ],
                 request_body: None,
-                responses: vec![CachedResponse {
-                    status_code: "200".to_string(),
-                    content: Some(
-                        r#"{"type": "object", "properties": {"id": {"type": "string"}}}"#
-                            .to_string(),
-                    ),
-                }],
+                responses: vec![test_response("200")],
                 security_requirements: vec![],
+                tags: vec!["get-user".to_string()],
+                deprecated: false,
+                external_docs_url: None,
             },
             CachedCommand {
                 name: "create-user".to_string(),
                 description: None,
+                summary: None,
                 operation_id: "createUser".to_string(),
                 method: "post".to_string(),
                 path: "/users".to_string(),
                 parameters: vec![],
-                request_body: Some(CachedRequestBody {
-                    content: r#"{"type": "object", "properties": {"name": {"type": "string"}}}"#
-                        .to_string(),
-                    required: true,
-                }),
+                request_body: Some(test_request_body()),
                 responses: vec![CachedResponse {
                     status_code: "201".to_string(),
-                    content: None,
+                    description: None,
+                    content_type: None,
+                    schema: None,
                 }],
                 security_requirements: vec![],
+                tags: vec!["create-user".to_string()],
+                deprecated: false,
+                external_docs_url: None,
             },
         ],
         base_url: Some("https://api.example.com".to_string()),
