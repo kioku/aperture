@@ -25,7 +25,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_API_KEY
+        source: env
+        name: TEST_API_KEY
 paths:
   /users/{id}:
     get:
@@ -120,7 +121,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths: {}
 ",
     )
@@ -204,7 +206,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users:
     post:
@@ -270,7 +273,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users/{id}:
     get:
@@ -368,7 +372,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /search:
     get:
@@ -456,7 +461,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users/{id}:
     get:
@@ -559,7 +565,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users:
     post:
@@ -635,7 +642,8 @@ components:
       in: header
       name: X-API-Key
       x-aperture-secret:
-        env: TEST_KEY
+        source: env
+        name: TEST_KEY
 paths:
   /users:
     post:

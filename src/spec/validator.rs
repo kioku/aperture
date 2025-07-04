@@ -54,27 +54,103 @@ impl SpecValidator {
 
     /// Validates a single security scheme
     fn validate_security_scheme(name: &str, scheme: &SecurityScheme) -> Result<(), Error> {
+        // First validate the scheme type
         match scheme {
-            SecurityScheme::APIKey { .. } => Ok(()),
+            SecurityScheme::APIKey { .. } => {
+                // API Key schemes are supported
+            }
             SecurityScheme::HTTP {
                 scheme: http_scheme,
                 ..
             } => {
-                if http_scheme == "bearer" {
-                    Ok(())
-                } else {
-                    Err(Error::Validation(format!(
-                        "Unsupported HTTP scheme '{http_scheme}' in security scheme '{name}'. Only 'bearer' is supported."
-                    )))
+                if http_scheme != "bearer" && http_scheme != "basic" {
+                    return Err(Error::Validation(format!(
+                        "Unsupported HTTP scheme '{http_scheme}' in security scheme '{name}'. Only 'bearer' and 'basic' are supported."
+                    )));
                 }
             }
-            SecurityScheme::OAuth2 { .. } => Err(Error::Validation(format!(
-                "OAuth2 security scheme '{name}' is not supported in v1.0."
-            ))),
-            SecurityScheme::OpenIDConnect { .. } => Err(Error::Validation(format!(
-                "OpenID Connect security scheme '{name}' is not supported in v1.0."
-            ))),
+            SecurityScheme::OAuth2 { .. } => {
+                return Err(Error::Validation(format!(
+                    "OAuth2 security scheme '{name}' is not supported in v1.0."
+                )));
+            }
+            SecurityScheme::OpenIDConnect { .. } => {
+                return Err(Error::Validation(format!(
+                    "OpenID Connect security scheme '{name}' is not supported in v1.0."
+                )));
+            }
         }
+
+        // Now validate x-aperture-secret extension if present
+        let (SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. }) =
+            scheme
+        else {
+            return Ok(());
+        };
+
+        if let Some(aperture_secret) = extensions.get("x-aperture-secret") {
+            // Validate that it's an object
+            let secret_obj = aperture_secret.as_object().ok_or_else(|| {
+                Error::Validation(format!(
+                    "Invalid x-aperture-secret in security scheme '{name}': must be an object"
+                ))
+            })?;
+
+            // Validate required 'source' field
+            let source = secret_obj
+                .get("source")
+                .ok_or_else(|| {
+                    Error::Validation(format!(
+                        "Missing 'source' field in x-aperture-secret for security scheme '{name}'"
+                    ))
+                })?
+                .as_str()
+                .ok_or_else(|| {
+                    Error::Validation(format!(
+                        "Invalid 'source' field in x-aperture-secret for security scheme '{name}': must be a string"
+                    ))
+                })?;
+
+            // Currently only 'env' source is supported
+            if source != "env" {
+                return Err(Error::Validation(format!(
+                    "Unsupported source '{source}' in x-aperture-secret for security scheme '{name}'. Only 'env' is supported."
+                )));
+            }
+
+            // Validate required 'name' field
+            let env_name = secret_obj
+                .get("name")
+                .ok_or_else(|| {
+                    Error::Validation(format!(
+                        "Missing 'name' field in x-aperture-secret for security scheme '{name}'"
+                    ))
+                })?
+                .as_str()
+                .ok_or_else(|| {
+                    Error::Validation(format!(
+                        "Invalid 'name' field in x-aperture-secret for security scheme '{name}': must be a string"
+                    ))
+                })?;
+
+            // Validate environment variable name format
+            if env_name.is_empty() {
+                return Err(Error::Validation(format!(
+                    "Empty 'name' field in x-aperture-secret for security scheme '{name}'"
+                )));
+            }
+
+            // Check for valid environment variable name (alphanumeric and underscore, not starting with digit)
+            if !env_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                || env_name.chars().next().is_some_and(char::is_numeric)
+            {
+                return Err(Error::Validation(format!(
+                    "Invalid environment variable name '{env_name}' in x-aperture-secret for security scheme '{name}'. Must contain only alphanumeric characters and underscores, and not start with a digit."
+                )));
+            }
+        }
+
+        Ok(())
     }
 
     /// Validates an operation against Aperture's supported features
@@ -256,17 +332,7 @@ mod tests {
             }),
         );
 
-        spec.components = Some(components);
-
-        assert!(validator.validate(&spec).is_ok());
-    }
-
-    #[test]
-    fn test_validate_unsupported_http_scheme() {
-        let validator = SpecValidator::new();
-        let mut spec = create_test_spec();
-        let mut components = Components::default();
-
+        // Add HTTP basic scheme (now supported)
         components.security_schemes.insert(
             "basic".to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
@@ -279,11 +345,32 @@ mod tests {
 
         spec.components = Some(components);
 
+        assert!(validator.validate(&spec).is_ok());
+    }
+
+    #[test]
+    fn test_validate_unsupported_http_scheme() {
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+        let mut components = Components::default();
+
+        components.security_schemes.insert(
+            "digest".to_string(),
+            ReferenceOr::Item(SecurityScheme::HTTP {
+                scheme: "digest".to_string(),
+                bearer_format: None,
+                description: None,
+                extensions: Default::default(),
+            }),
+        );
+
+        spec.components = Some(components);
+
         let result = validator.validate(&spec);
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
-                assert!(msg.contains("Unsupported HTTP scheme 'basic'"));
+                assert!(msg.contains("Unsupported HTTP scheme 'digest'"));
             }
             _ => panic!("Expected Validation error"),
         }
@@ -350,6 +437,182 @@ mod tests {
         match result.unwrap_err() {
             Error::Validation(msg) => {
                 assert!(msg.contains("Unsupported request body content type 'application/xml'"));
+            }
+            _ => panic!("Expected Validation error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_x_aperture_secret_valid() {
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+        let mut components = Components::default();
+
+        // Create a bearer auth scheme with valid x-aperture-secret
+        let mut extensions = serde_json::Map::new();
+        extensions.insert(
+            "x-aperture-secret".to_string(),
+            serde_json::json!({
+                "source": "env",
+                "name": "API_TOKEN"
+            }),
+        );
+
+        components.security_schemes.insert(
+            "bearerAuth".to_string(),
+            ReferenceOr::Item(SecurityScheme::HTTP {
+                scheme: "bearer".to_string(),
+                bearer_format: None,
+                description: None,
+                extensions: extensions.into_iter().collect(),
+            }),
+        );
+        spec.components = Some(components);
+
+        assert!(validator.validate(&spec).is_ok());
+    }
+
+    #[test]
+    fn test_validate_x_aperture_secret_missing_source() {
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+        let mut components = Components::default();
+
+        // Create a bearer auth scheme with invalid x-aperture-secret (missing source)
+        let mut extensions = serde_json::Map::new();
+        extensions.insert(
+            "x-aperture-secret".to_string(),
+            serde_json::json!({
+                "name": "API_TOKEN"
+            }),
+        );
+
+        components.security_schemes.insert(
+            "bearerAuth".to_string(),
+            ReferenceOr::Item(SecurityScheme::HTTP {
+                scheme: "bearer".to_string(),
+                bearer_format: None,
+                description: None,
+                extensions: extensions.into_iter().collect(),
+            }),
+        );
+        spec.components = Some(components);
+
+        let result = validator.validate(&spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::Validation(msg) => {
+                assert!(msg.contains("Missing 'source' field"));
+            }
+            _ => panic!("Expected Validation error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_x_aperture_secret_missing_name() {
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+        let mut components = Components::default();
+
+        // Create a bearer auth scheme with invalid x-aperture-secret (missing name)
+        let mut extensions = serde_json::Map::new();
+        extensions.insert(
+            "x-aperture-secret".to_string(),
+            serde_json::json!({
+                "source": "env"
+            }),
+        );
+
+        components.security_schemes.insert(
+            "bearerAuth".to_string(),
+            ReferenceOr::Item(SecurityScheme::HTTP {
+                scheme: "bearer".to_string(),
+                bearer_format: None,
+                description: None,
+                extensions: extensions.into_iter().collect(),
+            }),
+        );
+        spec.components = Some(components);
+
+        let result = validator.validate(&spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::Validation(msg) => {
+                assert!(msg.contains("Missing 'name' field"));
+            }
+            _ => panic!("Expected Validation error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_x_aperture_secret_invalid_env_name() {
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+        let mut components = Components::default();
+
+        // Create a bearer auth scheme with invalid environment variable name
+        let mut extensions = serde_json::Map::new();
+        extensions.insert(
+            "x-aperture-secret".to_string(),
+            serde_json::json!({
+                "source": "env",
+                "name": "123_INVALID"  // Starts with digit
+            }),
+        );
+
+        components.security_schemes.insert(
+            "bearerAuth".to_string(),
+            ReferenceOr::Item(SecurityScheme::HTTP {
+                scheme: "bearer".to_string(),
+                bearer_format: None,
+                description: None,
+                extensions: extensions.into_iter().collect(),
+            }),
+        );
+        spec.components = Some(components);
+
+        let result = validator.validate(&spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::Validation(msg) => {
+                assert!(msg.contains("Invalid environment variable name"));
+            }
+            _ => panic!("Expected Validation error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_x_aperture_secret_unsupported_source() {
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+        let mut components = Components::default();
+
+        // Create a bearer auth scheme with unsupported source
+        let mut extensions = serde_json::Map::new();
+        extensions.insert(
+            "x-aperture-secret".to_string(),
+            serde_json::json!({
+                "source": "file",  // Not supported
+                "name": "API_TOKEN"
+            }),
+        );
+
+        components.security_schemes.insert(
+            "bearerAuth".to_string(),
+            ReferenceOr::Item(SecurityScheme::HTTP {
+                scheme: "bearer".to_string(),
+                bearer_format: None,
+                description: None,
+                extensions: extensions.into_iter().collect(),
+            }),
+        );
+        spec.components = Some(components);
+
+        let result = validator.validate(&spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::Validation(msg) => {
+                assert!(msg.contains("Unsupported source 'file'"));
             }
             _ => panic!("Expected Validation error"),
         }

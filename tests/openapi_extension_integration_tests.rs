@@ -292,22 +292,16 @@ servers:
     let temp_file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(temp_file.path(), temp_spec).unwrap();
 
-    // Add spec with malformed extension
-    config_manager
-        .add_spec("malformed-extension", temp_file.path(), false)
-        .unwrap();
+    // Add spec with malformed extension - should now fail with validation error
+    let result = config_manager.add_spec("malformed-extension", temp_file.path(), false);
 
-    // Load and verify the spec handles malformed extensions gracefully
-    let cache_dir = _temp_dir.path().join(".cache");
-    let cached_spec = load_cached_spec(&cache_dir, "malformed-extension").unwrap();
-
-    assert!(cached_spec.security_schemes.contains_key("bearerAuth"));
-    let bearer_scheme = &cached_spec.security_schemes["bearerAuth"];
-
-    // Verify scheme details are correct
-    assert_eq!(bearer_scheme.scheme_type, "http");
-    assert_eq!(bearer_scheme.scheme, Some("bearer".to_string()));
-
-    // Verify malformed extension was ignored gracefully
-    assert!(bearer_scheme.aperture_secret.is_none());
+    // Verify that the malformed extension is caught during validation
+    assert!(result.is_err());
+    let error = result.unwrap_err();
+    let error_msg = error.to_string();
+    assert!(
+        error_msg.contains("must be an object"),
+        "Expected error about x-aperture-secret needing to be an object, got: {}",
+        error_msg
+    );
 }

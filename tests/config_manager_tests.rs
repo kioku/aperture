@@ -567,17 +567,17 @@ paths:
 #[test]
 fn test_add_spec_rejects_unsupported_http_scheme() {
     let (manager, fs) = setup_manager();
-    let spec_name = "basic-auth-api";
+    let spec_name = "digest-auth-api";
     let spec_content = r#"
 openapi: 3.0.0
 info:
-  title: Basic Auth API
+  title: Digest Auth API
   version: 1.0.0
 components:
   securitySchemes:
-    basicAuth:
+    digestAuth:
       type: http
-      scheme: basic
+      scheme: digest
 paths:
   /users:
     get:
@@ -586,14 +586,14 @@ paths:
         '200':
           description: Success
 "#;
-    let temp_spec_path = PathBuf::from("/tmp/basic_auth_api.yaml");
+    let temp_spec_path = PathBuf::from("/tmp/digest_auth_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false);
     assert!(result.is_err());
     if let Err(Error::Validation(msg)) = result {
-        assert!(msg.contains("Unsupported HTTP scheme 'basic'"));
-        assert!(msg.contains("Only 'bearer' is supported"));
+        assert!(msg.contains("Unsupported HTTP scheme 'digest'"));
+        assert!(msg.contains("Only 'bearer' and 'basic' are supported"));
     } else {
         panic!("Unexpected error type: {:?}", result);
     }
