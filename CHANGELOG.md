@@ -2,7 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
-## [unreleased]
+## [0.1.1] - 2025-07-04
+
+### 🚀 Features
+
+- Add specific error variants to replace generic Config errors
+- Enrich cached models with OpenAPI metadata for better agent support
+- Redesign ApiCapabilityManifest for stable agent contract
+- Implement manifest generation from original OpenAPI specs
+- Add description and bearer_format fields to CachedSecurityScheme
+- Add comprehensive x-aperture-secret validation
+
+### 🚜 Refactor
+
+- Extract validation and transformation logic into spec module
+- Use new spec module components in ConfigManager
+- Update error handling to use specific error variants
+- Extract HTTP method arrays to shared helper function
+
+### 🎨 Styling
+
+- Remove emojis from error messages
+
+## [0.1.0] - 2025-06-30
 
 ### 🚀 Features
 
@@ -44,6 +66,8 @@ All notable changes to this project will be documented in this file.
 - [**breaking**] Upgrade openapiv3 dependency from 1.0.0 to 2.2.0
 - Implement x-aperture-secret extension parsing in SecurityScheme transformation
 - Implement global security inheritance for OpenAPI operations
+- Prepare repository for open source release
+- Rename package to aperture-cli for crates.io uniqueness
 
 ### 🐛 Bug Fixes
 
@@ -72,6 +96,7 @@ All notable changes to this project will be documented in this file.
 - Add comprehensive base URL management documentation
 - Add ADR-005 for security authentication and custom headers
 - Update ADR-005 to reflect complete x-aperture-secret implementation
+- Update documentation to reflect production-ready status
 
 ### 🎨 Styling
 
