@@ -188,6 +188,7 @@ impl SpecTransformer {
     }
 
     /// Transforms a parameter into cached format
+    #[allow(clippy::too_many_lines)]
     fn transform_parameter(param: &Parameter) -> CachedParameter {
         let (param_data, location_str) = match param {
             Parameter::Query { parameter_data, .. } => (parameter_data, "query"),
@@ -205,38 +206,53 @@ impl SpecTransformer {
 
                         // Extract type information
                         let (schema_type, format, default, enums) = match &schema.schema_kind {
-                            openapiv3::SchemaKind::Type(type_val) => {
-                                match type_val {
-                                    openapiv3::Type::String(string_type) => {
-                                        let enum_values: Vec<String> = string_type
-                                            .enumeration
-                                            .iter()
-                                            .filter_map(|v| v.as_ref())
-                                            .map(|v| {
-                                                serde_json::to_string(v)
-                                                    .unwrap_or_else(|_| v.to_string())
-                                            })
-                                            .collect();
-                                        // TODO: Extract format when we understand VariantOrUnknownOrEmpty better
-                                        ("string".to_string(), None, None, enum_values)
-                                    }
-                                    openapiv3::Type::Number(_) => {
-                                        ("number".to_string(), None, None, vec![])
-                                    }
-                                    openapiv3::Type::Integer(_) => {
-                                        ("integer".to_string(), None, None, vec![])
-                                    }
-                                    openapiv3::Type::Boolean(_) => {
-                                        ("boolean".to_string(), None, None, vec![])
-                                    }
-                                    openapiv3::Type::Array(_) => {
-                                        ("array".to_string(), None, None, vec![])
-                                    }
-                                    openapiv3::Type::Object(_) => {
-                                        ("object".to_string(), None, None, vec![])
-                                    }
+                            openapiv3::SchemaKind::Type(type_val) => match type_val {
+                                openapiv3::Type::String(string_type) => {
+                                    let enum_values: Vec<String> = string_type
+                                        .enumeration
+                                        .iter()
+                                        .filter_map(|v| v.as_ref())
+                                        .map(|v| {
+                                            serde_json::to_string(v)
+                                                .unwrap_or_else(|_| v.to_string())
+                                        })
+                                        .collect();
+                                    let format = match &string_type.format {
+                                        openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => {
+                                            Some(format!("{fmt:?}"))
+                                        }
+                                        _ => None,
+                                    };
+                                    ("string".to_string(), format, None, enum_values)
                                 }
-                            }
+                                openapiv3::Type::Number(number_type) => {
+                                    let format = match &number_type.format {
+                                        openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => {
+                                            Some(format!("{fmt:?}"))
+                                        }
+                                        _ => None,
+                                    };
+                                    ("number".to_string(), format, None, vec![])
+                                }
+                                openapiv3::Type::Integer(integer_type) => {
+                                    let format = match &integer_type.format {
+                                        openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => {
+                                            Some(format!("{fmt:?}"))
+                                        }
+                                        _ => None,
+                                    };
+                                    ("integer".to_string(), format, None, vec![])
+                                }
+                                openapiv3::Type::Boolean(_) => {
+                                    ("boolean".to_string(), None, None, vec![])
+                                }
+                                openapiv3::Type::Array(_) => {
+                                    ("array".to_string(), None, None, vec![])
+                                }
+                                openapiv3::Type::Object(_) => {
+                                    ("object".to_string(), None, None, vec![])
+                                }
+                            },
                             _ => ("string".to_string(), None, None, vec![]),
                         };
 
@@ -363,6 +379,7 @@ impl SpecTransformer {
             SecurityScheme::APIKey {
                 location,
                 name: param_name,
+                description,
                 ..
             } => {
                 let aperture_secret = Self::extract_aperture_secret(scheme);
@@ -378,11 +395,15 @@ impl SpecTransformer {
                     scheme: None,
                     location: Some(location_str.to_string()),
                     parameter_name: Some(param_name.clone()),
+                    description: description.clone(),
+                    bearer_format: None,
                     aperture_secret,
                 })
             }
             SecurityScheme::HTTP {
                 scheme: http_scheme,
+                bearer_format,
+                description,
                 ..
             } => {
                 let aperture_secret = Self::extract_aperture_secret(scheme);
@@ -392,6 +413,8 @@ impl SpecTransformer {
                     scheme: Some(http_scheme.clone()),
                     location: Some("header".to_string()),
                     parameter_name: Some("Authorization".to_string()),
+                    description: description.clone(),
+                    bearer_format: bearer_format.clone(),
                     aperture_secret,
                 })
             }

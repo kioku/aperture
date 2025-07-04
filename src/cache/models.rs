@@ -79,6 +79,10 @@ pub struct CachedSecurityScheme {
     pub location: Option<String>,
     /// Parameter name for apiKey schemes (e.g., "Authorization", "X-API-Key")
     pub parameter_name: Option<String>,
+    /// Description of the security scheme from `OpenAPI` spec
+    pub description: Option<String>,
+    /// Bearer format for HTTP bearer schemes (e.g., "JWT")
+    pub bearer_format: Option<String>,
     /// x-aperture-secret mapping for environment variable resolution
     pub aperture_secret: Option<CachedApertureSecret>,
 }

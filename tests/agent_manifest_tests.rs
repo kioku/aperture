@@ -20,6 +20,8 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             scheme: Some("bearer".to_string()),
             location: Some("header".to_string()),
             parameter_name: Some("Authorization".to_string()),
+            description: None,
+            bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),
                 name: "API_TOKEN".to_string(),
@@ -36,6 +38,8 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             scheme: None,
             location: Some("header".to_string()),
             parameter_name: Some("X-API-Key".to_string()),
+            description: None,
+            bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),
                 name: "API_KEY".to_string(),
@@ -52,6 +56,8 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             scheme: Some("basic".to_string()),
             location: Some("header".to_string()),
             parameter_name: Some("Authorization".to_string()),
+            description: None,
+            bearer_format: None,
             aperture_secret: None, // No x-aperture-secret defined
         },
     );

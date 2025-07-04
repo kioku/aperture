@@ -388,7 +388,7 @@ fn extract_security_schemes(spec: &CachedSpec) -> HashMap<String, SecurityScheme
                     },
                     |http_scheme| match http_scheme.as_str() {
                         "bearer" => SecuritySchemeDetails::HttpBearer {
-                            bearer_format: None, // TODO: Extract from OpenAPI if available
+                            bearer_format: scheme.bearer_format.clone(),
                         },
                         "basic" => SecuritySchemeDetails::HttpBasic,
                         _ => {
@@ -420,7 +420,7 @@ fn extract_security_schemes(spec: &CachedSpec) -> HashMap<String, SecurityScheme
 
         let scheme_info = SecuritySchemeInfo {
             scheme_type: scheme.scheme_type.clone(),
-            description: None, // TODO: Add to CachedSecurityScheme if needed
+            description: scheme.description.clone(),
             details,
             aperture_secret: scheme.aperture_secret.clone(),
         };
@@ -718,6 +718,8 @@ mod tests {
                 scheme: Some("bearer".to_string()),
                 location: Some("header".to_string()),
                 parameter_name: Some("Authorization".to_string()),
+                description: None,
+                bearer_format: None,
                 aperture_secret: Some(CachedApertureSecret {
                     source: "env".to_string(),
                     name: "API_TOKEN".to_string(),

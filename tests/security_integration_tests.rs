@@ -57,6 +57,8 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
             scheme: Some("bearer".to_string()),
             location: Some("header".to_string()),
             parameter_name: Some("Authorization".to_string()),
+            description: None,
+            bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),
                 name: bearer_env_var.to_string(),
@@ -73,6 +75,8 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
             scheme: None,
             location: Some("header".to_string()),
             parameter_name: Some("X-API-Key".to_string()),
+            description: None,
+            bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),
                 name: api_key_env_var.to_string(),
