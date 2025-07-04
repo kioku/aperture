@@ -356,3 +356,214 @@ fn test_manifest_with_global_config() {
     // Verify that the base URL is overridden
     assert_eq!(manifest.api.base_url, "https://override.example.com");
 }
+
+#[test]
+fn test_manifest_from_openapi() {
+    use aperture_cli::agent::generate_capability_manifest_from_openapi;
+    use openapiv3::{
+        APIKeyLocation, Components, ExternalDocumentation, Info, MediaType, OpenAPI, Operation,
+        Parameter, ParameterData, ParameterSchemaOrContent, PathItem, Paths, QueryStyle,
+        ReferenceOr, RequestBody, Responses, Schema, SchemaKind, SecurityRequirement,
+        SecurityScheme, Server, StringType, Type,
+    };
+
+    // Create a complete OpenAPI spec
+    let mut paths = Paths::default();
+
+    // Create an operation with all metadata
+    let operation = Operation {
+        tags: vec!["users".to_string()],
+        summary: Some("Get user summary".to_string()),
+        description: Some("Get detailed user information by ID".to_string()),
+        external_docs: Some(ExternalDocumentation {
+            description: Some("Learn more".to_string()),
+            url: "https://docs.example.com/users".to_string(),
+            extensions: Default::default(),
+        }),
+        operation_id: Some("getUserById".to_string()),
+        parameters: vec![ReferenceOr::Item(Parameter::Query {
+            parameter_data: ParameterData {
+                name: "include".to_string(),
+                description: Some("Fields to include".to_string()),
+                required: false,
+                deprecated: Some(false),
+                format: ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema {
+                    schema_data: Default::default(),
+                    schema_kind: SchemaKind::Type(Type::String(StringType {
+                        format: Default::default(),
+                        pattern: None,
+                        enumeration: vec![Some("profile".into()), Some("settings".into())],
+                        min_length: None,
+                        max_length: None,
+                    })),
+                })),
+                example: Some(serde_json::json!("profile")),
+                examples: Default::default(),
+                explode: None,
+                extensions: Default::default(),
+            },
+            style: QueryStyle::default(),
+            allow_reserved: false,
+            allow_empty_value: None,
+        })],
+        request_body: Some(ReferenceOr::Item({
+            let mut body = RequestBody {
+                description: Some("User update data".to_string()),
+                content: Default::default(),
+                required: true,
+                extensions: Default::default(),
+            };
+            body.content.insert(
+                "application/json".to_string(),
+                MediaType {
+                    schema: None,
+                    example: Some(serde_json::json!({"name": "John Doe"})),
+                    examples: Default::default(),
+                    encoding: Default::default(),
+                    extensions: Default::default(),
+                },
+            );
+            body
+        })),
+        responses: Responses::default(),
+        deprecated: true,
+        security: Some(vec![{
+            let mut req = SecurityRequirement::new();
+            req.insert("bearerAuth".to_string(), vec![]);
+            req
+        }]),
+        servers: vec![],
+        callbacks: Default::default(),
+        extensions: Default::default(),
+    };
+
+    let mut path_item = PathItem::default();
+    path_item.get = Some(operation);
+    paths
+        .paths
+        .insert("/users/{id}".to_string(), ReferenceOr::Item(path_item));
+
+    // Create components with security schemes
+    let mut components = Components::default();
+
+    // Add a bearer auth scheme with x-aperture-secret
+    let mut bearer_extensions = serde_json::Map::new();
+    bearer_extensions.insert(
+        "x-aperture-secret".to_string(),
+        serde_json::json!({
+            "source": "env",
+            "name": "API_TOKEN"
+        }),
+    );
+
+    components.security_schemes.insert(
+        "bearerAuth".to_string(),
+        ReferenceOr::Item(SecurityScheme::HTTP {
+            scheme: "bearer".to_string(),
+            bearer_format: Some("JWT".to_string()),
+            description: Some("Bearer token authentication".to_string()),
+            extensions: bearer_extensions.into_iter().collect(),
+        }),
+    );
+
+    // Add an API key scheme
+    components.security_schemes.insert(
+        "apiKey".to_string(),
+        ReferenceOr::Item(SecurityScheme::APIKey {
+            location: APIKeyLocation::Header,
+            name: "X-API-Key".to_string(),
+            description: Some("API Key authentication".to_string()),
+            extensions: Default::default(),
+        }),
+    );
+
+    let spec = OpenAPI {
+        openapi: "3.0.0".to_string(),
+        info: Info {
+            title: "Test API from OpenAPI".to_string(),
+            version: "2.0.0".to_string(),
+            description: Some("A test API with full metadata".to_string()),
+            terms_of_service: None,
+            contact: None,
+            license: None,
+            extensions: Default::default(),
+        },
+        servers: vec![Server {
+            url: "https://api.test.com".to_string(),
+            description: Some("Production server".to_string()),
+            variables: Default::default(),
+            extensions: Default::default(),
+        }],
+        paths,
+        components: Some(components),
+        security: None,
+        tags: vec![],
+        external_docs: None,
+        extensions: Default::default(),
+    };
+
+    // Generate manifest from OpenAPI
+    let manifest_json = generate_capability_manifest_from_openapi("test-api", &spec, None).unwrap();
+    let manifest: ApiCapabilityManifest = serde_json::from_str(&manifest_json).unwrap();
+
+    // Verify API info preserves all metadata
+    assert_eq!(manifest.api.name, "Test API from OpenAPI");
+    assert_eq!(manifest.api.version, "2.0.0");
+    assert_eq!(
+        manifest.api.description,
+        Some("A test API with full metadata".to_string())
+    );
+    assert_eq!(manifest.api.base_url, "https://api.test.com");
+
+    // Verify command preserves all metadata
+    let users_commands = &manifest.commands["users"];
+    assert_eq!(users_commands.len(), 1);
+    let cmd = &users_commands[0];
+
+    assert_eq!(cmd.name, "get-user-by-id");
+    assert_eq!(cmd.summary, Some("Get user summary".to_string()));
+    assert_eq!(
+        cmd.description,
+        Some("Get detailed user information by ID".to_string())
+    );
+    assert!(cmd.deprecated);
+    assert_eq!(
+        cmd.external_docs_url,
+        Some("https://docs.example.com/users".to_string())
+    );
+    assert_eq!(cmd.security_requirements, vec!["bearerAuth"]);
+
+    // Verify parameter metadata
+    assert_eq!(cmd.parameters.len(), 1);
+    let param = &cmd.parameters[0];
+    assert_eq!(param.enum_values.len(), 2);
+    assert!(param.enum_values.contains(&"\"profile\"".to_string()));
+
+    // Verify request body
+    assert!(cmd.request_body.is_some());
+    let body = cmd.request_body.as_ref().unwrap();
+    assert_eq!(body.description, Some("User update data".to_string()));
+
+    // Verify security schemes preserve metadata
+    assert_eq!(manifest.security_schemes.len(), 2);
+
+    let bearer = &manifest.security_schemes["bearerAuth"];
+    assert_eq!(bearer.scheme_type, "http");
+    assert_eq!(
+        bearer.description,
+        Some("Bearer token authentication".to_string())
+    );
+    if let SecuritySchemeDetails::HttpBearer { bearer_format } = &bearer.details {
+        assert_eq!(bearer_format, &Some("JWT".to_string()));
+    } else {
+        panic!("Expected HttpBearer details");
+    }
+    assert!(bearer.aperture_secret.is_some());
+    assert_eq!(bearer.aperture_secret.as_ref().unwrap().name, "API_TOKEN");
+
+    let api_key = &manifest.security_schemes["apiKey"];
+    assert_eq!(
+        api_key.description,
+        Some("API Key authentication".to_string())
+    );
+}

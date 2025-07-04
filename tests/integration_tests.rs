@@ -497,7 +497,7 @@ paths:
 
     // Parse the JSON output to verify structure
     let manifest: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(manifest["api"]["name"].as_str().unwrap(), "test-api");
+    assert_eq!(manifest["api"]["name"].as_str().unwrap(), "Test API");
     assert_eq!(manifest["api"]["version"].as_str().unwrap(), "1.0.0");
     assert!(manifest["commands"]["users"].is_array());
 

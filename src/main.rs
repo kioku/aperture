@@ -5,6 +5,7 @@ use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
 use clap::Parser;
+use std::fs;
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -129,7 +130,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     let cache_dir = config_dir.join(".cache");
 
     // Create config manager and load global config
-    let manager = ConfigManager::with_fs(OsFileSystem, config_dir);
+    let manager = ConfigManager::with_fs(OsFileSystem, config_dir.clone());
     let global_config = manager.load_global_config().ok();
 
     // Load the cached spec for the context
@@ -142,7 +143,26 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
 
     // Handle --describe-json flag - output capability manifest and exit
     if cli.describe_json {
-        let manifest = agent::generate_capability_manifest(&spec, global_config.as_ref())?;
+        // Load the original spec file for complete metadata
+        let specs_dir = config_dir.join("specs");
+        let spec_path = specs_dir.join(format!("{context}.yaml"));
+
+        if !spec_path.exists() {
+            return Err(Error::SpecNotFound {
+                name: context.to_string(),
+            });
+        }
+
+        let spec_content = fs::read_to_string(&spec_path)?;
+        let openapi_spec: openapiv3::OpenAPI = serde_yaml::from_str(&spec_content)
+            .map_err(|e| Error::Config(format!("Failed to parse OpenAPI spec: {e}")))?;
+
+        // Generate manifest from the original spec with all metadata
+        let manifest = agent::generate_capability_manifest_from_openapi(
+            context,
+            &openapi_spec,
+            global_config.as_ref(),
+        )?;
         println!("{manifest}");
         return Ok(());
     }
