@@ -55,6 +55,7 @@ cargo install aperture-cli
 git clone https://github.com/kioku/aperture.git
 cd aperture
 cargo install --path .
+```
 
 ## Getting Started
 
@@ -68,8 +69,8 @@ aperture config add my-api ./openapi.yml
 aperture config list
 
 # Execute API commands (dynamically generated from spec)
-aperture my-api users list
-aperture my-api users create --name "John Doe" --email "john@example.com"
+aperture api my-api users list
+aperture api my-api users create --name "John Doe" --email "john@example.com"
 ```
 
 ### Base URL Management
@@ -91,7 +92,7 @@ aperture config get-url my-api
 aperture config list-urls
 
 # Use environment-specific URL
-APERTURE_ENV=staging aperture my-api users list
+APERTURE_ENV=staging aperture api my-api users list
 ```
 
 **URL Resolution Priority:**
@@ -105,16 +106,16 @@ APERTURE_ENV=staging aperture my-api users list
 
 ```bash
 # Get JSON description of all available commands
-aperture my-api --describe-json
+aperture api my-api --describe-json
 
 # Output errors as structured JSON
-aperture my-api --json-errors users list
+aperture api my-api --json-errors users list
 
 # Preview request without execution
-aperture my-api --dry-run users create --name "Test"
+aperture api my-api --dry-run users create --name "Test"
 
 # Add idempotency key for safe retries
-aperture my-api --idempotency-key "unique-key" users create --name "Test"
+aperture api my-api --idempotency-key "unique-key" users create --name "Test"
 ```
 
 ## Development
