@@ -109,6 +109,9 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 }
             }
         },
+        Commands::ListCommands { ref context } => {
+            list_commands(context)?;
+        }
         Commands::Api {
             ref context,
             ref args,
@@ -118,6 +121,88 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
     }
 
     Ok(())
+}
+
+fn list_commands(context: &str) -> Result<(), Error> {
+    // Get the cache directory - respecting APERTURE_CONFIG_DIR if set
+    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+        PathBuf::from(dir)
+    } else {
+        get_config_dir()?
+    };
+    let cache_dir = config_dir.join(".cache");
+
+    // Load the cached spec for the context
+    let spec = loader::load_cached_spec(&cache_dir, context).map_err(|e| match e {
+        Error::Io(_) => Error::SpecNotFound {
+            name: context.to_string(),
+        },
+        _ => e,
+    })?;
+
+    // Group commands by their primary tag
+    let mut tag_groups: std::collections::BTreeMap<
+        String,
+        Vec<&aperture_cli::cache::models::CachedCommand>,
+    > = std::collections::BTreeMap::new();
+
+    for command in &spec.commands {
+        let primary_tag = command
+            .tags
+            .first()
+            .map_or_else(|| "default".to_string(), std::clone::Clone::clone);
+        tag_groups.entry(primary_tag).or_default().push(command);
+    }
+
+    println!("Available commands for API: {}", spec.name);
+    println!("API Version: {}", spec.version);
+    if let Some(base_url) = &spec.base_url {
+        println!("Base URL: {base_url}");
+    }
+    println!();
+
+    if tag_groups.is_empty() {
+        println!("No commands available for this API.");
+        return Ok(());
+    }
+
+    for (tag, commands) in tag_groups {
+        println!("📁 {tag}");
+        for command in commands {
+            let kebab_id = to_kebab_case(&command.operation_id);
+            let description = command
+                .summary
+                .as_ref()
+                .or(command.description.as_ref())
+                .map(|s| format!(" - {s}"))
+                .unwrap_or_default();
+            println!(
+                "  ├─ {} ({}){}",
+                kebab_id,
+                command.method.to_uppercase(),
+                description
+            );
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Converts a string to kebab-case (copied from generator.rs)
+fn to_kebab_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut prev_lowercase = false;
+
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_uppercase() && i > 0 && prev_lowercase {
+            result.push('-');
+        }
+        result.push(ch.to_ascii_lowercase());
+        prev_lowercase = ch.is_lowercase();
+    }
+
+    result
 }
 
 async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {

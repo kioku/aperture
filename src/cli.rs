@@ -56,6 +56,19 @@ pub enum Commands {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+    /// List available commands for an API specification
+    #[command(
+        long_about = "Display a tree-like summary of all available commands for an API.\n\n\
+                      Shows operations organized by tags, making it easy to discover\n\
+                      what functionality is available in a registered API specification.\n\
+                      This provides an overview without having to use --help on each operation.\n\n\
+                      Example:\n  \
+                      aperture list-commands myapi"
+    )]
+    ListCommands {
+        /// Name of the API specification context
+        context: String,
+    },
     /// Execute API operations for a specific context
     #[command(
         long_about = "Execute operations from a registered API specification.\n\n\
