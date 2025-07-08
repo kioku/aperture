@@ -85,6 +85,7 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
     );
 
     CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "secure-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![

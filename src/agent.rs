@@ -188,6 +188,7 @@ pub fn generate_capability_manifest_from_openapi(
     let servers: Vec<String> = spec.servers.iter().map(|s| s.url.clone()).collect();
 
     let temp_cached_spec = CachedSpec {
+        cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
         name: api_name.to_string(),
         version: spec.info.version.clone(),
         commands: vec![], // We'll generate commands directly from OpenAPI
@@ -728,6 +729,7 @@ mod tests {
         );
 
         let spec = CachedSpec {
+            cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
             name: "Test API".to_string(),
             version: "1.0.0".to_string(),
             commands: vec![CachedCommand {

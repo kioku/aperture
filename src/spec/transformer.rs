@@ -1,6 +1,6 @@
 use crate::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
-    CachedSecurityScheme, CachedSpec,
+    CachedSecurityScheme, CachedSpec, CACHE_FORMAT_VERSION,
 };
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 use serde_json;
@@ -64,6 +64,7 @@ impl SpecTransformer {
         let security_schemes = Self::extract_security_schemes(spec);
 
         CachedSpec {
+            cache_format_version: CACHE_FORMAT_VERSION,
             name: name.to_string(),
             version,
             commands,

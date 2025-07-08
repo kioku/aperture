@@ -168,6 +168,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
     ];
 
     CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "Test API".to_string(),
         version: "1.0.0".to_string(),
         commands,

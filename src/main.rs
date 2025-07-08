@@ -108,7 +108,20 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                     }
                 }
             }
+            ConfigCommands::Reinit { context, all } => {
+                if all {
+                    reinit_all_specs(manager)?;
+                } else if let Some(spec_name) = context {
+                    reinit_spec(manager, &spec_name)?;
+                } else {
+                    eprintln!("Error: Either specify a spec name or use --all flag");
+                    std::process::exit(1);
+                }
+            }
         },
+        Commands::ListCommands { ref context } => {
+            list_commands(context)?;
+        }
         Commands::Api {
             ref context,
             ref args,
@@ -117,6 +130,142 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
         }
     }
 
+    Ok(())
+}
+
+fn list_commands(context: &str) -> Result<(), Error> {
+    // Get the cache directory - respecting APERTURE_CONFIG_DIR if set
+    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+        PathBuf::from(dir)
+    } else {
+        get_config_dir()?
+    };
+    let cache_dir = config_dir.join(".cache");
+
+    // Load the cached spec for the context
+    let spec = loader::load_cached_spec(&cache_dir, context).map_err(|e| match e {
+        Error::Io(_) => Error::SpecNotFound {
+            name: context.to_string(),
+        },
+        _ => e,
+    })?;
+
+    // Group commands by their primary tag
+    let mut tag_groups: std::collections::BTreeMap<
+        String,
+        Vec<&aperture_cli::cache::models::CachedCommand>,
+    > = std::collections::BTreeMap::new();
+
+    for command in &spec.commands {
+        let primary_tag = command
+            .tags
+            .first()
+            .map_or_else(|| "default".to_string(), std::clone::Clone::clone);
+        tag_groups.entry(primary_tag).or_default().push(command);
+    }
+
+    println!("Available commands for API: {}", spec.name);
+    println!("API Version: {}", spec.version);
+    if let Some(base_url) = &spec.base_url {
+        println!("Base URL: {base_url}");
+    }
+    println!();
+
+    if tag_groups.is_empty() {
+        println!("No commands available for this API.");
+        return Ok(());
+    }
+
+    for (tag, commands) in tag_groups {
+        println!("📁 {tag}");
+        for command in commands {
+            let kebab_id = to_kebab_case(&command.operation_id);
+            let description = command
+                .summary
+                .as_ref()
+                .or(command.description.as_ref())
+                .map(|s| format!(" - {s}"))
+                .unwrap_or_default();
+            println!(
+                "  ├─ {} ({}){}",
+                kebab_id,
+                command.method.to_uppercase(),
+                description
+            );
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Converts a string to kebab-case (copied from generator.rs)
+fn to_kebab_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut prev_lowercase = false;
+
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_uppercase() && i > 0 && prev_lowercase {
+            result.push('-');
+        }
+        result.push(ch.to_ascii_lowercase());
+        prev_lowercase = ch.is_lowercase();
+    }
+
+    result
+}
+
+fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result<(), Error> {
+    println!("Reinitializing cached specification: {spec_name}");
+
+    // Check if the spec exists
+    let specs = manager.list_specs()?;
+    if !specs.contains(&spec_name.to_string()) {
+        return Err(Error::SpecNotFound {
+            name: spec_name.to_string(),
+        });
+    }
+
+    // Get the config directory
+    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+        PathBuf::from(dir)
+    } else {
+        get_config_dir()?
+    };
+
+    // Get the original spec file path
+    let specs_dir = config_dir.join("specs");
+    let spec_path = specs_dir.join(format!("{spec_name}.yaml"));
+
+    // Re-add the spec with force to regenerate the cache
+    manager.add_spec(spec_name, &spec_path, true)?;
+
+    println!("Successfully reinitialized cache for '{spec_name}'");
+    Ok(())
+}
+
+fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
+    let specs = manager.list_specs()?;
+
+    if specs.is_empty() {
+        println!("No API specifications found to reinitialize.");
+        return Ok(());
+    }
+
+    println!("Reinitializing {} cached specification(s)...", specs.len());
+
+    for spec_name in &specs {
+        match reinit_spec(manager, spec_name) {
+            Ok(()) => {
+                println!("  ✓ {spec_name}");
+            }
+            Err(e) => {
+                eprintln!("  ✗ {spec_name}: {e}");
+            }
+        }
+    }
+
+    println!("Reinitialization complete.");
     Ok(())
 }
 
@@ -283,6 +432,9 @@ fn print_error(error: &Error) {
         Error::CachedSpecCorrupted { .. } => {
             eprintln!("Cached Specification Corrupted\n{error}\n\nHint: Try removing and re-adding the specification.");
         }
+        Error::CacheVersionMismatch { name, .. } => {
+            eprintln!("Cache Version Mismatch\n{error}\n\nHint: Run 'aperture config reinit {name}' to regenerate the cache with the current format.");
+        }
         Error::SecretNotSet { env_var, .. } => {
             eprintln!("Authentication Secret Not Set\n{error}\n\nHint: Set the environment variable: export {env_var}=<your-secret>");
         }
@@ -324,9 +476,77 @@ fn print_error(error: &Error) {
         Error::RequestFailed { .. } | Error::ResponseReadError { .. } => {
             eprintln!("Request Failed\n{error}");
         }
-        Error::HttpError { status, .. } => {
-            eprintln!("HTTP Error ({status})\n{error}");
-        }
+        Error::HttpErrorWithContext {
+            status,
+            body,
+            api_name,
+            operation_id,
+            security_schemes,
+        } => match status {
+            401 => {
+                eprintln!("Authentication Error (401) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+
+                if security_schemes.is_empty() {
+                    eprintln!("Hint: Check your API credentials and authentication configuration.");
+                } else {
+                    eprintln!("This operation requires authentication. Check these environment variables:");
+                    for scheme_name in security_schemes {
+                        eprintln!("  • Authentication scheme '{scheme_name}' - verify your environment variable is set");
+                    }
+                    eprintln!("\nExample: export YOUR_API_KEY=<your-secret>");
+                }
+            }
+            403 => {
+                eprintln!("Authorization Error (403) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+                eprintln!(
+                    "Hint: Your credentials may be valid but lack permission for this operation."
+                );
+            }
+            404 => {
+                eprintln!("Resource Not Found (404) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+                eprintln!("Hint: Check that the API endpoint and parameters are correct.");
+            }
+            429 => {
+                eprintln!("Rate Limited (429) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+                eprintln!("Hint: You're making requests too quickly. Wait before trying again.");
+            }
+            500..=599 => {
+                eprintln!("Server Error ({status}) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+                eprintln!("Hint: The API server is experiencing issues. Try again later.");
+            }
+            _ => {
+                eprintln!("HTTP Error ({status}) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+            }
+        },
         Error::InvalidCommand { context, .. } => {
             eprintln!("Invalid Command\n{error}\n\nHint: Use 'aperture api {context} --help' to see available commands.");
         }

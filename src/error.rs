@@ -27,6 +27,12 @@ pub enum Error {
     CachedSpecNotFound { name: String },
     #[error("Failed to deserialize cached spec '{name}': {reason}. The cache may be corrupted")]
     CachedSpecCorrupted { name: String, reason: String },
+    #[error("Cache format version mismatch for '{name}': found v{found}, expected v{expected}")]
+    CacheVersionMismatch {
+        name: String,
+        found: u32,
+        expected: u32,
+    },
     #[error(
         "Environment variable '{env_var}' required for authentication '{scheme_name}' is not set"
     )]
@@ -65,7 +71,13 @@ pub enum Error {
     #[error("Failed to read response: {reason}")]
     ResponseReadError { reason: String },
     #[error("Request failed with status {status}: {body}")]
-    HttpError { status: u16, body: String },
+    HttpErrorWithContext {
+        status: u16,
+        body: String,
+        api_name: String,
+        operation_id: Option<String>,
+        security_schemes: Vec<String>,
+    },
     #[error("Invalid command for API '{context}': {reason}")]
     InvalidCommand { context: String, reason: String },
     #[error("Could not find operation from command path")]
@@ -201,6 +213,12 @@ impl Error {
                 Some("Try removing and re-adding the specification.".to_string()),
                 Some(json!({ "spec_name": name, "corruption_reason": reason })),
             ),
+            Self::CacheVersionMismatch { name, found, expected } => (
+                "CacheVersionMismatch",
+                format!("Cache format version mismatch for '{name}': found v{found}, expected v{expected}"),
+                Some("Run 'aperture config reinit' to regenerate the cache.".to_string()),
+                Some(json!({ "spec_name": name, "found_version": found, "expected_version": expected })),
+            ),
             Self::SecretNotSet { scheme_name, env_var } => (
                 "SecretNotSet",
                 format!("Environment variable '{env_var}' required for authentication '{scheme_name}' is not set"),
@@ -297,12 +315,37 @@ impl Error {
                 None,
                 Some(json!({ "reason": reason })),
             ),
-            Self::HttpError { status, body } => (
-                "HttpError",
-                format!("Request failed with status {status}: {body}"),
-                None,
-                Some(json!({ "status": status, "body": body })),
-            ),
+            Self::HttpErrorWithContext { status, body, api_name, operation_id, security_schemes } => {
+                let context_hint = match status {
+                    401 => {
+                        if security_schemes.is_empty() {
+                            Some("Check your API credentials and authentication configuration.".to_string())
+                        } else {
+                            let env_vars: Vec<String> = security_schemes.iter()
+                                .map(|scheme| format!("Check environment variable for '{scheme}' authentication"))
+                                .collect();
+                            Some(env_vars.join("; "))
+                        }
+                    },
+                    403 => Some("Your credentials may be valid but lack permission for this operation.".to_string()),
+                    404 => Some("Check that the API endpoint and parameters are correct.".to_string()),
+                    429 => Some("You're making requests too quickly. Wait before trying again.".to_string()),
+                    500..=599 => Some("The API server is experiencing issues. Try again later.".to_string()),
+                    _ => None,
+                };
+                (
+                    "HttpError",
+                    format!("Request failed with status {status}: {body}"),
+                    context_hint,
+                    Some(json!({
+                        "status": status,
+                        "body": body,
+                        "api_name": api_name,
+                        "operation_id": operation_id,
+                        "security_schemes": security_schemes
+                    })),
+                )
+            },
             Self::InvalidCommand { context, reason } => (
                 "InvalidCommand",
                 format!("Invalid command for API '{context}': {reason}"),

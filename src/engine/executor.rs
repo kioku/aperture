@@ -30,6 +30,7 @@ use std::str::FromStr;
 ///
 /// # Panics
 /// Panics if JSON serialization of dry-run information fails (extremely unlikely)
+#[allow(clippy::too_many_lines)]
 pub async fn execute_request(
     spec: &CachedSpec,
     matches: &ArgMatches,
@@ -53,8 +54,13 @@ pub async fn execute_request(
     // Build the full URL with path parameters
     let url = build_url(&base_url, &operation.path, operation, matches)?;
 
-    // Create HTTP client
-    let client = reqwest::Client::new();
+    // Create HTTP client with timeout
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| Error::RequestFailed {
+            reason: format!("Failed to create HTTP client: {e}"),
+        })?;
 
     // Build headers including authentication and idempotency
     let mut headers = build_headers(spec, operation, matches)?;
@@ -122,13 +128,30 @@ pub async fn execute_request(
 
     // Check if request was successful
     if !status.is_success() {
-        return Err(Error::HttpError {
+        // Gather context for enhanced error reporting
+        let api_name = spec.name.clone();
+        let operation_id = Some(operation.operation_id.clone());
+        let security_schemes: Vec<String> = operation
+            .security_requirements
+            .iter()
+            .filter_map(|scheme_name| {
+                spec.security_schemes
+                    .get(scheme_name)
+                    .and_then(|scheme| scheme.aperture_secret.as_ref())
+                    .map(|aperture_secret| aperture_secret.name.clone())
+            })
+            .collect();
+
+        return Err(Error::HttpErrorWithContext {
             status: status.as_u16(),
             body: if response_text.is_empty() {
                 "(empty response)".to_string()
             } else {
                 response_text
             },
+            api_name,
+            operation_id,
+            security_schemes,
         });
     }
 

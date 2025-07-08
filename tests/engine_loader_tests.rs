@@ -7,6 +7,7 @@ use tempfile::TempDir;
 
 fn create_test_cached_spec() -> CachedSpec {
     CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![CachedCommand {
