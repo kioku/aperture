@@ -71,8 +71,6 @@ pub enum Error {
     #[error("Failed to read response: {reason}")]
     ResponseReadError { reason: String },
     #[error("Request failed with status {status}: {body}")]
-    HttpError { status: u16, body: String },
-    #[error("Request failed with status {status}: {body}")]
     HttpErrorWithContext {
         status: u16,
         body: String,
@@ -316,12 +314,6 @@ impl Error {
                 format!("Failed to read response: {reason}"),
                 None,
                 Some(json!({ "reason": reason })),
-            ),
-            Self::HttpError { status, body } => (
-                "HttpError",
-                format!("Request failed with status {status}: {body}"),
-                None,
-                Some(json!({ "status": status, "body": body })),
             ),
             Self::HttpErrorWithContext { status, body, api_name, operation_id, security_schemes } => {
                 let context_hint = match status {

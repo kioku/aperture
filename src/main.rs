@@ -476,9 +476,6 @@ fn print_error(error: &Error) {
         Error::RequestFailed { .. } | Error::ResponseReadError { .. } => {
             eprintln!("Request Failed\n{error}");
         }
-        Error::HttpError { status, .. } => {
-            eprintln!("HTTP Error ({status})\n{error}");
-        }
         Error::HttpErrorWithContext {
             status,
             body,
