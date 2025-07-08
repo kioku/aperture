@@ -33,8 +33,12 @@ async fn main() {
 async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
     match cli.command {
         Commands::Config { command } => match command {
-            ConfigCommands::Add { name, file, force } => {
-                manager.add_spec(&name, &file, force)?;
+            ConfigCommands::Add {
+                name,
+                file_or_url,
+                force,
+            } => {
+                manager.add_spec_auto(&name, &file_or_url, force).await?;
                 println!("Spec '{name}' added successfully.");
             }
             ConfigCommands::List {} => {

@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -99,14 +98,15 @@ pub enum ConfigCommands {
                       becomes the context for executing API operations.\n\n\
                       Supported formats: YAML (.yaml, .yml)\n\
                       Supported auth: API Key, Bearer Token\n\n\
-                      Example:\n  \
-                      aperture config add myapi ./openapi.yaml"
+                      Examples:\n  \
+                      aperture config add myapi ./openapi.yaml\n  \
+                      aperture config add myapi https://api.example.com/openapi.yaml"
     )]
     Add {
         /// Name to identify this API specification (used as context in 'aperture api')
         name: String,
-        /// Path to the `OpenAPI` 3.x specification file (YAML format)
-        file: PathBuf,
+        /// Path to the `OpenAPI` 3.x specification file (YAML format) or URL
+        file_or_url: String,
         /// Overwrite existing specification if it already exists
         #[arg(long, help = "Replace the specification if it already exists")]
         force: bool,

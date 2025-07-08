@@ -1,4 +1,4 @@
-use aperture_cli::config::manager::ConfigManager;
+use aperture_cli::config::manager::{is_url, ConfigManager};
 use aperture_cli::error::Error;
 use aperture_cli::fs::FileSystem;
 use std::collections::HashMap;
@@ -957,7 +957,6 @@ fn test_list_urls_shows_all_configs() {
 // --- Remote Spec Support Tests (Feature 2.1) ---
 // Tests are ignored until implementation is ready
 
-#[ignore = "implementation pending"]
 #[test]
 fn test_url_detection_http() {
     // Test that URLs starting with http:// are detected as URLs
@@ -965,7 +964,6 @@ fn test_url_detection_http() {
     assert!(is_url("http://localhost:8080/spec.yaml"));
 }
 
-#[ignore = "implementation pending"]
 #[test]
 fn test_url_detection_https() {
     // Test that URLs starting with https:// are detected as URLs
@@ -973,7 +971,6 @@ fn test_url_detection_https() {
     assert!(is_url("https://petstore.swagger.io/v2/swagger.json"));
 }
 
-#[ignore = "implementation pending"]
 #[test]
 fn test_url_detection_file_paths() {
     // Test that file paths are not detected as URLs
@@ -984,7 +981,6 @@ fn test_url_detection_file_paths() {
     assert!(!is_url("C:\\Windows\\spec.yaml"));
 }
 
-#[ignore = "implementation pending"]
 #[tokio::test]
 async fn test_remote_spec_fetching_success() {
     // Test successful remote spec fetching with valid OpenAPI
@@ -1009,20 +1005,26 @@ paths:
         .mount(&mock_server)
         .await;
 
-    let (_manager, _fs) = setup_manager();
-    let _spec_url = format!("{}/openapi.yaml", mock_server.uri());
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/openapi.yaml", mock_server.uri());
 
-    // Implementation pending: this test will verify URL-based spec fetching
-    panic!("Implementation pending: remote spec support")
+    // Test that adding a remote spec works
+    let result = manager
+        .add_spec_from_url("remote-api", &spec_url, false)
+        .await;
+    assert!(result.is_ok());
+
+    // Verify the spec was added to the list
+    let specs = manager.list_specs().unwrap();
+    assert!(specs.contains(&"remote-api".to_string()));
 }
 
-#[ignore = "implementation pending"]
 #[tokio::test]
 async fn test_remote_spec_fetching_timeout() {
     // Test that HTTP requests timeout after 30 seconds
     let mock_server = wiremock::MockServer::start().await;
 
-    // Mock a response that takes longer than timeout
+    // Mock a response that takes longer than timeout (35s > 30s timeout)
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/slow-spec.yaml"))
         .respond_with(
@@ -1035,14 +1037,24 @@ async fn test_remote_spec_fetching_timeout() {
         .mount(&mock_server)
         .await;
 
-    let (_manager, _fs) = setup_manager();
-    let _spec_url = format!("{}/slow-spec.yaml", mock_server.uri());
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/slow-spec.yaml", mock_server.uri());
 
-    // Implementation pending: this test will verify timeout handling
-    panic!("Implementation pending: remote spec timeout handling")
+    // Test that the request times out
+    let result = manager
+        .add_spec_from_url("slow-api", &spec_url, false)
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::RequestFailed { reason }) = result {
+        assert!(reason.contains("timed out"));
+    } else {
+        panic!(
+            "Expected RequestFailed error with timeout, got: {:?}",
+            result
+        );
+    }
 }
 
-#[ignore = "implementation pending"]
 #[tokio::test]
 async fn test_remote_spec_fetching_size_limit() {
     // Test that responses larger than 10MB are rejected
@@ -1057,24 +1069,48 @@ async fn test_remote_spec_fetching_size_limit() {
         .mount(&mock_server)
         .await;
 
-    let (_manager, _fs) = setup_manager();
-    let _spec_url = format!("{}/large-spec.yaml", mock_server.uri());
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/large-spec.yaml", mock_server.uri());
 
-    // Implementation pending: this test will verify size limit handling
-    panic!("Implementation pending: remote spec size limit handling")
+    // Test that large responses are rejected
+    let result = manager
+        .add_spec_from_url("large-api", &spec_url, false)
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::RequestFailed { reason }) = result {
+        assert!(reason.contains("too large"));
+    } else {
+        panic!(
+            "Expected RequestFailed error for size limit, got: {:?}",
+            result
+        );
+    }
 }
 
-#[ignore = "implementation pending"]
 #[tokio::test]
 async fn test_remote_spec_fetching_invalid_url() {
     // Test error handling for invalid URLs
-    let (_manager, _fs) = setup_manager();
+    let (manager, _fs) = setup_manager();
 
-    // Implementation pending: this test will verify network error handling
-    panic!("Implementation pending: remote spec network error handling")
+    // Test with a completely invalid URL that will fail to connect
+    let result = manager
+        .add_spec_from_url(
+            "invalid-api",
+            "https://nonexistent-domain-12345.com/spec.yaml",
+            false,
+        )
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::RequestFailed { reason }) = result {
+        assert!(reason.contains("Failed to connect") || reason.contains("Network error"));
+    } else {
+        panic!(
+            "Expected RequestFailed error for invalid URL, got: {:?}",
+            result
+        );
+    }
 }
 
-#[ignore = "implementation pending"]
 #[tokio::test]
 async fn test_remote_spec_fetching_http_error() {
     // Test error handling for HTTP errors (404, 500, etc.)
@@ -1086,14 +1122,24 @@ async fn test_remote_spec_fetching_http_error() {
         .mount(&mock_server)
         .await;
 
-    let (_manager, _fs) = setup_manager();
-    let _spec_url = format!("{}/not-found.yaml", mock_server.uri());
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/not-found.yaml", mock_server.uri());
 
-    // Implementation pending: this test will verify HTTP error handling
-    panic!("Implementation pending: remote spec HTTP error handling")
+    // Test that HTTP errors are handled properly
+    let result = manager
+        .add_spec_from_url("not-found-api", &spec_url, false)
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::RequestFailed { reason }) = result {
+        assert!(reason.contains("HTTP 404"));
+    } else {
+        panic!(
+            "Expected RequestFailed error for HTTP 404, got: {:?}",
+            result
+        );
+    }
 }
 
-#[ignore = "implementation pending"]
 #[tokio::test]
 async fn test_remote_spec_fetching_invalid_yaml() {
     // Test error handling for invalid YAML content
@@ -1107,14 +1153,18 @@ async fn test_remote_spec_fetching_invalid_yaml() {
         .mount(&mock_server)
         .await;
 
-    let (_manager, _fs) = setup_manager();
-    let _spec_url = format!("{}/invalid.yaml", mock_server.uri());
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/invalid.yaml", mock_server.uri());
 
-    // Implementation pending: this test will verify YAML parsing error handling
-    panic!("Implementation pending: remote spec YAML parsing error handling")
+    // Test that invalid YAML is rejected
+    let result = manager
+        .add_spec_from_url("invalid-yaml-api", &spec_url, false)
+        .await;
+    assert!(result.is_err());
+    // Should get a YAML parsing error
+    assert!(matches!(result, Err(Error::Yaml(_))));
 }
 
-#[ignore = "implementation pending"]
 #[tokio::test]
 async fn test_remote_spec_same_validation_as_local() {
     // Test that remote specs go through the same validation as local files
@@ -1151,15 +1201,22 @@ paths:
         .mount(&mock_server)
         .await;
 
-    let (_manager, _fs) = setup_manager();
-    let _spec_url = format!("{}/oauth2-spec.yaml", mock_server.uri());
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/oauth2-spec.yaml", mock_server.uri());
 
-    // Implementation pending: this test will verify same validation as local files
-    panic!("Implementation pending: remote spec validation consistency")
-}
-
-// Helper function for URL detection (will be implemented)
-#[ignore = "implementation pending"]
-fn is_url(input: &str) -> bool {
-    input.starts_with("http://") || input.starts_with("https://")
+    // Test that remote specs are validated the same as local files
+    let result = manager
+        .add_spec_from_url("oauth2-api", &spec_url, false)
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::Validation(msg)) = result {
+        // Check for any OAuth2-related validation error
+        assert!(
+            msg.contains("oauth2") || msg.contains("OAuth2"),
+            "Got validation message: {}",
+            msg
+        );
+    } else {
+        panic!("Expected Validation error for OAuth2, got: {:?}", result);
+    }
 }
