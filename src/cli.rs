@@ -1,4 +1,14 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum OutputFormat {
+    /// Output as JSON (default)
+    Json,
+    /// Output as YAML
+    Yaml,
+    /// Output as formatted table
+    Table,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -39,6 +49,16 @@ pub struct Cli {
         help = "Set idempotency key header"
     )]
     pub idempotency_key: Option<String>,
+
+    /// Output format for response data
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value = "json",
+        help = "Output format for response data"
+    )]
+    pub format: OutputFormat,
 
     #[command(subcommand)]
     pub command: Commands,

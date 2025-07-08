@@ -1,6 +1,7 @@
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
 };
+use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
 use clap::{Arg, Command};
 use std::collections::HashMap;
@@ -164,8 +165,16 @@ async fn test_bearer_token_authentication() {
 
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "123"]);
 
-    let result =
-        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+    )
+    .await;
     assert!(result.is_ok());
 
     // Clean up
@@ -199,8 +208,16 @@ async fn test_api_key_authentication() {
 
     let matches = command.get_matches_from(vec!["api", "data", "get-data"]);
 
-    let result =
-        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+    )
+    .await;
     assert!(result.is_ok());
 
     // Clean up
@@ -226,8 +243,16 @@ async fn test_missing_authentication_environment_variable() {
 
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "123"]);
 
-    let result =
-        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+    )
+    .await;
 
     match result {
         Ok(_) => panic!("Expected error but got success"),
@@ -280,8 +305,16 @@ async fn test_custom_headers_with_literal_values() {
         "X-Client-Version: 1.0.0",
     ]);
 
-    let result =
-        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+    )
+    .await;
     assert!(result.is_ok());
 }
 
@@ -332,8 +365,16 @@ async fn test_custom_headers_with_environment_variable_expansion() {
         &format!("X-Client-Version: ${{{}}}", client_version_env),
     ]);
 
-    let result =
-        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+    )
+    .await;
     assert!(result.is_ok());
 
     // Clean up
@@ -392,8 +433,16 @@ async fn test_authentication_and_custom_headers_combined() {
         "X-Custom: custom-value",
     ]);
 
-    let result =
-        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+    )
+    .await;
     assert!(result.is_ok());
 
     // Clean up
@@ -425,8 +474,16 @@ async fn test_invalid_custom_header_format() {
         "InvalidHeaderWithoutColon",
     ]);
 
-    let result =
-        execute_request(&spec, &matches, Some("http://localhost"), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some("http://localhost"),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+    )
+    .await;
 
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
@@ -458,8 +515,16 @@ async fn test_empty_header_name() {
         ": value-without-name",
     ]);
 
-    let result =
-        execute_request(&spec, &matches, Some("http://localhost"), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some("http://localhost"),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+    )
+    .await;
 
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();

@@ -96,7 +96,6 @@ paths:
         .args(&["api", "test-api", "users", "get-user-by-id", "123"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Executing GET"))
         .stdout(predicate::str::contains("\"id\": \"123\""))
         .stdout(predicate::str::contains("\"name\": \"John Doe\""));
 }
@@ -970,4 +969,434 @@ paths:
     let security_schemes = error["details"]["security_schemes"].as_array().unwrap();
     assert!(security_schemes.contains(&serde_json::Value::String("TEST_API_KEY".to_string())));
     assert!(security_schemes.contains(&serde_json::Value::String("BEARER_TOKEN".to_string())));
+}
+
+// Phase 2.2: Advanced Output Formatting Tests (ignored until implementation)
+
+#[tokio::test]
+async fn test_output_format_json() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a spec with a response that has structured data
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      tags:
+        - users
+      operationId: listUsers
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    email:
+                      type: string
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+
+    // Mock successful response with JSON data
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 1, "name": "Alice", "email": "alice@example.com"},
+            {"id": 2, "name": "Bob", "email": "bob@example.com"}
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    // Test --format json (default behavior should be preserved)
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&["api", "test-api", "--format", "json", "users", "list-users"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should be valid JSON
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(parsed.is_array());
+    assert_eq!(parsed.as_array().unwrap().len(), 2);
+    assert_eq!(parsed[0]["name"].as_str().unwrap(), "Alice");
+}
+
+#[tokio::test]
+async fn test_output_format_yaml() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a spec with a response that has structured data
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      tags:
+        - users
+      operationId: listUsers
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        name:
+                          type: string
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+
+    // Mock successful response with JSON data
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "users": [
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"}
+            ]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Test --format yaml
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&["api", "test-api", "--format", "yaml", "users", "list-users"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should be valid YAML
+    let parsed: serde_yaml::Value = serde_yaml::from_str(&stdout).unwrap();
+    assert!(parsed["users"].is_sequence());
+    let users = parsed["users"].as_sequence().unwrap();
+    assert_eq!(users.len(), 2);
+    assert_eq!(users[0]["name"].as_str().unwrap(), "Alice");
+
+    // Should contain YAML syntax markers
+    assert!(stdout.contains("users:"));
+    assert!(stdout.contains("- id: 1"));
+    assert!(stdout.contains("  name: Alice"));
+}
+
+#[tokio::test]
+async fn test_output_format_table() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a spec with a response that has structured data
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      tags:
+        - users
+      operationId: listUsers
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    email:
+                      type: string
+                    active:
+                      type: boolean
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+
+    // Mock successful response with JSON data suitable for table format
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 1, "name": "Alice", "email": "alice@example.com", "active": true},
+            {"id": 2, "name": "Bob", "email": "bob@example.com", "active": false},
+            {"id": 3, "name": "Charlie", "email": "charlie@example.com", "active": true}
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    // Test --format table
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--format",
+            "table",
+            "users",
+            "list-users",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should contain table structure
+    assert!(stdout.contains("|")); // Table borders
+    assert!(stdout.contains("id")); // Header columns
+    assert!(stdout.contains("name"));
+    assert!(stdout.contains("email"));
+    assert!(stdout.contains("active"));
+
+    // Should contain data rows
+    assert!(stdout.contains("Alice"));
+    assert!(stdout.contains("Bob"));
+    assert!(stdout.contains("Charlie"));
+    assert!(stdout.contains("alice@example.com"));
+
+    // Should have table formatting with proper alignment
+    assert!(stdout.lines().count() >= 5); // Header, separator, at least 3 data rows
+}
+
+#[tokio::test]
+async fn test_output_format_table_with_nested_objects() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a spec with nested object response
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      tags:
+        - users
+      operationId: listUsers
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    name:
+                      type: string
+                    profile:
+                      type: object
+                      properties:
+                        age:
+                          type: integer
+                        city:
+                          type: string
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+
+    // Mock response with nested objects
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 1, "name": "Alice", "profile": {"age": 30, "city": "New York"}},
+            {"id": 2, "name": "Bob", "profile": {"age": 25, "city": "San Francisco"}}
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    // Test --format table with nested objects (should flatten or stringify)
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--format",
+            "table",
+            "users",
+            "list-users",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should contain table structure
+    assert!(stdout.contains("|"));
+    assert!(stdout.contains("id"));
+    assert!(stdout.contains("name"));
+    assert!(stdout.contains("profile"));
+
+    // Should contain the flattened or stringified profile data
+    assert!(stdout.contains("Alice"));
+    assert!(stdout.contains("Bob"));
+    // Profile should be either flattened (profile.age, profile.city) or stringified
+    assert!(stdout.contains("30") || stdout.contains("age"));
+}
+
+#[tokio::test]
+async fn test_output_format_invalid() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a minimal spec
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      tags:
+        - users
+      operationId: listUsers
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Test invalid format
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&[
+            "api",
+            "test-api",
+            "--format",
+            "invalid",
+            "users",
+            "list-users",
+        ])
+        .output()
+        .unwrap();
+
+    // Should fail with helpful error message
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid") || stderr.contains("format"));
+}
+
+#[test]
+fn test_output_format_help_text() {
+    // Test that --help shows the format option
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .args(&["api", "test", "--help"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--format") || stdout.contains("format"));
+    assert!(stdout.contains("json") || stdout.contains("yaml") || stdout.contains("table"));
 }

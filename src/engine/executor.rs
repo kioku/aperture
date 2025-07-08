@@ -1,4 +1,5 @@
 use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
+use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
@@ -20,6 +21,7 @@ use std::str::FromStr;
 /// * `dry_run` - If true, show request details without executing
 /// * `idempotency_key` - Optional idempotency key for safe retries
 /// * `global_config` - Optional global configuration for URL resolution
+/// * `output_format` - Format for response output (json, yaml, table)
 ///
 /// # Returns
 /// * `Ok(())` - Request executed successfully or dry-run completed
@@ -38,6 +40,7 @@ pub async fn execute_request(
     dry_run: bool,
     idempotency_key: Option<&str>,
     global_config: Option<&GlobalConfig>,
+    output_format: &OutputFormat,
 ) -> Result<(), Error> {
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
@@ -113,7 +116,6 @@ pub async fn execute_request(
     }
 
     // Execute request
-    println!("Executing {method} {url}");
     let response = request.send().await.map_err(|e| Error::RequestFailed {
         reason: e.to_string(),
     })?;
@@ -155,18 +157,9 @@ pub async fn execute_request(
         });
     }
 
-    // Print response
+    // Print response in the requested format
     if !response_text.is_empty() {
-        // Try to pretty-print JSON
-        if let Ok(json_value) = serde_json::from_str::<Value>(&response_text) {
-            if let Ok(pretty) = serde_json::to_string_pretty(&json_value) {
-                println!("{pretty}");
-            } else {
-                println!("{response_text}");
-            }
-        } else {
-            println!("{response_text}");
-        }
+        print_formatted_response(&response_text, output_format);
     }
 
     Ok(())
@@ -451,4 +444,174 @@ fn to_kebab_case(s: &str) -> String {
     }
 
     result
+}
+
+/// Prints the response text in the specified format
+fn print_formatted_response(response_text: &str, output_format: &OutputFormat) {
+    match output_format {
+        OutputFormat::Json => {
+            // Try to pretty-print JSON (default behavior)
+            if let Ok(json_value) = serde_json::from_str::<Value>(response_text) {
+                if let Ok(pretty) = serde_json::to_string_pretty(&json_value) {
+                    println!("{pretty}");
+                } else {
+                    println!("{response_text}");
+                }
+            } else {
+                println!("{response_text}");
+            }
+        }
+        OutputFormat::Yaml => {
+            // Convert JSON to YAML
+            if let Ok(json_value) = serde_json::from_str::<Value>(response_text) {
+                match serde_yaml::to_string(&json_value) {
+                    Ok(yaml_output) => println!("{yaml_output}"),
+                    Err(_) => println!("{response_text}"), // Fallback to raw text
+                }
+            } else {
+                // If not JSON, output as-is
+                println!("{response_text}");
+            }
+        }
+        OutputFormat::Table => {
+            // Convert JSON to table format
+            if let Ok(json_value) = serde_json::from_str::<Value>(response_text) {
+                print_as_table(&json_value);
+            } else {
+                // If not JSON, output as-is
+                println!("{response_text}");
+            }
+        }
+    }
+}
+
+// Define table structures at module level to avoid clippy::items_after_statements
+#[derive(tabled::Tabled)]
+struct TableRow {
+    #[tabled(rename = "Key")]
+    key: String,
+    #[tabled(rename = "Value")]
+    value: String,
+}
+
+#[derive(tabled::Tabled)]
+struct KeyValue {
+    #[tabled(rename = "Key")]
+    key: String,
+    #[tabled(rename = "Value")]
+    value: String,
+}
+
+/// Prints JSON data as a formatted table
+#[allow(clippy::unnecessary_wraps)]
+fn print_as_table(json_value: &Value) {
+    use std::collections::BTreeMap;
+    use tabled::Table;
+
+    match json_value {
+        Value::Array(items) => {
+            if items.is_empty() {
+                println!("(empty array)");
+                return;
+            }
+
+            // Try to create a table from array of objects
+            if let Some(Value::Object(_)) = items.first() {
+                // Create table for array of objects
+                let mut table_data: Vec<BTreeMap<String, String>> = Vec::new();
+
+                for item in items {
+                    if let Value::Object(obj) = item {
+                        let mut row = BTreeMap::new();
+                        for (key, value) in obj {
+                            row.insert(key.clone(), format_value_for_table(value));
+                        }
+                        table_data.push(row);
+                    }
+                }
+
+                if !table_data.is_empty() {
+                    // For now, use a simple key-value representation
+                    // In the future, we could implement a more sophisticated table structure
+                    let mut rows = Vec::new();
+                    for (i, row) in table_data.iter().enumerate() {
+                        if i > 0 {
+                            rows.push(TableRow {
+                                key: "---".to_string(),
+                                value: "---".to_string(),
+                            });
+                        }
+                        for (key, value) in row {
+                            rows.push(TableRow {
+                                key: key.clone(),
+                                value: value.clone(),
+                            });
+                        }
+                    }
+
+                    let table = Table::new(&rows);
+                    println!("{table}");
+                    return;
+                }
+            }
+
+            // Fallback: print array as numbered list
+            for (i, item) in items.iter().enumerate() {
+                println!("{}: {}", i, format_value_for_table(item));
+            }
+        }
+        Value::Object(obj) => {
+            // Create a simple key-value table for objects
+            let rows: Vec<KeyValue> = obj
+                .iter()
+                .map(|(key, value)| KeyValue {
+                    key: key.clone(),
+                    value: format_value_for_table(value),
+                })
+                .collect();
+
+            let table = Table::new(&rows);
+            println!("{table}");
+        }
+        _ => {
+            // For primitive values, just print them
+            println!("{}", format_value_for_table(json_value));
+        }
+    }
+}
+
+/// Formats a JSON value for display in a table cell
+fn format_value_for_table(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Array(arr) => {
+            if arr.len() <= 3 {
+                format!(
+                    "[{}]",
+                    arr.iter()
+                        .map(format_value_for_table)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                format!("[{} items]", arr.len())
+            }
+        }
+        Value::Object(obj) => {
+            if obj.len() <= 2 {
+                format!(
+                    "{{{}}}",
+                    obj.iter()
+                        .map(|(k, v)| format!("{}: {}", k, format_value_for_table(v)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                format!("{{object with {} fields}}", obj.len())
+            }
+        }
+    }
 }

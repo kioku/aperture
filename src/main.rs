@@ -339,6 +339,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         cli.dry_run,
         cli.idempotency_key.as_deref(),
         global_config.as_ref(),
+        &cli.format,
     )
     .await
     .map_err(|e| match &e {
