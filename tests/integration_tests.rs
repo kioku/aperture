@@ -690,3 +690,284 @@ paths:
     let headers = &dry_run_info["headers"];
     assert!(headers["idempotency-key"].as_str().unwrap() == "my-unique-key-123");
 }
+
+#[test]
+fn test_list_commands_feature() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a spec with multiple tags and operations
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      x-aperture-secret:
+        source: env
+        name: TEST_KEY
+paths:
+  /users:
+    get:
+      tags:
+        - users
+      operationId: listUsers
+      summary: List all users
+      responses:
+        '200':
+          description: Success
+    post:
+      tags:
+        - users
+      operationId: createUser
+      summary: Create a new user
+      responses:
+        '201':
+          description: Created
+  /posts/{id}:
+    get:
+      tags:
+        - posts
+      operationId: getPostById
+      summary: Get post by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check endpoint
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Test list-commands
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["list-commands", "test-api"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Check that commands are grouped by tags
+    assert!(stdout.contains("users"));
+    assert!(stdout.contains("posts"));
+    assert!(stdout.contains("default")); // For healthCheck without tag
+
+    // Check that operations are listed
+    assert!(stdout.contains("list-users"));
+    assert!(stdout.contains("create-user"));
+    assert!(stdout.contains("get-post-by-id"));
+    assert!(stdout.contains("health-check"));
+
+    // Check that HTTP methods are shown
+    assert!(stdout.contains("GET"));
+    assert!(stdout.contains("POST"));
+}
+
+#[test]
+fn test_config_reinit_feature() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a minimal spec
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      x-aperture-secret:
+        source: env
+        name: TEST_KEY
+paths:
+  /users:
+    get:
+      tags:
+        - users
+      operationId: listUsers
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Test reinit for specific spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "reinit", "test-api"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Successfully reinitialized cache for 'test-api'",
+        ));
+
+    // Add another spec
+    let spec_file2 = temp_dir.path().join("spec2.yaml");
+    fs::write(
+        &spec_file2,
+        "openapi: 3.0.0
+info:
+  title: Test API 2
+  version: 1.0.0
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api-2", spec_file2.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Test reinit --all
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "reinit", "--all"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Reinitialization complete"));
+}
+
+#[tokio::test]
+async fn test_context_aware_error_messages() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a spec with authentication
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      x-aperture-secret:
+        source: env
+        name: TEST_API_KEY
+    bearerAuth:
+      type: http
+      scheme: bearer
+      x-aperture-secret:
+        source: env
+        name: BEARER_TOKEN
+paths:
+  /users:
+    get:
+      tags:
+        - users
+      operationId: listUsers
+      security:
+        - apiKey: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+
+    // Mock 401 response
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "error": "Unauthorized"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Test that 401 error shows environment variable names (set auth to get past SecretNotSet)
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .env("TEST_API_KEY", "test-key")
+        .env("BEARER_TOKEN", "test-token")
+        .args(&["--json-errors", "api", "test-api", "users", "list-users"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Parse the JSON error output
+    let error: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(error["error_type"].as_str().unwrap(), "HttpError");
+    assert_eq!(error["details"]["status"], 401);
+    assert_eq!(error["details"]["api_name"], "test-api");
+    assert_eq!(error["details"]["operation_id"], "listUsers");
+
+    // Check that environment variable names are included in security_schemes
+    let security_schemes = error["details"]["security_schemes"].as_array().unwrap();
+    assert!(security_schemes.contains(&serde_json::Value::String("TEST_API_KEY".to_string())));
+    assert!(security_schemes.contains(&serde_json::Value::String("BEARER_TOKEN".to_string())));
+}

@@ -30,6 +30,7 @@ use std::str::FromStr;
 ///
 /// # Panics
 /// Panics if JSON serialization of dry-run information fails (extremely unlikely)
+#[allow(clippy::too_many_lines)]
 pub async fn execute_request(
     spec: &CachedSpec,
     matches: &ArgMatches,
@@ -53,8 +54,13 @@ pub async fn execute_request(
     // Build the full URL with path parameters
     let url = build_url(&base_url, &operation.path, operation, matches)?;
 
-    // Create HTTP client
-    let client = reqwest::Client::new();
+    // Create HTTP client with timeout
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| Error::RequestFailed {
+            reason: format!("Failed to create HTTP client: {e}"),
+        })?;
 
     // Build headers including authentication and idempotency
     let mut headers = build_headers(spec, operation, matches)?;
@@ -131,7 +137,8 @@ pub async fn execute_request(
             .filter_map(|scheme_name| {
                 spec.security_schemes
                     .get(scheme_name)
-                    .map(|scheme| scheme.name.clone())
+                    .and_then(|scheme| scheme.aperture_secret.as_ref())
+                    .map(|aperture_secret| aperture_secret.name.clone())
             })
             .collect();
 
