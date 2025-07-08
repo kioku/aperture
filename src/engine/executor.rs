@@ -122,13 +122,29 @@ pub async fn execute_request(
 
     // Check if request was successful
     if !status.is_success() {
-        return Err(Error::HttpError {
+        // Gather context for enhanced error reporting
+        let api_name = spec.name.clone();
+        let operation_id = Some(operation.operation_id.clone());
+        let security_schemes: Vec<String> = operation
+            .security_requirements
+            .iter()
+            .filter_map(|scheme_name| {
+                spec.security_schemes
+                    .get(scheme_name)
+                    .map(|scheme| scheme.name.clone())
+            })
+            .collect();
+
+        return Err(Error::HttpErrorWithContext {
             status: status.as_u16(),
             body: if response_text.is_empty() {
                 "(empty response)".to_string()
             } else {
                 response_text
             },
+            api_name,
+            operation_id,
+            security_schemes,
         });
     }
 

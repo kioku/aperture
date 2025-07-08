@@ -327,6 +327,77 @@ fn print_error(error: &Error) {
         Error::HttpError { status, .. } => {
             eprintln!("HTTP Error ({status})\n{error}");
         }
+        Error::HttpErrorWithContext {
+            status,
+            body,
+            api_name,
+            operation_id,
+            security_schemes,
+        } => match status {
+            401 => {
+                eprintln!("Authentication Error (401) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+
+                if security_schemes.is_empty() {
+                    eprintln!("Hint: Check your API credentials and authentication configuration.");
+                } else {
+                    eprintln!("This operation requires authentication. Check these environment variables:");
+                    for scheme_name in security_schemes {
+                        eprintln!("  • Authentication scheme '{scheme_name}' - verify your environment variable is set");
+                    }
+                    eprintln!("\nExample: export YOUR_API_KEY=<your-secret>");
+                }
+            }
+            403 => {
+                eprintln!("Authorization Error (403) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+                eprintln!(
+                    "Hint: Your credentials may be valid but lack permission for this operation."
+                );
+            }
+            404 => {
+                eprintln!("Resource Not Found (404) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+                eprintln!("Hint: Check that the API endpoint and parameters are correct.");
+            }
+            429 => {
+                eprintln!("Rate Limited (429) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+                eprintln!("Hint: You're making requests too quickly. Wait before trying again.");
+            }
+            500..=599 => {
+                eprintln!("Server Error ({status}) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+                eprintln!();
+                eprintln!("Hint: The API server is experiencing issues. Try again later.");
+            }
+            _ => {
+                eprintln!("HTTP Error ({status}) - API: {api_name}");
+                if let Some(op_id) = operation_id {
+                    eprintln!("Operation: {op_id}");
+                }
+                eprintln!("Response: {body}");
+            }
+        },
         Error::InvalidCommand { context, .. } => {
             eprintln!("Invalid Command\n{error}\n\nHint: Use 'aperture api {context} --help' to see available commands.");
         }

@@ -66,6 +66,14 @@ pub enum Error {
     ResponseReadError { reason: String },
     #[error("Request failed with status {status}: {body}")]
     HttpError { status: u16, body: String },
+    #[error("Request failed with status {status}: {body}")]
+    HttpErrorWithContext {
+        status: u16,
+        body: String,
+        api_name: String,
+        operation_id: Option<String>,
+        security_schemes: Vec<String>,
+    },
     #[error("Invalid command for API '{context}': {reason}")]
     InvalidCommand { context: String, reason: String },
     #[error("Could not find operation from command path")]
@@ -303,6 +311,37 @@ impl Error {
                 None,
                 Some(json!({ "status": status, "body": body })),
             ),
+            Self::HttpErrorWithContext { status, body, api_name, operation_id, security_schemes } => {
+                let context_hint = match status {
+                    401 => {
+                        if security_schemes.is_empty() {
+                            Some("Check your API credentials and authentication configuration.".to_string())
+                        } else {
+                            let env_vars: Vec<String> = security_schemes.iter()
+                                .map(|scheme| format!("Check environment variable for '{scheme}' authentication"))
+                                .collect();
+                            Some(env_vars.join("; "))
+                        }
+                    },
+                    403 => Some("Your credentials may be valid but lack permission for this operation.".to_string()),
+                    404 => Some("Check that the API endpoint and parameters are correct.".to_string()),
+                    429 => Some("You're making requests too quickly. Wait before trying again.".to_string()),
+                    500..=599 => Some("The API server is experiencing issues. Try again later.".to_string()),
+                    _ => None,
+                };
+                (
+                    "HttpError",
+                    format!("Request failed with status {status}: {body}"),
+                    context_hint,
+                    Some(json!({
+                        "status": status,
+                        "body": body,
+                        "api_name": api_name,
+                        "operation_id": operation_id,
+                        "security_schemes": security_schemes
+                    })),
+                )
+            },
             Self::InvalidCommand { context, reason } => (
                 "InvalidCommand",
                 format!("Invalid command for API '{context}': {reason}"),
