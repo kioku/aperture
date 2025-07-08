@@ -19,6 +19,33 @@ pub struct CachedSpec {
 /// Current cache format version - increment when making breaking changes to `CachedSpec`
 pub const CACHE_FORMAT_VERSION: u32 = 1;
 
+/// Global cache metadata for all cached specifications
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GlobalCacheMetadata {
+    /// Cache format version for all specs
+    pub cache_format_version: u32,
+    /// Individual spec metadata
+    pub specs: std::collections::HashMap<String, SpecMetadata>,
+}
+
+/// Metadata for a single cached specification
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
+pub struct SpecMetadata {
+    /// When this spec cache was created/updated
+    pub updated_at: String, // Using String for simplicity in serialization
+    /// Size of the cached spec file in bytes
+    pub file_size: u64,
+}
+
+impl Default for GlobalCacheMetadata {
+    fn default() -> Self {
+        Self {
+            cache_format_version: CACHE_FORMAT_VERSION,
+            specs: std::collections::HashMap::new(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedCommand {
     pub name: String,

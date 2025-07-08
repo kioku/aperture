@@ -1,3 +1,4 @@
+use crate::cache::metadata::CacheMetadataManager;
 use crate::config::models::{ApiConfig, GlobalConfig};
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::engine::loader;
@@ -82,6 +83,11 @@ impl<F: FileSystem> ConfigManager<F> {
             })?;
         self.fs.write_all(&cache_path, &cached_data)?;
 
+        // Update cache metadata for optimized version checking
+        let cache_dir = self.config_dir.join(".cache");
+        let metadata_manager = CacheMetadataManager::new(&self.fs);
+        metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
+
         Ok(())
     }
 
@@ -131,6 +137,12 @@ impl<F: FileSystem> ConfigManager<F> {
         if self.fs.exists(&cache_path) {
             self.fs.remove_file(&cache_path)?;
         }
+
+        // Remove from cache metadata
+        let cache_dir = self.config_dir.join(".cache");
+        let metadata_manager = CacheMetadataManager::new(&self.fs);
+        // Ignore errors if metadata removal fails - the important files are already removed
+        let _ = metadata_manager.remove_spec_metadata(&cache_dir, name);
 
         Ok(())
     }
