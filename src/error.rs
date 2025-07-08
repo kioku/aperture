@@ -27,6 +27,12 @@ pub enum Error {
     CachedSpecNotFound { name: String },
     #[error("Failed to deserialize cached spec '{name}': {reason}. The cache may be corrupted")]
     CachedSpecCorrupted { name: String, reason: String },
+    #[error("Cache format version mismatch for '{name}': found v{found}, expected v{expected}")]
+    CacheVersionMismatch {
+        name: String,
+        found: u32,
+        expected: u32,
+    },
     #[error(
         "Environment variable '{env_var}' required for authentication '{scheme_name}' is not set"
     )]
@@ -208,6 +214,12 @@ impl Error {
                 format!("Failed to deserialize cached spec '{name}': {reason}. The cache may be corrupted"),
                 Some("Try removing and re-adding the specification.".to_string()),
                 Some(json!({ "spec_name": name, "corruption_reason": reason })),
+            ),
+            Self::CacheVersionMismatch { name, found, expected } => (
+                "CacheVersionMismatch",
+                format!("Cache format version mismatch for '{name}': found v{found}, expected v{expected}"),
+                Some("Run 'aperture config reinit' to regenerate the cache.".to_string()),
+                Some(json!({ "spec_name": name, "found_version": found, "expected_version": expected })),
             ),
             Self::SecretNotSet { scheme_name, env_var } => (
                 "SecretNotSet",

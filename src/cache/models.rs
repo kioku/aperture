@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedSpec {
+    /// Cache format version to detect incompatible changes
+    pub cache_format_version: u32,
     pub name: String,
     pub version: String,
     pub commands: Vec<CachedCommand>,
@@ -13,6 +15,9 @@ pub struct CachedSpec {
     /// Security schemes defined in the `OpenAPI` spec with `x-aperture-secret` mappings
     pub security_schemes: HashMap<String, CachedSecurityScheme>,
 }
+
+/// Current cache format version - increment when making breaking changes to `CachedSpec`
+pub const CACHE_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedCommand {

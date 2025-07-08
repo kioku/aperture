@@ -1,4 +1,4 @@
-use crate::cache::models::CachedSpec;
+use crate::cache::models::{CachedSpec, CACHE_FORMAT_VERSION};
 use crate::error::Error;
 use std::fs;
 use std::path::Path;
@@ -32,8 +32,20 @@ pub fn load_cached_spec<P: AsRef<Path>>(
     let cache_data = fs::read(&cache_path).map_err(Error::Io)?;
 
     // Deserialize using bincode
-    bincode::deserialize(&cache_data).map_err(|e| Error::CachedSpecCorrupted {
-        name: spec_name.to_string(),
-        reason: e.to_string(),
-    })
+    let cached_spec: CachedSpec =
+        bincode::deserialize(&cache_data).map_err(|e| Error::CachedSpecCorrupted {
+            name: spec_name.to_string(),
+            reason: e.to_string(),
+        })?;
+
+    // Check cache format version
+    if cached_spec.cache_format_version != CACHE_FORMAT_VERSION {
+        return Err(Error::CacheVersionMismatch {
+            name: spec_name.to_string(),
+            found: cached_spec.cache_format_version,
+            expected: CACHE_FORMAT_VERSION,
+        });
+    }
+
+    Ok(cached_spec)
 }

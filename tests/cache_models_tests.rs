@@ -7,6 +7,7 @@ use test_helpers::*;
 #[test]
 fn test_cached_spec_serialization_deserialization() {
     let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![

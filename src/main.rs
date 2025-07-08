@@ -108,6 +108,16 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                     }
                 }
             }
+            ConfigCommands::Reinit { context, all } => {
+                if all {
+                    reinit_all_specs(manager)?;
+                } else if let Some(spec_name) = context {
+                    reinit_spec(manager, &spec_name)?;
+                } else {
+                    eprintln!("Error: Either specify a spec name or use --all flag");
+                    std::process::exit(1);
+                }
+            }
         },
         Commands::ListCommands { ref context } => {
             list_commands(context)?;
@@ -203,6 +213,60 @@ fn to_kebab_case(s: &str) -> String {
     }
 
     result
+}
+
+fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result<(), Error> {
+    println!("Reinitializing cached specification: {spec_name}");
+
+    // Check if the spec exists
+    let specs = manager.list_specs()?;
+    if !specs.contains(&spec_name.to_string()) {
+        return Err(Error::SpecNotFound {
+            name: spec_name.to_string(),
+        });
+    }
+
+    // Get the config directory
+    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+        PathBuf::from(dir)
+    } else {
+        get_config_dir()?
+    };
+
+    // Get the original spec file path
+    let specs_dir = config_dir.join("specs");
+    let spec_path = specs_dir.join(format!("{spec_name}.yaml"));
+
+    // Re-add the spec with force to regenerate the cache
+    manager.add_spec(spec_name, &spec_path, true)?;
+
+    println!("Successfully reinitialized cache for '{spec_name}'");
+    Ok(())
+}
+
+fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
+    let specs = manager.list_specs()?;
+
+    if specs.is_empty() {
+        println!("No API specifications found to reinitialize.");
+        return Ok(());
+    }
+
+    println!("Reinitializing {} cached specification(s)...", specs.len());
+
+    for spec_name in &specs {
+        match reinit_spec(manager, spec_name) {
+            Ok(()) => {
+                println!("  ✓ {spec_name}");
+            }
+            Err(e) => {
+                eprintln!("  ✗ {spec_name}: {e}");
+            }
+        }
+    }
+
+    println!("Reinitialization complete.");
+    Ok(())
 }
 
 async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
@@ -367,6 +431,9 @@ fn print_error(error: &Error) {
         }
         Error::CachedSpecCorrupted { .. } => {
             eprintln!("Cached Specification Corrupted\n{error}\n\nHint: Try removing and re-adding the specification.");
+        }
+        Error::CacheVersionMismatch { name, .. } => {
+            eprintln!("Cache Version Mismatch\n{error}\n\nHint: Run 'aperture config reinit {name}' to regenerate the cache with the current format.");
         }
         Error::SecretNotSet { env_var, .. } => {
             eprintln!("Authentication Secret Not Set\n{error}\n\nHint: Set the environment variable: export {env_var}=<your-secret>");

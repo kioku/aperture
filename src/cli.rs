@@ -182,4 +182,21 @@ pub enum ConfigCommands {
                       at a glance."
     )]
     ListUrls {},
+    /// Re-initialize cached specifications
+    #[command(
+        long_about = "Regenerate binary cache files for API specifications.\n\n\
+                      This is useful when cache files become corrupted or when upgrading\n\
+                      between versions of Aperture that have incompatible cache formats.\n\
+                      You can reinitialize all specs or target a specific one.\n\n\
+                      Examples:\n  \
+                      aperture config reinit --all     # Reinitialize all specs\n  \
+                      aperture config reinit myapi     # Reinitialize specific spec"
+    )]
+    Reinit {
+        /// Name of the API specification to reinitialize (omit for --all)
+        context: Option<String>,
+        /// Reinitialize all cached specifications
+        #[arg(long, conflicts_with = "context", help = "Reinitialize all specs")]
+        all: bool,
+    },
 }

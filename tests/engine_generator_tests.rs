@@ -90,6 +90,7 @@ macro_rules! cached_command {
 
 fn create_test_spec() -> CachedSpec {
     CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![
@@ -167,6 +168,7 @@ fn test_generate_command_basic_functionality() {
 #[test]
 fn test_kebab_case_conversion() {
     let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![{
@@ -223,6 +225,7 @@ fn test_parameter_generation() {
 #[test]
 fn test_fallback_to_default_tag() {
     let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![{
@@ -253,6 +256,7 @@ fn test_fallback_to_default_tag() {
 #[test]
 fn test_fallback_to_http_method() {
     let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![{

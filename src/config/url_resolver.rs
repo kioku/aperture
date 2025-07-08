@@ -106,6 +106,7 @@ mod tests {
 
     fn create_test_spec(name: &str, base_url: Option<&str>) -> CachedSpec {
         CachedSpec {
+            cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
             name: name.to_string(),
             version: "1.0.0".to_string(),
             commands: vec![],

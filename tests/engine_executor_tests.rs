@@ -46,6 +46,7 @@ macro_rules! cached_command {
 
 fn create_test_spec() -> CachedSpec {
     CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![{
@@ -101,6 +102,7 @@ async fn test_execute_request_with_query_params() {
     let mock_server = MockServer::start().await;
 
     let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![{
@@ -186,6 +188,7 @@ async fn test_execute_request_with_global_config_base_url() {
 
     // Create spec WITHOUT base_url (this should force use of global config)
     let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "test-api".to_string(),
         version: "1.0.0".to_string(),
         commands: vec![{
