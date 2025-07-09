@@ -69,6 +69,34 @@ pub struct Cli {
     )]
     pub jq: Option<String>,
 
+    /// Execute operations from a batch file
+    #[arg(
+        long,
+        global = true,
+        value_name = "PATH",
+        help = "Path to batch file (JSON or YAML) containing multiple operations"
+    )]
+    pub batch_file: Option<String>,
+
+    /// Maximum concurrent requests for batch operations
+    #[arg(
+        long,
+        global = true,
+        value_name = "N",
+        default_value = "5",
+        help = "Maximum number of concurrent requests for batch operations"
+    )]
+    pub batch_concurrency: usize,
+
+    /// Rate limit for batch operations (requests per second)
+    #[arg(
+        long,
+        global = true,
+        value_name = "N",
+        help = "Rate limit for batch operations (requests per second)"
+    )]
+    pub batch_rate_limit: Option<u32>,
+
     #[command(subcommand)]
     pub command: Commands,
 }

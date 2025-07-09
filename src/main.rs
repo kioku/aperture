@@ -1,6 +1,9 @@
 use aperture_cli::agent;
+use aperture_cli::batch::{BatchConfig, BatchProcessor};
+use aperture_cli::cache::models::CachedSpec;
 use aperture_cli::cli::{Cli, Commands, ConfigCommands};
 use aperture_cli::config::manager::{get_config_dir, ConfigManager};
+use aperture_cli::config::models::GlobalConfig;
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
@@ -320,6 +323,18 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         return Ok(());
     }
 
+    // Handle --batch-file flag - execute batch operations and exit
+    if let Some(batch_file_path) = &cli.batch_file {
+        return execute_batch_operations(
+            context,
+            batch_file_path,
+            &spec,
+            global_config.as_ref(),
+            cli,
+        )
+        .await;
+    }
+
     // Generate the dynamic command tree
     let command = generator::generate_command_tree(&spec);
 
@@ -383,6 +398,92 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         }
         _ => e,
     })?;
+
+    Ok(())
+}
+
+/// Executes batch operations from a batch file
+async fn execute_batch_operations(
+    _context: &str,
+    batch_file_path: &str,
+    spec: &CachedSpec,
+    global_config: Option<&GlobalConfig>,
+    cli: &Cli,
+) -> Result<(), Error> {
+    // Parse the batch file
+    let batch_file =
+        BatchProcessor::parse_batch_file(std::path::Path::new(batch_file_path)).await?;
+
+    // Create batch configuration from CLI options
+    let batch_config = BatchConfig {
+        max_concurrency: cli.batch_concurrency,
+        rate_limit: cli.batch_rate_limit,
+        continue_on_error: true, // Default to continuing on error for batch operations
+        show_progress: true,     // Always show progress for batch operations
+    };
+
+    // Create batch processor
+    let processor = BatchProcessor::new(batch_config);
+
+    // Execute the batch
+    let result = processor
+        .execute_batch(
+            spec,
+            batch_file,
+            global_config,
+            None, // base_url (None = use BaseUrlResolver)
+            cli.dry_run,
+            &cli.format,
+            cli.jq.as_deref(),
+        )
+        .await?;
+
+    // Print batch results summary
+    if cli.json_errors {
+        // Output structured JSON summary
+        let summary = serde_json::json!({
+            "batch_execution_summary": {
+                "total_operations": result.results.len(),
+                "successful_operations": result.success_count,
+                "failed_operations": result.failure_count,
+                "total_duration_seconds": result.total_duration.as_secs_f64(),
+                "operations": result.results.iter().map(|r| serde_json::json!({
+                    "operation_id": r.operation.id,
+                    "args": r.operation.args,
+                    "success": r.success,
+                    "duration_seconds": r.duration.as_secs_f64(),
+                    "error": r.error
+                })).collect::<Vec<_>>()
+            }
+        });
+        println!("{}", serde_json::to_string_pretty(&summary).unwrap());
+    } else {
+        // Output human-readable summary
+        println!("\n=== Batch Execution Summary ===");
+        println!("Total operations: {}", result.results.len());
+        println!("Successful: {}", result.success_count);
+        println!("Failed: {}", result.failure_count);
+        println!("Total time: {:.2}s", result.total_duration.as_secs_f64());
+
+        if result.failure_count > 0 {
+            println!("\nFailed operations:");
+            for (i, op_result) in result.results.iter().enumerate() {
+                if !op_result.success {
+                    println!(
+                        "  {} - {}: {}",
+                        i + 1,
+                        op_result.operation.args.join(" "),
+                        op_result.error.as_deref().unwrap_or("Unknown error")
+                    );
+                }
+            }
+        }
+    }
+
+    // Exit with error code if any operations failed
+    if result.failure_count > 0 {
+        std::process::exit(1);
+    }
 
     Ok(())
 }
