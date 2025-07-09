@@ -1021,15 +1021,16 @@ paths:
 
 #[tokio::test]
 async fn test_remote_spec_fetching_timeout() {
-    // Test that HTTP requests timeout after 30 seconds
+    // Test that HTTP requests timeout with configurable timeout (fast test)
     let mock_server = wiremock::MockServer::start().await;
 
-    // Mock a response that takes longer than timeout (35s > 30s timeout)
+    // Mock a response that takes longer than timeout (2s > 1s timeout)
+    // We'll modify the timeout for this test to be shorter for faster testing
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/slow-spec.yaml"))
         .respond_with(
             wiremock::ResponseTemplate::new(200)
-                .set_delay(std::time::Duration::from_secs(35))
+                .set_delay(std::time::Duration::from_secs(2))
                 .set_body_string(
                     "openapi: 3.0.0\ninfo:\n  title: Slow API\n  version: 1.0.0\npaths: {}",
                 ),
@@ -1040,9 +1041,14 @@ async fn test_remote_spec_fetching_timeout() {
     let (manager, _fs) = setup_manager();
     let spec_url = format!("{}/slow-spec.yaml", mock_server.uri());
 
-    // Test that the request times out
+    // Test that the request times out using a 1-second timeout instead of 30 seconds
     let result = manager
-        .add_spec_from_url("slow-api", &spec_url, false)
+        .add_spec_from_url_with_timeout(
+            "slow-api",
+            &spec_url,
+            false,
+            std::time::Duration::from_secs(1),
+        )
         .await;
     assert!(result.is_err());
     if let Err(Error::RequestFailed { reason }) = result {

@@ -440,6 +440,52 @@ impl<F: FileSystem> ConfigManager<F> {
 
         Ok(result)
     }
+
+    /// Test-only method to add spec from URL with custom timeout
+    #[doc(hidden)]
+    #[allow(clippy::future_not_send)]
+    pub async fn add_spec_from_url_with_timeout(
+        &self,
+        name: &str,
+        url: &str,
+        force: bool,
+        timeout: std::time::Duration,
+    ) -> Result<(), Error> {
+        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
+        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
+
+        if self.fs.exists(&spec_path) && !force {
+            return Err(Error::SpecAlreadyExists {
+                name: name.to_string(),
+            });
+        }
+
+        // Fetch content from URL with custom timeout
+        let content = fetch_spec_from_url_with_timeout(url, timeout).await?;
+        let openapi_spec: OpenAPI = serde_yaml::from_str(&content)?;
+
+        // Validate against Aperture's supported feature set using SpecValidator
+        let validator = SpecValidator::new();
+        validator.validate(&openapi_spec)?;
+
+        // Transform into internal cached representation using SpecTransformer
+        let transformer = SpecTransformer::new();
+        let cached_spec = transformer.transform(name, &openapi_spec);
+
+        // Create directories
+        self.fs.create_dir_all(spec_path.parent().unwrap())?;
+        self.fs.create_dir_all(cache_path.parent().unwrap())?;
+
+        // Write original spec file
+        self.fs.write_all(&spec_path, content.as_bytes())?;
+
+        // Serialize and write cached representation
+        let cached_data = bincode::serialize(&cached_spec)
+            .map_err(|e| Error::Config(format!("Failed to serialize cached spec: {e}")))?;
+        self.fs.write_all(&cache_path, &cached_data)?;
+
+        Ok(())
+    }
 }
 
 /// Gets the default configuration directory path.
@@ -472,9 +518,17 @@ const MAX_RESPONSE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
 
 #[allow(clippy::future_not_send)]
 async fn fetch_spec_from_url(url: &str) -> Result<String, Error> {
+    fetch_spec_from_url_with_timeout(url, std::time::Duration::from_secs(30)).await
+}
+
+#[allow(clippy::future_not_send)]
+async fn fetch_spec_from_url_with_timeout(
+    url: &str,
+    timeout: std::time::Duration,
+) -> Result<String, Error> {
     // Create HTTP client with timeout and security limits
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(timeout)
         .build()
         .map_err(|e| Error::RequestFailed {
             reason: format!("Failed to create HTTP client: {e}"),
@@ -484,7 +538,7 @@ async fn fetch_spec_from_url(url: &str) -> Result<String, Error> {
     let response = client.get(url).send().await.map_err(|e| {
         if e.is_timeout() {
             Error::RequestFailed {
-                reason: "Request timed out after 30 seconds".to_string(),
+                reason: format!("Request timed out after {} seconds", timeout.as_secs()),
             }
         } else if e.is_connect() {
             Error::RequestFailed {
