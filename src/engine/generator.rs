@@ -49,7 +49,26 @@ fn to_static_str(s: String) -> &'static str {
 pub fn generate_command_tree(spec: &CachedSpec) -> Command {
     let mut root_command = Command::new("api")
         .version(to_static_str(spec.version.clone()))
-        .about(format!("CLI for {} API", spec.name));
+        .about(format!("CLI for {} API", spec.name))
+        // Add global flags that should be available to all operations
+        .arg(
+            Arg::new("jq")
+                .long("jq")
+                .global(true)
+                .help("Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')")
+                .value_name("FILTER")
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("format")
+                .long("format")
+                .global(true)
+                .help("Output format for response data")
+                .value_name("FORMAT")
+                .value_parser(["json", "yaml", "table"])
+                .default_value("json")
+                .action(ArgAction::Set),
+        );
 
     // Group commands by their tag (namespace)
     let mut command_groups: HashMap<String, Vec<&CachedCommand>> = HashMap::new();

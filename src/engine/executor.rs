@@ -1,4 +1,5 @@
 use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
+use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
@@ -7,6 +8,9 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
 use serde_json::Value;
 use std::str::FromStr;
+
+/// Maximum number of rows to display in table format to prevent memory exhaustion
+const MAX_TABLE_ROWS: usize = 1000;
 
 /// Executes HTTP requests based on parsed CLI arguments and cached spec data.
 ///
@@ -20,17 +24,20 @@ use std::str::FromStr;
 /// * `dry_run` - If true, show request details without executing
 /// * `idempotency_key` - Optional idempotency key for safe retries
 /// * `global_config` - Optional global configuration for URL resolution
+/// * `output_format` - Format for response output (json, yaml, table)
+/// * `jq_filter` - Optional JQ filter expression to apply to response
 ///
 /// # Returns
 /// * `Ok(())` - Request executed successfully or dry-run completed
 /// * `Err(Error)` - Request failed or validation error
 ///
 /// # Errors
-/// Returns errors for authentication failures, network issues, or response validation
+/// Returns errors for authentication failures, network issues, response validation, or JQ filter errors
 ///
 /// # Panics
 /// Panics if JSON serialization of dry-run information fails (extremely unlikely)
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_request(
     spec: &CachedSpec,
     matches: &ArgMatches,
@@ -38,6 +45,8 @@ pub async fn execute_request(
     dry_run: bool,
     idempotency_key: Option<&str>,
     global_config: Option<&GlobalConfig>,
+    output_format: &OutputFormat,
+    jq_filter: Option<&str>,
 ) -> Result<(), Error> {
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
@@ -108,12 +117,15 @@ pub async fn execute_request(
             "headers": headers_clone.iter().map(|(k, v)| (k.as_str(), v.to_str().unwrap_or("<binary>"))).collect::<std::collections::HashMap<_, _>>(),
             "operation_id": operation.operation_id
         });
-        println!("{}", serde_json::to_string_pretty(&dry_run_info).unwrap());
+        let dry_run_output =
+            serde_json::to_string_pretty(&dry_run_info).map_err(|e| Error::SerializationError {
+                reason: format!("Failed to serialize dry-run info: {e}"),
+            })?;
+        println!("{dry_run_output}");
         return Ok(());
     }
 
     // Execute request
-    println!("Executing {method} {url}");
     let response = request.send().await.map_err(|e| Error::RequestFailed {
         reason: e.to_string(),
     })?;
@@ -155,18 +167,9 @@ pub async fn execute_request(
         });
     }
 
-    // Print response
+    // Print response in the requested format
     if !response_text.is_empty() {
-        // Try to pretty-print JSON
-        if let Ok(json_value) = serde_json::from_str::<Value>(&response_text) {
-            if let Ok(pretty) = serde_json::to_string_pretty(&json_value) {
-                println!("{pretty}");
-            } else {
-                println!("{response_text}");
-            }
-        } else {
-            println!("{response_text}");
-        }
+        print_formatted_response(&response_text, output_format, jq_filter)?;
     }
 
     Ok(())
@@ -451,4 +454,484 @@ fn to_kebab_case(s: &str) -> String {
     }
 
     result
+}
+
+/// Prints the response text in the specified format
+fn print_formatted_response(
+    response_text: &str,
+    output_format: &OutputFormat,
+    jq_filter: Option<&str>,
+) -> Result<(), Error> {
+    // Apply JQ filter if provided
+    let processed_text = if let Some(filter) = jq_filter {
+        apply_jq_filter(response_text, filter)?
+    } else {
+        response_text.to_string()
+    };
+
+    match output_format {
+        OutputFormat::Json => {
+            // Try to pretty-print JSON (default behavior)
+            if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
+                if let Ok(pretty) = serde_json::to_string_pretty(&json_value) {
+                    println!("{pretty}");
+                } else {
+                    println!("{processed_text}");
+                }
+            } else {
+                println!("{processed_text}");
+            }
+        }
+        OutputFormat::Yaml => {
+            // Convert JSON to YAML
+            if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
+                match serde_yaml::to_string(&json_value) {
+                    Ok(yaml_output) => println!("{yaml_output}"),
+                    Err(_) => println!("{processed_text}"), // Fallback to raw text
+                }
+            } else {
+                // If not JSON, output as-is
+                println!("{processed_text}");
+            }
+        }
+        OutputFormat::Table => {
+            // Convert JSON to table format
+            if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
+                print_as_table(&json_value);
+            } else {
+                // If not JSON, output as-is
+                println!("{processed_text}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// Define table structures at module level to avoid clippy::items_after_statements
+#[derive(tabled::Tabled)]
+struct TableRow {
+    #[tabled(rename = "Key")]
+    key: String,
+    #[tabled(rename = "Value")]
+    value: String,
+}
+
+#[derive(tabled::Tabled)]
+struct KeyValue {
+    #[tabled(rename = "Key")]
+    key: String,
+    #[tabled(rename = "Value")]
+    value: String,
+}
+
+/// Prints JSON data as a formatted table
+#[allow(clippy::unnecessary_wraps)]
+fn print_as_table(json_value: &Value) {
+    use std::collections::BTreeMap;
+    use tabled::Table;
+
+    match json_value {
+        Value::Array(items) => {
+            if items.is_empty() {
+                println!("(empty array)");
+                return;
+            }
+
+            // Check if array is too large
+            if items.len() > MAX_TABLE_ROWS {
+                println!(
+                    "Array too large: {} items (max {} for table display)",
+                    items.len(),
+                    MAX_TABLE_ROWS
+                );
+                println!("Use --format json or --jq to process the full data");
+                return;
+            }
+
+            // Try to create a table from array of objects
+            if let Some(Value::Object(_)) = items.first() {
+                // Create table for array of objects
+                let mut table_data: Vec<BTreeMap<String, String>> = Vec::new();
+
+                for item in items {
+                    if let Value::Object(obj) = item {
+                        let mut row = BTreeMap::new();
+                        for (key, value) in obj {
+                            row.insert(key.clone(), format_value_for_table(value));
+                        }
+                        table_data.push(row);
+                    }
+                }
+
+                if !table_data.is_empty() {
+                    // For now, use a simple key-value representation
+                    // In the future, we could implement a more sophisticated table structure
+                    let mut rows = Vec::new();
+                    for (i, row) in table_data.iter().enumerate() {
+                        if i > 0 {
+                            rows.push(TableRow {
+                                key: "---".to_string(),
+                                value: "---".to_string(),
+                            });
+                        }
+                        for (key, value) in row {
+                            rows.push(TableRow {
+                                key: key.clone(),
+                                value: value.clone(),
+                            });
+                        }
+                    }
+
+                    let table = Table::new(&rows);
+                    println!("{table}");
+                    return;
+                }
+            }
+
+            // Fallback: print array as numbered list
+            for (i, item) in items.iter().enumerate() {
+                println!("{}: {}", i, format_value_for_table(item));
+            }
+        }
+        Value::Object(obj) => {
+            // Check if object has too many fields
+            if obj.len() > MAX_TABLE_ROWS {
+                println!(
+                    "Object too large: {} fields (max {} for table display)",
+                    obj.len(),
+                    MAX_TABLE_ROWS
+                );
+                println!("Use --format json or --jq to process the full data");
+                return;
+            }
+
+            // Create a simple key-value table for objects
+            let rows: Vec<KeyValue> = obj
+                .iter()
+                .map(|(key, value)| KeyValue {
+                    key: key.clone(),
+                    value: format_value_for_table(value),
+                })
+                .collect();
+
+            let table = Table::new(&rows);
+            println!("{table}");
+        }
+        _ => {
+            // For primitive values, just print them
+            println!("{}", format_value_for_table(json_value));
+        }
+    }
+}
+
+/// Formats a JSON value for display in a table cell
+fn format_value_for_table(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Array(arr) => {
+            if arr.len() <= 3 {
+                format!(
+                    "[{}]",
+                    arr.iter()
+                        .map(format_value_for_table)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                format!("[{} items]", arr.len())
+            }
+        }
+        Value::Object(obj) => {
+            if obj.len() <= 2 {
+                format!(
+                    "{{{}}}",
+                    obj.iter()
+                        .map(|(k, v)| format!("{}: {}", k, format_value_for_table(v)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                format!("{{object with {} fields}}", obj.len())
+            }
+        }
+    }
+}
+
+/// Applies a JQ filter to the response text
+fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
+    // Parse the response as JSON
+    let json_value: Value =
+        serde_json::from_str(response_text).map_err(|e| Error::JqFilterError {
+            reason: format!("Response is not valid JSON: {e}"),
+        })?;
+
+    #[cfg(feature = "jq")]
+    {
+        // Use jaq (pure Rust implementation) when available
+        use jaq_interpret::{Ctx, FilterT, ParseCtx, RcIter, Val};
+        use jaq_parse::parse;
+        use jaq_std::std;
+
+        // Parse the filter expression
+        let (expr, errs) = parse(filter, jaq_parse::main());
+        if !errs.is_empty() {
+            return Err(Error::JqFilterError {
+                reason: format!("Parse error in jq expression: {}", errs[0]),
+            });
+        }
+
+        // Create parsing context and compile the filter
+        let mut ctx = ParseCtx::new(Vec::new());
+        ctx.insert_defs(std());
+        let filter = ctx.compile(expr.unwrap());
+
+        // Convert serde_json::Value to jaq Val
+        let jaq_value = serde_json_to_jaq_val(&json_value);
+
+        // Execute the filter
+        let inputs = RcIter::new(core::iter::empty());
+        let ctx = Ctx::new([], &inputs);
+        let results: Result<Vec<Val>, _> = filter.run((ctx, jaq_value.into())).collect();
+
+        match results {
+            Ok(vals) => {
+                if vals.is_empty() {
+                    Ok("null".to_string())
+                } else if vals.len() == 1 {
+                    // Single result - convert back to JSON
+                    let json_val = jaq_val_to_serde_json(&vals[0]);
+                    serde_json::to_string_pretty(&json_val).map_err(|e| Error::JqFilterError {
+                        reason: format!("Failed to serialize result: {e}"),
+                    })
+                } else {
+                    // Multiple results - return as JSON array
+                    let json_vals: Vec<Value> = vals.iter().map(jaq_val_to_serde_json).collect();
+                    let array = Value::Array(json_vals);
+                    serde_json::to_string_pretty(&array).map_err(|e| Error::JqFilterError {
+                        reason: format!("Failed to serialize results: {e}"),
+                    })
+                }
+            }
+            Err(e) => Err(Error::JqFilterError {
+                reason: format!("Filter execution error: {e}"),
+            }),
+        }
+    }
+
+    #[cfg(not(feature = "jq"))]
+    {
+        // Basic JQ-like functionality without full jq library
+        apply_basic_jq_filter(&json_value, filter)
+    }
+}
+
+#[cfg(not(feature = "jq"))]
+/// Basic JQ-like functionality for common cases
+fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Error> {
+    // Check if the filter uses advanced features
+    let uses_advanced_features = filter.contains('[')
+        || filter.contains(']')
+        || filter.contains('|')
+        || filter.contains('(')
+        || filter.contains(')')
+        || filter.contains("select")
+        || filter.contains("map")
+        || filter.contains("length");
+
+    if uses_advanced_features {
+        eprintln!("Warning: Advanced JQ features require building with --features jq");
+        eprintln!("         Currently only basic field access is supported (e.g., '.field', '.nested.field')");
+        eprintln!("         To enable full JQ support: cargo install aperture-cli --features jq");
+    }
+
+    let result = match filter {
+        "." => json_value.clone(),
+        ".[]" => {
+            // Handle array iteration
+            match json_value {
+                Value::Array(arr) => {
+                    // Return array elements as a JSON array
+                    Value::Array(arr.clone())
+                }
+                Value::Object(obj) => {
+                    // Return object values as an array
+                    Value::Array(obj.values().cloned().collect())
+                }
+                _ => Value::Null,
+            }
+        }
+        ".length" => {
+            // Handle length operation
+            match json_value {
+                Value::Array(arr) => Value::Number(arr.len().into()),
+                Value::Object(obj) => Value::Number(obj.len().into()),
+                Value::String(s) => Value::Number(s.len().into()),
+                _ => Value::Null,
+            }
+        }
+        filter if filter.starts_with(".[].") => {
+            // Handle array map like .[].name
+            let field_path = &filter[4..]; // Remove ".[].""
+            match json_value {
+                Value::Array(arr) => {
+                    let mapped: Vec<Value> = arr
+                        .iter()
+                        .map(|item| get_nested_field(item, field_path))
+                        .collect();
+                    Value::Array(mapped)
+                }
+                _ => Value::Null,
+            }
+        }
+        filter if filter.starts_with('.') => {
+            // Handle simple field access like .name, .metadata.role
+            let field_path = &filter[1..]; // Remove the leading dot
+            get_nested_field(json_value, field_path)
+        }
+        _ => {
+            return Err(Error::JqFilterError {
+                reason: format!("Unsupported JQ filter: '{filter}'. Only basic field access like '.name' or '.metadata.role' is supported without the full jq library."),
+            });
+        }
+    };
+
+    serde_json::to_string_pretty(&result).map_err(|e| Error::JqFilterError {
+        reason: format!("Failed to serialize filtered result: {e}"),
+    })
+}
+
+#[cfg(not(feature = "jq"))]
+/// Get a nested field from JSON using dot notation
+fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
+    let parts: Vec<&str> = field_path.split('.').collect();
+    let mut current = json_value;
+
+    for part in parts {
+        if part.is_empty() {
+            continue;
+        }
+
+        // Handle array index notation like [0]
+        if part.starts_with('[') && part.ends_with(']') {
+            let index_str = &part[1..part.len() - 1];
+            if let Ok(index) = index_str.parse::<usize>() {
+                match current {
+                    Value::Array(arr) => {
+                        if let Some(item) = arr.get(index) {
+                            current = item;
+                        } else {
+                            return Value::Null;
+                        }
+                    }
+                    _ => return Value::Null,
+                }
+            } else {
+                return Value::Null;
+            }
+            continue;
+        }
+
+        match current {
+            Value::Object(obj) => {
+                if let Some(field) = obj.get(part) {
+                    current = field;
+                } else {
+                    return Value::Null;
+                }
+            }
+            Value::Array(arr) => {
+                // Handle numeric string as array index
+                if let Ok(index) = part.parse::<usize>() {
+                    if let Some(item) = arr.get(index) {
+                        current = item;
+                    } else {
+                        return Value::Null;
+                    }
+                } else {
+                    return Value::Null;
+                }
+            }
+            _ => return Value::Null,
+        }
+    }
+
+    current.clone()
+}
+
+#[cfg(feature = "jq")]
+/// Convert serde_json::Value to jaq Val
+fn serde_json_to_jaq_val(value: &Value) -> jaq_interpret::Val {
+    use jaq_interpret::Val;
+    use std::rc::Rc;
+
+    match value {
+        Value::Null => Val::Null,
+        Value::Bool(b) => Val::Bool(*b),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                // Convert i64 to isize safely
+                if let Ok(isize_val) = isize::try_from(i) {
+                    Val::Int(isize_val)
+                } else {
+                    // Fallback to float for large numbers
+                    Val::Float(i as f64)
+                }
+            } else if let Some(f) = n.as_f64() {
+                Val::Float(f)
+            } else {
+                Val::Null
+            }
+        }
+        Value::String(s) => Val::Str(s.clone().into()),
+        Value::Array(arr) => {
+            let jaq_arr: Vec<Val> = arr.iter().map(serde_json_to_jaq_val).collect();
+            Val::Arr(Rc::new(jaq_arr))
+        }
+        Value::Object(obj) => {
+            let mut jaq_obj = indexmap::IndexMap::with_hasher(ahash::RandomState::new());
+            for (k, v) in obj {
+                jaq_obj.insert(Rc::new(k.clone()), serde_json_to_jaq_val(v));
+            }
+            Val::Obj(Rc::new(jaq_obj))
+        }
+    }
+}
+
+#[cfg(feature = "jq")]
+/// Convert jaq Val to serde_json::Value
+fn jaq_val_to_serde_json(val: &jaq_interpret::Val) -> Value {
+    use jaq_interpret::Val;
+
+    match val {
+        Val::Null => Value::Null,
+        Val::Bool(b) => Value::Bool(*b),
+        Val::Int(i) => {
+            // Convert isize to i64
+            Value::Number((*i as i64).into())
+        }
+        Val::Float(f) => {
+            if let Some(num) = serde_json::Number::from_f64(*f) {
+                Value::Number(num)
+            } else {
+                Value::Null
+            }
+        }
+        Val::Str(s) => Value::String(s.to_string()),
+        Val::Arr(arr) => {
+            let json_arr: Vec<Value> = arr.iter().map(jaq_val_to_serde_json).collect();
+            Value::Array(json_arr)
+        }
+        Val::Obj(obj) => {
+            let mut json_obj = serde_json::Map::new();
+            for (k, v) in obj.iter() {
+                json_obj.insert(k.to_string(), jaq_val_to_serde_json(v));
+            }
+            Value::Object(json_obj)
+        }
+        _ => Value::Null, // Handle any other Val variants as null
+    }
 }

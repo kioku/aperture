@@ -35,7 +35,7 @@ impl<F: FileSystem> ConfigManager<F> {
         Self { fs, config_dir }
     }
 
-    /// Adds a new `OpenAPI` specification to the configuration.
+    /// Adds a new `OpenAPI` specification to the configuration from a local file.
     ///
     /// # Errors
     ///
@@ -70,8 +70,16 @@ impl<F: FileSystem> ConfigManager<F> {
         let cached_spec = transformer.transform(name, &openapi_spec);
 
         // Create directories
-        self.fs.create_dir_all(spec_path.parent().unwrap())?;
-        self.fs.create_dir_all(cache_path.parent().unwrap())?;
+        let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: spec_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        let cache_parent = cache_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: cache_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        self.fs.create_dir_all(spec_parent)?;
+        self.fs.create_dir_all(cache_parent)?;
 
         // Write original spec file
         self.fs.write_all(&spec_path, content.as_bytes())?;
@@ -89,6 +97,105 @@ impl<F: FileSystem> ConfigManager<F> {
         metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
 
         Ok(())
+    }
+
+    /// Adds a new `OpenAPI` specification to the configuration from a URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The spec already exists and `force` is false
+    /// - Network requests fail
+    /// - The `OpenAPI` spec is invalid YAML
+    /// - The spec contains unsupported features
+    /// - Response size exceeds 10MB limit
+    /// - Request times out (30 seconds)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the spec path parent directory is None (should not happen in normal usage).
+    #[allow(clippy::future_not_send)]
+    pub async fn add_spec_from_url(&self, name: &str, url: &str, force: bool) -> Result<(), Error> {
+        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
+        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
+
+        if self.fs.exists(&spec_path) && !force {
+            return Err(Error::SpecAlreadyExists {
+                name: name.to_string(),
+            });
+        }
+
+        // Fetch content from URL
+        let content = fetch_spec_from_url(url).await?;
+        let openapi_spec: OpenAPI = serde_yaml::from_str(&content)?;
+
+        // Validate against Aperture's supported feature set using SpecValidator
+        let validator = SpecValidator::new();
+        validator.validate(&openapi_spec)?;
+
+        // Transform into internal cached representation using SpecTransformer
+        let transformer = SpecTransformer::new();
+        let cached_spec = transformer.transform(name, &openapi_spec);
+
+        // Create directories
+        let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: spec_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        let cache_parent = cache_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: cache_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        self.fs.create_dir_all(spec_parent)?;
+        self.fs.create_dir_all(cache_parent)?;
+
+        // Write original spec file
+        self.fs.write_all(&spec_path, content.as_bytes())?;
+
+        // Serialize and write cached representation
+        let cached_data =
+            bincode::serialize(&cached_spec).map_err(|e| Error::SerializationError {
+                reason: e.to_string(),
+            })?;
+        self.fs.write_all(&cache_path, &cached_data)?;
+
+        // Update cache metadata for optimized version checking
+        let cache_dir = self.config_dir.join(".cache");
+        let metadata_manager = CacheMetadataManager::new(&self.fs);
+        metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
+
+        Ok(())
+    }
+
+    /// Adds a new `OpenAPI` specification from either a file path or URL.
+    ///
+    /// This is a convenience method that automatically detects whether the input
+    /// is a URL or file path and calls the appropriate method.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The spec already exists and `force` is false
+    /// - File I/O operations fail (for local files)
+    /// - Network requests fail (for URLs)
+    /// - The `OpenAPI` spec is invalid YAML
+    /// - The spec contains unsupported features
+    /// - Response size exceeds 10MB limit (for URLs)
+    /// - Request times out (for URLs)
+    #[allow(clippy::future_not_send)]
+    pub async fn add_spec_auto(
+        &self,
+        name: &str,
+        file_or_url: &str,
+        force: bool,
+    ) -> Result<(), Error> {
+        if is_url(file_or_url) {
+            self.add_spec_from_url(name, file_or_url, force).await
+        } else {
+            // Convert file path string to Path and call sync method
+            let path = std::path::Path::new(file_or_url);
+            self.add_spec(name, path, force)
+        }
     }
 
     /// Lists all registered API contexts.
@@ -349,6 +456,60 @@ impl<F: FileSystem> ConfigManager<F> {
 
         Ok(result)
     }
+
+    /// Test-only method to add spec from URL with custom timeout
+    #[doc(hidden)]
+    #[allow(clippy::future_not_send)]
+    pub async fn add_spec_from_url_with_timeout(
+        &self,
+        name: &str,
+        url: &str,
+        force: bool,
+        timeout: std::time::Duration,
+    ) -> Result<(), Error> {
+        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
+        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
+
+        if self.fs.exists(&spec_path) && !force {
+            return Err(Error::SpecAlreadyExists {
+                name: name.to_string(),
+            });
+        }
+
+        // Fetch content from URL with custom timeout
+        let content = fetch_spec_from_url_with_timeout(url, timeout).await?;
+        let openapi_spec: OpenAPI = serde_yaml::from_str(&content)?;
+
+        // Validate against Aperture's supported feature set using SpecValidator
+        let validator = SpecValidator::new();
+        validator.validate(&openapi_spec)?;
+
+        // Transform into internal cached representation using SpecTransformer
+        let transformer = SpecTransformer::new();
+        let cached_spec = transformer.transform(name, &openapi_spec);
+
+        // Create directories
+        let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: spec_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        let cache_parent = cache_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: cache_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        self.fs.create_dir_all(spec_parent)?;
+        self.fs.create_dir_all(cache_parent)?;
+
+        // Write original spec file
+        self.fs.write_all(&spec_path, content.as_bytes())?;
+
+        // Serialize and write cached representation
+        let cached_data = bincode::serialize(&cached_spec)
+            .map_err(|e| Error::Config(format!("Failed to serialize cached spec: {e}")))?;
+        self.fs.write_all(&cache_path, &cached_data)?;
+
+        Ok(())
+    }
 }
 
 /// Gets the default configuration directory path.
@@ -360,4 +521,95 @@ pub fn get_config_dir() -> Result<PathBuf, Error> {
     let home_dir = dirs::home_dir().ok_or_else(|| Error::HomeDirectoryNotFound)?;
     let config_dir = home_dir.join(".config").join("aperture");
     Ok(config_dir)
+}
+
+/// Determines if the input string is a URL (starts with http:// or https://)
+#[must_use]
+pub fn is_url(input: &str) -> bool {
+    input.starts_with("http://") || input.starts_with("https://")
+}
+
+/// Fetches `OpenAPI` specification content from a URL with security limits
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Network request fails
+/// - Response status is not successful
+/// - Response size exceeds 10MB limit
+/// - Request times out (30 seconds)
+const MAX_RESPONSE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+
+#[allow(clippy::future_not_send)]
+async fn fetch_spec_from_url(url: &str) -> Result<String, Error> {
+    fetch_spec_from_url_with_timeout(url, std::time::Duration::from_secs(30)).await
+}
+
+#[allow(clippy::future_not_send)]
+async fn fetch_spec_from_url_with_timeout(
+    url: &str,
+    timeout: std::time::Duration,
+) -> Result<String, Error> {
+    // Create HTTP client with timeout and security limits
+    let client = reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| Error::RequestFailed {
+            reason: format!("Failed to create HTTP client: {e}"),
+        })?;
+
+    // Make the request
+    let response = client.get(url).send().await.map_err(|e| {
+        if e.is_timeout() {
+            Error::RequestFailed {
+                reason: format!("Request timed out after {} seconds", timeout.as_secs()),
+            }
+        } else if e.is_connect() {
+            Error::RequestFailed {
+                reason: format!("Failed to connect to {url}: {e}"),
+            }
+        } else {
+            Error::RequestFailed {
+                reason: format!("Network error: {e}"),
+            }
+        }
+    })?;
+
+    // Check response status
+    if !response.status().is_success() {
+        return Err(Error::RequestFailed {
+            reason: format!("HTTP {} from {url}", response.status()),
+        });
+    }
+
+    // Check content length before downloading
+    if let Some(content_length) = response.content_length() {
+        if content_length > MAX_RESPONSE_SIZE {
+            return Err(Error::RequestFailed {
+                reason: format!(
+                    "Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE} bytes)"
+                ),
+            });
+        }
+    }
+
+    // Read response body with size limit
+    let bytes = response.bytes().await.map_err(|e| Error::RequestFailed {
+        reason: format!("Failed to read response body: {e}"),
+    })?;
+
+    // Double-check size after download
+    if bytes.len() > usize::try_from(MAX_RESPONSE_SIZE).unwrap_or(usize::MAX) {
+        return Err(Error::RequestFailed {
+            reason: format!(
+                "Response too large: {} bytes (max {MAX_RESPONSE_SIZE} bytes)",
+                bytes.len()
+            ),
+        });
+    }
+
+    // Convert to string
+    String::from_utf8(bytes.to_vec()).map_err(|e| Error::RequestFailed {
+        reason: format!("Invalid UTF-8 in response: {e}"),
+    })
 }

@@ -1,4 +1,4 @@
-use aperture_cli::config::manager::ConfigManager;
+use aperture_cli::config::manager::{is_url, ConfigManager};
 use aperture_cli::error::Error;
 use aperture_cli::fs::FileSystem;
 use std::collections::HashMap;
@@ -952,4 +952,277 @@ fn test_list_urls_shows_all_configs() {
         api2_envs.get("prod"),
         Some(&"https://api2-prod.example.com".to_string())
     );
+}
+
+// --- Remote Spec Support Tests (Feature 2.1) ---
+// Tests are ignored until implementation is ready
+
+#[test]
+fn test_url_detection_http() {
+    // Test that URLs starting with http:// are detected as URLs
+    assert!(is_url("http://api.example.com/openapi.yaml"));
+    assert!(is_url("http://localhost:8080/spec.yaml"));
+}
+
+#[test]
+fn test_url_detection_https() {
+    // Test that URLs starting with https:// are detected as URLs
+    assert!(is_url("https://api.example.com/openapi.yaml"));
+    assert!(is_url("https://petstore.swagger.io/v2/swagger.json"));
+}
+
+#[test]
+fn test_url_detection_file_paths() {
+    // Test that file paths are not detected as URLs
+    assert!(!is_url("/path/to/spec.yaml"));
+    assert!(!is_url("./relative/spec.yaml"));
+    assert!(!is_url("../parent/spec.yaml"));
+    assert!(!is_url("spec.yaml"));
+    assert!(!is_url("C:\\Windows\\spec.yaml"));
+}
+
+#[tokio::test]
+async fn test_remote_spec_fetching_success() {
+    // Test successful remote spec fetching with valid OpenAPI
+    let mock_server = wiremock::MockServer::start().await;
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Remote API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        '200':
+          description: Success
+"#;
+
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/openapi.yaml"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(spec_content))
+        .mount(&mock_server)
+        .await;
+
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/openapi.yaml", mock_server.uri());
+
+    // Test that adding a remote spec works
+    let result = manager
+        .add_spec_from_url("remote-api", &spec_url, false)
+        .await;
+    assert!(result.is_ok());
+
+    // Verify the spec was added to the list
+    let specs = manager.list_specs().unwrap();
+    assert!(specs.contains(&"remote-api".to_string()));
+}
+
+#[tokio::test]
+async fn test_remote_spec_fetching_timeout() {
+    // Test that HTTP requests timeout with configurable timeout (fast test)
+    let mock_server = wiremock::MockServer::start().await;
+
+    // Mock a response that takes longer than timeout (2s > 1s timeout)
+    // We'll modify the timeout for this test to be shorter for faster testing
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/slow-spec.yaml"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_secs(2))
+                .set_body_string(
+                    "openapi: 3.0.0\ninfo:\n  title: Slow API\n  version: 1.0.0\npaths: {}",
+                ),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/slow-spec.yaml", mock_server.uri());
+
+    // Test that the request times out using a 1-second timeout instead of 30 seconds
+    let result = manager
+        .add_spec_from_url_with_timeout(
+            "slow-api",
+            &spec_url,
+            false,
+            std::time::Duration::from_secs(1),
+        )
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::RequestFailed { reason }) = result {
+        assert!(reason.contains("timed out"));
+    } else {
+        panic!(
+            "Expected RequestFailed error with timeout, got: {:?}",
+            result
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_remote_spec_fetching_size_limit() {
+    // Test that responses larger than 10MB are rejected
+    let mock_server = wiremock::MockServer::start().await;
+
+    // Create a large response (>10MB)
+    let large_content = "x".repeat(11 * 1024 * 1024); // 11MB
+
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/large-spec.yaml"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(large_content))
+        .mount(&mock_server)
+        .await;
+
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/large-spec.yaml", mock_server.uri());
+
+    // Test that large responses are rejected
+    let result = manager
+        .add_spec_from_url("large-api", &spec_url, false)
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::RequestFailed { reason }) = result {
+        assert!(reason.contains("too large"));
+    } else {
+        panic!(
+            "Expected RequestFailed error for size limit, got: {:?}",
+            result
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_remote_spec_fetching_invalid_url() {
+    // Test error handling for invalid URLs
+    let (manager, _fs) = setup_manager();
+
+    // Test with a completely invalid URL that will fail to connect
+    let result = manager
+        .add_spec_from_url(
+            "invalid-api",
+            "https://nonexistent-domain-12345.com/spec.yaml",
+            false,
+        )
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::RequestFailed { reason }) = result {
+        assert!(reason.contains("Failed to connect") || reason.contains("Network error"));
+    } else {
+        panic!(
+            "Expected RequestFailed error for invalid URL, got: {:?}",
+            result
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_remote_spec_fetching_http_error() {
+    // Test error handling for HTTP errors (404, 500, etc.)
+    let mock_server = wiremock::MockServer::start().await;
+
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/not-found.yaml"))
+        .respond_with(wiremock::ResponseTemplate::new(404))
+        .mount(&mock_server)
+        .await;
+
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/not-found.yaml", mock_server.uri());
+
+    // Test that HTTP errors are handled properly
+    let result = manager
+        .add_spec_from_url("not-found-api", &spec_url, false)
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::RequestFailed { reason }) = result {
+        assert!(reason.contains("HTTP 404"));
+    } else {
+        panic!(
+            "Expected RequestFailed error for HTTP 404, got: {:?}",
+            result
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_remote_spec_fetching_invalid_yaml() {
+    // Test error handling for invalid YAML content
+    let mock_server = wiremock::MockServer::start().await;
+
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/invalid.yaml"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_string("invalid: yaml: content: ["),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/invalid.yaml", mock_server.uri());
+
+    // Test that invalid YAML is rejected
+    let result = manager
+        .add_spec_from_url("invalid-yaml-api", &spec_url, false)
+        .await;
+    assert!(result.is_err());
+    // Should get a YAML parsing error
+    assert!(matches!(result, Err(Error::Yaml(_))));
+}
+
+#[tokio::test]
+async fn test_remote_spec_same_validation_as_local() {
+    // Test that remote specs go through the same validation as local files
+    let mock_server = wiremock::MockServer::start().await;
+
+    // Spec with unsupported OAuth2 (should be rejected)
+    let invalid_spec = r#"
+openapi: 3.0.0
+info:
+  title: OAuth2 API
+  version: 1.0.0
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/auth
+          tokenUrl: https://example.com/token
+          scopes:
+            read: Read access
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        '200':
+          description: Success
+"#;
+
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/oauth2-spec.yaml"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(invalid_spec))
+        .mount(&mock_server)
+        .await;
+
+    let (manager, _fs) = setup_manager();
+    let spec_url = format!("{}/oauth2-spec.yaml", mock_server.uri());
+
+    // Test that remote specs are validated the same as local files
+    let result = manager
+        .add_spec_from_url("oauth2-api", &spec_url, false)
+        .await;
+    assert!(result.is_err());
+    if let Err(Error::Validation(msg)) = result {
+        // Check for any OAuth2-related validation error
+        assert!(
+            msg.contains("oauth2") || msg.contains("OAuth2"),
+            "Got validation message: {}",
+            msg
+        );
+    } else {
+        panic!("Expected Validation error for OAuth2, got: {:?}", result);
+    }
 }

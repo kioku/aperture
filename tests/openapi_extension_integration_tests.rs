@@ -1,4 +1,5 @@
 use aperture_cli::cache::models::CachedApertureSecret;
+use aperture_cli::cli::OutputFormat;
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::engine::executor::execute_request;
 use aperture_cli::engine::loader::load_cached_spec;
@@ -196,6 +197,8 @@ async fn test_end_to_end_authentication_with_parsed_extensions() {
         Some(&mock_server.uri()),
         false,
         None,
+        None,
+        &OutputFormat::Json,
         None,
     )
     .await;

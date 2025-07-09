@@ -33,8 +33,12 @@ async fn main() {
 async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
     match cli.command {
         Commands::Config { command } => match command {
-            ConfigCommands::Add { name, file, force } => {
-                manager.add_spec(&name, &file, force)?;
+            ConfigCommands::Add {
+                name,
+                file_or_url,
+                force,
+            } => {
+                manager.add_spec_auto(&name, &file_or_url, force).await?;
                 println!("Spec '{name}' added successfully.");
             }
             ConfigCommands::List {} => {
@@ -327,6 +331,34 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
             reason: e.to_string(),
         })?;
 
+    // Extract JQ filter from dynamic matches (takes precedence) or CLI global flag
+    let jq_filter = matches
+        .get_one::<String>("jq")
+        .map(String::as_str)
+        .or(cli.jq.as_deref());
+
+    // Extract format from dynamic matches or fall back to CLI global flag
+    // Only override the CLI format if the dynamic format was explicitly provided (not default)
+    let output_format = matches.get_one::<String>("format").map_or_else(
+        || cli.format.clone(),
+        |format_str| {
+            // Check if the user explicitly provided a format or if it's the default
+            // If the CLI format is not the default Json, use the CLI format
+            if format_str == "json" && !matches!(cli.format, aperture_cli::cli::OutputFormat::Json)
+            {
+                // User didn't explicitly set format in dynamic command, use CLI global format
+                cli.format.clone()
+            } else {
+                match format_str.as_str() {
+                    "json" => aperture_cli::cli::OutputFormat::Json,
+                    "yaml" => aperture_cli::cli::OutputFormat::Yaml,
+                    "table" => aperture_cli::cli::OutputFormat::Table,
+                    _ => cli.format.clone(),
+                }
+            }
+        },
+    );
+
     // Execute the request with agent flags
     executor::execute_request(
         &spec,
@@ -335,6 +367,8 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         cli.dry_run,
         cli.idempotency_key.as_deref(),
         global_config.as_ref(),
+        &output_format,
+        jq_filter,
     )
     .await
     .map_err(|e| match &e {
@@ -555,6 +589,12 @@ fn print_error(error: &Error) {
         }
         Error::InvalidIdempotencyKey => {
             eprintln!("Invalid Idempotency Key\n{error}\n\nHint: Idempotency key must be a valid header value.");
+        }
+        Error::JqFilterError { .. } => {
+            eprintln!("JQ Filter Error\n{error}\n\nHint: Check your JQ filter syntax. Common examples: '.name', '.[] | select(.active)'");
+        }
+        Error::InvalidPath { .. } => {
+            eprintln!("Invalid Path\n{error}\n\nHint: Check that the path is valid and properly formatted.");
         }
         Error::Anyhow(err) => {
             eprintln!("💥 Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");

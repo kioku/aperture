@@ -1,5 +1,14 @@
-use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum OutputFormat {
+    /// Output as JSON (default)
+    Json,
+    /// Output as YAML
+    Yaml,
+    /// Output as formatted table
+    Table,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -40,6 +49,25 @@ pub struct Cli {
         help = "Set idempotency key header"
     )]
     pub idempotency_key: Option<String>,
+
+    /// Output format for response data
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value = "json",
+        help = "Output format for response data"
+    )]
+    pub format: OutputFormat,
+
+    /// Apply JQ filter to response data
+    #[arg(
+        long,
+        global = true,
+        value_name = "FILTER",
+        help = "Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')"
+    )]
+    pub jq: Option<String>,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -99,14 +127,15 @@ pub enum ConfigCommands {
                       becomes the context for executing API operations.\n\n\
                       Supported formats: YAML (.yaml, .yml)\n\
                       Supported auth: API Key, Bearer Token\n\n\
-                      Example:\n  \
-                      aperture config add myapi ./openapi.yaml"
+                      Examples:\n  \
+                      aperture config add myapi ./openapi.yaml\n  \
+                      aperture config add myapi https://api.example.com/openapi.yaml"
     )]
     Add {
         /// Name to identify this API specification (used as context in 'aperture api')
         name: String,
-        /// Path to the `OpenAPI` 3.x specification file (YAML format)
-        file: PathBuf,
+        /// Path to the `OpenAPI` 3.x specification file (YAML format) or URL
+        file_or_url: String,
         /// Overwrite existing specification if it already exists
         #[arg(long, help = "Replace the specification if it already exists")]
         force: bool,

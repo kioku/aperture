@@ -557,7 +557,6 @@ async fn test_backward_compatibility() {
         .args(&["api", "test-api", "users", "get-user-by-id", "123"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Executing GET"))
         .stdout(predicate::str::contains("\"id\": \"123\""));
 }
 

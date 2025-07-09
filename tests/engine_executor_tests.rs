@@ -1,4 +1,5 @@
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture_cli::cli::OutputFormat;
 use aperture_cli::config::models::{ApiConfig, GlobalConfig};
 use aperture_cli::engine::executor::execute_request;
 use clap::{Arg, Command};
@@ -92,8 +93,17 @@ async fn test_execute_request_basic_get() {
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "123"]);
 
     // Execute the request with mock server URL
-    let result =
-        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+        None,
+    )
+    .await;
     assert!(result.is_ok());
 }
 
@@ -134,8 +144,17 @@ async fn test_execute_request_with_query_params() {
 
     let matches = command.get_matches_from(vec!["api", "users", "list-users", "--limit", "10"]);
 
-    let result =
-        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+        None,
+    )
+    .await;
     assert!(result.is_ok());
 }
 
@@ -160,8 +179,17 @@ async fn test_execute_request_error_response() {
 
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "999"]);
 
-    let result =
-        execute_request(&spec, &matches, Some(&mock_server.uri()), false, None, None).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()),
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+        None,
+    )
+    .await;
     assert!(result.is_err());
 
     if let Err(e) = result {
@@ -230,6 +258,16 @@ async fn test_execute_request_with_global_config_base_url() {
     let matches = command.get_matches_from(vec!["api", "users", "get-user-by-id", "123"]);
 
     // Execute the request with global config providing the base URL
-    let result = execute_request(&spec, &matches, None, false, None, Some(&global_config)).await;
+    let result = execute_request(
+        &spec,
+        &matches,
+        None,
+        false,
+        None,
+        Some(&global_config),
+        &OutputFormat::Json,
+        None,
+    )
+    .await;
     assert!(result.is_ok());
 }
