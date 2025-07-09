@@ -593,6 +593,9 @@ fn print_error(error: &Error) {
         Error::JqFilterError { .. } => {
             eprintln!("JQ Filter Error\n{error}\n\nHint: Check your JQ filter syntax. Common examples: '.name', '.[] | select(.active)'");
         }
+        Error::InvalidPath { .. } => {
+            eprintln!("Invalid Path\n{error}\n\nHint: Check that the path is valid and properly formatted.");
+        }
         Error::Anyhow(err) => {
             eprintln!("💥 Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
         }

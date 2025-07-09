@@ -70,8 +70,16 @@ impl<F: FileSystem> ConfigManager<F> {
         let cached_spec = transformer.transform(name, &openapi_spec);
 
         // Create directories
-        self.fs.create_dir_all(spec_path.parent().unwrap())?;
-        self.fs.create_dir_all(cache_path.parent().unwrap())?;
+        let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: spec_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        let cache_parent = cache_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: cache_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        self.fs.create_dir_all(spec_parent)?;
+        self.fs.create_dir_all(cache_parent)?;
 
         // Write original spec file
         self.fs.write_all(&spec_path, content.as_bytes())?;
@@ -130,8 +138,16 @@ impl<F: FileSystem> ConfigManager<F> {
         let cached_spec = transformer.transform(name, &openapi_spec);
 
         // Create directories
-        self.fs.create_dir_all(spec_path.parent().unwrap())?;
-        self.fs.create_dir_all(cache_path.parent().unwrap())?;
+        let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: spec_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        let cache_parent = cache_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: cache_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        self.fs.create_dir_all(spec_parent)?;
+        self.fs.create_dir_all(cache_parent)?;
 
         // Write original spec file
         self.fs.write_all(&spec_path, content.as_bytes())?;
@@ -473,8 +489,16 @@ impl<F: FileSystem> ConfigManager<F> {
         let cached_spec = transformer.transform(name, &openapi_spec);
 
         // Create directories
-        self.fs.create_dir_all(spec_path.parent().unwrap())?;
-        self.fs.create_dir_all(cache_path.parent().unwrap())?;
+        let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: spec_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        let cache_parent = cache_path.parent().ok_or_else(|| Error::InvalidPath {
+            path: cache_path.display().to_string(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+        self.fs.create_dir_all(spec_parent)?;
+        self.fs.create_dir_all(cache_parent)?;
 
         // Write original spec file
         self.fs.write_all(&spec_path, content.as_bytes())?;

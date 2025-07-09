@@ -9,6 +9,9 @@ use reqwest::Method;
 use serde_json::Value;
 use std::str::FromStr;
 
+/// Maximum number of rows to display in table format to prevent memory exhaustion
+const MAX_TABLE_ROWS: usize = 1000;
+
 /// Executes HTTP requests based on parsed CLI arguments and cached spec data.
 ///
 /// This module handles the mapping from CLI arguments back to API operations,
@@ -114,7 +117,11 @@ pub async fn execute_request(
             "headers": headers_clone.iter().map(|(k, v)| (k.as_str(), v.to_str().unwrap_or("<binary>"))).collect::<std::collections::HashMap<_, _>>(),
             "operation_id": operation.operation_id
         });
-        println!("{}", serde_json::to_string_pretty(&dry_run_info).unwrap());
+        let dry_run_output =
+            serde_json::to_string_pretty(&dry_run_info).map_err(|e| Error::SerializationError {
+                reason: format!("Failed to serialize dry-run info: {e}"),
+            })?;
+        println!("{dry_run_output}");
         return Ok(());
     }
 
@@ -531,6 +538,17 @@ fn print_as_table(json_value: &Value) {
                 return;
             }
 
+            // Check if array is too large
+            if items.len() > MAX_TABLE_ROWS {
+                println!(
+                    "Array too large: {} items (max {} for table display)",
+                    items.len(),
+                    MAX_TABLE_ROWS
+                );
+                println!("Use --format json or --jq to process the full data");
+                return;
+            }
+
             // Try to create a table from array of objects
             if let Some(Value::Object(_)) = items.first() {
                 // Create table for array of objects
@@ -577,6 +595,17 @@ fn print_as_table(json_value: &Value) {
             }
         }
         Value::Object(obj) => {
+            // Check if object has too many fields
+            if obj.len() > MAX_TABLE_ROWS {
+                println!(
+                    "Object too large: {} fields (max {} for table display)",
+                    obj.len(),
+                    MAX_TABLE_ROWS
+                );
+                println!("Use --format json or --jq to process the full data");
+                return;
+            }
+
             // Create a simple key-value table for objects
             let rows: Vec<KeyValue> = obj
                 .iter()
@@ -703,8 +732,61 @@ fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
 #[cfg(not(feature = "jq"))]
 /// Basic JQ-like functionality for common cases
 fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Error> {
+    // Check if the filter uses advanced features
+    let uses_advanced_features = filter.contains('[')
+        || filter.contains(']')
+        || filter.contains('|')
+        || filter.contains('(')
+        || filter.contains(')')
+        || filter.contains("select")
+        || filter.contains("map")
+        || filter.contains("length");
+
+    if uses_advanced_features {
+        eprintln!("Warning: Advanced JQ features require building with --features jq");
+        eprintln!("         Currently only basic field access is supported (e.g., '.field', '.nested.field')");
+        eprintln!("         To enable full JQ support: cargo install aperture-cli --features jq");
+    }
+
     let result = match filter {
         "." => json_value.clone(),
+        ".[]" => {
+            // Handle array iteration
+            match json_value {
+                Value::Array(arr) => {
+                    // Return array elements as a JSON array
+                    Value::Array(arr.clone())
+                }
+                Value::Object(obj) => {
+                    // Return object values as an array
+                    Value::Array(obj.values().cloned().collect())
+                }
+                _ => Value::Null,
+            }
+        }
+        ".length" => {
+            // Handle length operation
+            match json_value {
+                Value::Array(arr) => Value::Number(arr.len().into()),
+                Value::Object(obj) => Value::Number(obj.len().into()),
+                Value::String(s) => Value::Number(s.len().into()),
+                _ => Value::Null,
+            }
+        }
+        filter if filter.starts_with(".[].") => {
+            // Handle array map like .[].name
+            let field_path = &filter[4..]; // Remove ".[].""
+            match json_value {
+                Value::Array(arr) => {
+                    let mapped: Vec<Value> = arr
+                        .iter()
+                        .map(|item| get_nested_field(item, field_path))
+                        .collect();
+                    Value::Array(mapped)
+                }
+                _ => Value::Null,
+            }
+        }
         filter if filter.starts_with('.') => {
             // Handle simple field access like .name, .metadata.role
             let field_path = &filter[1..]; // Remove the leading dot

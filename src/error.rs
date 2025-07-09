@@ -88,6 +88,8 @@ pub enum Error {
     EmptyHeaderName,
     #[error("JQ filter error: {reason}")]
     JqFilterError { reason: String },
+    #[error("Invalid path '{path}': {reason}")]
+    InvalidPath { path: String, reason: String },
 
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
@@ -377,6 +379,12 @@ impl Error {
                 format!("JQ filter error: {reason}"),
                 Some("Check your JQ filter syntax. Common examples: '.name', '.[] | select(.active)'".to_string()),
                 Some(json!({ "reason": reason })),
+            ),
+            Self::InvalidPath { path, reason } => (
+                "InvalidPath",
+                format!("Invalid path '{path}': {reason}"),
+                Some("Check that the path is valid and properly formatted.".to_string()),
+                Some(json!({ "path": path, "reason": reason })),
             ),
             Self::Anyhow(err) => (
                 "Unexpected",

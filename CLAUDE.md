@@ -112,10 +112,23 @@ The project follows a structured development approach:
 - `serde`: Serialization ecosystem
 - `tokio`: Async runtime
 
+### Optional Dependencies (Feature-Gated)
+- `jaq-interpret`, `jaq-parse`, `jaq-std`: Pure Rust JQ implementation (enabled with `--features jq`)
+- `ahash`: High-performance hashing for JQ support
+
 ### Development/Testing
 - `assert_cmd`: Command-line testing
 - `wiremock`: HTTP mocking
 - `predicates`: Test assertions
+
+## Feature Flags
+
+### `jq` Feature
+Enables advanced JSON filtering using JQ syntax with a pure Rust implementation:
+- **Build:** `cargo build --features jq`
+- **Test:** `cargo test --features jq`
+- **Without feature:** Only basic field access works (`.field`, `.nested.field`)
+- **With feature:** Full JQ syntax support (arrays, filters, transformations)
 
 ## Code Style
 

@@ -57,6 +57,34 @@ cd aperture
 cargo install --path .
 ```
 
+### Optional Features
+
+Aperture supports optional features that can be enabled during compilation:
+
+#### JQ Support (Pure Rust Implementation)
+
+The `jq` feature enables advanced JSON filtering using JQ syntax. This provides a pure Rust implementation without requiring external dependencies:
+
+```bash
+# Install with JQ support
+cargo install aperture-cli --features jq
+
+# Build from source with JQ support
+cargo build --release --features jq
+cargo install --path . --features jq
+```
+
+When enabled, you can use advanced JQ filters:
+```bash
+# Extract specific fields
+aperture api my-api get-users --jq '.[].name'
+
+# Complex filtering
+aperture api my-api get-data --jq '.items | map(select(.active)) | .[0:5]'
+```
+
+**Note:** Without the `jq` feature, only basic field access is supported (e.g., `.name`, `.data.items`). For full JQ functionality including array operations, filters, and transformations, enable the feature during compilation.
+
 ## Getting Started
 
 ### Basic Usage
