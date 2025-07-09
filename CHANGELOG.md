@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🚀 Features
+
+#### Phase 3: Automation at Scale & Experimental Syntax
+
+- **Batch Processing**: Execute multiple API operations from JSON/YAML batch files with concurrency control and rate limiting
+- **Response Caching**: Intelligent caching with TTL support for improved performance on repeated requests
+- **Experimental Flag-Based Parameter Syntax**: New command syntax using flags for all parameters (including path parameters)
+- **Cache Management**: New `config clear-cache` and `config cache-stats` commands for managing response caches
+
+#### Detailed Phase 3 Features
+
+- Add `--batch-file` flag for bulk operations with JSON/YAML support
+- Add `--batch-concurrency` and `--batch-rate-limit` flags for batch processing control
+- Add `--cache`, `--no-cache`, and `--cache-ttl` flags for response caching
+- Add `--experimental-flags` flag for flag-based parameter syntax
+- Implement batch processing module with `tokio::sync::Semaphore` for concurrency control
+- Implement rate limiting using `governor` crate for batch operations
+- Add comprehensive response cache infrastructure with TTL and cleanup
+- Integrate response caching into HTTP request executor
+- Add cache management CLI commands (`clear-cache`, `cache-stats`)
+- Implement experimental command generation with flag-based parameters
+
+### 🧪 Testing
+
+- Add comprehensive Phase 3 integration tests (26 new tests)
+- Add batch processing integration tests with JSON/YAML parsing
+- Add response cache integration tests with TTL and expiration
+- Add experimental flags integration tests with backwards compatibility
+- Add wiremock-based API mocking for realistic testing scenarios
+
+### 📚 Documentation
+
+- Update README.md with Phase 3 features and usage examples
+- Add dedicated Phase 3 features documentation (`docs/phase3_features.md`)
+- Update CLI help text and command descriptions
+- Add batch file format examples and best practices
+
 ## [0.1.1] - 2025-07-04
 
 ### 🚀 Features

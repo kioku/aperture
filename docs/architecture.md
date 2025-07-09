@@ -251,3 +251,201 @@ default_timeout_secs = 30
 json_errors = true
 ```
 
+## 9. Phase 3 Architecture: Automation at Scale
+
+### 9.1. Batch Processing System
+
+The batch processing system enables execution of multiple API operations from structured batch files with concurrency control and rate limiting.
+
+#### 9.1.1. Batch Module (`src/batch.rs`)
+
+**Core Components:**
+
+- **`BatchProcessor`**: Main orchestrator for batch execution
+- **`BatchFile`**: Structured representation of batch operations
+- **`BatchOperation`**: Individual operation within a batch
+- **`BatchConfig`**: Configuration for concurrency and rate limiting
+
+**Key Features:**
+
+- **Concurrency Control**: Uses `tokio::sync::Semaphore` to limit concurrent requests
+- **Rate Limiting**: Implements `governor` crate for request throttling
+- **Error Handling**: Configurable continue-on-error behavior
+- **Progress Reporting**: Optional progress display during execution
+
+**Architecture Pattern:**
+
+```rust
+BatchProcessor::new(config)
+    .execute_batch(spec, batch_file, global_config, base_url, dry_run, format, jq_filter)
+    -> BatchResult { results, total_duration, success_count, failure_count }
+```
+
+#### 9.1.2. Batch File Format
+
+Supports both JSON and YAML formats with the following structure:
+
+```yaml
+metadata:
+  name: "Batch Name"
+  description: "Batch description"
+  version: "1.0"
+operations:
+  - id: "operation-1"
+    args: ["users", "get-user-by-id", "--id", "123"]
+    description: "Get user by ID"
+    headers:
+      X-Custom-Header: "value"
+    use_cache: true
+```
+
+### 9.2. Response Caching System
+
+The response caching system provides intelligent caching with TTL support for improved performance on repeated requests.
+
+#### 9.2.1. Cache Module (`src/response_cache.rs`)
+
+**Core Components:**
+
+- **`ResponseCache`**: Main cache interface with TTL management
+- **`CacheConfig`**: Configuration for cache behavior
+- **`CachedResponse`**: Cached response with metadata
+- **`CacheKey`**: Unique identifier for cache entries
+
+**Key Features:**
+
+- **TTL Management**: Automatic expiration based on configurable TTL
+- **Cache Key Generation**: SHA256 hashes of normalized request parameters
+- **Security**: Authentication headers excluded from cache keys
+- **Storage**: File-based cache with JSON serialization
+
+**Architecture Pattern:**
+
+```rust
+ResponseCache::new(config)
+    .get_cached_response(cache_key) -> Option<CachedResponse>
+    .store_response(cache_key, response, ttl)
+    .cleanup_expired_entries()
+```
+
+#### 9.2.2. Cache Integration
+
+Cache integration is seamlessly integrated into the HTTP request executor:
+
+1. **Cache Lookup**: Check for cached response before making HTTP request
+2. **Cache Store**: Store successful responses with TTL
+3. **Cache Bypass**: Honor `--no-cache` flag and skip caching for errors
+
+### 9.3. Experimental Flag-Based Parameter Syntax
+
+The experimental syntax system provides an alternative command generation approach using flags for all parameters.
+
+#### 9.3.1. Enhanced Command Generation
+
+**Modified Generator (`src/engine/generator.rs`):**
+
+- **`generate_command_tree_with_flags`**: Alternative command generation function
+- **Flag-Based Parameters**: Converts all parameters (including path parameters) to flags
+- **Backwards Compatibility**: Maintains existing positional parameter support
+
+**Architecture Pattern:**
+
+```rust
+if experimental_flags {
+    // All parameters become flags: --id 123
+    arg.long(param_name).takes_value(true)
+} else {
+    // Path parameters remain positional: 123
+    arg.takes_value(true)
+}
+```
+
+#### 9.3.2. Command Syntax Comparison
+
+**Traditional Syntax:**
+```bash
+aperture api my-api users get-user-by-id 123 --include-profile true
+```
+
+**Experimental Syntax:**
+```bash
+aperture api my-api --experimental-flags users get-user-by-id --id 123 --include-profile true
+```
+
+### 9.4. Cache Management System
+
+The cache management system provides CLI commands for managing response caches.
+
+#### 9.4.1. Cache Management Commands
+
+**New CLI Commands:**
+
+- **`config clear-cache`**: Remove cached responses
+- **`config cache-stats`**: Display cache statistics
+
+**Command Structure:**
+
+```bash
+# Clear cache for specific API
+aperture config clear-cache my-api
+
+# Clear all caches
+aperture config clear-cache --all
+
+# Show cache statistics
+aperture config cache-stats my-api
+```
+
+#### 9.4.2. Cache Statistics
+
+Provides detailed information about cache usage:
+
+- **Total Entries**: Number of cached responses
+- **Valid Entries**: Number of non-expired responses
+- **Expired Entries**: Number of expired responses
+- **Cache Size**: Total disk space used
+- **Hit Rate**: Cache effectiveness metrics
+
+### 9.5. Performance Considerations
+
+#### 9.5.1. Batch Processing Performance
+
+- **Concurrency**: Default limit of 5 concurrent requests (configurable)
+- **Rate Limiting**: Optional requests-per-second throttling
+- **Memory Usage**: Streaming processing for large batch files
+- **Error Recovery**: Configurable failure handling strategies
+
+#### 9.5.2. Cache Performance
+
+- **Cache Hits**: Sub-millisecond response times for cached requests
+- **Storage Efficiency**: Compressed JSON with minimal metadata
+- **TTL Management**: Efficient expiration without background processes
+- **Cleanup**: Automatic removal of expired entries during access
+
+### 9.6. Security Considerations
+
+#### 9.6.1. Cache Security
+
+- **Authentication Exclusion**: Auth headers excluded from cache keys
+- **File Permissions**: Cache files use secure permissions
+- **Sensitive Data**: Guidelines for avoiding sensitive data caching
+- **Cache Isolation**: Per-API cache separation
+
+#### 9.6.2. Batch Security
+
+- **Input Validation**: Batch files validated against schema
+- **Resource Limits**: Configurable concurrency and rate limits
+- **Error Handling**: Secure error reporting without sensitive data
+- **Access Control**: Batch files respect existing authentication
+
+### 9.7. Future Architecture Considerations
+
+Phase 3 architecture lays the foundation for future enhancements:
+
+- **Distributed Caching**: Shared cache across multiple Aperture instances
+- **Advanced Batching**: Support for conditional operations and dependencies
+- **Plugin System**: Extensible architecture for custom batch processors
+- **Stable Flag Syntax**: Migration path for experimental syntax to become default
+
+This architecture supports the project's evolution while maintaining backwards compatibility and performance characteristics.
+

@@ -9,6 +9,10 @@ Aperture is a command-line interface (CLI) that dynamically generates commands f
 - **Agent-First Design:** Optimized for programmatic use with structured I/O, JSON output modes, and actionable errors
 - **Secure & Robust:** Enforces strict separation of configuration from secrets using environment variables
 - **Spec Validation:** Validates OpenAPI specs during registration with clear error messages for unsupported features
+- **Batch Processing:** Execute multiple operations concurrently with rate limiting and error handling
+- **Response Caching:** Intelligent caching with TTL support for improved performance
+- **Advanced Output:** Multiple output formats (JSON, YAML, table) with JQ-based filtering
+- **Experimental Features:** Early access to upcoming functionality like flag-based parameter syntax
 
 ## Architecture
 
@@ -144,6 +148,80 @@ aperture api my-api --dry-run users create --name "Test"
 
 # Add idempotency key for safe retries
 aperture api my-api --idempotency-key "unique-key" users create --name "Test"
+```
+
+### Advanced Output Formatting
+
+Aperture supports multiple output formats and data filtering:
+
+```bash
+# Output as formatted table
+aperture api my-api users list --format table
+
+# Output as YAML
+aperture api my-api users list --format yaml
+
+# Extract specific fields with JQ filtering
+aperture api my-api users list --jq '.[] | {name: .name, email: .email}'
+
+# Complex JQ transformations
+aperture api my-api get-data --jq '.items | map(select(.active)) | .[0:5]'
+```
+
+### Batch Operations & Automation
+
+For high-volume automation, Aperture supports batch processing with concurrency controls:
+
+```bash
+# Execute multiple operations from a batch file
+aperture --batch-file operations.json --batch-concurrency 10
+
+# Rate limiting for batch operations
+aperture --batch-file operations.json --batch-rate-limit 50
+```
+
+**Example batch file (JSON):**
+```json
+{
+  "operations": [
+    {
+      "id": "get-user-1",
+      "args": ["users", "get-user-by-id", "--id", "123"]
+    },
+    {
+      "id": "get-user-2", 
+      "args": ["users", "get-user-by-id", "--id", "456"]
+    }
+  ]
+}
+```
+
+### Response Caching
+
+Improve performance with intelligent response caching:
+
+```bash
+# Enable caching with default TTL (300 seconds)
+aperture api my-api --cache users list
+
+# Custom cache TTL
+aperture api my-api --cache --cache-ttl 600 users list
+
+# Disable caching
+aperture api my-api --no-cache users list
+
+# Manage cache
+aperture config cache-stats my-api
+aperture config clear-cache my-api
+```
+
+### Experimental Features
+
+Try upcoming features with experimental flags:
+
+```bash
+# Use flag-based syntax for all parameters (including path parameters)
+aperture api my-api --experimental-flags users get-user-by-id --id 123
 ```
 
 ## Development

@@ -69,6 +69,12 @@ cargo test --test executor_tests
 
 # Test base URL management functionality
 cargo test --test base_url_integration_tests
+
+# Test Phase 3 features
+cargo test --test batch_processing_integration_tests
+cargo test --test response_cache_integration_tests
+cargo test --test phase3_integration_tests
+cargo test --test experimental_flags_tests
 ```
 
 ## Configuration Management
@@ -76,6 +82,7 @@ cargo test --test base_url_integration_tests
 The project uses a structured configuration system:
 - **Specs Directory**: `~/.config/aperture/specs/` - Original OpenAPI files
 - **Cache Directory**: `~/.config/aperture/.cache/` - Binary cached representations
+- **Response Cache**: `~/.config/aperture/.cache/response_cache/` - HTTP response caches
 - **Global Config**: `~/.config/aperture/config.toml` - Application settings
 
 ### Security Model
