@@ -642,41 +642,54 @@ fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
 
     #[cfg(feature = "jq")]
     {
-        // Use full jq-rs implementation when available
-        let result =
-            jq_rs::run(filter, &json_value.to_string()).map_err(|e| Error::JqFilterError {
-                reason: format!("Invalid jq expression: {e}"),
-            })?;
+        // Use jaq (pure Rust implementation) when available
+        use jaq_interpret::{Ctx, FilterT, ParseCtx, RcIter, Val};
+        use jaq_parse::parse;
+        use jaq_std::std;
 
-        // Handle the case where jq returns multiple results (one per line)
-        let lines: Vec<&str> = result.trim().lines().collect();
-        if lines.len() == 1 {
-            // Single result
-            Ok(lines[0].to_string())
-        } else if lines.is_empty() {
-            // No results
-            Ok("null".to_string())
-        } else {
-            // Multiple results - return as JSON array
-            let json_lines: Result<Vec<Value>, _> = lines
-                .iter()
-                .map(|line| serde_json::from_str(line))
-                .collect();
+        // Parse the filter expression
+        let (expr, errs) = parse(filter, jaq_parse::main());
+        if !errs.is_empty() {
+            return Err(Error::JqFilterError {
+                reason: format!("Parse error in jq expression: {}", errs[0]),
+            });
+        }
 
-            match json_lines {
-                Ok(values) => {
-                    let array = Value::Array(values);
-                    Ok(
-                        serde_json::to_string(&array).map_err(|e| Error::JqFilterError {
-                            reason: format!("Failed to serialize filtered results: {e}"),
-                        })?,
-                    )
-                }
-                Err(_) => {
-                    // If we can't parse as JSON, return the raw lines joined
-                    Ok(lines.join("\n"))
+        // Create parsing context and compile the filter
+        let mut ctx = ParseCtx::new(Vec::new());
+        ctx.insert_defs(std());
+        let filter = ctx.compile(expr.unwrap());
+
+        // Convert serde_json::Value to jaq Val
+        let jaq_value = serde_json_to_jaq_val(&json_value);
+
+        // Execute the filter
+        let inputs = RcIter::new(core::iter::empty());
+        let ctx = Ctx::new([], &inputs);
+        let results: Result<Vec<Val>, _> = filter.run((ctx, jaq_value.into())).collect();
+
+        match results {
+            Ok(vals) => {
+                if vals.is_empty() {
+                    Ok("null".to_string())
+                } else if vals.len() == 1 {
+                    // Single result - convert back to JSON
+                    let json_val = jaq_val_to_serde_json(&vals[0]);
+                    serde_json::to_string_pretty(&json_val).map_err(|e| Error::JqFilterError {
+                        reason: format!("Failed to serialize result: {e}"),
+                    })
+                } else {
+                    // Multiple results - return as JSON array
+                    let json_vals: Vec<Value> = vals.iter().map(jaq_val_to_serde_json).collect();
+                    let array = Value::Array(json_vals);
+                    serde_json::to_string_pretty(&array).map_err(|e| Error::JqFilterError {
+                        reason: format!("Failed to serialize results: {e}"),
+                    })
                 }
             }
+            Err(e) => Err(Error::JqFilterError {
+                reason: format!("Filter execution error: {e}"),
+            }),
         }
     }
 
@@ -720,6 +733,26 @@ fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
             continue;
         }
 
+        // Handle array index notation like [0]
+        if part.starts_with('[') && part.ends_with(']') {
+            let index_str = &part[1..part.len() - 1];
+            if let Ok(index) = index_str.parse::<usize>() {
+                match current {
+                    Value::Array(arr) => {
+                        if let Some(item) = arr.get(index) {
+                            current = item;
+                        } else {
+                            return Value::Null;
+                        }
+                    }
+                    _ => return Value::Null,
+                }
+            } else {
+                return Value::Null;
+            }
+            continue;
+        }
+
         match current {
             Value::Object(obj) => {
                 if let Some(field) = obj.get(part) {
@@ -729,7 +762,7 @@ fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
                 }
             }
             Value::Array(arr) => {
-                // Handle array index access
+                // Handle numeric string as array index
                 if let Ok(index) = part.parse::<usize>() {
                     if let Some(item) = arr.get(index) {
                         current = item;
@@ -745,4 +778,78 @@ fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
     }
 
     current.clone()
+}
+
+#[cfg(feature = "jq")]
+/// Convert serde_json::Value to jaq Val
+fn serde_json_to_jaq_val(value: &Value) -> jaq_interpret::Val {
+    use jaq_interpret::Val;
+    use std::rc::Rc;
+
+    match value {
+        Value::Null => Val::Null,
+        Value::Bool(b) => Val::Bool(*b),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                // Convert i64 to isize safely
+                if let Ok(isize_val) = isize::try_from(i) {
+                    Val::Int(isize_val)
+                } else {
+                    // Fallback to float for large numbers
+                    Val::Float(i as f64)
+                }
+            } else if let Some(f) = n.as_f64() {
+                Val::Float(f)
+            } else {
+                Val::Null
+            }
+        }
+        Value::String(s) => Val::Str(s.clone().into()),
+        Value::Array(arr) => {
+            let jaq_arr: Vec<Val> = arr.iter().map(serde_json_to_jaq_val).collect();
+            Val::Arr(Rc::new(jaq_arr))
+        }
+        Value::Object(obj) => {
+            let mut jaq_obj = indexmap::IndexMap::with_hasher(ahash::RandomState::new());
+            for (k, v) in obj {
+                jaq_obj.insert(Rc::new(k.clone()), serde_json_to_jaq_val(v));
+            }
+            Val::Obj(Rc::new(jaq_obj))
+        }
+    }
+}
+
+#[cfg(feature = "jq")]
+/// Convert jaq Val to serde_json::Value
+fn jaq_val_to_serde_json(val: &jaq_interpret::Val) -> Value {
+    use jaq_interpret::Val;
+
+    match val {
+        Val::Null => Value::Null,
+        Val::Bool(b) => Value::Bool(*b),
+        Val::Int(i) => {
+            // Convert isize to i64
+            Value::Number((*i as i64).into())
+        }
+        Val::Float(f) => {
+            if let Some(num) = serde_json::Number::from_f64(*f) {
+                Value::Number(num)
+            } else {
+                Value::Null
+            }
+        }
+        Val::Str(s) => Value::String(s.to_string()),
+        Val::Arr(arr) => {
+            let json_arr: Vec<Value> = arr.iter().map(jaq_val_to_serde_json).collect();
+            Value::Array(json_arr)
+        }
+        Val::Obj(obj) => {
+            let mut json_obj = serde_json::Map::new();
+            for (k, v) in obj.iter() {
+                json_obj.insert(k.to_string(), jaq_val_to_serde_json(v));
+            }
+            Value::Object(json_obj)
+        }
+        _ => Value::Null, // Handle any other Val variants as null
+    }
 }

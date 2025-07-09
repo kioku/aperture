@@ -1601,7 +1601,14 @@ paths:
         .unwrap()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
-        .args(&["api", "test-api", "users", "list-users", "--jq", ".0.name"])
+        .args(&[
+            "api",
+            "test-api",
+            "users",
+            "list-users",
+            "--jq",
+            ".[0].name",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"Alice\""));

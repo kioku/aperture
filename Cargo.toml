@@ -17,11 +17,14 @@ name = "aperture"
 path = "src/main.rs"
 
 [dependencies]
+ahash = { version = "0.8.12", optional = true }
 anyhow = "1.0.98"
 bincode = "1.3.3"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5.40", features = ["derive"] }
-jq-rs = { version = "0.4.1", optional = true }
+jaq-interpret = { version = "1.5.0", optional = true }
+jaq-parse = { version = "1.0.3", optional = true }
+jaq-std = { version = "1.6.0", optional = true }
 openapiv3 = "2.2.0"
 reqwest = { version = "0.12.21", features = ["json"] }
 serde = "1.0.219"
@@ -32,12 +35,13 @@ tabled = "0.15.0"
 thiserror = "2.0.12"
 tokio = { version = "1.45.1", features = ["rt-multi-thread", "macros"] }
 dirs = "6.0.0"
+indexmap = "2.2.1"
 toml = "0.8.23"
 urlencoding = "2.1.3"
 
 [features]
 default = []
-jq = ["jq-rs"]
+jq = ["jaq-interpret", "jaq-parse", "jaq-std", "ahash"]
 
 [dev-dependencies]
 assert_cmd = "2.0.17"
