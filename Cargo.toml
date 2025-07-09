@@ -33,9 +33,11 @@ serde_yaml = "0.9.34"
 shellexpand = "3.1.1"
 tabled = "0.15.0"
 thiserror = "2.0.12"
-tokio = { version = "1.45.1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.45.1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 dirs = "6.0.0"
+governor = "0.6.3"
 indexmap = "2.2.1"
+sha2 = "0.10.8"
 toml = "0.8.23"
 urlencoding = "2.1.3"
 

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GlobalConfig {
     #[serde(default = "default_timeout_secs_value")]
     pub default_timeout_secs: u64,
@@ -16,7 +16,7 @@ const fn default_timeout_secs_value() -> u64 {
     30
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AgentDefaults {
     #[serde(default)]
     pub json_errors: bool,

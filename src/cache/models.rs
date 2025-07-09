@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedSpec {
     /// Cache format version to detect incompatible changes
     pub cache_format_version: u32,
@@ -46,7 +46,7 @@ impl Default for GlobalCacheMetadata {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedCommand {
     pub name: String,
     pub description: Option<String>,
@@ -67,7 +67,7 @@ pub struct CachedCommand {
     pub external_docs_url: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedParameter {
     pub name: String,
     pub location: String,
@@ -81,7 +81,7 @@ pub struct CachedParameter {
     pub example: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedRequestBody {
     pub content_type: String,
     pub schema: String,
@@ -90,7 +90,7 @@ pub struct CachedRequestBody {
     pub example: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedResponse {
     pub status_code: String,
     pub description: Option<String>,
@@ -99,7 +99,7 @@ pub struct CachedResponse {
 }
 
 /// Cached representation of a security scheme with x-aperture-secret mapping
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedSecurityScheme {
     /// Security scheme name from the `OpenAPI` spec
     pub name: String,
