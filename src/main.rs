@@ -7,6 +7,7 @@ use aperture_cli::config::models::GlobalConfig;
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
+use aperture_cli::response_cache::{CacheConfig, ResponseCache};
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
@@ -33,6 +34,7 @@ async fn main() {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
     match cli.command {
         Commands::Config { command } => match command {
@@ -124,6 +126,12 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                     eprintln!("Error: Either specify a spec name or use --all flag");
                     std::process::exit(1);
                 }
+            }
+            ConfigCommands::ClearCache { api_name, all } => {
+                clear_response_cache(manager, api_name.as_deref(), all).await?;
+            }
+            ConfigCommands::CacheStats { api_name } => {
+                show_cache_stats(manager, api_name.as_deref()).await?;
             }
         },
         Commands::ListCommands { ref context } => {
@@ -501,6 +509,84 @@ fn print_error_with_json(error: &Error, json_format: bool) {
     } else {
         print_error(error);
     }
+}
+
+/// Clear response cache for a specific API or all APIs
+async fn clear_response_cache(
+    _manager: &ConfigManager<OsFileSystem>,
+    api_name: Option<&str>,
+    all: bool,
+) -> Result<(), Error> {
+    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+        PathBuf::from(dir)
+    } else {
+        get_config_dir()?
+    };
+
+    let cache_config = CacheConfig {
+        cache_dir: config_dir.join(".cache").join("responses"),
+        ..Default::default()
+    };
+
+    let cache = ResponseCache::new(cache_config)?;
+
+    let cleared_count = if all {
+        cache.clear_all().await?
+    } else if let Some(api) = api_name {
+        cache.clear_api_cache(api).await?
+    } else {
+        eprintln!("Error: Either specify an API name or use --all flag");
+        std::process::exit(1);
+    };
+
+    if all {
+        println!("Cleared {cleared_count} cached responses for all APIs");
+    } else if let Some(api) = api_name {
+        println!("Cleared {cleared_count} cached responses for API '{api}'");
+    }
+
+    Ok(())
+}
+
+/// Show cache statistics for a specific API or all APIs
+async fn show_cache_stats(
+    _manager: &ConfigManager<OsFileSystem>,
+    api_name: Option<&str>,
+) -> Result<(), Error> {
+    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+        PathBuf::from(dir)
+    } else {
+        get_config_dir()?
+    };
+
+    let cache_config = CacheConfig {
+        cache_dir: config_dir.join(".cache").join("responses"),
+        ..Default::default()
+    };
+
+    let cache = ResponseCache::new(cache_config)?;
+    let stats = cache.get_stats(api_name).await?;
+
+    if let Some(api) = api_name {
+        println!("Cache statistics for API '{api}':");
+    } else {
+        println!("Cache statistics for all APIs:");
+    }
+
+    println!("  Total entries: {}", stats.total_entries);
+    println!("  Valid entries: {}", stats.valid_entries);
+    println!("  Expired entries: {}", stats.expired_entries);
+    #[allow(clippy::cast_precision_loss)]
+    let size_mb = stats.total_size_bytes as f64 / 1024.0 / 1024.0;
+    println!("  Total size: {size_mb:.2} MB");
+
+    if stats.total_entries > 0 {
+        #[allow(clippy::cast_precision_loss)]
+        let hit_rate = stats.valid_entries as f64 / stats.total_entries as f64 * 100.0;
+        println!("  Hit rate: {hit_rate:.1}%");
+    }
+
+    Ok(())
 }
 
 /// Prints a user-friendly error message with context and suggestions
