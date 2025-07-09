@@ -22,17 +22,19 @@ use std::str::FromStr;
 /// * `idempotency_key` - Optional idempotency key for safe retries
 /// * `global_config` - Optional global configuration for URL resolution
 /// * `output_format` - Format for response output (json, yaml, table)
+/// * `jq_filter` - Optional JQ filter expression to apply to response
 ///
 /// # Returns
 /// * `Ok(())` - Request executed successfully or dry-run completed
 /// * `Err(Error)` - Request failed or validation error
 ///
 /// # Errors
-/// Returns errors for authentication failures, network issues, or response validation
+/// Returns errors for authentication failures, network issues, response validation, or JQ filter errors
 ///
 /// # Panics
 /// Panics if JSON serialization of dry-run information fails (extremely unlikely)
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_request(
     spec: &CachedSpec,
     matches: &ArgMatches,
@@ -41,6 +43,7 @@ pub async fn execute_request(
     idempotency_key: Option<&str>,
     global_config: Option<&GlobalConfig>,
     output_format: &OutputFormat,
+    jq_filter: Option<&str>,
 ) -> Result<(), Error> {
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
@@ -159,7 +162,7 @@ pub async fn execute_request(
 
     // Print response in the requested format
     if !response_text.is_empty() {
-        print_formatted_response(&response_text, output_format);
+        print_formatted_response(&response_text, output_format, jq_filter)?;
     }
 
     Ok(())
@@ -447,42 +450,55 @@ fn to_kebab_case(s: &str) -> String {
 }
 
 /// Prints the response text in the specified format
-fn print_formatted_response(response_text: &str, output_format: &OutputFormat) {
+fn print_formatted_response(
+    response_text: &str,
+    output_format: &OutputFormat,
+    jq_filter: Option<&str>,
+) -> Result<(), Error> {
+    // Apply JQ filter if provided
+    let processed_text = if let Some(filter) = jq_filter {
+        apply_jq_filter(response_text, filter)?
+    } else {
+        response_text.to_string()
+    };
+
     match output_format {
         OutputFormat::Json => {
             // Try to pretty-print JSON (default behavior)
-            if let Ok(json_value) = serde_json::from_str::<Value>(response_text) {
+            if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
                 if let Ok(pretty) = serde_json::to_string_pretty(&json_value) {
                     println!("{pretty}");
                 } else {
-                    println!("{response_text}");
+                    println!("{processed_text}");
                 }
             } else {
-                println!("{response_text}");
+                println!("{processed_text}");
             }
         }
         OutputFormat::Yaml => {
             // Convert JSON to YAML
-            if let Ok(json_value) = serde_json::from_str::<Value>(response_text) {
+            if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
                 match serde_yaml::to_string(&json_value) {
                     Ok(yaml_output) => println!("{yaml_output}"),
-                    Err(_) => println!("{response_text}"), // Fallback to raw text
+                    Err(_) => println!("{processed_text}"), // Fallback to raw text
                 }
             } else {
                 // If not JSON, output as-is
-                println!("{response_text}");
+                println!("{processed_text}");
             }
         }
         OutputFormat::Table => {
             // Convert JSON to table format
-            if let Ok(json_value) = serde_json::from_str::<Value>(response_text) {
+            if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
                 print_as_table(&json_value);
             } else {
                 // If not JSON, output as-is
-                println!("{response_text}");
+                println!("{processed_text}");
             }
         }
     }
+
+    Ok(())
 }
 
 // Define table structures at module level to avoid clippy::items_after_statements
@@ -614,4 +630,119 @@ fn format_value_for_table(value: &Value) -> String {
             }
         }
     }
+}
+
+/// Applies a JQ filter to the response text
+fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
+    // Parse the response as JSON
+    let json_value: Value =
+        serde_json::from_str(response_text).map_err(|e| Error::JqFilterError {
+            reason: format!("Response is not valid JSON: {e}"),
+        })?;
+
+    #[cfg(feature = "jq")]
+    {
+        // Use full jq-rs implementation when available
+        let result =
+            jq_rs::run(filter, &json_value.to_string()).map_err(|e| Error::JqFilterError {
+                reason: format!("Invalid jq expression: {e}"),
+            })?;
+
+        // Handle the case where jq returns multiple results (one per line)
+        let lines: Vec<&str> = result.trim().lines().collect();
+        if lines.len() == 1 {
+            // Single result
+            Ok(lines[0].to_string())
+        } else if lines.is_empty() {
+            // No results
+            Ok("null".to_string())
+        } else {
+            // Multiple results - return as JSON array
+            let json_lines: Result<Vec<Value>, _> = lines
+                .iter()
+                .map(|line| serde_json::from_str(line))
+                .collect();
+
+            match json_lines {
+                Ok(values) => {
+                    let array = Value::Array(values);
+                    Ok(
+                        serde_json::to_string(&array).map_err(|e| Error::JqFilterError {
+                            reason: format!("Failed to serialize filtered results: {e}"),
+                        })?,
+                    )
+                }
+                Err(_) => {
+                    // If we can't parse as JSON, return the raw lines joined
+                    Ok(lines.join("\n"))
+                }
+            }
+        }
+    }
+
+    #[cfg(not(feature = "jq"))]
+    {
+        // Basic JQ-like functionality without full jq library
+        apply_basic_jq_filter(&json_value, filter)
+    }
+}
+
+#[cfg(not(feature = "jq"))]
+/// Basic JQ-like functionality for common cases
+fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Error> {
+    let result = match filter {
+        "." => json_value.clone(),
+        filter if filter.starts_with('.') => {
+            // Handle simple field access like .name, .metadata.role
+            let field_path = &filter[1..]; // Remove the leading dot
+            get_nested_field(json_value, field_path)
+        }
+        _ => {
+            return Err(Error::JqFilterError {
+                reason: format!("Unsupported JQ filter: '{filter}'. Only basic field access like '.name' or '.metadata.role' is supported without the full jq library."),
+            });
+        }
+    };
+
+    serde_json::to_string_pretty(&result).map_err(|e| Error::JqFilterError {
+        reason: format!("Failed to serialize filtered result: {e}"),
+    })
+}
+
+#[cfg(not(feature = "jq"))]
+/// Get a nested field from JSON using dot notation
+fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
+    let parts: Vec<&str> = field_path.split('.').collect();
+    let mut current = json_value;
+
+    for part in parts {
+        if part.is_empty() {
+            continue;
+        }
+
+        match current {
+            Value::Object(obj) => {
+                if let Some(field) = obj.get(part) {
+                    current = field;
+                } else {
+                    return Value::Null;
+                }
+            }
+            Value::Array(arr) => {
+                // Handle array index access
+                if let Ok(index) = part.parse::<usize>() {
+                    if let Some(item) = arr.get(index) {
+                        current = item;
+                    } else {
+                        return Value::Null;
+                    }
+                } else {
+                    return Value::Null;
+                }
+            }
+            _ => return Value::Null,
+        }
+    }
+
+    current.clone()
 }

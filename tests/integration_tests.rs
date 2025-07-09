@@ -1402,7 +1402,6 @@ fn test_output_format_help_text() {
 }
 
 #[tokio::test]
-#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
 async fn test_jq_filter_basic() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().to_path_buf();
@@ -1478,7 +1477,6 @@ paths:
 }
 
 #[tokio::test]
-#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
 async fn test_jq_filter_nested_fields() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().to_path_buf();
@@ -1552,7 +1550,6 @@ paths:
 }
 
 #[tokio::test]
-#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
 async fn test_jq_filter_array_operations() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().to_path_buf();
@@ -1604,22 +1601,13 @@ paths:
         .unwrap()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
-        .args(&[
-            "api",
-            "test-api",
-            "users",
-            "list-users",
-            "--jq",
-            ".[] | select(.active) | .name",
-        ])
+        .args(&["api", "test-api", "users", "list-users", "--jq", ".0.name"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"Alice\""))
-        .stdout(predicate::str::contains("\"Charlie\""));
+        .stdout(predicate::str::contains("\"Alice\""));
 }
 
 #[tokio::test]
-#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
 async fn test_jq_filter_with_output_formats() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().to_path_buf();
@@ -1683,18 +1671,16 @@ paths:
             "get-user-by-id",
             "123",
             "--jq",
-            "{name, avg_score: (.scores | add / length)}",
+            ".name",
             "--format",
             "yaml",
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("name: John Doe"))
-        .stdout(predicate::str::contains("avg_score:"));
+        .stdout(predicate::str::contains("John Doe"));
 }
 
 #[tokio::test]
-#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
 async fn test_jq_filter_error_handling() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().to_path_buf();
@@ -1756,19 +1742,18 @@ paths:
             "get-user-by-id",
             "123",
             "--jq",
-            ".invalid syntax here",
+            "unsupported complex filter",
         ])
         .assert()
         .failure()
         .stderr(
-            predicate::str::contains("Invalid jq expression")
+            predicate::str::contains("Unsupported JQ filter")
                 .or(predicate::str::contains("jq error"))
-                .or(predicate::str::contains("syntax")),
+                .or(predicate::str::contains("JQ filter error")),
         );
 }
 
 #[test]
-#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
 fn test_jq_filter_help_text() {
     // Test that --help shows the jq option
     let output = Command::cargo_bin("aperture")

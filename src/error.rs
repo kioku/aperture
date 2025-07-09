@@ -86,6 +86,8 @@ pub enum Error {
     InvalidIdempotencyKey,
     #[error("Header name cannot be empty")]
     EmptyHeaderName,
+    #[error("JQ filter error: {reason}")]
+    JqFilterError { reason: String },
 
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
@@ -369,6 +371,12 @@ impl Error {
                 "Header name cannot be empty".to_string(),
                 None,
                 None,
+            ),
+            Self::JqFilterError { reason } => (
+                "JqFilterError",
+                format!("JQ filter error: {reason}"),
+                Some("Check your JQ filter syntax. Common examples: '.name', '.[] | select(.active)'".to_string()),
+                Some(json!({ "reason": reason })),
             ),
             Self::Anyhow(err) => (
                 "Unexpected",

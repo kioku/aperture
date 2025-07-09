@@ -60,6 +60,15 @@ pub struct Cli {
     )]
     pub format: OutputFormat,
 
+    /// Apply JQ filter to response data
+    #[arg(
+        long,
+        global = true,
+        value_name = "FILTER",
+        help = "Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')"
+    )]
+    pub jq: Option<String>,
+
     #[command(subcommand)]
     pub command: Commands,
 }
