@@ -1400,3 +1400,383 @@ fn test_output_format_help_text() {
     assert!(stdout.contains("--format") || stdout.contains("format"));
     assert!(stdout.contains("json") || stdout.contains("yaml") || stdout.contains("table"));
 }
+
+#[tokio::test]
+#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
+async fn test_jq_filter_basic() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("test-spec.yaml");
+
+    // Create spec and add it
+    let spec_content = "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+";
+    fs::write(&spec_file, spec_content).unwrap();
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "123",
+            "name": "John Doe",
+            "email": "john@example.com",
+            "metadata": {
+                "created": "2024-01-01",
+                "role": "admin"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Test basic field extraction
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "users",
+            "get-user-by-id",
+            "123",
+            "--jq",
+            ".name",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"John Doe\""));
+}
+
+#[tokio::test]
+#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
+async fn test_jq_filter_nested_fields() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("test-spec.yaml");
+
+    let spec_content = "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+";
+    fs::write(&spec_file, spec_content).unwrap();
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "123",
+            "name": "John Doe",
+            "metadata": {
+                "role": "admin",
+                "permissions": ["read", "write", "delete"]
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Test nested field extraction
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "users",
+            "get-user-by-id",
+            "123",
+            "--jq",
+            ".metadata.role",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"admin\""));
+}
+
+#[tokio::test]
+#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
+async fn test_jq_filter_array_operations() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("test-spec.yaml");
+
+    let spec_content = "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users:
+    get:
+      tags:
+        - users
+      operationId: listUsers
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+";
+    fs::write(&spec_file, spec_content).unwrap();
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": "1", "name": "Alice", "active": true},
+            {"id": "2", "name": "Bob", "active": false},
+            {"id": "3", "name": "Charlie", "active": true}
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    // Test array filtering
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "users",
+            "list-users",
+            "--jq",
+            ".[] | select(.active) | .name",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"Alice\""))
+        .stdout(predicate::str::contains("\"Charlie\""));
+}
+
+#[tokio::test]
+#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
+async fn test_jq_filter_with_output_formats() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("test-spec.yaml");
+
+    let spec_content = "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+";
+    fs::write(&spec_file, spec_content).unwrap();
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "123",
+            "name": "John Doe",
+            "email": "john@example.com",
+            "scores": [85, 90, 78, 92]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Test JQ with YAML output
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "users",
+            "get-user-by-id",
+            "123",
+            "--jq",
+            "{name, avg_score: (.scores | add / length)}",
+            "--format",
+            "yaml",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("name: John Doe"))
+        .stdout(predicate::str::contains("avg_score:"));
+}
+
+#[tokio::test]
+#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
+async fn test_jq_filter_error_handling() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("test-spec.yaml");
+
+    let spec_content = "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+";
+    fs::write(&spec_file, spec_content).unwrap();
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users/123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "123",
+            "name": "John Doe"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    // Test invalid JQ expression
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "users",
+            "get-user-by-id",
+            "123",
+            "--jq",
+            ".invalid syntax here",
+        ])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("Invalid jq expression")
+                .or(predicate::str::contains("jq error"))
+                .or(predicate::str::contains("syntax")),
+        );
+}
+
+#[test]
+#[ignore = "Feature 2.3: JQ filtering not yet implemented"]
+fn test_jq_filter_help_text() {
+    // Test that --help shows the jq option
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .args(&["api", "test", "--help"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--jq") || stdout.contains("jq filter"));
+}
