@@ -11,6 +11,7 @@ use aperture_cli::response_cache::{CacheConfig, ResponseCache};
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
@@ -284,6 +285,7 @@ fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> 
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
     // Get the cache directory - respecting APERTURE_CONFIG_DIR if set
     let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
@@ -382,6 +384,18 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         },
     );
 
+    // Create cache configuration from CLI flags
+    let cache_config = if cli.no_cache {
+        None
+    } else {
+        Some(CacheConfig {
+            cache_dir: config_dir.join(".cache").join("responses"),
+            default_ttl: Duration::from_secs(cli.cache_ttl.unwrap_or(300)),
+            max_entries: 1000,
+            enabled: cli.cache || cli.cache_ttl.is_some(),
+        })
+    };
+
     // Execute the request with agent flags
     executor::execute_request(
         &spec,
@@ -392,6 +406,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         global_config.as_ref(),
         &output_format,
         jq_filter,
+        cache_config.as_ref(),
     )
     .await
     .map_err(|e| match &e {

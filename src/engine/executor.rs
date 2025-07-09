@@ -3,10 +3,12 @@ use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
+use crate::response_cache::{CacheConfig, CacheKey, CachedRequestInfo, ResponseCache};
 use clap::ArgMatches;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::str::FromStr;
 
 /// Maximum number of rows to display in table format to prevent memory exhaustion
@@ -26,6 +28,7 @@ const MAX_TABLE_ROWS: usize = 1000;
 /// * `global_config` - Optional global configuration for URL resolution
 /// * `output_format` - Format for response output (json, yaml, table)
 /// * `jq_filter` - Optional JQ filter expression to apply to response
+/// * `cache_config` - Optional cache configuration for response caching
 ///
 /// # Returns
 /// * `Ok(())` - Request executed successfully or dry-run completed
@@ -47,6 +50,7 @@ pub async fn execute_request(
     global_config: Option<&GlobalConfig>,
     output_format: &OutputFormat,
     jq_filter: Option<&str>,
+    cache_config: Option<&CacheConfig>,
 ) -> Result<(), Error> {
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
@@ -97,16 +101,55 @@ pub async fn execute_request(
         current_matches = sub_matches;
     }
 
-    // Only check for body if the operation expects one
-    if operation.request_body.is_some() {
+    let request_body = if operation.request_body.is_some() {
         if let Some(body_value) = current_matches.get_one::<String>("body") {
             let json_body: Value =
                 serde_json::from_str(body_value).map_err(|e| Error::InvalidJsonBody {
                     reason: e.to_string(),
                 })?;
             request = request.json(&json_body);
+            Some(body_value.clone())
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
+
+    // Check cache for response if caching is enabled
+    let cache_key = if let Some(cache_cfg) = cache_config {
+        if cache_cfg.enabled {
+            // Create cache key from request details
+            let header_map: HashMap<String, String> = headers_clone
+                .iter()
+                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+
+            let cache_key = CacheKey::from_request(
+                &spec.name,
+                &operation.operation_id,
+                method.as_ref(),
+                &url,
+                &header_map,
+                request_body.as_deref(),
+            )?;
+
+            let response_cache = ResponseCache::new(cache_cfg.clone())?;
+
+            // Try to get cached response
+            if let Some(cached_response) = response_cache.get(&cache_key).await? {
+                // Use cached response
+                print_formatted_response(&cached_response.body, output_format, jq_filter)?;
+                return Ok(());
+            }
+
+            Some((cache_key, response_cache))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     // Handle dry-run mode - show request details without executing
     if dry_run {
@@ -131,6 +174,12 @@ pub async fn execute_request(
     })?;
 
     let status = response.status();
+    let response_headers: HashMap<String, String> = response
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+
     let response_text = response
         .text()
         .await
@@ -165,6 +214,45 @@ pub async fn execute_request(
             operation_id,
             security_schemes,
         });
+    }
+
+    // Store response in cache if caching is enabled
+    if let Some((cache_key, response_cache)) = cache_key {
+        // Create cached request info
+        let cached_request_info = CachedRequestInfo {
+            method: method.to_string(),
+            url: url.clone(),
+            headers: headers_clone
+                .iter()
+                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect(),
+            body_hash: request_body.as_ref().map(|body| {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(body.as_bytes());
+                format!("{:x}", hasher.finalize())
+            }),
+        };
+
+        // Store in cache with custom TTL if specified
+        let cache_ttl = cache_config.and_then(|cfg| {
+            if cfg.default_ttl.as_secs() > 0 {
+                Some(cfg.default_ttl)
+            } else {
+                None
+            }
+        });
+
+        let _ = response_cache
+            .store(
+                &cache_key,
+                &response_text,
+                status.as_u16(),
+                &response_headers,
+                cached_request_info,
+                cache_ttl,
+            )
+            .await;
     }
 
     // Print response in the requested format

@@ -174,6 +174,7 @@ async fn test_bearer_token_authentication() {
         None,
         &OutputFormat::Json,
         None,
+        None, // cache_config
     )
     .await;
     assert!(result.is_ok());
@@ -218,6 +219,7 @@ async fn test_api_key_authentication() {
         None,
         &OutputFormat::Json,
         None,
+        None, // cache_config
     )
     .await;
     assert!(result.is_ok());
@@ -254,6 +256,7 @@ async fn test_missing_authentication_environment_variable() {
         None,
         &OutputFormat::Json,
         None,
+        None, // cache_config
     )
     .await;
 
@@ -317,6 +320,7 @@ async fn test_custom_headers_with_literal_values() {
         None,
         &OutputFormat::Json,
         None,
+        None, // cache_config
     )
     .await;
     assert!(result.is_ok());
@@ -378,6 +382,7 @@ async fn test_custom_headers_with_environment_variable_expansion() {
         None,
         &OutputFormat::Json,
         None,
+        None, // cache_config
     )
     .await;
     assert!(result.is_ok());
@@ -447,6 +452,7 @@ async fn test_authentication_and_custom_headers_combined() {
         None,
         &OutputFormat::Json,
         None,
+        None, // cache_config
     )
     .await;
     assert!(result.is_ok());
@@ -489,6 +495,7 @@ async fn test_invalid_custom_header_format() {
         None,
         &OutputFormat::Json,
         None,
+        None, // cache_config
     )
     .await;
 
@@ -531,6 +538,7 @@ async fn test_empty_header_name() {
         None,
         &OutputFormat::Json,
         None,
+        None, // cache_config
     )
     .await;
 
