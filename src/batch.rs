@@ -290,36 +290,86 @@ impl BatchProcessor {
     }
 
     /// Executes a single operation from a batch
-    #[allow(clippy::unused_async)]
     async fn execute_single_operation(
-        _spec: &CachedSpec,
+        spec: &CachedSpec,
         operation: &BatchOperation,
-        _global_config: Option<&GlobalConfig>,
-        _base_url: Option<&str>,
+        global_config: Option<&GlobalConfig>,
+        base_url: Option<&str>,
         dry_run: bool,
-        _output_format: &crate::cli::OutputFormat,
-        _jq_filter: Option<&str>,
+        output_format: &crate::cli::OutputFormat,
+        jq_filter: Option<&str>,
     ) -> Result<String, Error> {
-        // For now, we'll capture stdout to return as a string
-        // In a real implementation, we might want to modify the executor
-        // to return the response instead of printing it
+        use crate::engine::generator;
 
-        // This is a placeholder implementation
-        // The actual implementation would need to:
-        // 1. Parse the operation args into a proper ArgMatches structure
-        // 2. Call the executor with the parsed arguments
-        // 3. Capture the output instead of printing to stdout
+        // Generate the command tree (we don't use experimental flags for batch operations)
+        let command = generator::generate_command_tree_with_flags(spec, false);
 
-        // For now, return a placeholder
+        // Parse the operation args into ArgMatches
+        let matches = command
+            .try_get_matches_from(std::iter::once("api".to_string()).chain(operation.args.clone()))
+            .map_err(|e| Error::InvalidCommand {
+                context: "batch".to_string(),
+                reason: e.to_string(),
+            })?;
+
+        // Create cache configuration - for batch operations, we use the operation's use_cache setting
+        let cache_config = if operation.use_cache.unwrap_or(false) {
+            Some(crate::response_cache::CacheConfig {
+                cache_dir: std::env::var("APERTURE_CONFIG_DIR")
+                    .map_or_else(
+                        |_| std::path::PathBuf::from("~/.config/aperture"),
+                        std::path::PathBuf::from,
+                    )
+                    .join(".cache")
+                    .join("responses"),
+                default_ttl: std::time::Duration::from_secs(300),
+                max_entries: 1000,
+                enabled: true,
+            })
+        } else {
+            None
+        };
+
         if dry_run {
+            // For dry run, we still call execute_request but with dry_run=true
+            crate::engine::executor::execute_request(
+                spec,
+                &matches,
+                base_url,
+                true, // dry_run
+                None, // idempotency_key
+                global_config,
+                output_format,
+                jq_filter,
+                cache_config.as_ref(),
+            )
+            .await?;
+
+            // Return dry run message
             Ok(format!(
                 "DRY RUN: Would execute operation with args: {:?}",
                 operation.args
             ))
         } else {
-            // TODO: Implement actual execution
-            Err(Error::Config(
-                "Batch execution not yet fully implemented".to_string(),
+            // For actual execution, call execute_request normally
+            // The output will go to stdout as expected for batch operations
+            crate::engine::executor::execute_request(
+                spec,
+                &matches,
+                base_url,
+                false, // dry_run
+                None,  // idempotency_key
+                global_config,
+                output_format,
+                jq_filter,
+                cache_config.as_ref(),
+            )
+            .await?;
+
+            // Return success message
+            Ok(format!(
+                "Successfully executed operation: {}",
+                operation.id.as_deref().unwrap_or("unnamed")
             ))
         }
     }

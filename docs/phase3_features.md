@@ -133,7 +133,7 @@ Cache keys are generated based on:
 
 #### Cache Storage
 
-- **Location:** `~/.config/aperture/.cache/response_cache/`
+- **Location:** `~/.config/aperture/.cache/responses/`
 - **Format:** JSON files with metadata
 - **TTL:** Configurable per request (default: 300 seconds)
 - **Security:** Authentication headers are excluded from cache keys

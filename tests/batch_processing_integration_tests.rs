@@ -1,4 +1,4 @@
-use aperture_cli::batch::{BatchConfig, BatchFile, BatchOperation, BatchProcessor};
+use aperture_cli::batch::{BatchConfig, BatchFile, BatchMetadata, BatchOperation, BatchProcessor};
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use aperture_cli::cli::OutputFormat;
 use std::collections::HashMap;
@@ -280,8 +280,7 @@ async fn test_batch_dry_run_execution() {
         }],
     };
 
-    // Note: This test only verifies the batch processor can be created and called
-    // The actual execution is not fully implemented in the current batch processor
+    // This test verifies dry-run mode works correctly
     let result = processor
         .execute_batch(
             &spec,
@@ -294,7 +293,7 @@ async fn test_batch_dry_run_execution() {
         )
         .await;
 
-    // The current implementation returns a placeholder for dry run
+    // Dry run should complete successfully
     assert!(result.is_ok());
     let batch_result = result.unwrap();
     assert_eq!(batch_result.results.len(), 1);
@@ -348,4 +347,204 @@ async fn test_batch_complex_operations() {
     assert!(batch_file.operations[2]
         .args
         .contains(&"update-user".to_string()));
+}
+
+#[tokio::test]
+async fn test_batch_real_execution_with_mock_server() {
+    // Start a mock server
+    let mock_server = wiremock::MockServer::start().await;
+
+    // Set up mock responses
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .and(wiremock::matchers::path("/users/123"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({
+                            "id": 123,
+                            "name": "John Doe",
+                            "email": "john@example.com"
+                        }))
+                        .insert_header("content-type", "application/json"),
+                ),
+        )
+        .await;
+
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .and(wiremock::matchers::path("/users/456"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({
+                            "id": 456,
+                            "name": "Jane Smith",
+                            "email": "jane@example.com"
+                        }))
+                        .insert_header("content-type", "application/json"),
+                ),
+        )
+        .await;
+
+    // Create spec with mock server URL
+    let mut spec = create_test_spec();
+    spec.base_url = Some(mock_server.uri());
+    spec.servers = vec![mock_server.uri()];
+
+    let config = BatchConfig::default();
+    let processor = BatchProcessor::new(config);
+
+    let batch_file = BatchFile {
+        metadata: Some(BatchMetadata {
+            name: Some("Test Batch".to_string()),
+            version: Some("1.0".to_string()),
+            description: Some("Test batch execution".to_string()),
+            defaults: None,
+        }),
+        operations: vec![
+            BatchOperation {
+                id: Some("get-user-123".to_string()),
+                args: vec![
+                    "users".to_string(),
+                    "get-user-by-id".to_string(),
+                    "123".to_string(),
+                ],
+                description: Some("Get user 123".to_string()),
+                headers: std::collections::HashMap::new(),
+                use_cache: Some(false),
+            },
+            BatchOperation {
+                id: Some("get-user-456".to_string()),
+                args: vec![
+                    "users".to_string(),
+                    "get-user-by-id".to_string(),
+                    "456".to_string(),
+                ],
+                description: Some("Get user 456".to_string()),
+                headers: std::collections::HashMap::new(),
+                use_cache: Some(false),
+            },
+        ],
+    };
+
+    // Execute actual batch operations (not dry run)
+    let result = processor
+        .execute_batch(
+            &spec,
+            batch_file,
+            None,
+            Some(&mock_server.uri()),
+            false, // real execution
+            &OutputFormat::Json,
+            None,
+        )
+        .await;
+
+    assert!(result.is_ok(), "Batch execution should succeed");
+    let batch_result = result.unwrap();
+    assert_eq!(batch_result.results.len(), 2);
+    assert_eq!(batch_result.success_count, 2);
+    assert_eq!(batch_result.failure_count, 0);
+    assert!(batch_result.total_duration.as_millis() > 0);
+
+    // Verify that the mock server received the expected requests
+    mock_server.verify().await;
+}
+
+#[tokio::test]
+async fn test_batch_execution_with_error_handling() {
+    // Start a mock server
+    let mock_server = wiremock::MockServer::start().await;
+
+    // Set up one successful and one failing response
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .and(wiremock::matchers::path("/users/123"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({
+                            "id": 123,
+                            "name": "John Doe",
+                            "email": "john@example.com"
+                        }))
+                        .insert_header("content-type", "application/json"),
+                ),
+        )
+        .await;
+
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .and(wiremock::matchers::path("/users/999"))
+                .respond_with(wiremock::ResponseTemplate::new(404)),
+        )
+        .await;
+
+    // Create spec with mock server URL
+    let mut spec = create_test_spec();
+    spec.base_url = Some(mock_server.uri());
+    spec.servers = vec![mock_server.uri()];
+
+    let config = BatchConfig {
+        max_concurrency: 2,
+        rate_limit: None,
+        continue_on_error: true,
+        show_progress: false,
+    };
+    let processor = BatchProcessor::new(config);
+
+    let batch_file = BatchFile {
+        metadata: None,
+        operations: vec![
+            BatchOperation {
+                id: Some("get-user-123".to_string()),
+                args: vec![
+                    "users".to_string(),
+                    "get-user-by-id".to_string(),
+                    "123".to_string(),
+                ],
+                description: Some("Get user 123".to_string()),
+                headers: std::collections::HashMap::new(),
+                use_cache: Some(false),
+            },
+            BatchOperation {
+                id: Some("get-user-999".to_string()),
+                args: vec![
+                    "users".to_string(),
+                    "get-user-by-id".to_string(),
+                    "999".to_string(),
+                ],
+                description: Some("Get non-existent user".to_string()),
+                headers: std::collections::HashMap::new(),
+                use_cache: Some(false),
+            },
+        ],
+    };
+
+    // Execute batch operations
+    let result = processor
+        .execute_batch(
+            &spec,
+            batch_file,
+            None,
+            Some(&mock_server.uri()),
+            false, // real execution
+            &OutputFormat::Json,
+            None,
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "Batch execution should complete even with errors"
+    );
+    let batch_result = result.unwrap();
+    assert_eq!(batch_result.results.len(), 2);
+    assert_eq!(batch_result.success_count, 1); // One success
+    assert_eq!(batch_result.failure_count, 1); // One failure
+
+    // Verify that the mock server received the expected requests
+    mock_server.verify().await;
 }
