@@ -215,13 +215,16 @@ aperture config cache-stats my-api
 aperture config clear-cache my-api
 ```
 
-### Experimental Features
+### Command Syntax
 
-Try upcoming features with experimental flags:
+Aperture now uses flag-based syntax by default for all parameters:
 
 ```bash
-# Use flag-based syntax for all parameters (including path parameters)
-aperture api my-api --experimental-flags users get-user-by-id --id 123
+# Default flag-based syntax (recommended)
+aperture api my-api users get-user-by-id --id 123
+
+# Legacy positional syntax (backwards compatibility)
+aperture api my-api --positional-args users get-user-by-id 123
 ```
 
 ## Development

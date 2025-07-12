@@ -124,13 +124,13 @@ pub struct Cli {
     )]
     pub cache_ttl: Option<u64>,
 
-    /// Enable experimental flag-based parameter syntax
+    /// Use positional arguments for path parameters (legacy syntax)
     #[arg(
         long,
         global = true,
-        help = "Use flags for all parameters instead of positional arguments (experimental)"
+        help = "Use positional arguments for path parameters (legacy syntax)"
     )]
-    pub experimental_flags: bool,
+    pub positional_args: bool,
 
     #[command(subcommand)]
     pub command: Commands,

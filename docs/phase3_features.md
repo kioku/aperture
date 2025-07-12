@@ -138,24 +138,24 @@ Cache keys are generated based on:
 - **TTL:** Configurable per request (default: 300 seconds)
 - **Security:** Authentication headers are excluded from cache keys
 
-## Feature 3.2: Experimental Flag-Based Parameter Syntax
+## Feature 3.2: Flag-Based Parameter Syntax
 
 ### Overview
 
-The experimental flag-based parameter syntax provides a more consistent and predictable command-line interface by converting all parameters (including path parameters) to flags.
+Aperture now uses flag-based parameter syntax by default, providing a more consistent and predictable command-line interface by converting all parameters (including path parameters) to flags.
 
 #### Comparison
 
-**Traditional Syntax:**
+**Legacy Syntax (requires --positional-args):**
 ```bash
 # Path parameters are positional
-aperture api my-api users get-user-by-id 123 --include-profile true
+aperture api my-api --positional-args users get-user-by-id 123 --include-profile true
 ```
 
-**Experimental Syntax:**
+**Default Syntax (flag-based):**
 ```bash
 # All parameters are flags
-aperture api my-api --experimental-flags users get-user-by-id --id 123 --include-profile true
+aperture api my-api users get-user-by-id --id 123 --include-profile true
 ```
 
 #### Benefits
@@ -168,18 +168,23 @@ aperture api my-api --experimental-flags users get-user-by-id --id 123 --include
 #### Usage
 
 ```bash
-# Enable experimental syntax globally
-aperture --experimental-flags api my-api users get-user-by-id --id 123
+# Default flag-based syntax (recommended)
+aperture api my-api users get-user-by-id --id 123
 
 # Works with all parameter types
-aperture --experimental-flags api my-api users create-user \
+aperture api my-api users create-user \
   --body '{"name": "John", "email": "john@example.com"}' \
   --x-request-id "unique-id"
 ```
 
 #### Backwards Compatibility
 
-The experimental syntax is fully backwards compatible. Traditional positional syntax remains the default and will continue to work.
+Flag-based syntax is now the default. Legacy positional syntax is still supported using the `--positional-args` flag:
+
+```bash
+# Legacy positional syntax
+aperture api my-api --positional-args users get-user-by-id 123 --include-profile true
+```
 
 ## Implementation Details
 

@@ -93,7 +93,7 @@ paths:
         .unwrap()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
-        .args(&["api", "test-api", "users", "get-user-by-id", "123"])
+        .args(&["api", "test-api", "users", "get-user-by-id", "--id", "123"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"id\": \"123\""))
@@ -318,7 +318,7 @@ paths:
         .unwrap()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
-        .args(&["api", "test-api", "users", "get-user-by-id", "999"])
+        .args(&["api", "test-api", "users", "get-user-by-id", "--id", "999"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("404"))
@@ -1467,6 +1467,7 @@ paths:
             "test-api",
             "users",
             "get-user-by-id",
+            "--id",
             "123",
             "--jq",
             ".name",
@@ -1540,6 +1541,7 @@ paths:
             "test-api",
             "users",
             "get-user-by-id",
+            "--id",
             "123",
             "--jq",
             ".metadata.role",
@@ -1676,6 +1678,7 @@ paths:
             "test-api",
             "users",
             "get-user-by-id",
+            "--id",
             "123",
             "--jq",
             ".name",
@@ -1747,6 +1750,7 @@ paths:
             "test-api",
             "users",
             "get-user-by-id",
+            "--id",
             "123",
             "--jq",
             "unsupported complex filter",

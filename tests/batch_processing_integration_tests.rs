@@ -73,11 +73,11 @@ async fn test_batch_file_parsing_json() {
         "operations": [
             {
                 "id": "get-user-1",
-                "args": ["users", "get-user-by-id", "123"]
+                "args": ["users", "get-user-by-id", "--id", "123"]
             },
             {
                 "id": "get-user-2",
-                "args": ["users", "get-user-by-id", "456"]
+                "args": ["users", "get-user-by-id", "--id", "456"]
             }
         ]
     }"#;
@@ -94,12 +94,12 @@ async fn test_batch_file_parsing_json() {
     assert_eq!(batch_file.operations[0].id, Some("get-user-1".to_string()));
     assert_eq!(
         batch_file.operations[0].args,
-        vec!["users", "get-user-by-id", "123"]
+        vec!["users", "get-user-by-id", "--id", "123"]
     );
     assert_eq!(batch_file.operations[1].id, Some("get-user-2".to_string()));
     assert_eq!(
         batch_file.operations[1].args,
-        vec!["users", "get-user-by-id", "456"]
+        vec!["users", "get-user-by-id", "--id", "456"]
     );
 }
 
@@ -207,6 +207,7 @@ async fn test_batch_operation_serialization() {
         args: vec![
             "users".to_string(),
             "get-user-by-id".to_string(),
+            "--id".to_string(),
             "123".to_string(),
         ],
         description: None,
@@ -218,7 +219,10 @@ async fn test_batch_operation_serialization() {
     let deserialized: BatchOperation = serde_json::from_str(&serialized).unwrap();
 
     assert_eq!(deserialized.id, Some("test-op".to_string()));
-    assert_eq!(deserialized.args, vec!["users", "get-user-by-id", "123"]);
+    assert_eq!(
+        deserialized.args,
+        vec!["users", "get-user-by-id", "--id", "123"]
+    );
 }
 
 #[tokio::test]
@@ -231,6 +235,7 @@ async fn test_batch_file_serialization() {
                 args: vec![
                     "users".to_string(),
                     "get-user-by-id".to_string(),
+                    "--id".to_string(),
                     "123".to_string(),
                 ],
                 description: None,
@@ -242,6 +247,7 @@ async fn test_batch_file_serialization() {
                 args: vec![
                     "users".to_string(),
                     "get-user-by-id".to_string(),
+                    "--id".to_string(),
                     "456".to_string(),
                 ],
                 description: None,
@@ -272,6 +278,7 @@ async fn test_batch_dry_run_execution() {
             args: vec![
                 "users".to_string(),
                 "get-user-by-id".to_string(),
+                "--id".to_string(),
                 "123".to_string(),
             ],
             description: None,
@@ -311,7 +318,7 @@ async fn test_batch_complex_operations() {
             },
             {
                 "id": "get-user",
-                "args": ["users", "get-user-by-id", "123"]
+                "args": ["users", "get-user-by-id", "--id", "123"]
             },
             {
                 "id": "update-user",
@@ -408,6 +415,7 @@ async fn test_batch_real_execution_with_mock_server() {
                 args: vec![
                     "users".to_string(),
                     "get-user-by-id".to_string(),
+                    "--id".to_string(),
                     "123".to_string(),
                 ],
                 description: Some("Get user 123".to_string()),
@@ -419,6 +427,7 @@ async fn test_batch_real_execution_with_mock_server() {
                 args: vec![
                     "users".to_string(),
                     "get-user-by-id".to_string(),
+                    "--id".to_string(),
                     "456".to_string(),
                 ],
                 description: Some("Get user 456".to_string()),
@@ -503,6 +512,7 @@ async fn test_batch_execution_with_error_handling() {
                 args: vec![
                     "users".to_string(),
                     "get-user-by-id".to_string(),
+                    "--id".to_string(),
                     "123".to_string(),
                 ],
                 description: Some("Get user 123".to_string()),
@@ -514,6 +524,7 @@ async fn test_batch_execution_with_error_handling() {
                 args: vec![
                     "users".to_string(),
                     "get-user-by-id".to_string(),
+                    "--id".to_string(),
                     "999".to_string(),
                 ],
                 description: Some("Get non-existent user".to_string()),

@@ -54,7 +54,7 @@ fn create_test_spec() -> CachedSpec {
 }
 
 #[test]
-fn test_normal_command_generation() {
+fn test_default_flag_based_command_generation() {
     let spec = create_test_spec();
     let command = generate_command_tree(&spec);
 
@@ -76,9 +76,10 @@ fn test_normal_command_generation() {
         .get_arguments()
         .find(|arg| arg.get_id() == "id")
         .expect("id argument should exist");
-    assert!(
-        id_arg.get_long().is_none(),
-        "Path parameter should not have long flag in normal mode"
+    assert_eq!(
+        id_arg.get_long(),
+        Some("id"),
+        "Path parameter should have long flag in default mode"
     );
 
     // Check that query parameter has long flag
@@ -94,7 +95,7 @@ fn test_normal_command_generation() {
 }
 
 #[test]
-fn test_experimental_flags_command_generation() {
+fn test_legacy_positional_command_generation() {
     let spec = create_test_spec();
     let command = generate_command_tree_with_flags(&spec, true);
 
@@ -111,15 +112,14 @@ fn test_experimental_flags_command_generation() {
         .find_subcommand("get-user-by-id")
         .expect("get-user-by-id subcommand should exist");
 
-    // Check that path parameter now has a long flag in experimental mode
+    // Check that path parameter is positional in legacy mode
     let id_arg = get_user_cmd
         .get_arguments()
         .find(|arg| arg.get_id() == "id")
         .expect("id argument should exist");
-    assert_eq!(
-        id_arg.get_long(),
-        Some("id"),
-        "Path parameter should have long flag in experimental mode"
+    assert!(
+        id_arg.get_long().is_none(),
+        "Path parameter should not have long flag in legacy positional mode"
     );
 
     // Check that query parameter still has long flag
@@ -135,7 +135,7 @@ fn test_experimental_flags_command_generation() {
 }
 
 #[test]
-fn test_experimental_flags_help_text() {
+fn test_legacy_positional_help_text() {
     let spec = create_test_spec();
     let command = generate_command_tree_with_flags(&spec, true);
 
@@ -158,7 +158,7 @@ fn test_experimental_flags_help_text() {
         .get_help()
         .expect("id argument should have help text");
     assert!(
-        help_text.to_string().contains("Path parameter"),
+        help_text.to_string().contains("id parameter"),
         "Path parameter should have descriptive help text"
     );
 }

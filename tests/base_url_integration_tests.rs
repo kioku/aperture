@@ -119,6 +119,7 @@ async fn test_base_url_priority_hierarchy() {
             "--dry-run",
             "users",
             "get-user-by-id",
+            "--id",
             "123",
         ])
         .output()
@@ -143,6 +144,7 @@ async fn test_base_url_priority_hierarchy() {
             "--dry-run",
             "users",
             "get-user-by-id",
+            "--id",
             "123",
         ])
         .output()
@@ -183,6 +185,7 @@ async fn test_base_url_priority_hierarchy() {
             "--dry-run",
             "users",
             "get-user-by-id",
+            "--id",
             "123",
         ])
         .output()
@@ -223,6 +226,7 @@ async fn test_base_url_priority_hierarchy() {
             "--dry-run",
             "users",
             "get-user-by-id",
+            "--id",
             "123",
         ])
         .output()
@@ -414,6 +418,7 @@ async fn test_base_url_fallback_behavior() {
             "--dry-run",
             "users",
             "get-user-by-id",
+            "--id",
             "123",
         ])
         .output()
@@ -554,7 +559,7 @@ async fn test_backward_compatibility() {
         .unwrap()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
-        .args(&["api", "test-api", "users", "get-user-by-id", "123"])
+        .args(&["api", "test-api", "users", "get-user-by-id", "--id", "123"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"id\": \"123\""));

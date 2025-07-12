@@ -109,7 +109,7 @@ fn create_test_cache_config() -> (CacheConfig, TempDir) {
 }
 
 #[tokio::test]
-async fn test_experimental_flags_with_caching() {
+async fn test_flag_based_syntax_with_caching() {
     let mock_server = MockServer::start().await;
     let (cache_config, _temp_dir) = create_test_cache_config();
     let spec = create_comprehensive_test_spec();
@@ -126,8 +126,8 @@ async fn test_experimental_flags_with_caching() {
         .mount(&mock_server)
         .await;
 
-    // Test with experimental flags enabled
-    let command = generate_command_tree_with_flags(&spec, true);
+    // Test with flag-based syntax (now default)
+    let command = generate_command_tree_with_flags(&spec, false);
     let users_cmd = command.find_subcommand("users").unwrap();
     let get_user_cmd = users_cmd.find_subcommand("get-user-by-id").unwrap();
 
@@ -191,7 +191,7 @@ async fn test_experimental_flags_with_caching() {
 }
 
 #[tokio::test]
-async fn test_normal_syntax_with_caching() {
+async fn test_legacy_positional_syntax_with_caching() {
     let mock_server = MockServer::start().await;
     let (cache_config, _temp_dir) = create_test_cache_config();
     let spec = create_comprehensive_test_spec();
@@ -207,8 +207,8 @@ async fn test_normal_syntax_with_caching() {
         .mount(&mock_server)
         .await;
 
-    // Test with normal (non-experimental) syntax
-    let command = generate_command_tree(&spec);
+    // Test with legacy positional syntax
+    let command = generate_command_tree_with_flags(&spec, true);
     let users_cmd = command.find_subcommand("users").unwrap();
     let get_user_cmd = users_cmd.find_subcommand("get-user-by-id").unwrap();
 
@@ -299,7 +299,7 @@ async fn test_different_parameter_combinations_cache_separately() {
         .await;
 
     // Request with include_profile=true
-    let command1 = generate_command_tree_with_flags(&spec, true);
+    let command1 = generate_command_tree_with_flags(&spec, false);
     let matches1 = command1
         .try_get_matches_from(vec![
             "api",
@@ -327,7 +327,7 @@ async fn test_different_parameter_combinations_cache_separately() {
     assert!(result1.is_ok());
 
     // Request with include_profile=false (should be cached separately)
-    let command2 = generate_command_tree_with_flags(&spec, true);
+    let command2 = generate_command_tree_with_flags(&spec, false);
     let matches2 = command2
         .try_get_matches_from(vec![
             "api",
@@ -380,7 +380,7 @@ async fn test_post_request_with_body_and_caching() {
         .mount(&mock_server)
         .await;
 
-    let command = generate_command_tree_with_flags(&spec, true);
+    let command = generate_command_tree_with_flags(&spec, false);
 
     // Create matches for POST request with body
     let matches = command
@@ -431,7 +431,7 @@ async fn test_post_request_with_body_and_caching() {
 }
 
 #[tokio::test]
-async fn test_dry_run_with_experimental_flags() {
+async fn test_dry_run_with_flag_based_syntax() {
     let mock_server = MockServer::start().await;
     let (cache_config, _temp_dir) = create_test_cache_config();
     let spec = create_comprehensive_test_spec();
@@ -444,7 +444,7 @@ async fn test_dry_run_with_experimental_flags() {
         .mount(&mock_server)
         .await;
 
-    let command = generate_command_tree_with_flags(&spec, true);
+    let command = generate_command_tree_with_flags(&spec, false);
 
     let matches = command
         .try_get_matches_from(vec![
@@ -500,7 +500,7 @@ async fn test_cache_with_custom_ttl() {
     let command = generate_command_tree(&spec);
 
     let matches = command
-        .try_get_matches_from(vec!["api", "users", "get-user-by-id", "789"])
+        .try_get_matches_from(vec!["api", "users", "get-user-by-id", "--id", "789"])
         .unwrap();
 
     // First request

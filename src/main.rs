@@ -346,7 +346,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     }
 
     // Generate the dynamic command tree
-    let command = generator::generate_command_tree_with_flags(&spec, cli.experimental_flags);
+    let command = generator::generate_command_tree_with_flags(&spec, cli.positional_args);
 
     // Parse the arguments against the dynamic command
     let matches = command
