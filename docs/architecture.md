@@ -1,7 +1,7 @@
 # **Software Design Document: Aperture CLI**
 
 - **Document Version:** 3.0 (Definitive Specification)
-- **Product Version:** 0.1.0
+- **Product Version:** 0.1.2
 - **Status:** Production Ready - Fully Implemented
 - **Author:** Claudiu Ivan with Gemini 2.5 Pro
 

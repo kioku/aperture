@@ -88,6 +88,11 @@ The project uses a structured configuration system:
 ### Security Model
 Uses custom `x-aperture-secret` extensions in OpenAPI specs to map authentication schemes to environment variables, maintaining strict separation between configuration and secrets.
 
+### Command Syntax (v0.1.2+)
+- **Default**: Flag-based syntax for all parameters (`--id 123`)
+- **Legacy**: Positional syntax available with `--positional-args` flag
+- **Examples**: `aperture api my-api users get-user-by-id --id 123`
+
 ## Testing Strategy
 
 ### Test Organization

@@ -12,7 +12,7 @@ Aperture is a command-line interface (CLI) that dynamically generates commands f
 - **Batch Processing:** Execute multiple operations concurrently with rate limiting and error handling
 - **Response Caching:** Intelligent caching with TTL support for improved performance
 - **Advanced Output:** Multiple output formats (JSON, YAML, table) with JQ-based filtering
-- **Experimental Features:** Early access to upcoming functionality like flag-based parameter syntax
+- **Flag-Based Syntax:** Consistent `--flag` syntax for all parameters (with legacy positional support)
 
 ## Architecture
 
@@ -103,6 +103,7 @@ aperture config list
 # Execute API commands (dynamically generated from spec)
 aperture api my-api users list
 aperture api my-api users create --name "John Doe" --email "john@example.com"
+aperture api my-api users get-user-by-id --id 123
 ```
 
 ### Base URL Management
@@ -148,6 +149,9 @@ aperture api my-api --dry-run users create --name "Test"
 
 # Add idempotency key for safe retries
 aperture api my-api --idempotency-key "unique-key" users create --name "Test"
+
+# Get specific user with flag-based syntax
+aperture api my-api --dry-run users get-user-by-id --id 123
 ```
 
 ### Advanced Output Formatting
