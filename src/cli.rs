@@ -11,6 +11,7 @@ pub enum OutputFormat {
 }
 
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 #[command(
     author,
     version,
@@ -68,6 +69,68 @@ pub struct Cli {
         help = "Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')"
     )]
     pub jq: Option<String>,
+
+    /// Execute operations from a batch file
+    #[arg(
+        long,
+        global = true,
+        value_name = "PATH",
+        help = "Path to batch file (JSON or YAML) containing multiple operations"
+    )]
+    pub batch_file: Option<String>,
+
+    /// Maximum concurrent requests for batch operations
+    #[arg(
+        long,
+        global = true,
+        value_name = "N",
+        default_value = "5",
+        help = "Maximum number of concurrent requests for batch operations"
+    )]
+    pub batch_concurrency: usize,
+
+    /// Rate limit for batch operations (requests per second)
+    #[arg(
+        long,
+        global = true,
+        value_name = "N",
+        help = "Rate limit for batch operations (requests per second)"
+    )]
+    pub batch_rate_limit: Option<u32>,
+
+    /// Enable response caching
+    #[arg(
+        long,
+        global = true,
+        help = "Enable response caching (can speed up repeated requests)"
+    )]
+    pub cache: bool,
+
+    /// Disable response caching
+    #[arg(
+        long,
+        global = true,
+        conflicts_with = "cache",
+        help = "Disable response caching"
+    )]
+    pub no_cache: bool,
+
+    /// TTL for cached responses in seconds
+    #[arg(
+        long,
+        global = true,
+        value_name = "SECONDS",
+        help = "Cache TTL in seconds (default: 300)"
+    )]
+    pub cache_ttl: Option<u64>,
+
+    /// Enable experimental flag-based parameter syntax
+    #[arg(
+        long,
+        global = true,
+        help = "Use flags for all parameters instead of positional arguments (experimental)"
+    )]
+    pub experimental_flags: bool,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -227,5 +290,31 @@ pub enum ConfigCommands {
         /// Reinitialize all cached specifications
         #[arg(long, conflicts_with = "context", help = "Reinitialize all specs")]
         all: bool,
+    },
+    /// Clear response cache
+    #[command(long_about = "Clear cached API responses to free up disk space.\n\n\
+                      You can clear cache for a specific API or all cached responses.\n\
+                      This is useful when you want to ensure fresh data from the API\n\
+                      or free up disk space.\n\n\
+                      Examples:\n  \
+                      aperture config clear-cache myapi     # Clear cache for specific API\n  \
+                      aperture config clear-cache --all     # Clear all cached responses")]
+    ClearCache {
+        /// Name of the API specification to clear cache for (omit for --all)
+        api_name: Option<String>,
+        /// Clear all cached responses
+        #[arg(long, conflicts_with = "api_name", help = "Clear all response cache")]
+        all: bool,
+    },
+    /// Show response cache statistics
+    #[command(long_about = "Display statistics about cached API responses.\n\n\
+                      Shows cache size, number of entries, and hit/miss rates.\n\
+                      Useful for monitoring cache effectiveness and disk usage.\n\n\
+                      Examples:\n  \
+                      aperture config cache-stats myapi     # Stats for specific API\n  \
+                      aperture config cache-stats           # Stats for all APIs")]
+    CacheStats {
+        /// Name of the API specification to show stats for (omit for all APIs)
+        api_name: Option<String>,
     },
 }

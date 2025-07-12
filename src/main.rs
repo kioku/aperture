@@ -1,12 +1,17 @@
 use aperture_cli::agent;
+use aperture_cli::batch::{BatchConfig, BatchProcessor};
+use aperture_cli::cache::models::CachedSpec;
 use aperture_cli::cli::{Cli, Commands, ConfigCommands};
 use aperture_cli::config::manager::{get_config_dir, ConfigManager};
+use aperture_cli::config::models::GlobalConfig;
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
+use aperture_cli::response_cache::{CacheConfig, ResponseCache};
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
@@ -30,6 +35,7 @@ async fn main() {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
     match cli.command {
         Commands::Config { command } => match command {
@@ -121,6 +127,12 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                     eprintln!("Error: Either specify a spec name or use --all flag");
                     std::process::exit(1);
                 }
+            }
+            ConfigCommands::ClearCache { api_name, all } => {
+                clear_response_cache(manager, api_name.as_deref(), all).await?;
+            }
+            ConfigCommands::CacheStats { api_name } => {
+                show_cache_stats(manager, api_name.as_deref()).await?;
             }
         },
         Commands::ListCommands { ref context } => {
@@ -273,6 +285,7 @@ fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> 
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
     // Get the cache directory - respecting APERTURE_CONFIG_DIR if set
     let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
@@ -320,8 +333,20 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         return Ok(());
     }
 
+    // Handle --batch-file flag - execute batch operations and exit
+    if let Some(batch_file_path) = &cli.batch_file {
+        return execute_batch_operations(
+            context,
+            batch_file_path,
+            &spec,
+            global_config.as_ref(),
+            cli,
+        )
+        .await;
+    }
+
     // Generate the dynamic command tree
-    let command = generator::generate_command_tree(&spec);
+    let command = generator::generate_command_tree_with_flags(&spec, cli.experimental_flags);
 
     // Parse the arguments against the dynamic command
     let matches = command
@@ -359,6 +384,18 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         },
     );
 
+    // Create cache configuration from CLI flags
+    let cache_config = if cli.no_cache {
+        None
+    } else {
+        Some(CacheConfig {
+            cache_dir: config_dir.join(".cache").join("responses"),
+            default_ttl: Duration::from_secs(cli.cache_ttl.unwrap_or(300)),
+            max_entries: 1000,
+            enabled: cli.cache || cli.cache_ttl.is_some(),
+        })
+    };
+
     // Execute the request with agent flags
     executor::execute_request(
         &spec,
@@ -369,6 +406,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         global_config.as_ref(),
         &output_format,
         jq_filter,
+        cache_config.as_ref(),
     )
     .await
     .map_err(|e| match &e {
@@ -387,6 +425,92 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     Ok(())
 }
 
+/// Executes batch operations from a batch file
+async fn execute_batch_operations(
+    _context: &str,
+    batch_file_path: &str,
+    spec: &CachedSpec,
+    global_config: Option<&GlobalConfig>,
+    cli: &Cli,
+) -> Result<(), Error> {
+    // Parse the batch file
+    let batch_file =
+        BatchProcessor::parse_batch_file(std::path::Path::new(batch_file_path)).await?;
+
+    // Create batch configuration from CLI options
+    let batch_config = BatchConfig {
+        max_concurrency: cli.batch_concurrency,
+        rate_limit: cli.batch_rate_limit,
+        continue_on_error: true, // Default to continuing on error for batch operations
+        show_progress: true,     // Always show progress for batch operations
+    };
+
+    // Create batch processor
+    let processor = BatchProcessor::new(batch_config);
+
+    // Execute the batch
+    let result = processor
+        .execute_batch(
+            spec,
+            batch_file,
+            global_config,
+            None, // base_url (None = use BaseUrlResolver)
+            cli.dry_run,
+            &cli.format,
+            cli.jq.as_deref(),
+        )
+        .await?;
+
+    // Print batch results summary
+    if cli.json_errors {
+        // Output structured JSON summary
+        let summary = serde_json::json!({
+            "batch_execution_summary": {
+                "total_operations": result.results.len(),
+                "successful_operations": result.success_count,
+                "failed_operations": result.failure_count,
+                "total_duration_seconds": result.total_duration.as_secs_f64(),
+                "operations": result.results.iter().map(|r| serde_json::json!({
+                    "operation_id": r.operation.id,
+                    "args": r.operation.args,
+                    "success": r.success,
+                    "duration_seconds": r.duration.as_secs_f64(),
+                    "error": r.error
+                })).collect::<Vec<_>>()
+            }
+        });
+        println!("{}", serde_json::to_string_pretty(&summary).unwrap());
+    } else {
+        // Output human-readable summary
+        println!("\n=== Batch Execution Summary ===");
+        println!("Total operations: {}", result.results.len());
+        println!("Successful: {}", result.success_count);
+        println!("Failed: {}", result.failure_count);
+        println!("Total time: {:.2}s", result.total_duration.as_secs_f64());
+
+        if result.failure_count > 0 {
+            println!("\nFailed operations:");
+            for (i, op_result) in result.results.iter().enumerate() {
+                if !op_result.success {
+                    println!(
+                        "  {} - {}: {}",
+                        i + 1,
+                        op_result.operation.args.join(" "),
+                        op_result.error.as_deref().unwrap_or("Unknown error")
+                    );
+                }
+            }
+        }
+    }
+
+    // Exit with error code if any operations failed
+    if result.failure_count > 0 {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
 /// Prints an error message, either as JSON or user-friendly format
 fn print_error_with_json(error: &Error, json_format: bool) {
     if json_format {
@@ -400,6 +524,84 @@ fn print_error_with_json(error: &Error, json_format: bool) {
     } else {
         print_error(error);
     }
+}
+
+/// Clear response cache for a specific API or all APIs
+async fn clear_response_cache(
+    _manager: &ConfigManager<OsFileSystem>,
+    api_name: Option<&str>,
+    all: bool,
+) -> Result<(), Error> {
+    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+        PathBuf::from(dir)
+    } else {
+        get_config_dir()?
+    };
+
+    let cache_config = CacheConfig {
+        cache_dir: config_dir.join(".cache").join("responses"),
+        ..Default::default()
+    };
+
+    let cache = ResponseCache::new(cache_config)?;
+
+    let cleared_count = if all {
+        cache.clear_all().await?
+    } else if let Some(api) = api_name {
+        cache.clear_api_cache(api).await?
+    } else {
+        eprintln!("Error: Either specify an API name or use --all flag");
+        std::process::exit(1);
+    };
+
+    if all {
+        println!("Cleared {cleared_count} cached responses for all APIs");
+    } else if let Some(api) = api_name {
+        println!("Cleared {cleared_count} cached responses for API '{api}'");
+    }
+
+    Ok(())
+}
+
+/// Show cache statistics for a specific API or all APIs
+async fn show_cache_stats(
+    _manager: &ConfigManager<OsFileSystem>,
+    api_name: Option<&str>,
+) -> Result<(), Error> {
+    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+        PathBuf::from(dir)
+    } else {
+        get_config_dir()?
+    };
+
+    let cache_config = CacheConfig {
+        cache_dir: config_dir.join(".cache").join("responses"),
+        ..Default::default()
+    };
+
+    let cache = ResponseCache::new(cache_config)?;
+    let stats = cache.get_stats(api_name).await?;
+
+    if let Some(api) = api_name {
+        println!("Cache statistics for API '{api}':");
+    } else {
+        println!("Cache statistics for all APIs:");
+    }
+
+    println!("  Total entries: {}", stats.total_entries);
+    println!("  Valid entries: {}", stats.valid_entries);
+    println!("  Expired entries: {}", stats.expired_entries);
+    #[allow(clippy::cast_precision_loss)]
+    let size_mb = stats.total_size_bytes as f64 / 1024.0 / 1024.0;
+    println!("  Total size: {size_mb:.2} MB");
+
+    if stats.total_entries > 0 {
+        #[allow(clippy::cast_precision_loss)]
+        let hit_rate = stats.valid_entries as f64 / stats.total_entries as f64 * 100.0;
+        println!("  Hit rate: {hit_rate:.1}%");
+    }
+
+    Ok(())
 }
 
 /// Prints a user-friendly error message with context and suggestions

@@ -35,6 +35,7 @@ fn to_static_str(s: String) -> &'static str {
 ///
 /// # Arguments
 /// * `spec` - The cached `OpenAPI` specification
+/// * `experimental_flags` - Whether to use flag-based syntax for all parameters
 ///
 /// # Returns
 /// A clap Command configured with all operations from the spec
@@ -47,6 +48,12 @@ fn to_static_str(s: String) -> &'static str {
 /// ```
 #[must_use]
 pub fn generate_command_tree(spec: &CachedSpec) -> Command {
+    generate_command_tree_with_flags(spec, false)
+}
+
+/// Generates a dynamic clap command tree with optional experimental flag-based parameter syntax.
+#[must_use]
+pub fn generate_command_tree_with_flags(spec: &CachedSpec, experimental_flags: bool) -> Command {
     let mut root_command = Command::new("api")
         .version(to_static_str(spec.version.clone()))
         .about(format!("CLI for {} API", spec.name))
@@ -105,7 +112,7 @@ pub fn generate_command_tree(spec: &CachedSpec) -> Command {
 
             // Add parameters as CLI arguments
             for param in &cached_command.parameters {
-                let arg = create_arg_from_parameter(param);
+                let arg = create_arg_from_parameter(param, experimental_flags);
                 operation_command = operation_command.arg(arg);
             }
 
@@ -141,19 +148,31 @@ pub fn generate_command_tree(spec: &CachedSpec) -> Command {
 }
 
 /// Creates a clap Arg from a `CachedParameter`
-fn create_arg_from_parameter(param: &CachedParameter) -> Arg {
+fn create_arg_from_parameter(param: &CachedParameter, experimental_flags: bool) -> Arg {
     let param_name_static = to_static_str(param.name.clone());
     let mut arg = Arg::new(param_name_static);
 
     match param.location.as_str() {
         "path" => {
-            // Path parameters are positional arguments
-            let value_name = to_static_str(param.name.to_uppercase());
-            arg = arg
-                .help(format!("{} parameter", param.name))
-                .value_name(value_name)
-                .required(param.required)
-                .action(ArgAction::Set);
+            if experimental_flags {
+                // In experimental mode, path parameters become flags too
+                let long_name = to_static_str(param.name.clone());
+                let value_name = to_static_str(param.name.to_uppercase());
+                arg = arg
+                    .long(long_name)
+                    .help(format!("Path parameter: {}", param.name))
+                    .value_name(value_name)
+                    .required(param.required)
+                    .action(ArgAction::Set);
+            } else {
+                // Path parameters are positional arguments
+                let value_name = to_static_str(param.name.to_uppercase());
+                arg = arg
+                    .help(format!("{} parameter", param.name))
+                    .value_name(value_name)
+                    .required(param.required)
+                    .action(ArgAction::Set);
+            }
         }
         "query" | "header" => {
             // Query and header parameters are flags

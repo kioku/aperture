@@ -94,7 +94,7 @@ _Focus: Implement features for high-volume automation and introduce experimental
 - **User Value:** Unlocks true automation at scale and dramatically improves performance for repeated tasks.
 - **Architectural & Implementation Plan:**
   1.  **Batch Controller (`src/batch.rs`):** A new module will manage the batch execution loop, using `tokio::sync::Semaphore` for concurrency and `governor` for rate-limiting.
-  2.  **Response Caching (`src/engine/executor.rs`):** A caching middleware layer will be added to the executor. It will generate a unique hash key for each request and perform a read-through cache lookup in `~/.config/aperture/.response_cache/` before making a network call.
+  2.  **Response Caching (`src/engine/executor.rs`):** A caching middleware layer will be added to the executor. It will generate a unique hash key for each request and perform a read-through cache lookup in `~/.config/aperture/.cache/responses/` before making a network call.
 
 ##### **Feature 3.2: Experimental Flag-Based Parameter Syntax**
 
