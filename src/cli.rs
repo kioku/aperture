@@ -65,12 +65,12 @@ pub struct Cli {
     )]
     pub format: OutputFormat,
 
-    /// Apply JQ filter to response data or describe-json output
+    /// Apply JQ filter to response data, describe-json output, or batch results (with --json-errors)
     #[arg(
         long,
         global = true,
         value_name = "FILTER",
-        help = "Apply JQ filter to response data or describe-json output (e.g., '.name', '.[] | select(.active)', '.commands.users')"
+        help = "Apply JQ filter to JSON output (e.g., '.name', '.[] | select(.active)', '.batch_execution_summary.operations[] | select(.success == false)')"
     )]
     pub jq: Option<String>,
 

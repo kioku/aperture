@@ -207,6 +207,15 @@ aperture --batch-file operations.json --batch-concurrency 10
 
 # Rate limiting for batch operations
 aperture --batch-file operations.json --batch-rate-limit 50
+
+# Analyze batch results with JQ filtering (requires --json-errors)
+aperture --batch-file operations.json --json-errors --jq '.batch_execution_summary.operations[] | select(.success == false)'
+
+# Get summary statistics only
+aperture --batch-file operations.json --json-errors --jq '{total: .batch_execution_summary.total_operations, failed: .batch_execution_summary.failed_operations}'
+
+# Find slow operations (> 1 second)
+aperture --batch-file operations.json --json-errors --jq '.batch_execution_summary.operations[] | select(.duration_seconds > 1)'
 ```
 
 **Example batch file (JSON):**

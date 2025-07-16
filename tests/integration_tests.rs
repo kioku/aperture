@@ -1913,3 +1913,194 @@ fn test_jq_filter_help_text() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("--jq") || stdout.contains("jq filter"));
 }
+
+#[tokio::test]
+async fn test_batch_operations_with_jq_filter() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+    let batch_file = temp_dir.path().join("batch.json");
+
+    // Create a minimal spec
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+  /posts/{id}:
+    get:
+      tags:
+        - posts
+      operationId: getPost
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Create a batch file with multiple operations
+    let batch_ops = serde_json::json!({
+        "operations": [
+            {
+                "id": "op1",
+                "args": ["users", "get-user", "--id", "123"]
+            },
+            {
+                "id": "op2",
+                "args": ["posts", "get-post", "--id", "456"]
+            },
+            {
+                "id": "op3",
+                "args": ["users", "get-user", "--id", "789"]
+            }
+        ]
+    });
+    fs::write(
+        &batch_file,
+        serde_json::to_string_pretty(&batch_ops).unwrap(),
+    )
+    .unwrap();
+
+    // Mock server setup
+    let mock_server = MockServer::start().await;
+
+    // Mock successful user requests
+    Mock::given(method("GET"))
+        .and(path("/users/123"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"id": "123", "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/users/789"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"id": "789", "name": "Charlie"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Mock failed post request
+    Mock::given(method("GET"))
+        .and(path("/posts/456"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Post not found"))
+        .mount(&mock_server)
+        .await;
+
+    // Test JQ filter to get only failed operations
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+            "--json-errors",
+            "--jq",
+            ".batch_execution_summary.failed_operations",
+        ])
+        .output()
+        .unwrap();
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        panic!("Command failed.\nStderr: {}\nStdout: {}", stderr, stdout);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The output contains individual operation results followed by the JQ-filtered summary
+    // Extract the last line which should be the JQ-filtered result
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    let filtered_output = lines.last().expect("No output from command");
+
+    // Parse the filtered output - should be the number of failed operations
+    let failed_count: serde_json::Value = serde_json::from_str(filtered_output).unwrap();
+    assert_eq!(failed_count, 1);
+
+    // Test JQ filter to get summary statistics only
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+            "--json-errors",
+            "--jq",
+            ".batch_execution_summary.total_operations",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    let filtered_output = lines.last().expect("No output from command");
+    let total_count: serde_json::Value = serde_json::from_str(filtered_output).unwrap();
+    assert_eq!(total_count, 3);
+
+    // Test JQ filter to get success count
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+            "--json-errors",
+            "--jq",
+            ".batch_execution_summary.successful_operations",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.trim().lines().collect();
+    let filtered_output = lines.last().expect("No output from command");
+    let success_count: serde_json::Value = serde_json::from_str(filtered_output).unwrap();
+    assert_eq!(success_count, 2); // Should have 2 successful operations
+}

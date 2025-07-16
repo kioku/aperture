@@ -19,6 +19,8 @@ pub struct BatchConfig {
     pub continue_on_error: bool,
     /// Whether to show progress during processing
     pub show_progress: bool,
+    /// Whether to suppress individual operation outputs
+    pub suppress_output: bool,
 }
 
 impl Default for BatchConfig {
@@ -28,6 +30,7 @@ impl Default for BatchConfig {
             rate_limit: None,
             continue_on_error: true,
             show_progress: true,
+            suppress_output: false,
         }
     }
 }
@@ -463,6 +466,7 @@ operations:
             rate_limit: Some(5),
             continue_on_error: false,
             show_progress: false,
+            suppress_output: false,
         };
 
         let processor = BatchProcessor::new(config);
