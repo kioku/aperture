@@ -6,7 +6,7 @@ use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter as OpenApiParameter, ReferenceOr, SecurityScheme};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// JSON manifest describing all available commands and parameters for an API context.
 /// This is output when the `--describe-json` flag is used.
@@ -161,6 +161,69 @@ fn to_kebab_case(s: &str) -> String {
     result
 }
 
+/// Maximum depth for resolving parameter references to prevent stack overflow
+const MAX_REFERENCE_DEPTH: usize = 50;
+
+/// Resolves a parameter reference to its actual parameter definition
+fn resolve_parameter_reference(spec: &OpenAPI, reference: &str) -> Result<OpenApiParameter, Error> {
+    let mut visited = HashSet::new();
+    resolve_parameter_reference_with_visited(spec, reference, &mut visited, 0)
+}
+
+/// Internal method that resolves parameter references with circular reference detection
+fn resolve_parameter_reference_with_visited(
+    spec: &OpenAPI,
+    reference: &str,
+    visited: &mut HashSet<String>,
+    depth: usize,
+) -> Result<OpenApiParameter, Error> {
+    // Check depth limit
+    if depth >= MAX_REFERENCE_DEPTH {
+        return Err(Error::Validation(format!(
+            "Maximum reference depth ({MAX_REFERENCE_DEPTH}) exceeded while resolving '{reference}'"
+        )));
+    }
+
+    // Check for circular references
+    if !visited.insert(reference.to_string()) {
+        return Err(Error::Validation(format!(
+            "Circular reference detected: '{reference}' is part of a reference cycle"
+        )));
+    }
+
+    // Parse the reference path
+    // Expected format: #/components/parameters/{parameter_name}
+    if !reference.starts_with("#/components/parameters/") {
+        return Err(Error::Validation(format!(
+            "Invalid parameter reference format: '{reference}'. Expected format: #/components/parameters/{{name}}"
+        )));
+    }
+
+    let param_name = reference
+        .strip_prefix("#/components/parameters/")
+        .ok_or_else(|| Error::Validation(format!("Invalid parameter reference: '{reference}'")))?;
+
+    // Look up the parameter in components
+    let components = spec.components.as_ref().ok_or_else(|| {
+        Error::Validation(
+            "Cannot resolve parameter reference: OpenAPI spec has no components section"
+                .to_string(),
+        )
+    })?;
+
+    let param_ref = components.parameters.get(param_name).ok_or_else(|| {
+        Error::Validation(format!("Parameter '{param_name}' not found in components"))
+    })?;
+
+    // Handle nested references (reference pointing to another reference)
+    match param_ref {
+        ReferenceOr::Item(param) => Ok(param.clone()),
+        ReferenceOr::Reference {
+            reference: nested_ref,
+        } => resolve_parameter_reference_with_visited(spec, nested_ref, visited, depth + 1),
+    }
+}
+
 /// Generates a capability manifest from an `OpenAPI` specification.
 ///
 /// This function creates a comprehensive JSON description of all available commands,
@@ -214,8 +277,13 @@ pub fn generate_capability_manifest_from_openapi(
             // Process each HTTP method
             for (method, operation) in crate::spec::http_methods_iter(item) {
                 if let Some(op) = operation {
-                    let command_info =
-                        convert_openapi_operation_to_info(method, path, op, spec.security.as_ref());
+                    let command_info = convert_openapi_operation_to_info(
+                        method,
+                        path,
+                        op,
+                        spec,
+                        spec.security.as_ref(),
+                    );
 
                     // Group by first tag or "default"
                     let group_name = op
@@ -437,6 +505,7 @@ fn convert_openapi_operation_to_info(
     method: &str,
     path: &str,
     operation: &Operation,
+    spec: &OpenAPI,
     global_security: Option<&Vec<openapiv3::SecurityRequirement>>,
 ) -> CommandInfo {
     let command_name = operation
@@ -444,16 +513,15 @@ fn convert_openapi_operation_to_info(
         .as_ref()
         .map_or_else(|| method.to_lowercase(), |op_id| to_kebab_case(op_id));
 
-    // Extract parameters with full metadata
+    // Extract parameters with full metadata, resolving references
     let parameters: Vec<ParameterInfo> = operation
         .parameters
         .iter()
-        .filter_map(|param_ref| {
-            if let ReferenceOr::Item(param) = param_ref {
-                Some(convert_openapi_parameter_to_info(param))
-            } else {
-                None
-            }
+        .filter_map(|param_ref| match param_ref {
+            ReferenceOr::Item(param) => Some(convert_openapi_parameter_to_info(param)),
+            ReferenceOr::Reference { reference } => resolve_parameter_reference(spec, reference)
+                .ok()
+                .map(|param| convert_openapi_parameter_to_info(&param)),
         })
         .collect();
 
