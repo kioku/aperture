@@ -191,6 +191,10 @@ aperture api my-api users list --jq '.[] | {name: .name, email: .email}'
 
 # Complex JQ transformations
 aperture api my-api get-data --jq '.items | map(select(.active)) | .[0:5]'
+
+# JQ filtering also works with --describe-json
+aperture api my-api --describe-json --jq '.commands.users'
+aperture api my-api --describe-json --jq '.commands | to_entries | .[].value[] | select(.deprecated)'
 ```
 
 ### Batch Operations & Automation

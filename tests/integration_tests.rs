@@ -520,6 +520,143 @@ paths:
 }
 
 #[tokio::test]
+async fn test_describe_json_with_jq_filter() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a minimal spec
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      x-aperture-secret:
+        source: env
+        name: TEST_KEY
+    bearerAuth:
+      type: http
+      scheme: bearer
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+  /posts:
+    get:
+      tags:
+        - posts
+      operationId: listPosts
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Test --describe-json with --jq to get only the users commands
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&[
+            "api",
+            "test-api",
+            "--describe-json",
+            "--jq",
+            ".commands.users",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse the JSON output to verify it's only the users commands
+    let users_commands: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(users_commands.is_array());
+    assert_eq!(users_commands.as_array().unwrap().len(), 1);
+    assert_eq!(
+        users_commands[0]["name"].as_str().unwrap(),
+        "get-user-by-id"
+    );
+
+    // Test --jq to get security schemes
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&[
+            "api",
+            "test-api",
+            "--describe-json",
+            "--jq",
+            ".security_schemes",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let security_schemes: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(security_schemes["apiKey"].is_object());
+    assert!(security_schemes["bearerAuth"].is_object());
+
+    // Test --jq to get API version
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["api", "test-api", "--describe-json", "--jq", ".api.version"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The output should be a JSON string
+    let version: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(version, serde_json::Value::String("1.0.0".to_string()));
+
+    // Test invalid JQ filter error handling
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&[
+            "api",
+            "test-api",
+            "--describe-json",
+            "--jq",
+            "invalid[filter",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+}
+
+#[tokio::test]
 async fn test_json_errors_flag() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().to_path_buf();

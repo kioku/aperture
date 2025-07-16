@@ -750,7 +750,14 @@ fn format_value_for_table(value: &Value) -> String {
 }
 
 /// Applies a JQ filter to the response text
-fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The response text is not valid JSON
+/// - The JQ filter expression is invalid
+/// - The filter execution fails
+pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
     // Parse the response as JSON
     let json_value: Value =
         serde_json::from_str(response_text).map_err(|e| Error::JqFilterError {

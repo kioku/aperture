@@ -31,7 +31,11 @@ pub enum OutputFormat {
 )]
 pub struct Cli {
     /// Output a JSON manifest of all available commands and parameters
-    #[arg(long, global = true, help = "Output capability manifest as JSON")]
+    #[arg(
+        long,
+        global = true,
+        help = "Output capability manifest as JSON (can be filtered with --jq)"
+    )]
     pub describe_json: bool,
 
     /// Output all errors as structured JSON to stderr
@@ -61,12 +65,12 @@ pub struct Cli {
     )]
     pub format: OutputFormat,
 
-    /// Apply JQ filter to response data
+    /// Apply JQ filter to response data or describe-json output
     #[arg(
         long,
         global = true,
         value_name = "FILTER",
-        help = "Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')"
+        help = "Apply JQ filter to response data or describe-json output (e.g., '.name', '.[] | select(.active)', '.commands.users')"
     )]
     pub jq: Option<String>,
 

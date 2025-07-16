@@ -329,7 +329,15 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
             &openapi_spec,
             global_config.as_ref(),
         )?;
-        println!("{manifest}");
+
+        // Apply JQ filter if provided
+        let output = if let Some(jq_filter) = &cli.jq {
+            executor::apply_jq_filter(&manifest, jq_filter)?
+        } else {
+            manifest
+        };
+
+        println!("{output}");
         return Ok(());
     }
 
