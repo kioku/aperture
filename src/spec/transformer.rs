@@ -2,6 +2,7 @@ use crate::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
     CachedSecurityScheme, CachedSpec, CACHE_FORMAT_VERSION,
 };
+use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 use serde_json;
 use std::collections::HashMap;
@@ -20,8 +21,11 @@ impl SpecTransformer {
     ///
     /// This method converts the full `OpenAPI` spec into an optimized format
     /// that can be quickly loaded and used for CLI generation.
-    #[must_use]
-    pub fn transform(&self, name: &str, spec: &OpenAPI) -> CachedSpec {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parameter reference resolution fails
+    pub fn transform(&self, name: &str, spec: &OpenAPI) -> Result<CachedSpec, Error> {
         let mut commands = Vec::new();
 
         // Extract version from info
@@ -49,11 +53,12 @@ impl SpecTransformer {
                 for (method, operation) in crate::spec::http_methods_iter(item) {
                     if let Some(op) = operation {
                         let command = Self::transform_operation(
+                            spec,
                             method,
                             path,
                             op,
                             &global_security_requirements,
-                        );
+                        )?;
                         commands.push(command);
                     }
                 }
@@ -63,7 +68,7 @@ impl SpecTransformer {
         // Extract security schemes
         let security_schemes = Self::extract_security_schemes(spec);
 
-        CachedSpec {
+        Ok(CachedSpec {
             cache_format_version: CACHE_FORMAT_VERSION,
             name: name.to_string(),
             version,
@@ -71,16 +76,17 @@ impl SpecTransformer {
             base_url,
             servers,
             security_schemes,
-        }
+        })
     }
 
     /// Transforms a single operation into a cached command
     fn transform_operation(
+        spec: &OpenAPI,
         method: &str,
         path: &str,
         operation: &Operation,
         global_security_requirements: &[String],
-    ) -> CachedCommand {
+    ) -> Result<CachedCommand, Error> {
         // Extract operation metadata
         let operation_id = operation
             .operation_id
@@ -97,10 +103,15 @@ impl SpecTransformer {
         // Transform parameters
         let mut parameters = Vec::new();
         for param_ref in &operation.parameters {
-            if let ReferenceOr::Item(param) = param_ref {
-                parameters.push(Self::transform_parameter(param));
+            match param_ref {
+                ReferenceOr::Item(param) => {
+                    parameters.push(Self::transform_parameter(param));
+                }
+                ReferenceOr::Reference { reference } => {
+                    let param = Self::resolve_parameter_reference(spec, reference)?;
+                    parameters.push(Self::transform_parameter(&param));
+                }
             }
-            // Skip references for now - validation should have caught these
         }
 
         // Transform request body
@@ -168,7 +179,7 @@ impl SpecTransformer {
             },
         );
 
-        CachedCommand {
+        Ok(CachedCommand {
             name,
             description: operation.description.clone(),
             summary: operation.summary.clone(),
@@ -185,7 +196,7 @@ impl SpecTransformer {
                 .external_docs
                 .as_ref()
                 .map(|docs| docs.url.clone()),
-        }
+        })
     }
 
     /// Transforms a parameter into cached format
@@ -452,6 +463,11 @@ impl SpecTransformer {
             None
         })
     }
+
+    /// Resolves a parameter reference to its actual parameter definition
+    fn resolve_parameter_reference(spec: &OpenAPI, reference: &str) -> Result<Parameter, Error> {
+        crate::spec::resolve_parameter_reference(spec, reference)
+    }
 }
 
 impl Default for SpecTransformer {
@@ -486,7 +502,9 @@ mod tests {
     fn test_transform_basic_spec() {
         let transformer = SpecTransformer::new();
         let spec = create_test_spec();
-        let cached = transformer.transform("test", &spec);
+        let cached = transformer
+            .transform("test", &spec)
+            .expect("Transform should succeed");
 
         assert_eq!(cached.name, "test");
         assert_eq!(cached.version, "1.0.0");
@@ -515,7 +533,9 @@ mod tests {
             .paths
             .insert("/users".to_string(), ReferenceOr::Item(path_item));
 
-        let cached = transformer.transform("test", &spec);
+        let cached = transformer
+            .transform("test", &spec)
+            .expect("Transform should succeed");
 
         assert_eq!(cached.commands.len(), 1);
         let command = &cached.commands[0];
@@ -524,5 +544,450 @@ mod tests {
         assert_eq!(command.method, "GET");
         assert_eq!(command.path, "/users");
         assert_eq!(command.description, Some("Get all users".to_string()));
+    }
+
+    #[test]
+    fn test_transform_with_parameter_reference() {
+        use openapiv3::{
+            Components, Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem,
+            ReferenceOr, Responses, Schema, SchemaData, SchemaKind, Type,
+        };
+
+        let transformer = SpecTransformer::new();
+        let mut spec = create_test_spec();
+
+        // Add a parameter to components
+        let mut components = Components::default();
+        let user_id_param = Parameter::Path {
+            parameter_data: ParameterData {
+                name: "userId".to_string(),
+                description: Some("Unique identifier of the user".to_string()),
+                required: true,
+                deprecated: Some(false),
+                format: ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema {
+                    schema_data: SchemaData::default(),
+                    schema_kind: SchemaKind::Type(Type::String(Default::default())),
+                })),
+                example: None,
+                examples: Default::default(),
+                explode: None,
+                extensions: Default::default(),
+            },
+            style: Default::default(),
+        };
+        components
+            .parameters
+            .insert("userId".to_string(), ReferenceOr::Item(user_id_param));
+        spec.components = Some(components);
+
+        // Create operation with parameter reference
+        let mut path_item = PathItem::default();
+        path_item.get = Some(Operation {
+            operation_id: Some("getUserById".to_string()),
+            tags: vec!["users".to_string()],
+            parameters: vec![ReferenceOr::Reference {
+                reference: "#/components/parameters/userId".to_string(),
+            }],
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/users/{userId}".to_string(), ReferenceOr::Item(path_item));
+
+        let cached = transformer
+            .transform("test", &spec)
+            .expect("Transform should succeed with parameter reference");
+
+        // Verify the parameter was resolved
+        assert_eq!(cached.commands.len(), 1);
+        let command = &cached.commands[0];
+        assert_eq!(command.parameters.len(), 1);
+        let param = &command.parameters[0];
+        assert_eq!(param.name, "userId");
+        assert_eq!(param.location, "path");
+        assert!(param.required);
+        assert_eq!(
+            param.description,
+            Some("Unique identifier of the user".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_with_invalid_parameter_reference() {
+        use openapiv3::{Operation, PathItem, ReferenceOr, Responses};
+
+        let transformer = SpecTransformer::new();
+        let mut spec = create_test_spec();
+
+        // Create operation with invalid parameter reference
+        let mut path_item = PathItem::default();
+        path_item.get = Some(Operation {
+            parameters: vec![ReferenceOr::Reference {
+                reference: "#/invalid/reference/format".to_string(),
+            }],
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/users".to_string(), ReferenceOr::Item(path_item));
+
+        let result = transformer.transform("test", &spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::Error::Validation(msg) => {
+                assert!(msg.contains("Invalid parameter reference format"));
+            }
+            _ => panic!("Expected Validation error"),
+        }
+    }
+
+    #[test]
+    fn test_transform_with_missing_parameter_reference() {
+        use openapiv3::{Components, Operation, PathItem, ReferenceOr, Responses};
+
+        let transformer = SpecTransformer::new();
+        let mut spec = create_test_spec();
+
+        // Add empty components
+        spec.components = Some(Components::default());
+
+        // Create operation with reference to non-existent parameter
+        let mut path_item = PathItem::default();
+        path_item.get = Some(Operation {
+            parameters: vec![ReferenceOr::Reference {
+                reference: "#/components/parameters/nonExistent".to_string(),
+            }],
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/users".to_string(), ReferenceOr::Item(path_item));
+
+        let result = transformer.transform("test", &spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::Error::Validation(msg) => {
+                assert!(msg.contains("Parameter 'nonExistent' not found in components"));
+            }
+            _ => panic!("Expected Validation error"),
+        }
+    }
+
+    #[test]
+    fn test_transform_with_nested_parameter_reference() {
+        use openapiv3::{
+            Components, Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem,
+            ReferenceOr, Responses, Schema, SchemaData, SchemaKind, Type,
+        };
+
+        let transformer = SpecTransformer::new();
+        let mut spec = create_test_spec();
+
+        let mut components = Components::default();
+
+        // Add a parameter that references another parameter
+        components.parameters.insert(
+            "userIdRef".to_string(),
+            ReferenceOr::Reference {
+                reference: "#/components/parameters/userId".to_string(),
+            },
+        );
+
+        // Add the actual parameter
+        let user_id_param = Parameter::Path {
+            parameter_data: ParameterData {
+                name: "userId".to_string(),
+                description: Some("User ID parameter".to_string()),
+                required: true,
+                deprecated: Some(false),
+                format: ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema {
+                    schema_data: SchemaData::default(),
+                    schema_kind: SchemaKind::Type(Type::String(Default::default())),
+                })),
+                example: None,
+                examples: Default::default(),
+                explode: None,
+                extensions: Default::default(),
+            },
+            style: Default::default(),
+        };
+        components
+            .parameters
+            .insert("userId".to_string(), ReferenceOr::Item(user_id_param));
+        spec.components = Some(components);
+
+        // Create operation with nested parameter reference
+        let mut path_item = PathItem::default();
+        path_item.get = Some(Operation {
+            parameters: vec![ReferenceOr::Reference {
+                reference: "#/components/parameters/userIdRef".to_string(),
+            }],
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/users/{userId}".to_string(), ReferenceOr::Item(path_item));
+
+        let cached = transformer
+            .transform("test", &spec)
+            .expect("Transform should succeed with nested parameter reference");
+
+        // Verify the nested reference was resolved
+        assert_eq!(cached.commands.len(), 1);
+        let command = &cached.commands[0];
+        assert_eq!(command.parameters.len(), 1);
+        let param = &command.parameters[0];
+        assert_eq!(param.name, "userId");
+        assert_eq!(param.description, Some("User ID parameter".to_string()));
+    }
+
+    #[test]
+    fn test_transform_with_circular_parameter_reference() {
+        use openapiv3::{Components, Operation, PathItem, ReferenceOr, Responses};
+
+        let transformer = SpecTransformer::new();
+        let mut spec = create_test_spec();
+
+        let mut components = Components::default();
+
+        // Create direct circular reference: paramA -> paramA
+        components.parameters.insert(
+            "paramA".to_string(),
+            ReferenceOr::Reference {
+                reference: "#/components/parameters/paramA".to_string(),
+            },
+        );
+
+        spec.components = Some(components);
+
+        // Create operation with circular parameter reference
+        let mut path_item = PathItem::default();
+        path_item.get = Some(Operation {
+            parameters: vec![ReferenceOr::Reference {
+                reference: "#/components/parameters/paramA".to_string(),
+            }],
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/test".to_string(), ReferenceOr::Item(path_item));
+
+        let result = transformer.transform("test", &spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::Error::Validation(msg) => {
+                assert!(
+                    msg.contains("Circular reference detected"),
+                    "Error message should mention circular reference: {}",
+                    msg
+                );
+            }
+            _ => panic!("Expected Validation error for circular reference"),
+        }
+    }
+
+    #[test]
+    fn test_transform_with_indirect_circular_reference() {
+        use openapiv3::{Components, Operation, PathItem, ReferenceOr, Responses};
+
+        let transformer = SpecTransformer::new();
+        let mut spec = create_test_spec();
+
+        let mut components = Components::default();
+
+        // Create indirect circular reference: paramA -> paramB -> paramA
+        components.parameters.insert(
+            "paramA".to_string(),
+            ReferenceOr::Reference {
+                reference: "#/components/parameters/paramB".to_string(),
+            },
+        );
+
+        components.parameters.insert(
+            "paramB".to_string(),
+            ReferenceOr::Reference {
+                reference: "#/components/parameters/paramA".to_string(),
+            },
+        );
+
+        spec.components = Some(components);
+
+        // Create operation with circular parameter reference
+        let mut path_item = PathItem::default();
+        path_item.get = Some(Operation {
+            parameters: vec![ReferenceOr::Reference {
+                reference: "#/components/parameters/paramA".to_string(),
+            }],
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/test".to_string(), ReferenceOr::Item(path_item));
+
+        let result = transformer.transform("test", &spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::Error::Validation(msg) => {
+                assert!(
+                    msg.contains("Circular reference detected") || msg.contains("reference cycle"),
+                    "Error message should mention circular reference: {}",
+                    msg
+                );
+            }
+            _ => panic!("Expected Validation error for circular reference"),
+        }
+    }
+
+    #[test]
+    fn test_transform_with_complex_circular_reference() {
+        use openapiv3::{Components, Operation, PathItem, ReferenceOr, Responses};
+
+        let transformer = SpecTransformer::new();
+        let mut spec = create_test_spec();
+
+        let mut components = Components::default();
+
+        // Create complex circular reference: paramA -> paramB -> paramC -> paramA
+        components.parameters.insert(
+            "paramA".to_string(),
+            ReferenceOr::Reference {
+                reference: "#/components/parameters/paramB".to_string(),
+            },
+        );
+
+        components.parameters.insert(
+            "paramB".to_string(),
+            ReferenceOr::Reference {
+                reference: "#/components/parameters/paramC".to_string(),
+            },
+        );
+
+        components.parameters.insert(
+            "paramC".to_string(),
+            ReferenceOr::Reference {
+                reference: "#/components/parameters/paramA".to_string(),
+            },
+        );
+
+        spec.components = Some(components);
+
+        // Create operation with circular parameter reference
+        let mut path_item = PathItem::default();
+        path_item.get = Some(Operation {
+            parameters: vec![ReferenceOr::Reference {
+                reference: "#/components/parameters/paramA".to_string(),
+            }],
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/test".to_string(), ReferenceOr::Item(path_item));
+
+        let result = transformer.transform("test", &spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::Error::Validation(msg) => {
+                assert!(
+                    msg.contains("Circular reference detected") || msg.contains("reference cycle"),
+                    "Error message should mention circular reference: {}",
+                    msg
+                );
+            }
+            _ => panic!("Expected Validation error for circular reference"),
+        }
+    }
+
+    #[test]
+    fn test_transform_with_depth_limit() {
+        use openapiv3::{
+            Components, Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem,
+            ReferenceOr, Responses, Schema, SchemaData, SchemaKind, Type,
+        };
+
+        let transformer = SpecTransformer::new();
+        let mut spec = create_test_spec();
+
+        let mut components = Components::default();
+
+        // Create a chain of references that exceeds MAX_REFERENCE_DEPTH
+        for i in 0..52 {
+            let param_name = format!("param{}", i);
+            let next_param = format!("param{}", i + 1);
+
+            if i < 51 {
+                // Reference to next parameter
+                components.parameters.insert(
+                    param_name,
+                    ReferenceOr::Reference {
+                        reference: format!("#/components/parameters/{}", next_param),
+                    },
+                );
+            } else {
+                // Last parameter is actual parameter definition
+                let actual_param = Parameter::Path {
+                    parameter_data: ParameterData {
+                        name: "deepParam".to_string(),
+                        description: Some("Very deeply nested parameter".to_string()),
+                        required: true,
+                        deprecated: Some(false),
+                        format: ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema {
+                            schema_data: SchemaData::default(),
+                            schema_kind: SchemaKind::Type(Type::String(Default::default())),
+                        })),
+                        example: None,
+                        examples: Default::default(),
+                        explode: None,
+                        extensions: Default::default(),
+                    },
+                    style: Default::default(),
+                };
+                components
+                    .parameters
+                    .insert(param_name, ReferenceOr::Item(actual_param));
+            }
+        }
+
+        spec.components = Some(components);
+
+        // Create operation with deeply nested parameter reference
+        let mut path_item = PathItem::default();
+        path_item.get = Some(Operation {
+            parameters: vec![ReferenceOr::Reference {
+                reference: "#/components/parameters/param0".to_string(),
+            }],
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/test".to_string(), ReferenceOr::Item(path_item));
+
+        let result = transformer.transform("test", &spec);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::Error::Validation(msg) => {
+                assert!(
+                    msg.contains("Maximum reference depth") && msg.contains("50"),
+                    "Error message should mention depth limit: {}",
+                    msg
+                );
+            }
+            _ => panic!("Expected Validation error for depth limit"),
+        }
     }
 }

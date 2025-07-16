@@ -110,7 +110,9 @@ fn test_enriched_metadata_preservation() {
     };
 
     // Transform the spec
-    let cached_spec = transformer.transform("test-api", &spec);
+    let cached_spec = transformer
+        .transform("test-api", &spec)
+        .expect("Transform should succeed");
 
     // Verify metadata was preserved
     assert_eq!(cached_spec.commands.len(), 1);

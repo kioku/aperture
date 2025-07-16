@@ -67,7 +67,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
-        let cached_spec = transformer.transform(name, &openapi_spec);
+        let cached_spec = transformer.transform(name, &openapi_spec)?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
@@ -135,7 +135,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
-        let cached_spec = transformer.transform(name, &openapi_spec);
+        let cached_spec = transformer.transform(name, &openapi_spec)?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
@@ -486,7 +486,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
-        let cached_spec = transformer.transform(name, &openapi_spec);
+        let cached_spec = transformer.transform(name, &openapi_spec)?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {

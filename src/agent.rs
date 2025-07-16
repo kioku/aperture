@@ -4,6 +4,7 @@ use crate::cache::models::{
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
+use crate::spec::resolve_parameter_reference;
 use openapiv3::{OpenAPI, Operation, Parameter as OpenApiParameter, ReferenceOr, SecurityScheme};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -214,8 +215,13 @@ pub fn generate_capability_manifest_from_openapi(
             // Process each HTTP method
             for (method, operation) in crate::spec::http_methods_iter(item) {
                 if let Some(op) = operation {
-                    let command_info =
-                        convert_openapi_operation_to_info(method, path, op, spec.security.as_ref());
+                    let command_info = convert_openapi_operation_to_info(
+                        method,
+                        path,
+                        op,
+                        spec,
+                        spec.security.as_ref(),
+                    );
 
                     // Group by first tag or "default"
                     let group_name = op
@@ -437,6 +443,7 @@ fn convert_openapi_operation_to_info(
     method: &str,
     path: &str,
     operation: &Operation,
+    spec: &OpenAPI,
     global_security: Option<&Vec<openapiv3::SecurityRequirement>>,
 ) -> CommandInfo {
     let command_name = operation
@@ -444,16 +451,15 @@ fn convert_openapi_operation_to_info(
         .as_ref()
         .map_or_else(|| method.to_lowercase(), |op_id| to_kebab_case(op_id));
 
-    // Extract parameters with full metadata
+    // Extract parameters with full metadata, resolving references
     let parameters: Vec<ParameterInfo> = operation
         .parameters
         .iter()
-        .filter_map(|param_ref| {
-            if let ReferenceOr::Item(param) = param_ref {
-                Some(convert_openapi_parameter_to_info(param))
-            } else {
-                None
-            }
+        .filter_map(|param_ref| match param_ref {
+            ReferenceOr::Item(param) => Some(convert_openapi_parameter_to_info(param)),
+            ReferenceOr::Reference { reference } => resolve_parameter_reference(spec, reference)
+                .ok()
+                .map(|param| convert_openapi_parameter_to_info(&param)),
         })
         .collect();
 

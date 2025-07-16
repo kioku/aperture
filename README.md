@@ -9,6 +9,7 @@ Aperture is a command-line interface (CLI) that dynamically generates commands f
 - **Agent-First Design:** Optimized for programmatic use with structured I/O, JSON output modes, and actionable errors
 - **Secure & Robust:** Enforces strict separation of configuration from secrets using environment variables
 - **Spec Validation:** Validates OpenAPI specs during registration with clear error messages for unsupported features
+- **Parameter References:** Full support for OpenAPI parameter references (`$ref`) for DRY specifications
 - **Batch Processing:** Execute multiple operations concurrently with rate limiting and error handling
 - **Response Caching:** Intelligent caching with TTL support for improved performance
 - **Advanced Output:** Multiple output formats (JSON, YAML, table) with JQ-based filtering
@@ -43,6 +44,26 @@ components:
       x-aperture-secret:
         source: env
         name: API_TOKEN
+```
+
+### Parameter References
+
+Aperture fully supports OpenAPI parameter references, allowing you to define reusable parameters:
+
+```yaml
+components:
+  parameters:
+    userId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+paths:
+  /users/{userId}:
+    get:
+      parameters:
+        - $ref: '#/components/parameters/userId'
 ```
 
 ## Installation

@@ -162,9 +162,7 @@ impl SpecValidator {
                     Self::validate_parameter(path, method, param)?;
                 }
                 ReferenceOr::Reference { .. } => {
-                    return Err(Error::Validation(format!(
-                        "Parameter references are not supported in {method} {path}"
-                    )));
+                    // Parameter references are now allowed and will be resolved during transformation
                 }
             }
         }
@@ -377,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_parameter_reference_rejected() {
+    fn test_validate_parameter_reference_allowed() {
         use openapiv3::{Operation, PathItem, ReferenceOr as PathRef, Responses};
 
         let validator = SpecValidator::new();
@@ -396,14 +394,9 @@ mod tests {
             .paths
             .insert("/users/{id}".to_string(), PathRef::Item(path_item));
 
+        // Parameter references should now be allowed
         let result = validator.validate(&spec);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            Error::Validation(msg) => {
-                assert!(msg.contains("Parameter references are not supported"));
-            }
-            _ => panic!("Expected Validation error"),
-        }
+        assert!(result.is_ok());
     }
 
     #[test]

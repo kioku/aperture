@@ -1,5 +1,6 @@
 use aperture_cli::agent::{
-    generate_capability_manifest, ApiCapabilityManifest, SecuritySchemeDetails,
+    generate_capability_manifest, generate_capability_manifest_from_openapi, ApiCapabilityManifest,
+    SecuritySchemeDetails,
 };
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
@@ -573,4 +574,151 @@ fn test_manifest_from_openapi() {
         api_key.description,
         Some("API Key authentication".to_string())
     );
+}
+
+#[test]
+fn test_manifest_with_parameter_references() {
+    use indexmap::IndexMap;
+    use openapiv3::{
+        BooleanType, Components, Info, OpenAPI, Operation, Parameter, ParameterData,
+        ParameterSchemaOrContent, PathItem, Paths, ReferenceOr, Responses, Schema, SchemaData,
+        SchemaKind, Server, StringType, Type,
+    };
+
+    // Create OpenAPI spec with parameter references
+    let spec = OpenAPI {
+        openapi: "3.0.0".to_string(),
+        info: Info {
+            title: "Test API with References".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        },
+        servers: vec![Server {
+            url: "https://api.example.com".to_string(),
+            ..Default::default()
+        }],
+        paths: {
+            let mut paths = Paths::default();
+
+            // Create operation with parameter references
+            let mut path_item = PathItem::default();
+            path_item.get = Some(Operation {
+                operation_id: Some("getUserById".to_string()),
+                tags: vec!["users".to_string()],
+                parameters: vec![
+                    ReferenceOr::Reference {
+                        reference: "#/components/parameters/userId".to_string(),
+                    },
+                    ReferenceOr::Reference {
+                        reference: "#/components/parameters/includeDetails".to_string(),
+                    },
+                ],
+                responses: Responses::default(),
+                ..Default::default()
+            });
+
+            paths
+                .paths
+                .insert("/users/{userId}".to_string(), ReferenceOr::Item(path_item));
+            paths
+        },
+        components: Some(Components {
+            parameters: {
+                let mut params = IndexMap::new();
+
+                // Define userId parameter
+                params.insert(
+                    "userId".to_string(),
+                    ReferenceOr::Item(Parameter::Path {
+                        parameter_data: ParameterData {
+                            name: "userId".to_string(),
+                            description: Some("User identifier".to_string()),
+                            required: true,
+                            deprecated: None,
+                            format: ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema {
+                                schema_kind: SchemaKind::Type(Type::String(StringType::default())),
+                                schema_data: SchemaData::default(),
+                            })),
+                            example: Some(serde_json::json!("user123")),
+                            examples: IndexMap::default(),
+                            explode: None,
+                            extensions: IndexMap::default(),
+                        },
+                        style: Default::default(),
+                    }),
+                );
+
+                // Define includeDetails parameter
+                params.insert(
+                    "includeDetails".to_string(),
+                    ReferenceOr::Item(Parameter::Query {
+                        parameter_data: ParameterData {
+                            name: "includeDetails".to_string(),
+                            description: Some("Include detailed information".to_string()),
+                            required: false,
+                            deprecated: None,
+                            format: ParameterSchemaOrContent::Schema(ReferenceOr::Item(Schema {
+                                schema_kind: SchemaKind::Type(
+                                    Type::Boolean(BooleanType::default()),
+                                ),
+                                schema_data: SchemaData {
+                                    default: Some(serde_json::json!(false)),
+                                    ..Default::default()
+                                },
+                            })),
+                            example: None,
+                            examples: IndexMap::default(),
+                            explode: None,
+                            extensions: IndexMap::default(),
+                        },
+                        allow_reserved: false,
+                        style: Default::default(),
+                        allow_empty_value: None,
+                    }),
+                );
+
+                params
+            },
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    // Generate manifest
+    let manifest_json = generate_capability_manifest_from_openapi("test-ref", &spec, None)
+        .expect("Failed to generate manifest");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
+
+    // Verify parameters were resolved from references
+    let commands = manifest["commands"]["users"]
+        .as_array()
+        .expect("Commands should be an array");
+    assert_eq!(commands.len(), 1);
+
+    let get_user = &commands[0];
+    assert_eq!(get_user["operation_id"], "getUserById");
+
+    let parameters = get_user["parameters"]
+        .as_array()
+        .expect("Parameters should be an array");
+    assert_eq!(parameters.len(), 2, "Should have 2 resolved parameters");
+
+    // Check userId parameter
+    let user_id_param = &parameters[0];
+    assert_eq!(user_id_param["name"], "userId");
+    assert_eq!(user_id_param["location"], "path");
+    assert_eq!(user_id_param["required"], true);
+    assert_eq!(user_id_param["param_type"], "string");
+    assert_eq!(user_id_param["description"], "User identifier");
+    assert_eq!(user_id_param["example"], "\"user123\"");
+
+    // Check includeDetails parameter
+    let include_param = &parameters[1];
+    assert_eq!(include_param["name"], "includeDetails");
+    assert_eq!(include_param["location"], "query");
+    assert_eq!(include_param["required"], false);
+    assert_eq!(include_param["param_type"], "boolean");
+    assert_eq!(include_param["description"], "Include detailed information");
+    assert_eq!(include_param["default_value"], "false");
 }
