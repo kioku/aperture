@@ -38,7 +38,7 @@ pub const fn http_methods_iter(item: &PathItem) -> HttpMethodsIter<'_> {
 }
 
 /// Maximum depth for resolving parameter references to prevent stack overflow
-pub const MAX_REFERENCE_DEPTH: usize = 50;
+pub const MAX_REFERENCE_DEPTH: usize = 10;
 
 /// Resolves a parameter reference to its actual parameter definition
 ///
