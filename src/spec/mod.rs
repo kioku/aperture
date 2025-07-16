@@ -9,7 +9,9 @@ pub mod validator;
 pub use transformer::SpecTransformer;
 pub use validator::SpecValidator;
 
-use openapiv3::{Operation, PathItem};
+use crate::error::Error;
+use openapiv3::{OpenAPI, Operation, Parameter, PathItem, ReferenceOr};
+use std::collections::HashSet;
 
 /// A helper type to iterate over all HTTP methods in a `PathItem`
 pub type HttpMethodsIter<'a> = [(&'static str, &'a Option<Operation>); 8];
@@ -33,4 +35,82 @@ pub const fn http_methods_iter(item: &PathItem) -> HttpMethodsIter<'_> {
         ("OPTIONS", &item.options),
         ("TRACE", &item.trace),
     ]
+}
+
+/// Maximum depth for resolving parameter references to prevent stack overflow
+pub const MAX_REFERENCE_DEPTH: usize = 50;
+
+/// Resolves a parameter reference to its actual parameter definition
+///
+/// # Arguments
+/// * `spec` - The `OpenAPI` specification containing the components
+/// * `reference` - The reference string (e.g., "#/components/parameters/userId")
+///
+/// # Returns
+/// * `Ok(Parameter)` - The resolved parameter
+/// * `Err(Error)` - If resolution fails
+///
+/// # Errors
+/// Returns an error if:
+/// - The reference format is invalid
+/// - The referenced parameter doesn't exist
+/// - Circular references are detected
+/// - Maximum reference depth is exceeded
+pub fn resolve_parameter_reference(spec: &OpenAPI, reference: &str) -> Result<Parameter, Error> {
+    let mut visited = HashSet::new();
+    resolve_parameter_reference_with_visited(spec, reference, &mut visited, 0)
+}
+
+/// Internal method that resolves parameter references with circular reference detection
+fn resolve_parameter_reference_with_visited(
+    spec: &OpenAPI,
+    reference: &str,
+    visited: &mut HashSet<String>,
+    depth: usize,
+) -> Result<Parameter, Error> {
+    // Check depth limit
+    if depth >= MAX_REFERENCE_DEPTH {
+        return Err(Error::Validation(format!(
+            "Maximum reference depth ({MAX_REFERENCE_DEPTH}) exceeded while resolving '{reference}'"
+        )));
+    }
+
+    // Check for circular references
+    if !visited.insert(reference.to_string()) {
+        return Err(Error::Validation(format!(
+            "Circular reference detected: '{reference}' is part of a reference cycle"
+        )));
+    }
+
+    // Parse the reference path
+    // Expected format: #/components/parameters/{parameter_name}
+    if !reference.starts_with("#/components/parameters/") {
+        return Err(Error::Validation(format!(
+            "Invalid parameter reference format: '{reference}'. Expected format: #/components/parameters/{{name}}"
+        )));
+    }
+
+    let param_name = reference
+        .strip_prefix("#/components/parameters/")
+        .ok_or_else(|| Error::Validation(format!("Invalid parameter reference: '{reference}'")))?;
+
+    // Look up the parameter in components
+    let components = spec.components.as_ref().ok_or_else(|| {
+        Error::Validation(
+            "Cannot resolve parameter reference: OpenAPI spec has no components section"
+                .to_string(),
+        )
+    })?;
+
+    let param_ref = components.parameters.get(param_name).ok_or_else(|| {
+        Error::Validation(format!("Parameter '{param_name}' not found in components"))
+    })?;
+
+    // Handle nested references (reference pointing to another reference)
+    match param_ref {
+        ReferenceOr::Item(param) => Ok(param.clone()),
+        ReferenceOr::Reference {
+            reference: nested_ref,
+        } => resolve_parameter_reference_with_visited(spec, nested_ref, visited, depth + 1),
+    }
 }

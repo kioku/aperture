@@ -5,10 +5,7 @@ use crate::cache::models::{
 use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 use serde_json;
-use std::collections::{HashMap, HashSet};
-
-/// Maximum depth for resolving parameter references to prevent stack overflow
-const MAX_REFERENCE_DEPTH: usize = 50;
+use std::collections::HashMap;
 
 /// Transforms `OpenAPI` specifications into Aperture's cached format
 pub struct SpecTransformer;
@@ -469,66 +466,7 @@ impl SpecTransformer {
 
     /// Resolves a parameter reference to its actual parameter definition
     fn resolve_parameter_reference(spec: &OpenAPI, reference: &str) -> Result<Parameter, Error> {
-        let mut visited = HashSet::new();
-        Self::resolve_parameter_reference_with_visited(spec, reference, &mut visited, 0)
-    }
-
-    /// Internal method that resolves parameter references with circular reference detection
-    fn resolve_parameter_reference_with_visited(
-        spec: &OpenAPI,
-        reference: &str,
-        visited: &mut HashSet<String>,
-        depth: usize,
-    ) -> Result<Parameter, Error> {
-        // Check depth limit
-        if depth >= MAX_REFERENCE_DEPTH {
-            return Err(Error::Validation(format!(
-                "Maximum reference depth ({MAX_REFERENCE_DEPTH}) exceeded while resolving '{reference}'"
-            )));
-        }
-
-        // Check for circular references
-        if !visited.insert(reference.to_string()) {
-            return Err(Error::Validation(format!(
-                "Circular reference detected: '{reference}' is part of a reference cycle"
-            )));
-        }
-
-        // Parse the reference path
-        // Expected format: #/components/parameters/{parameter_name}
-        if !reference.starts_with("#/components/parameters/") {
-            return Err(Error::Validation(format!(
-                "Invalid parameter reference format: '{reference}'. Expected format: #/components/parameters/{{name}}"
-            )));
-        }
-
-        let param_name = reference
-            .strip_prefix("#/components/parameters/")
-            .ok_or_else(|| {
-                Error::Validation(format!("Invalid parameter reference: '{reference}'"))
-            })?;
-
-        // Look up the parameter in components
-        let components = spec.components.as_ref().ok_or_else(|| {
-            Error::Validation(
-                "Cannot resolve parameter reference: OpenAPI spec has no components section"
-                    .to_string(),
-            )
-        })?;
-
-        let param_ref = components.parameters.get(param_name).ok_or_else(|| {
-            Error::Validation(format!("Parameter '{param_name}' not found in components"))
-        })?;
-
-        // Handle nested references (reference pointing to another reference)
-        match param_ref {
-            ReferenceOr::Item(param) => Ok(param.clone()),
-            ReferenceOr::Reference {
-                reference: nested_ref,
-            } => {
-                Self::resolve_parameter_reference_with_visited(spec, nested_ref, visited, depth + 1)
-            }
-        }
+        crate::spec::resolve_parameter_reference(spec, reference)
     }
 }
 
