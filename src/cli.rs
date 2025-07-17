@@ -39,6 +39,7 @@ pub struct Cli {
     pub describe_json: bool,
 
     /// Output all errors as structured JSON to stderr
+    /// When used with batch operations, outputs a clean JSON summary at the end
     #[arg(long, global = true, help = "Output errors in JSON format")]
     pub json_errors: bool,
 

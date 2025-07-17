@@ -521,8 +521,8 @@ async fn execute_batch_operations(
         }
     }
 
-    // Exit with error code if any operations failed (unless using json-errors for programmatic access)
-    if result.failure_count > 0 && !cli.json_errors {
+    // Exit with error code if any operations failed
+    if result.failure_count > 0 {
         std::process::exit(1);
     }
 

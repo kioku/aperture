@@ -209,6 +209,7 @@ aperture --batch-file operations.json --batch-concurrency 10
 aperture --batch-file operations.json --batch-rate-limit 50
 
 # Analyze batch results with JQ filtering (requires --json-errors)
+# Note: The final JSON summary is printed after all operations complete
 aperture --batch-file operations.json --json-errors --jq '.batch_execution_summary.operations[] | select(.success == false)'
 
 # Get summary statistics only
@@ -263,6 +264,32 @@ aperture api my-api users get-user-by-id --id 123
 
 # Legacy positional syntax (backwards compatibility)
 aperture api my-api --positional-args users get-user-by-id 123
+```
+
+### Exit Codes
+
+Aperture follows standard CLI conventions for exit codes:
+
+- **0**: Success - all operations completed successfully
+- **1**: Failure - one or more operations failed, including:
+  - API request failures (4xx, 5xx errors)
+  - Network connection errors
+  - Authentication failures
+  - Batch operations with any failed requests
+
+For batch operations, Aperture exits with code 1 if ANY operation fails, making it easy to detect failures in CI/CD pipelines:
+
+```bash
+# Check batch success/failure
+aperture --batch-file ops.json --json-errors
+if [ $? -eq 0 ]; then
+    echo "All operations succeeded"
+else
+    echo "Some operations failed"
+fi
+
+# Continue despite failures
+aperture --batch-file ops.json --json-errors || true
 ```
 
 ## Development
