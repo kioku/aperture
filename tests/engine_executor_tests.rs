@@ -102,7 +102,8 @@ async fn test_execute_request_basic_get() {
         None,
         &OutputFormat::Json,
         None,
-        None, // cache_config
+        None,  // cache_config
+        false, // capture_output
     )
     .await;
     assert!(result.is_ok());
@@ -154,7 +155,8 @@ async fn test_execute_request_with_query_params() {
         None,
         &OutputFormat::Json,
         None,
-        None, // cache_config
+        None,  // cache_config
+        false, // capture_output
     )
     .await;
     assert!(result.is_ok());
@@ -190,7 +192,8 @@ async fn test_execute_request_error_response() {
         None,
         &OutputFormat::Json,
         None,
-        None, // cache_config
+        None,  // cache_config
+        false, // capture_output
     )
     .await;
     assert!(result.is_err());
@@ -270,7 +273,8 @@ async fn test_execute_request_with_global_config_base_url() {
         Some(&global_config),
         &OutputFormat::Json,
         None,
-        None, // cache_config
+        None,  // cache_config
+        false, // capture_output
     )
     .await;
     assert!(result.is_ok());

@@ -2,7 +2,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{header, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
@@ -517,6 +517,143 @@ paths:
         users_commands[0]["operation_id"].as_str().unwrap(),
         "getUserById"
     );
+}
+
+#[tokio::test]
+async fn test_describe_json_with_jq_filter() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    // Create a minimal spec
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      x-aperture-secret:
+        source: env
+        name: TEST_KEY
+    bearerAuth:
+      type: http
+      scheme: bearer
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+  /posts:
+    get:
+      tags:
+        - posts
+      operationId: listPosts
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Test --describe-json with --jq to get only the users commands
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&[
+            "api",
+            "test-api",
+            "--describe-json",
+            "--jq",
+            ".commands.users",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse the JSON output to verify it's only the users commands
+    let users_commands: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(users_commands.is_array());
+    assert_eq!(users_commands.as_array().unwrap().len(), 1);
+    assert_eq!(
+        users_commands[0]["name"].as_str().unwrap(),
+        "get-user-by-id"
+    );
+
+    // Test --jq to get security schemes
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&[
+            "api",
+            "test-api",
+            "--describe-json",
+            "--jq",
+            ".security_schemes",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let security_schemes: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(security_schemes["apiKey"].is_object());
+    assert!(security_schemes["bearerAuth"].is_object());
+
+    // Test --jq to get API version
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["api", "test-api", "--describe-json", "--jq", ".api.version"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The output should be a JSON string
+    let version: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(version, serde_json::Value::String("1.0.0".to_string()));
+
+    // Test invalid JQ filter error handling
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&[
+            "api",
+            "test-api",
+            "--describe-json",
+            "--jq",
+            "invalid[filter",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
 }
 
 #[tokio::test]
@@ -1775,4 +1912,452 @@ fn test_jq_filter_help_text() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("--jq") || stdout.contains("jq filter"));
+}
+
+#[tokio::test]
+async fn test_batch_operations_with_jq_filter() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+    let batch_file = temp_dir.path().join("batch.json");
+
+    // Create a minimal spec
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+  /posts/{id}:
+    get:
+      tags:
+        - posts
+      operationId: getPost
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Create a batch file with multiple operations
+    let batch_ops = serde_json::json!({
+        "operations": [
+            {
+                "id": "op1",
+                "args": ["users", "get-user", "--id", "123"]
+            },
+            {
+                "id": "op2",
+                "args": ["posts", "get-post", "--id", "456"]
+            },
+            {
+                "id": "op3",
+                "args": ["users", "get-user", "--id", "789"]
+            }
+        ]
+    });
+    fs::write(
+        &batch_file,
+        serde_json::to_string_pretty(&batch_ops).unwrap(),
+    )
+    .unwrap();
+
+    // Mock server setup
+    let mock_server = MockServer::start().await;
+
+    // Mock successful user requests
+    Mock::given(method("GET"))
+        .and(path("/users/123"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"id": "123", "name": "Alice"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/users/789"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"id": "789", "name": "Charlie"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Mock failed post request
+    Mock::given(method("GET"))
+        .and(path("/posts/456"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Post not found"))
+        .mount(&mock_server)
+        .await;
+
+    // Test JQ filter to get only failed operations
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+            "--json-errors",
+            "--jq",
+            ".batch_execution_summary.failed_operations",
+        ])
+        .output()
+        .unwrap();
+
+    // The command should exit with code 1 since one operation fails
+    assert!(
+        !output.status.success(),
+        "Command should fail when operations fail"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // With --json-errors, only the final JSON summary should be printed
+    // Individual operation outputs are suppressed
+    let failed_count: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(failed_count, 1);
+
+    // Test JQ filter to get summary statistics only
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+            "--json-errors",
+            "--jq",
+            ".batch_execution_summary.total_operations",
+        ])
+        .output()
+        .unwrap();
+
+    // Exit code 1 because of failed operations
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let total_count: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(total_count, 3);
+
+    // Test JQ filter to get success count
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+            "--json-errors",
+            "--jq",
+            ".batch_execution_summary.successful_operations",
+        ])
+        .output()
+        .unwrap();
+
+    // Exit code 1 because of failed operations
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let success_count: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(success_count, 2); // Should have 2 successful operations
+}
+
+#[tokio::test]
+async fn test_batch_empty_operations_with_jq() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+    let batch_file = temp_dir.path().join("batch.json");
+
+    // Create a minimal spec
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Create a batch file with no operations
+    let batch_ops = serde_json::json!({
+        "operations": []
+    });
+    fs::write(
+        &batch_file,
+        serde_json::to_string_pretty(&batch_ops).unwrap(),
+    )
+    .unwrap();
+
+    // Test JQ filter on empty batch
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&[
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+            "--json-errors",
+            "--jq",
+            ".batch_execution_summary.total_operations",
+        ])
+        .output()
+        .unwrap();
+
+    // Should succeed with empty batch
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "0");
+}
+
+#[tokio::test]
+async fn test_batch_all_fail_with_jq() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+    let batch_file = temp_dir.path().join("batch.json");
+
+    // Create a minimal spec
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Create a batch file with operations that will all fail
+    let batch_ops = serde_json::json!({
+        "operations": [
+            {
+                "id": "op1",
+                "args": ["users", "get-user", "--id", "fail1"]
+            },
+            {
+                "id": "op2",
+                "args": ["users", "get-user", "--id", "fail2"]
+            }
+        ]
+    });
+    fs::write(
+        &batch_file,
+        serde_json::to_string_pretty(&batch_ops).unwrap(),
+    )
+    .unwrap();
+
+    // Mock server setup
+    let mock_server = MockServer::start().await;
+
+    // All requests return 404
+    Mock::given(method("GET"))
+        .and(path_regex("/users/.*"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not found"))
+        .mount(&mock_server)
+        .await;
+
+    // Test JQ filter when all operations fail
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+            "--json-errors",
+            "--jq",
+            ".batch_execution_summary.failed_operations",
+        ])
+        .output()
+        .unwrap();
+
+    // Should exit with code 1 when all operations fail
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let failed_count: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(failed_count, 2);
+}
+
+#[tokio::test]
+async fn test_batch_jq_empty_result() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+    let batch_file = temp_dir.path().join("batch.json");
+
+    // Create a minimal spec
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Create a simple batch file
+    let batch_ops = serde_json::json!({
+        "operations": [
+            {
+                "id": "op1",
+                "args": ["users", "get-user", "--id", "123"]
+            }
+        ]
+    });
+    fs::write(
+        &batch_file,
+        serde_json::to_string_pretty(&batch_ops).unwrap(),
+    )
+    .unwrap();
+
+    // Mock server setup
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/users/123"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"id": "123", "name": "Test"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Test JQ filter that returns empty/null
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .args(&[
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+            "--json-errors",
+            "--jq",
+            ".batch_execution_summary.nonexistent_field",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "null");
 }

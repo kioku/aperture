@@ -164,6 +164,7 @@ async fn test_flag_based_syntax_with_caching() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -179,6 +180,7 @@ async fn test_flag_based_syntax_with_caching() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());
@@ -242,6 +244,7 @@ async fn test_legacy_positional_syntax_with_caching() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -257,6 +260,7 @@ async fn test_legacy_positional_syntax_with_caching() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());
@@ -322,6 +326,7 @@ async fn test_different_parameter_combinations_cache_separately() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -350,6 +355,7 @@ async fn test_different_parameter_combinations_cache_separately() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());
@@ -404,6 +410,7 @@ async fn test_post_request_with_body_and_caching() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -419,6 +426,7 @@ async fn test_post_request_with_body_and_caching() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());
@@ -469,6 +477,7 @@ async fn test_dry_run_with_flag_based_syntax() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result.is_ok());
@@ -514,6 +523,7 @@ async fn test_cache_with_custom_ttl() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -538,6 +548,7 @@ async fn test_cache_with_custom_ttl() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());

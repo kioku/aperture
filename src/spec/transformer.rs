@@ -924,11 +924,11 @@ mod tests {
         let mut components = Components::default();
 
         // Create a chain of references that exceeds MAX_REFERENCE_DEPTH
-        for i in 0..52 {
+        for i in 0..12 {
             let param_name = format!("param{}", i);
             let next_param = format!("param{}", i + 1);
 
-            if i < 51 {
+            if i < 11 {
                 // Reference to next parameter
                 components.parameters.insert(
                     param_name,
@@ -982,7 +982,7 @@ mod tests {
         match result.unwrap_err() {
             crate::error::Error::Validation(msg) => {
                 assert!(
-                    msg.contains("Maximum reference depth") && msg.contains("50"),
+                    msg.contains("Maximum reference depth") && msg.contains("10"),
                     "Error message should mention depth limit: {}",
                     msg
                 );

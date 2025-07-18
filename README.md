@@ -191,6 +191,10 @@ aperture api my-api users list --jq '.[] | {name: .name, email: .email}'
 
 # Complex JQ transformations
 aperture api my-api get-data --jq '.items | map(select(.active)) | .[0:5]'
+
+# JQ filtering also works with --describe-json
+aperture api my-api --describe-json --jq '.commands.users'
+aperture api my-api --describe-json --jq '.commands | to_entries | .[].value[] | select(.deprecated)'
 ```
 
 ### Batch Operations & Automation
@@ -203,6 +207,16 @@ aperture --batch-file operations.json --batch-concurrency 10
 
 # Rate limiting for batch operations
 aperture --batch-file operations.json --batch-rate-limit 50
+
+# Analyze batch results with JQ filtering (requires --json-errors)
+# Note: The final JSON summary is printed after all operations complete
+aperture --batch-file operations.json --json-errors --jq '.batch_execution_summary.operations[] | select(.success == false)'
+
+# Get summary statistics only
+aperture --batch-file operations.json --json-errors --jq '{total: .batch_execution_summary.total_operations, failed: .batch_execution_summary.failed_operations}'
+
+# Find slow operations (> 1 second)
+aperture --batch-file operations.json --json-errors --jq '.batch_execution_summary.operations[] | select(.duration_seconds > 1)'
 ```
 
 **Example batch file (JSON):**
@@ -250,6 +264,32 @@ aperture api my-api users get-user-by-id --id 123
 
 # Legacy positional syntax (backwards compatibility)
 aperture api my-api --positional-args users get-user-by-id 123
+```
+
+### Exit Codes
+
+Aperture follows standard CLI conventions for exit codes:
+
+- **0**: Success - all operations completed successfully
+- **1**: Failure - one or more operations failed, including:
+  - API request failures (4xx, 5xx errors)
+  - Network connection errors
+  - Authentication failures
+  - Batch operations with any failed requests
+
+For batch operations, Aperture exits with code 1 if ANY operation fails, making it easy to detect failures in CI/CD pipelines:
+
+```bash
+# Check batch success/failure
+aperture --batch-file ops.json --json-errors
+if [ $? -eq 0 ]; then
+    echo "All operations succeeded"
+else
+    echo "Some operations failed"
+fi
+
+# Continue despite failures
+aperture --batch-file ops.json --json-errors || true
 ```
 
 ## Development

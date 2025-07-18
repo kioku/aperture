@@ -19,6 +19,8 @@ pub struct BatchConfig {
     pub continue_on_error: bool,
     /// Whether to show progress during processing
     pub show_progress: bool,
+    /// Whether to suppress individual operation outputs
+    pub suppress_output: bool,
 }
 
 impl Default for BatchConfig {
@@ -28,6 +30,7 @@ impl Default for BatchConfig {
             rate_limit: None,
             continue_on_error: true,
             show_progress: true,
+            suppress_output: false,
         }
     }
 }
@@ -207,6 +210,7 @@ impl BatchProcessor {
             let semaphore = Arc::clone(&self.semaphore);
             let rate_limiter = self.rate_limiter.clone();
             let show_progress = self.config.show_progress;
+            let suppress_output = self.config.suppress_output;
 
             let handle = tokio::spawn(async move {
                 // Acquire semaphore permit for concurrency control
@@ -228,6 +232,7 @@ impl BatchProcessor {
                     dry_run,
                     &output_format,
                     jq_filter.as_deref(),
+                    suppress_output,
                 )
                 .await;
 
@@ -290,6 +295,7 @@ impl BatchProcessor {
     }
 
     /// Executes a single operation from a batch
+    #[allow(clippy::too_many_arguments)]
     async fn execute_single_operation(
         spec: &CachedSpec,
         operation: &BatchOperation,
@@ -298,6 +304,7 @@ impl BatchProcessor {
         dry_run: bool,
         output_format: &crate::cli::OutputFormat,
         jq_filter: Option<&str>,
+        suppress_output: bool,
     ) -> Result<String, Error> {
         use crate::engine::generator;
 
@@ -330,47 +337,70 @@ impl BatchProcessor {
             None
         };
 
-        if dry_run {
-            // For dry run, we still call execute_request but with dry_run=true
-            crate::engine::executor::execute_request(
+        if suppress_output {
+            // When suppressing output, capture it
+            let output = crate::engine::executor::execute_request(
                 spec,
                 &matches,
                 base_url,
-                true, // dry_run
+                dry_run,
                 None, // idempotency_key
                 global_config,
                 output_format,
                 jq_filter,
                 cache_config.as_ref(),
+                true, // capture_output
             )
             .await?;
 
-            // Return dry run message
-            Ok(format!(
-                "DRY RUN: Would execute operation with args: {:?}",
-                operation.args
-            ))
+            // Return captured output (for debugging/logging if needed)
+            Ok(output.unwrap_or_default())
         } else {
-            // For actual execution, call execute_request normally
-            // The output will go to stdout as expected for batch operations
-            crate::engine::executor::execute_request(
-                spec,
-                &matches,
-                base_url,
-                false, // dry_run
-                None,  // idempotency_key
-                global_config,
-                output_format,
-                jq_filter,
-                cache_config.as_ref(),
-            )
-            .await?;
+            // Normal execution - output goes to stdout
+            if dry_run {
+                // For dry run, we still call execute_request but with dry_run=true
+                crate::engine::executor::execute_request(
+                    spec,
+                    &matches,
+                    base_url,
+                    true, // dry_run
+                    None, // idempotency_key
+                    global_config,
+                    output_format,
+                    jq_filter,
+                    cache_config.as_ref(),
+                    false, // capture_output
+                )
+                .await?;
 
-            // Return success message
-            Ok(format!(
-                "Successfully executed operation: {}",
-                operation.id.as_deref().unwrap_or("unnamed")
-            ))
+                // Return dry run message
+                Ok(format!(
+                    "DRY RUN: Would execute operation with args: {:?}",
+                    operation.args
+                ))
+            } else {
+                // For actual execution, call execute_request normally
+                // The output will go to stdout as expected for batch operations
+                crate::engine::executor::execute_request(
+                    spec,
+                    &matches,
+                    base_url,
+                    false, // dry_run
+                    None,  // idempotency_key
+                    global_config,
+                    output_format,
+                    jq_filter,
+                    cache_config.as_ref(),
+                    false, // capture_output
+                )
+                .await?;
+
+                // Return success message
+                Ok(format!(
+                    "Successfully executed operation: {}",
+                    operation.id.as_deref().unwrap_or("unnamed")
+                ))
+            }
         }
     }
 }
@@ -463,6 +493,7 @@ operations:
             rate_limit: Some(5),
             continue_on_error: false,
             show_progress: false,
+            suppress_output: false,
         };
 
         let processor = BatchProcessor::new(config);

@@ -200,7 +200,8 @@ async fn test_end_to_end_authentication_with_parsed_extensions() {
         None,
         &OutputFormat::Json,
         None,
-        None, // cache_config
+        None,  // cache_config
+        false, // capture_output
     )
     .await;
     assert!(result.is_ok());

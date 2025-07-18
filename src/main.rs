@@ -329,7 +329,15 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
             &openapi_spec,
             global_config.as_ref(),
         )?;
-        println!("{manifest}");
+
+        // Apply JQ filter if provided
+        let output = if let Some(jq_filter) = &cli.jq {
+            executor::apply_jq_filter(&manifest, jq_filter)?
+        } else {
+            manifest
+        };
+
+        println!("{output}");
         return Ok(());
     }
 
@@ -407,6 +415,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         &output_format,
         jq_filter,
         cache_config.as_ref(),
+        false, // capture_output
     )
     .await
     .map_err(|e| match &e {
@@ -442,7 +451,8 @@ async fn execute_batch_operations(
         max_concurrency: cli.batch_concurrency,
         rate_limit: cli.batch_rate_limit,
         continue_on_error: true, // Default to continuing on error for batch operations
-        show_progress: true,     // Always show progress for batch operations
+        show_progress: !cli.json_errors, // Disable progress when using JSON output
+        suppress_output: cli.json_errors, // Suppress individual outputs when using JSON output
     };
 
     // Create batch processor
@@ -457,7 +467,7 @@ async fn execute_batch_operations(
             None, // base_url (None = use BaseUrlResolver)
             cli.dry_run,
             &cli.format,
-            cli.jq.as_deref(),
+            None, // Don't pass JQ filter to individual operations
         )
         .await?;
 
@@ -479,7 +489,16 @@ async fn execute_batch_operations(
                 })).collect::<Vec<_>>()
             }
         });
-        println!("{}", serde_json::to_string_pretty(&summary).unwrap());
+
+        // Apply JQ filter if provided
+        let output = if let Some(jq_filter) = &cli.jq {
+            let summary_json = serde_json::to_string(&summary).unwrap();
+            executor::apply_jq_filter(&summary_json, jq_filter)?
+        } else {
+            serde_json::to_string_pretty(&summary).unwrap()
+        };
+
+        println!("{output}");
     } else {
         // Output human-readable summary
         println!("\n=== Batch Execution Summary ===");

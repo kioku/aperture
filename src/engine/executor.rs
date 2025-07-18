@@ -29,9 +29,10 @@ const MAX_TABLE_ROWS: usize = 1000;
 /// * `output_format` - Format for response output (json, yaml, table)
 /// * `jq_filter` - Optional JQ filter expression to apply to response
 /// * `cache_config` - Optional cache configuration for response caching
+/// * `capture_output` - If true, captures output and returns it instead of printing to stdout
 ///
 /// # Returns
-/// * `Ok(())` - Request executed successfully or dry-run completed
+/// * `Ok(Option<String>)` - Request executed successfully. Returns Some(output) if `capture_output` is true
 /// * `Err(Error)` - Request failed or validation error
 ///
 /// # Errors
@@ -51,7 +52,8 @@ pub async fn execute_request(
     output_format: &OutputFormat,
     jq_filter: Option<&str>,
     cache_config: Option<&CacheConfig>,
-) -> Result<(), Error> {
+    capture_output: bool,
+) -> Result<Option<String>, Error> {
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
 
@@ -139,8 +141,13 @@ pub async fn execute_request(
             // Try to get cached response
             if let Some(cached_response) = response_cache.get(&cache_key).await? {
                 // Use cached response
-                print_formatted_response(&cached_response.body, output_format, jq_filter)?;
-                return Ok(());
+                let output = print_formatted_response(
+                    &cached_response.body,
+                    output_format,
+                    jq_filter,
+                    capture_output,
+                )?;
+                return Ok(output);
             }
 
             Some((cache_key, response_cache))
@@ -164,8 +171,12 @@ pub async fn execute_request(
             serde_json::to_string_pretty(&dry_run_info).map_err(|e| Error::SerializationError {
                 reason: format!("Failed to serialize dry-run info: {e}"),
             })?;
+
+        if capture_output {
+            return Ok(Some(dry_run_output));
+        }
         println!("{dry_run_output}");
-        return Ok(());
+        return Ok(None);
     }
 
     // Execute request
@@ -256,11 +267,11 @@ pub async fn execute_request(
     }
 
     // Print response in the requested format
-    if !response_text.is_empty() {
-        print_formatted_response(&response_text, output_format, jq_filter)?;
+    if response_text.is_empty() {
+        Ok(None)
+    } else {
+        print_formatted_response(&response_text, output_format, jq_filter, capture_output)
     }
-
-    Ok(())
 }
 
 /// Finds the operation from the command hierarchy
@@ -549,7 +560,8 @@ fn print_formatted_response(
     response_text: &str,
     output_format: &OutputFormat,
     jq_filter: Option<&str>,
-) -> Result<(), Error> {
+    capture_output: bool,
+) -> Result<Option<String>, Error> {
     // Apply JQ filter if provided
     let processed_text = if let Some(filter) = jq_filter {
         apply_jq_filter(response_text, filter)?
@@ -560,40 +572,46 @@ fn print_formatted_response(
     match output_format {
         OutputFormat::Json => {
             // Try to pretty-print JSON (default behavior)
-            if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
-                if let Ok(pretty) = serde_json::to_string_pretty(&json_value) {
-                    println!("{pretty}");
-                } else {
-                    println!("{processed_text}");
-                }
-            } else {
-                println!("{processed_text}");
+            let output = serde_json::from_str::<Value>(&processed_text)
+                .ok()
+                .and_then(|json_value| serde_json::to_string_pretty(&json_value).ok())
+                .unwrap_or_else(|| processed_text.clone());
+
+            if capture_output {
+                return Ok(Some(output));
             }
+            println!("{output}");
         }
         OutputFormat::Yaml => {
             // Convert JSON to YAML
-            if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
-                match serde_yaml::to_string(&json_value) {
-                    Ok(yaml_output) => println!("{yaml_output}"),
-                    Err(_) => println!("{processed_text}"), // Fallback to raw text
-                }
-            } else {
-                // If not JSON, output as-is
-                println!("{processed_text}");
+            let output = serde_json::from_str::<Value>(&processed_text)
+                .ok()
+                .and_then(|json_value| serde_yaml::to_string(&json_value).ok())
+                .unwrap_or_else(|| processed_text.clone());
+
+            if capture_output {
+                return Ok(Some(output));
             }
+            println!("{output}");
         }
         OutputFormat::Table => {
             // Convert JSON to table format
             if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
-                print_as_table(&json_value);
+                let table_output = print_as_table(&json_value, capture_output)?;
+                if capture_output {
+                    return Ok(table_output);
+                }
             } else {
                 // If not JSON, output as-is
+                if capture_output {
+                    return Ok(Some(processed_text));
+                }
                 println!("{processed_text}");
             }
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 // Define table structures at module level to avoid clippy::items_after_statements
@@ -614,27 +632,36 @@ struct KeyValue {
 }
 
 /// Prints JSON data as a formatted table
-#[allow(clippy::unnecessary_wraps)]
-fn print_as_table(json_value: &Value) {
+#[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
+fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<String>, Error> {
     use std::collections::BTreeMap;
     use tabled::Table;
 
     match json_value {
         Value::Array(items) => {
             if items.is_empty() {
+                if capture_output {
+                    return Ok(Some("(empty array)".to_string()));
+                }
                 println!("(empty array)");
-                return;
+                return Ok(None);
             }
 
             // Check if array is too large
             if items.len() > MAX_TABLE_ROWS {
-                println!(
+                let msg1 = format!(
                     "Array too large: {} items (max {} for table display)",
                     items.len(),
                     MAX_TABLE_ROWS
                 );
-                println!("Use --format json or --jq to process the full data");
-                return;
+                let msg2 = "Use --format json or --jq to process the full data";
+
+                if capture_output {
+                    return Ok(Some(format!("{msg1}\n{msg2}")));
+                }
+                println!("{msg1}");
+                println!("{msg2}");
+                return Ok(None);
             }
 
             // Try to create a table from array of objects
@@ -672,12 +699,23 @@ fn print_as_table(json_value: &Value) {
                     }
 
                     let table = Table::new(&rows);
+                    if capture_output {
+                        return Ok(Some(table.to_string()));
+                    }
                     println!("{table}");
-                    return;
+                    return Ok(None);
                 }
             }
 
             // Fallback: print array as numbered list
+            if capture_output {
+                let mut output = String::new();
+                for (i, item) in items.iter().enumerate() {
+                    use std::fmt::Write;
+                    writeln!(&mut output, "{}: {}", i, format_value_for_table(item)).unwrap();
+                }
+                return Ok(Some(output.trim_end().to_string()));
+            }
             for (i, item) in items.iter().enumerate() {
                 println!("{}: {}", i, format_value_for_table(item));
             }
@@ -685,13 +723,19 @@ fn print_as_table(json_value: &Value) {
         Value::Object(obj) => {
             // Check if object has too many fields
             if obj.len() > MAX_TABLE_ROWS {
-                println!(
+                let msg1 = format!(
                     "Object too large: {} fields (max {} for table display)",
                     obj.len(),
                     MAX_TABLE_ROWS
                 );
-                println!("Use --format json or --jq to process the full data");
-                return;
+                let msg2 = "Use --format json or --jq to process the full data";
+
+                if capture_output {
+                    return Ok(Some(format!("{msg1}\n{msg2}")));
+                }
+                println!("{msg1}");
+                println!("{msg2}");
+                return Ok(None);
             }
 
             // Create a simple key-value table for objects
@@ -704,13 +748,22 @@ fn print_as_table(json_value: &Value) {
                 .collect();
 
             let table = Table::new(&rows);
+            if capture_output {
+                return Ok(Some(table.to_string()));
+            }
             println!("{table}");
         }
         _ => {
             // For primitive values, just print them
-            println!("{}", format_value_for_table(json_value));
+            let formatted = format_value_for_table(json_value);
+            if capture_output {
+                return Ok(Some(formatted));
+            }
+            println!("{formatted}");
         }
     }
+
+    Ok(None)
 }
 
 /// Formats a JSON value for display in a table cell
@@ -750,7 +803,14 @@ fn format_value_for_table(value: &Value) -> String {
 }
 
 /// Applies a JQ filter to the response text
-fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The response text is not valid JSON
+/// - The JQ filter expression is invalid
+/// - The filter execution fails
+pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
     // Parse the response as JSON
     let json_value: Value =
         serde_json::from_str(response_text).map_err(|e| Error::JqFilterError {

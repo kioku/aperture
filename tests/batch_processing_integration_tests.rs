@@ -178,6 +178,7 @@ async fn test_batch_config_custom() {
         rate_limit: Some(100),
         continue_on_error: true,
         show_progress: true,
+        suppress_output: false,
     };
 
     assert_eq!(config.max_concurrency, 10);
@@ -193,6 +194,7 @@ async fn test_batch_processor_creation() {
         rate_limit: Some(50),
         continue_on_error: false,
         show_progress: false,
+        suppress_output: false,
     };
 
     let _processor = BatchProcessor::new(config);
@@ -501,6 +503,7 @@ async fn test_batch_execution_with_error_handling() {
         rate_limit: None,
         continue_on_error: true,
         show_progress: false,
+        suppress_output: false,
     };
     let processor = BatchProcessor::new(config);
 
