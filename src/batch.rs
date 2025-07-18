@@ -338,11 +338,8 @@ impl BatchProcessor {
         };
 
         if suppress_output {
-            // When suppressing output, we need to capture stdout
-            // For now, we'll execute normally but not print progress messages
-            // The actual output suppression will be handled at a higher level
-            // since modifying executor would be too invasive
-            crate::engine::executor::execute_request(
+            // When suppressing output, capture it
+            let output = crate::engine::executor::execute_request(
                 spec,
                 &matches,
                 base_url,
@@ -352,11 +349,12 @@ impl BatchProcessor {
                 output_format,
                 jq_filter,
                 cache_config.as_ref(),
+                true, // capture_output
             )
             .await?;
 
-            // Return empty string when suppressing output
-            Ok(String::new())
+            // Return captured output (for debugging/logging if needed)
+            Ok(output.unwrap_or_default())
         } else {
             // Normal execution - output goes to stdout
             if dry_run {
@@ -371,6 +369,7 @@ impl BatchProcessor {
                     output_format,
                     jq_filter,
                     cache_config.as_ref(),
+                    false, // capture_output
                 )
                 .await?;
 
@@ -392,6 +391,7 @@ impl BatchProcessor {
                     output_format,
                     jq_filter,
                     cache_config.as_ref(),
+                    false, // capture_output
                 )
                 .await?;
 

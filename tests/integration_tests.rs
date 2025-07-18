@@ -2047,14 +2047,9 @@ paths:
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // TODO: Currently, individual operation outputs are still printed even with --json-errors
-    // This is a known limitation - proper output suppression requires refactoring the executor
-    // For now, we extract the last line which contains the JQ-filtered result
-    let lines: Vec<&str> = stdout.trim().lines().collect();
-    let filtered_output = lines.last().expect("No output from command");
-
-    // Parse the filtered output - should be the number of failed operations
-    let failed_count: serde_json::Value = serde_json::from_str(filtered_output).unwrap();
+    // With --json-errors, only the final JSON summary should be printed
+    // Individual operation outputs are suppressed
+    let failed_count: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     assert_eq!(failed_count, 1);
 
     // Test JQ filter to get summary statistics only
@@ -2077,9 +2072,7 @@ paths:
     // Exit code 1 because of failed operations
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.trim().lines().collect();
-    let filtered_output = lines.last().expect("No output from command");
-    let total_count: serde_json::Value = serde_json::from_str(filtered_output).unwrap();
+    let total_count: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     assert_eq!(total_count, 3);
 
     // Test JQ filter to get success count
@@ -2102,9 +2095,7 @@ paths:
     // Exit code 1 because of failed operations
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.trim().lines().collect();
-    let filtered_output = lines.last().expect("No output from command");
-    let success_count: serde_json::Value = serde_json::from_str(filtered_output).unwrap();
+    let success_count: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     assert_eq!(success_count, 2); // Should have 2 successful operations
 }
 
@@ -2275,9 +2266,7 @@ paths:
     // Should exit with code 1 when all operations fail
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.trim().lines().collect();
-    let filtered_output = lines.last().expect("No output from command");
-    let failed_count: serde_json::Value = serde_json::from_str(filtered_output).unwrap();
+    let failed_count: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     assert_eq!(failed_count, 2);
 }
 
@@ -2370,7 +2359,5 @@ paths:
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.trim().lines().collect();
-    let filtered_output = lines.last().expect("No output from command");
-    assert_eq!(*filtered_output, "null");
+    assert_eq!(stdout.trim(), "null");
 }

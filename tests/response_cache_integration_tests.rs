@@ -93,6 +93,7 @@ async fn test_response_caching_enabled() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -108,6 +109,7 @@ async fn test_response_caching_enabled() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());
@@ -155,6 +157,7 @@ async fn test_response_caching_disabled() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -169,6 +172,7 @@ async fn test_response_caching_disabled() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());
@@ -215,6 +219,7 @@ async fn test_response_cache_expiration() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -233,6 +238,7 @@ async fn test_response_cache_expiration() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());
@@ -281,6 +287,7 @@ async fn test_response_cache_different_parameters() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -301,6 +308,7 @@ async fn test_response_cache_different_parameters() {
         &OutputFormat::Json,
         None,
         Some(&cache_config),
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());
@@ -345,7 +353,8 @@ async fn test_response_cache_no_config() {
         None,
         &OutputFormat::Json,
         None,
-        None, // No cache config
+        None,  // No cache config
+        false, // capture_output
     )
     .await;
     assert!(result1.is_ok());
@@ -359,7 +368,8 @@ async fn test_response_cache_no_config() {
         None,
         &OutputFormat::Json,
         None,
-        None, // No cache config
+        None,  // No cache config
+        false, // capture_output
     )
     .await;
     assert!(result2.is_ok());
