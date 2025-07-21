@@ -77,7 +77,8 @@ impl SpecTransformer {
                     if let Some(op) = operation {
                         // Check if this endpoint should be skipped
                         let should_skip = skip_endpoints.iter().any(|(skip_path, skip_method)| {
-                            skip_path == path && skip_method.eq_ignore_ascii_case(method)
+                            skip_path.eq_ignore_ascii_case(path)
+                                && skip_method.eq_ignore_ascii_case(method)
                         });
 
                         if !should_skip {

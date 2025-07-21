@@ -545,6 +545,22 @@ impl<F: FileSystem> ConfigManager<F> {
         force: bool,
         timeout: std::time::Duration,
     ) -> Result<(), Error> {
+        // Default to strict mode for backward compatibility in tests
+        self.add_spec_from_url_with_timeout_and_mode(name, url, force, timeout, true)
+            .await
+    }
+
+    /// Test-only method to add spec from URL with custom timeout and validation mode
+    #[doc(hidden)]
+    #[allow(clippy::future_not_send)]
+    async fn add_spec_from_url_with_timeout_and_mode(
+        &self,
+        name: &str,
+        url: &str,
+        force: bool,
+        timeout: std::time::Duration,
+        strict: bool,
+    ) -> Result<(), Error> {
         let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
 
@@ -560,11 +576,27 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Validate against Aperture's supported feature set using SpecValidator
         let validator = SpecValidator::new();
-        validator.validate(&openapi_spec)?;
+        let validation_result = validator.validate_with_mode(&openapi_spec, strict);
+
+        // Check for errors first
+        if !validation_result.is_valid() {
+            return validation_result.into_result();
+        }
+
+        // Note: Not displaying warnings in test method
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
-        let cached_spec = transformer.transform(name, &openapi_spec)?;
+
+        // Convert warnings to skip_endpoints format
+        let skip_endpoints: Vec<(String, String)> = validation_result
+            .warnings
+            .iter()
+            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .collect();
+
+        let cached_spec =
+            transformer.transform_with_filter(name, &openapi_spec, &skip_endpoints)?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
@@ -582,8 +614,10 @@ impl<F: FileSystem> ConfigManager<F> {
         self.fs.write_all(&spec_path, content.as_bytes())?;
 
         // Serialize and write cached representation
-        let cached_data = bincode::serialize(&cached_spec)
-            .map_err(|e| Error::Config(format!("Failed to serialize cached spec: {e}")))?;
+        let cached_data =
+            bincode::serialize(&cached_spec).map_err(|e| Error::SerializationError {
+                reason: e.to_string(),
+            })?;
         self.fs.write_all(&cache_path, &cached_data)?;
 
         Ok(())
