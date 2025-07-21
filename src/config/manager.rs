@@ -48,7 +48,13 @@ impl<F: FileSystem> ConfigManager<F> {
     /// # Panics
     ///
     /// Panics if the spec path parent directory is None (should not happen in normal usage).
-    pub fn add_spec(&self, name: &str, file_path: &Path, force: bool) -> Result<(), Error> {
+    pub fn add_spec(
+        &self,
+        name: &str,
+        file_path: &Path,
+        force: bool,
+        _strict: bool,
+    ) -> Result<(), Error> {
         let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
 
@@ -115,7 +121,13 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// Panics if the spec path parent directory is None (should not happen in normal usage).
     #[allow(clippy::future_not_send)]
-    pub async fn add_spec_from_url(&self, name: &str, url: &str, force: bool) -> Result<(), Error> {
+    pub async fn add_spec_from_url(
+        &self,
+        name: &str,
+        url: &str,
+        force: bool,
+        _strict: bool,
+    ) -> Result<(), Error> {
         let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
 
@@ -188,13 +200,15 @@ impl<F: FileSystem> ConfigManager<F> {
         name: &str,
         file_or_url: &str,
         force: bool,
+        strict: bool,
     ) -> Result<(), Error> {
         if is_url(file_or_url) {
-            self.add_spec_from_url(name, file_or_url, force).await
+            self.add_spec_from_url(name, file_or_url, force, strict)
+                .await
         } else {
             // Convert file path string to Path and call sync method
             let path = std::path::Path::new(file_or_url);
-            self.add_spec(name, path, force)
+            self.add_spec(name, path, force, strict)
         }
     }
 

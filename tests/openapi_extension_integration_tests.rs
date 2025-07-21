@@ -23,7 +23,7 @@ async fn test_bearer_auth_extension_parsing_from_yaml() {
     // Add spec with x-aperture-secret extension
     let spec_path = Path::new("tests/fixtures/openapi/bearer-auth-with-extension.yaml");
     config_manager
-        .add_spec("bearer-test", spec_path, false)
+        .add_spec("bearer-test", spec_path, false, true)
         .unwrap();
 
     // Load the cached spec and verify extension parsing
@@ -64,7 +64,7 @@ async fn test_api_key_extension_parsing_from_yaml() {
     // Add spec with x-aperture-secret extension
     let spec_path = Path::new("tests/fixtures/openapi/api-key-with-extension.yaml");
     config_manager
-        .add_spec("apikey-test", spec_path, false)
+        .add_spec("apikey-test", spec_path, false, true)
         .unwrap();
 
     // Load the cached spec and verify extension parsing
@@ -102,7 +102,7 @@ async fn test_multiple_schemes_extension_parsing_from_json() {
     // Add spec with multiple x-aperture-secret extensions
     let spec_path = Path::new("tests/fixtures/openapi/multiple-schemes-with-extensions.json");
     config_manager
-        .add_spec("multi-test", spec_path, false)
+        .add_spec("multi-test", spec_path, false, true)
         .unwrap();
 
     // Load the cached spec and verify extension parsing
@@ -154,7 +154,7 @@ async fn test_end_to_end_authentication_with_parsed_extensions() {
     // Add spec with x-aperture-secret extension
     let spec_path = Path::new("tests/fixtures/openapi/bearer-auth-with-extension.yaml");
     config_manager
-        .add_spec("e2e-test", spec_path, false)
+        .add_spec("e2e-test", spec_path, false, true)
         .unwrap();
 
     // Load the cached spec
@@ -245,7 +245,7 @@ servers:
 
     // Add spec without extension
     config_manager
-        .add_spec("no-extension", temp_file.path(), false)
+        .add_spec("no-extension", temp_file.path(), false, true)
         .unwrap();
 
     // Load and verify the spec handles missing extensions gracefully
@@ -298,7 +298,7 @@ servers:
     std::fs::write(temp_file.path(), temp_spec).unwrap();
 
     // Add spec with malformed extension - should now fail with validation error
-    let result = config_manager.add_spec("malformed-extension", temp_file.path(), false);
+    let result = config_manager.add_spec("malformed-extension", temp_file.path(), false, true);
 
     // Verify that the malformed extension is caught during validation
     assert!(result.is_err());

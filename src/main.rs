@@ -43,8 +43,11 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 name,
                 file_or_url,
                 force,
+                strict,
             } => {
-                manager.add_spec_auto(&name, &file_or_url, force).await?;
+                manager
+                    .add_spec_auto(&name, &file_or_url, force, strict)
+                    .await?;
                 println!("Spec '{name}' added successfully.");
             }
             ConfigCommands::List {} => {
@@ -253,8 +256,8 @@ fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result
     let specs_dir = config_dir.join("specs");
     let spec_path = specs_dir.join(format!("{spec_name}.yaml"));
 
-    // Re-add the spec with force to regenerate the cache
-    manager.add_spec(spec_name, &spec_path, true)?;
+    // Re-add the spec with force to regenerate the cache (use strict=true for backward compatibility)
+    manager.add_spec(spec_name, &spec_path, true, true)?;
 
     println!("Successfully reinitialized cache for '{spec_name}'");
     Ok(())

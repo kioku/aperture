@@ -207,6 +207,9 @@ pub enum ConfigCommands {
         /// Overwrite existing specification if it already exists
         #[arg(long, help = "Replace the specification if it already exists")]
         force: bool,
+        /// Reject specs with unsupported features instead of skipping endpoints
+        #[arg(long, help = "Reject specs with unsupported content types or features")]
+        strict: bool,
     },
     /// List all registered API specifications
     #[command(
