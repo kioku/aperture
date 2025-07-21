@@ -76,6 +76,30 @@ impl SpecValidator {
         Self
     }
 
+    /// Returns a human-readable reason for why a content type is not supported
+    fn get_unsupported_content_type_reason(content_type: &str) -> &'static str {
+        match content_type {
+            // Binary file types
+            "multipart/form-data" => "file uploads are not supported",
+            "application/octet-stream" => "binary data uploads are not supported",
+            ct if ct.starts_with("image/") => "image uploads are not supported",
+            "application/pdf" => "PDF uploads are not supported",
+
+            // Alternative text formats
+            "application/xml" | "text/xml" => "XML content is not supported",
+            "application/x-www-form-urlencoded" => "form-encoded data is not supported",
+            "text/plain" => "plain text content is not supported",
+            "text/csv" => "CSV content is not supported",
+
+            // JSON-compatible formats
+            "application/x-ndjson" => "newline-delimited JSON is not supported",
+            "application/graphql" => "GraphQL content is not supported",
+
+            // Generic fallback
+            _ => "is not supported",
+        }
+    }
+
     /// Validates an `OpenAPI` specification for Aperture compatibility
     ///
     /// # Errors
@@ -331,28 +355,7 @@ impl SpecValidator {
                 let content_types: Vec<String> = unsupported_types
                     .iter()
                     .map(|ct| {
-                        let reason = match ct.as_str() {
-                            // Binary file types
-                            "multipart/form-data" => "file uploads are not supported",
-                            "application/octet-stream" => "binary data uploads are not supported",
-                            ct if ct.starts_with("image/") => "image uploads are not supported",
-                            "application/pdf" => "PDF uploads are not supported",
-
-                            // Alternative text formats
-                            "application/xml" | "text/xml" => "XML content is not supported",
-                            "application/x-www-form-urlencoded" => {
-                                "form-encoded data is not supported"
-                            }
-                            "text/plain" => "plain text content is not supported",
-                            "text/csv" => "CSV content is not supported",
-
-                            // JSON-compatible formats
-                            "application/x-ndjson" => "newline-delimited JSON is not supported",
-                            "application/graphql" => "GraphQL content is not supported",
-
-                            // Generic fallback
-                            _ => "is not supported",
-                        };
+                        let reason = Self::get_unsupported_content_type_reason(ct);
                         format!("{ct} ({reason})")
                     })
                     .collect();

@@ -128,17 +128,30 @@ Any unsupported keyword or feature encountered during `config add` will result i
 
 Starting from v0.1.2, Aperture supports two validation modes during `config add`:
 
-1. **Non-Strict Mode (Default):** Accepts specifications with unsupported content types but skips the affected endpoints with warnings. This allows partial use of APIs that have some endpoints with unsupported features.
+1. **Non-Strict Mode (Default):** Accepts specifications with unsupported features but intelligently handles endpoints:
+   - Endpoints that support `application/json` alongside unsupported content types remain available
+   - Only endpoints with NO supported content types are skipped with warnings
+   - This maximizes API usability while clearly communicating limitations
    
 2. **Strict Mode (`--strict` flag):** Rejects specifications that contain any unsupported features. This ensures complete compatibility but may prevent usage of APIs that have mixed endpoint support.
 
 **Example:**
 ```bash
-# Non-strict mode (default) - accepts spec, skips unsupported endpoints
+# Non-strict mode (default) - accepts spec, only skips endpoints with no JSON support
 aperture config add my-api ./spec.yaml
 
 # Strict mode - rejects spec if any unsupported features found  
 aperture config add --strict my-api ./spec.yaml
+```
+
+**Warning Display:**
+When endpoints are skipped in non-strict mode, Aperture displays detailed warnings:
+```
+Warning: Skipping 2 endpoints with unsupported content types (3 of 5 endpoints will be available):
+  - POST /upload (multipart/form-data (file uploads are not supported)) - endpoint has no supported content types
+  - PUT /binary (application/octet-stream (binary data uploads are not supported)) - endpoint has no supported content types
+
+Use --strict to reject specs with unsupported content types.
 ```
 
 ### 5.1. Command Generation Strategy
