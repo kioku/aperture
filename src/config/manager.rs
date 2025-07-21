@@ -53,7 +53,7 @@ impl<F: FileSystem> ConfigManager<F> {
         name: &str,
         file_path: &Path,
         force: bool,
-        _strict: bool,
+        strict: bool,
     ) -> Result<(), Error> {
         let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
@@ -69,11 +69,43 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Validate against Aperture's supported feature set using SpecValidator
         let validator = SpecValidator::new();
-        validator.validate(&openapi_spec)?;
+        let validation_result = validator.validate_with_mode(&openapi_spec, strict);
+
+        // Check for errors first
+        if !validation_result.is_valid() {
+            return validation_result.into_result();
+        }
+
+        // Display warnings if any
+        if !validation_result.warnings.is_empty() {
+            eprintln!(
+                "Warning: Skipping {} endpoints with unsupported content types:",
+                validation_result.warnings.len()
+            );
+            for warning in &validation_result.warnings {
+                eprintln!(
+                    "  - {} {} ({}) - {}",
+                    warning.endpoint.method,
+                    warning.endpoint.path,
+                    warning.endpoint.content_type,
+                    warning.reason
+                );
+            }
+            eprintln!("\nUse --strict to reject specs with unsupported content types.");
+        }
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
-        let cached_spec = transformer.transform(name, &openapi_spec)?;
+
+        // Convert warnings to skip_endpoints format
+        let skip_endpoints: Vec<(String, String)> = validation_result
+            .warnings
+            .iter()
+            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .collect();
+
+        let cached_spec =
+            transformer.transform_with_filter(name, &openapi_spec, &skip_endpoints)?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
@@ -126,7 +158,7 @@ impl<F: FileSystem> ConfigManager<F> {
         name: &str,
         url: &str,
         force: bool,
-        _strict: bool,
+        strict: bool,
     ) -> Result<(), Error> {
         let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
@@ -143,11 +175,43 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Validate against Aperture's supported feature set using SpecValidator
         let validator = SpecValidator::new();
-        validator.validate(&openapi_spec)?;
+        let validation_result = validator.validate_with_mode(&openapi_spec, strict);
+
+        // Check for errors first
+        if !validation_result.is_valid() {
+            return validation_result.into_result();
+        }
+
+        // Display warnings if any
+        if !validation_result.warnings.is_empty() {
+            eprintln!(
+                "Warning: Skipping {} endpoints with unsupported content types:",
+                validation_result.warnings.len()
+            );
+            for warning in &validation_result.warnings {
+                eprintln!(
+                    "  - {} {} ({}) - {}",
+                    warning.endpoint.method,
+                    warning.endpoint.path,
+                    warning.endpoint.content_type,
+                    warning.reason
+                );
+            }
+            eprintln!("\nUse --strict to reject specs with unsupported content types.");
+        }
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
-        let cached_spec = transformer.transform(name, &openapi_spec)?;
+
+        // Convert warnings to skip_endpoints format
+        let skip_endpoints: Vec<(String, String)> = validation_result
+            .warnings
+            .iter()
+            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .collect();
+
+        let cached_spec =
+            transformer.transform_with_filter(name, &openapi_spec, &skip_endpoints)?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {

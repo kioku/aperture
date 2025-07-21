@@ -458,6 +458,149 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_with_mode_non_strict() {
+        use openapiv3::{
+            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
+        };
+
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+
+        let mut request_body = RequestBody::default();
+        request_body
+            .content
+            .insert("multipart/form-data".to_string(), MediaType::default());
+        request_body
+            .content
+            .insert("application/json".to_string(), MediaType::default());
+        request_body.required = true;
+
+        let mut path_item = PathItem::default();
+        path_item.post = Some(Operation {
+            operation_id: Some("uploadFile".to_string()),
+            tags: vec!["files".to_string()],
+            request_body: Some(ReferenceOr::Item(request_body)),
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/upload".to_string(), PathRef::Item(path_item));
+
+        // Non-strict mode should produce warnings, not errors
+        let result = validator.validate_with_mode(&spec, false);
+        assert!(result.is_valid(), "Non-strict mode should be valid");
+        assert_eq!(result.warnings.len(), 1, "Should have one warning");
+        assert_eq!(result.errors.len(), 0, "Should have no errors");
+
+        let warning = &result.warnings[0];
+        assert_eq!(warning.endpoint.path, "/upload");
+        assert_eq!(warning.endpoint.method, "POST");
+        assert_eq!(warning.endpoint.content_type, "multipart/form-data");
+        assert!(warning.reason.contains("not supported"));
+    }
+
+    #[test]
+    fn test_validate_with_mode_strict() {
+        use openapiv3::{
+            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
+        };
+
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+
+        let mut request_body = RequestBody::default();
+        request_body
+            .content
+            .insert("multipart/form-data".to_string(), MediaType::default());
+        request_body.required = true;
+
+        let mut path_item = PathItem::default();
+        path_item.post = Some(Operation {
+            operation_id: Some("uploadFile".to_string()),
+            tags: vec!["files".to_string()],
+            request_body: Some(ReferenceOr::Item(request_body)),
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/upload".to_string(), PathRef::Item(path_item));
+
+        // Strict mode should produce errors
+        let result = validator.validate_with_mode(&spec, true);
+        assert!(!result.is_valid(), "Strict mode should be invalid");
+        assert_eq!(result.warnings.len(), 0, "Should have no warnings");
+        assert_eq!(result.errors.len(), 1, "Should have one error");
+
+        match &result.errors[0] {
+            Error::Validation(msg) => {
+                assert!(msg.contains("multipart/form-data"));
+                assert!(msg.contains("v1.0"));
+            }
+            _ => panic!("Expected Validation error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_with_mode_multiple_content_types() {
+        use openapiv3::{
+            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
+        };
+
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+
+        // Add multiple endpoints with different content types
+        let mut path_item1 = PathItem::default();
+        let mut request_body1 = RequestBody::default();
+        request_body1
+            .content
+            .insert("application/xml".to_string(), MediaType::default());
+        path_item1.post = Some(Operation {
+            operation_id: Some("postXml".to_string()),
+            tags: vec!["data".to_string()],
+            request_body: Some(ReferenceOr::Item(request_body1)),
+            responses: Responses::default(),
+            ..Default::default()
+        });
+        spec.paths
+            .paths
+            .insert("/xml".to_string(), PathRef::Item(path_item1));
+
+        let mut path_item2 = PathItem::default();
+        let mut request_body2 = RequestBody::default();
+        request_body2
+            .content
+            .insert("text/plain".to_string(), MediaType::default());
+        path_item2.put = Some(Operation {
+            operation_id: Some("putText".to_string()),
+            tags: vec!["data".to_string()],
+            request_body: Some(ReferenceOr::Item(request_body2)),
+            responses: Responses::default(),
+            ..Default::default()
+        });
+        spec.paths
+            .paths
+            .insert("/text".to_string(), PathRef::Item(path_item2));
+
+        // Non-strict mode should have warnings for both
+        let result = validator.validate_with_mode(&spec, false);
+        assert!(result.is_valid());
+        assert_eq!(result.warnings.len(), 2);
+
+        let warning_paths: Vec<&str> = result
+            .warnings
+            .iter()
+            .map(|w| w.endpoint.path.as_str())
+            .collect();
+        assert!(warning_paths.contains(&"/xml"));
+        assert!(warning_paths.contains(&"/text"));
+    }
+
+    #[test]
     fn test_validate_unsupported_http_scheme() {
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();

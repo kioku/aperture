@@ -26,6 +26,29 @@ impl SpecTransformer {
     ///
     /// Returns an error if parameter reference resolution fails
     pub fn transform(&self, name: &str, spec: &OpenAPI) -> Result<CachedSpec, Error> {
+        self.transform_with_filter(name, spec, &[])
+    }
+
+    /// Transforms an `OpenAPI` specification into a cached representation with endpoint filtering
+    ///
+    /// This method converts the full `OpenAPI` spec into an optimized format
+    /// that can be quickly loaded and used for CLI generation, filtering out specified endpoints.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name for the cached spec
+    /// * `spec` - The `OpenAPI` specification to transform
+    /// * `skip_endpoints` - List of endpoints to skip (path, method pairs)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parameter reference resolution fails
+    pub fn transform_with_filter(
+        &self,
+        name: &str,
+        spec: &OpenAPI,
+        skip_endpoints: &[(String, String)],
+    ) -> Result<CachedSpec, Error> {
         let mut commands = Vec::new();
 
         // Extract version from info
@@ -52,14 +75,21 @@ impl SpecTransformer {
                 // Process each HTTP method
                 for (method, operation) in crate::spec::http_methods_iter(item) {
                     if let Some(op) = operation {
-                        let command = Self::transform_operation(
-                            spec,
-                            method,
-                            path,
-                            op,
-                            &global_security_requirements,
-                        )?;
-                        commands.push(command);
+                        // Check if this endpoint should be skipped
+                        let should_skip = skip_endpoints.iter().any(|(skip_path, skip_method)| {
+                            skip_path == path && skip_method.eq_ignore_ascii_case(method)
+                        });
+
+                        if !should_skip {
+                            let command = Self::transform_operation(
+                                spec,
+                                method,
+                                path,
+                                op,
+                                &global_security_requirements,
+                            )?;
+                            commands.push(command);
+                        }
                     }
                 }
             }
