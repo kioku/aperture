@@ -5,7 +5,7 @@ use crate::engine::loader;
 use crate::error::Error;
 use crate::fs::{FileSystem, OsFileSystem};
 use crate::spec::{SpecTransformer, SpecValidator};
-use openapiv3::OpenAPI;
+use openapiv3::{OpenAPI, ReferenceOr};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -38,6 +38,83 @@ impl<F: FileSystem> ConfigManager<F> {
     /// Get the configuration directory path
     pub fn config_dir(&self) -> &Path {
         &self.config_dir
+    }
+
+    /// Count total operations in an `OpenAPI` spec
+    fn count_total_operations(spec: &OpenAPI) -> usize {
+        spec.paths
+            .iter()
+            .filter_map(|(_, path_item)| match path_item {
+                ReferenceOr::Item(item) => Some(item),
+                ReferenceOr::Reference { .. } => None,
+            })
+            .map(|item| {
+                let mut count = 0;
+                if item.get.is_some() {
+                    count += 1;
+                }
+                if item.post.is_some() {
+                    count += 1;
+                }
+                if item.put.is_some() {
+                    count += 1;
+                }
+                if item.delete.is_some() {
+                    count += 1;
+                }
+                if item.patch.is_some() {
+                    count += 1;
+                }
+                if item.head.is_some() {
+                    count += 1;
+                }
+                if item.options.is_some() {
+                    count += 1;
+                }
+                if item.trace.is_some() {
+                    count += 1;
+                }
+                count
+            })
+            .sum()
+    }
+
+    /// Display validation warnings to stderr
+    fn display_validation_warnings(
+        warnings: &[crate::spec::validator::ValidationWarning],
+        total_operations: Option<usize>,
+    ) {
+        if !warnings.is_empty() {
+            let warning_msg = total_operations.map_or_else(
+                || {
+                    format!(
+                        "Warning: Skipping {} endpoints with unsupported content types:",
+                        warnings.len()
+                    )
+                },
+                |total| {
+                    let available = total.saturating_sub(warnings.len());
+                    format!(
+                        "Warning: Skipping {} endpoints with unsupported content types ({} of {} endpoints will be available):",
+                        warnings.len(),
+                        available,
+                        total
+                    )
+                },
+            );
+            eprintln!("{warning_msg}");
+
+            for warning in warnings {
+                eprintln!(
+                    "  - {} {} ({}) - {}",
+                    warning.endpoint.method,
+                    warning.endpoint.path,
+                    warning.endpoint.content_type,
+                    warning.reason
+                );
+            }
+            eprintln!("\nUse --strict to reject specs with unsupported content types.");
+        }
     }
 
     /// Adds a new `OpenAPI` specification to the configuration from a local file.
@@ -81,23 +158,11 @@ impl<F: FileSystem> ConfigManager<F> {
             return validation_result.into_result();
         }
 
+        // Count total operations for better UX
+        let total_operations = Self::count_total_operations(&openapi_spec);
+
         // Display warnings if any
-        if !validation_result.warnings.is_empty() {
-            eprintln!(
-                "Warning: Skipping {} endpoints with unsupported content types:",
-                validation_result.warnings.len()
-            );
-            for warning in &validation_result.warnings {
-                eprintln!(
-                    "  - {} {} ({}) - {}",
-                    warning.endpoint.method,
-                    warning.endpoint.path,
-                    warning.endpoint.content_type,
-                    warning.reason
-                );
-            }
-            eprintln!("\nUse --strict to reject specs with unsupported content types.");
-        }
+        Self::display_validation_warnings(&validation_result.warnings, Some(total_operations));
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
@@ -191,23 +256,11 @@ impl<F: FileSystem> ConfigManager<F> {
             return validation_result.into_result();
         }
 
+        // Count total operations for better UX
+        let total_operations = Self::count_total_operations(&openapi_spec);
+
         // Display warnings if any
-        if !validation_result.warnings.is_empty() {
-            eprintln!(
-                "Warning: Skipping {} endpoints with unsupported content types:",
-                validation_result.warnings.len()
-            );
-            for warning in &validation_result.warnings {
-                eprintln!(
-                    "  - {} {} ({}) - {}",
-                    warning.endpoint.method,
-                    warning.endpoint.path,
-                    warning.endpoint.content_type,
-                    warning.reason
-                );
-            }
-            eprintln!("\nUse --strict to reject specs with unsupported content types.");
-        }
+        Self::display_validation_warnings(&validation_result.warnings, Some(total_operations));
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();

@@ -439,8 +439,8 @@ paths:
 
     // Check for specific warning messages
     assert!(
-        stderr.contains("Warning: Skipping 4 endpoints with unsupported content types"),
-        "Should show correct count of skipped endpoints"
+        stderr.contains("Warning: Skipping 4 endpoints with unsupported content types (0 of 4 endpoints will be available)"),
+        "Should show correct count of skipped endpoints with available count. Actual stderr: {}", stderr
     );
     assert!(
         stderr.contains("file uploads are not supported"),

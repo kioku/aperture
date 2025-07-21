@@ -277,8 +277,8 @@ fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result
     let specs_dir = config_dir.join("specs");
     let spec_path = specs_dir.join(format!("{spec_name}.yaml"));
 
-    // Re-add the spec with force to regenerate the cache (use strict=true for backward compatibility)
-    manager.add_spec(spec_name, &spec_path, true, true)?;
+    // Re-add the spec with force to regenerate the cache (use strict=false to match new default behavior)
+    manager.add_spec(spec_name, &spec_path, true, false)?;
 
     println!("Successfully reinitialized cache for '{spec_name}'");
     Ok(())
