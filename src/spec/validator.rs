@@ -318,14 +318,35 @@ impl SpecValidator {
                 if strict {
                     result.add_error(error);
                 } else {
-                    // In non-strict mode, add as warning
+                    // In non-strict mode, add as warning with specific reason based on content type
+                    let reason = match content_type.as_str() {
+                        // Binary file types
+                        "multipart/form-data" => "file uploads are not supported",
+                        "application/octet-stream" => "binary data uploads are not supported",
+                        ct if ct.starts_with("image/") => "image uploads are not supported",
+                        "application/pdf" => "PDF uploads are not supported",
+
+                        // Alternative text formats
+                        "application/xml" | "text/xml" => "XML content is not supported",
+                        "application/x-www-form-urlencoded" => "form-encoded data is not supported",
+                        "text/plain" => "plain text content is not supported",
+                        "text/csv" => "CSV content is not supported",
+
+                        // JSON-compatible formats
+                        "application/x-ndjson" => "newline-delimited JSON is not supported",
+                        "application/graphql" => "GraphQL content is not supported",
+
+                        // Generic fallback
+                        _ => &format!("content type '{content_type}' is not supported"),
+                    };
+
                     let warning = ValidationWarning {
                         endpoint: UnsupportedEndpoint {
                             path: path.to_string(),
                             method: method.to_uppercase(),
                             content_type: content_type.clone(),
                         },
-                        reason: format!("content type '{content_type}' is not supported"),
+                        reason: reason.to_string(),
                     };
                     result.add_warning(warning);
                 }

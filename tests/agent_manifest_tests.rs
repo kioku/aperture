@@ -176,6 +176,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
         security_schemes,
+        skipped_endpoints: vec![],
     }
 }
 

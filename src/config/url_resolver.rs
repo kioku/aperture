@@ -113,6 +113,7 @@ mod tests {
             base_url: base_url.map(|s| s.to_string()),
             servers: base_url.map(|s| vec![s.to_string()]).unwrap_or_default(),
             security_schemes: HashMap::new(),
+            skipped_endpoints: vec![],
         }
     }
 

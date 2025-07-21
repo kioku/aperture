@@ -1,6 +1,6 @@
 use crate::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
-    CachedSecurityScheme, CachedSpec, CACHE_FORMAT_VERSION,
+    CachedSecurityScheme, CachedSpec, SkippedEndpoint, CACHE_FORMAT_VERSION,
 };
 use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
@@ -49,6 +49,28 @@ impl SpecTransformer {
         spec: &OpenAPI,
         skip_endpoints: &[(String, String)],
     ) -> Result<CachedSpec, Error> {
+        self.transform_with_warnings(name, spec, skip_endpoints, &[])
+    }
+
+    /// Transforms an `OpenAPI` specification with full warning information
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name for the cached spec
+    /// * `spec` - The `OpenAPI` specification to transform
+    /// * `skip_endpoints` - List of endpoints to skip (path, method pairs)
+    /// * `warnings` - Validation warnings to store in the cached spec
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parameter reference resolution fails
+    pub fn transform_with_warnings(
+        &self,
+        name: &str,
+        spec: &OpenAPI,
+        skip_endpoints: &[(String, String)],
+        warnings: &[crate::spec::validator::ValidationWarning],
+    ) -> Result<CachedSpec, Error> {
         let mut commands = Vec::new();
 
         // Extract version from info
@@ -77,8 +99,7 @@ impl SpecTransformer {
                     if let Some(op) = operation {
                         // Check if this endpoint should be skipped
                         let should_skip = skip_endpoints.iter().any(|(skip_path, skip_method)| {
-                            skip_path.eq_ignore_ascii_case(path)
-                                && skip_method.eq_ignore_ascii_case(method)
+                            skip_path == path && skip_method.eq_ignore_ascii_case(method)
                         });
 
                         if !should_skip {
@@ -99,6 +120,17 @@ impl SpecTransformer {
         // Extract security schemes
         let security_schemes = Self::extract_security_schemes(spec);
 
+        // Convert warnings to skipped endpoints
+        let skipped_endpoints: Vec<SkippedEndpoint> = warnings
+            .iter()
+            .map(|w| SkippedEndpoint {
+                path: w.endpoint.path.clone(),
+                method: w.endpoint.method.clone(),
+                content_type: w.endpoint.content_type.clone(),
+                reason: w.reason.clone(),
+            })
+            .collect();
+
         Ok(CachedSpec {
             cache_format_version: CACHE_FORMAT_VERSION,
             name: name.to_string(),
@@ -107,6 +139,7 @@ impl SpecTransformer {
             base_url,
             servers,
             security_schemes,
+            skipped_endpoints,
         })
     }
 

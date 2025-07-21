@@ -293,3 +293,111 @@ fn test_generated_commands_exclude_multipart_endpoints() {
 
 // Note: --describe-json shows the original OpenAPI spec, not the filtered cached spec
 // This is by design, as it's used by agents to understand the full API capabilities
+
+#[test]
+fn test_path_case_sensitivity_in_filtering() {
+    let (config_manager, _temp_dir) = create_temp_config_manager();
+
+    // Create a spec with case-sensitive paths
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Case Sensitive API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /Users:
+    get:
+      operationId: getUppercaseUsers
+      responses:
+        '200':
+          description: Success
+  /users:
+    get:
+      operationId: getLowercaseUsers
+      responses:
+        '200':
+          description: Success
+    post:
+      operationId: createUser
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+        required: true
+      responses:
+        '201':
+          description: Created
+  /USERS:
+    get:
+      operationId: getAllCapsUsers
+      responses:
+        '200':
+          description: Success
+"#;
+
+    // Write spec to temp file
+    let spec_file = _temp_dir.path().join("case-sensitive.yaml");
+    std::fs::write(&spec_file, spec_content).unwrap();
+
+    // Add spec in non-strict mode
+    let result = config_manager.add_spec("case-test", &spec_file, false, false);
+    assert!(result.is_ok(), "Should accept spec in non-strict mode");
+
+    // Load cached spec and verify correct endpoints were filtered
+    let cache_dir = _temp_dir.path().join(".cache");
+    let cached_spec = load_cached_spec(&cache_dir, "case-test").unwrap();
+
+    // Should have 3 endpoints total (excluding only the multipart one)
+    assert_eq!(cached_spec.commands.len(), 3);
+
+    let operation_ids: Vec<&str> = cached_spec
+        .commands
+        .iter()
+        .map(|cmd| cmd.operation_id.as_str())
+        .collect();
+
+    // All three case variants should be present
+    assert!(operation_ids.contains(&"getUppercaseUsers"));
+    assert!(operation_ids.contains(&"getLowercaseUsers"));
+    assert!(operation_ids.contains(&"getAllCapsUsers"));
+
+    // The multipart endpoint should be excluded
+    assert!(!operation_ids.contains(&"createUser"));
+}
+
+#[test]
+fn test_cli_list_verbose_shows_skipped_endpoints() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().join(".aperture");
+    let spec_path = Path::new("tests/fixtures/openapi/spec-with-multipart.yaml")
+        .canonicalize()
+        .unwrap();
+
+    // Add spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(["config", "add", "test-api", spec_path.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Run config list --verbose
+    let output = Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(["config", "list", "--verbose"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(stdout.contains("test-api"));
+    assert!(stdout.contains("Skipped endpoints:"));
+    assert!(stdout.contains("POST /users/{userId}/avatar (multipart/form-data)"));
+    assert!(stdout.contains("POST /documents (multipart/form-data)"));
+    assert!(stdout.contains("file uploads are not supported"));
+}

@@ -35,6 +35,11 @@ impl<F: FileSystem> ConfigManager<F> {
         Self { fs, config_dir }
     }
 
+    /// Get the configuration directory path
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
+    }
+
     /// Adds a new `OpenAPI` specification to the configuration from a local file.
     ///
     /// # Errors
@@ -104,8 +109,12 @@ impl<F: FileSystem> ConfigManager<F> {
             .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
             .collect();
 
-        let cached_spec =
-            transformer.transform_with_filter(name, &openapi_spec, &skip_endpoints)?;
+        let cached_spec = transformer.transform_with_warnings(
+            name,
+            &openapi_spec,
+            &skip_endpoints,
+            &validation_result.warnings,
+        )?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
@@ -210,8 +219,12 @@ impl<F: FileSystem> ConfigManager<F> {
             .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
             .collect();
 
-        let cached_spec =
-            transformer.transform_with_filter(name, &openapi_spec, &skip_endpoints)?;
+        let cached_spec = transformer.transform_with_warnings(
+            name,
+            &openapi_spec,
+            &skip_endpoints,
+            &validation_result.warnings,
+        )?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
@@ -595,8 +608,12 @@ impl<F: FileSystem> ConfigManager<F> {
             .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
             .collect();
 
-        let cached_spec =
-            transformer.transform_with_filter(name, &openapi_spec, &skip_endpoints)?;
+        let cached_spec = transformer.transform_with_warnings(
+            name,
+            &openapi_spec,
+            &skip_endpoints,
+            &validation_result.warnings,
+        )?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {

@@ -124,6 +124,7 @@ fn create_test_spec() -> CachedSpec {
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
     }
 }
 
@@ -187,6 +188,7 @@ fn test_kebab_case_conversion() {
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
     };
 
     let command = generate_command_tree(&spec);
@@ -244,6 +246,7 @@ fn test_fallback_to_default_tag() {
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
     };
 
     let command = generate_command_tree(&spec);
@@ -275,6 +278,7 @@ fn test_fallback_to_http_method() {
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
     };
 
     let command = generate_command_tree(&spec);

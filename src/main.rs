@@ -50,14 +50,35 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                     .await?;
                 println!("Spec '{name}' added successfully.");
             }
-            ConfigCommands::List {} => {
+            ConfigCommands::List { verbose } => {
                 let specs = manager.list_specs()?;
                 if specs.is_empty() {
                     println!("No API specifications found.");
                 } else {
                     println!("Registered API specifications:");
-                    for spec in specs {
-                        println!("- {spec}");
+                    let cache_dir = manager.config_dir().join(".cache");
+                    for spec_name in specs {
+                        println!("- {spec_name}");
+
+                        // Show skipped endpoints in verbose mode
+                        if verbose {
+                            if let Ok(cached_spec) = aperture_cli::engine::loader::load_cached_spec(
+                                &cache_dir, &spec_name,
+                            ) {
+                                if !cached_spec.skipped_endpoints.is_empty() {
+                                    println!("  Skipped endpoints:");
+                                    for endpoint in &cached_spec.skipped_endpoints {
+                                        println!(
+                                            "    - {} {} ({}) - {}",
+                                            endpoint.method,
+                                            endpoint.path,
+                                            endpoint.content_type,
+                                            endpoint.reason
+                                        );
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
