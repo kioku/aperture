@@ -308,49 +308,66 @@ impl SpecValidator {
         result: &mut ValidationResult,
         strict: bool,
     ) {
-        // Check for unsupported content types
-        for (content_type, _) in &request_body.content {
-            if content_type != "application/json" {
-                let error = Error::Validation(format!(
-                    "Unsupported request body content type '{content_type}' in {method} {path}. Only 'application/json' is supported in v1.0."
-                ));
+        // Check if request body has any supported content types
+        let has_json = request_body.content.contains_key("application/json");
+        let unsupported_types: Vec<&String> = request_body
+            .content
+            .keys()
+            .filter(|ct| *ct != "application/json")
+            .collect();
 
-                if strict {
+        if !unsupported_types.is_empty() {
+            if strict {
+                // In strict mode, any unsupported content type is an error
+                for content_type in unsupported_types {
+                    let error = Error::Validation(format!(
+                        "Unsupported request body content type '{content_type}' in {method} {path}. Only 'application/json' is supported in v1.0."
+                    ));
                     result.add_error(error);
-                } else {
-                    // In non-strict mode, add as warning with specific reason based on content type
-                    let reason = match content_type.as_str() {
-                        // Binary file types
-                        "multipart/form-data" => "file uploads are not supported",
-                        "application/octet-stream" => "binary data uploads are not supported",
-                        ct if ct.starts_with("image/") => "image uploads are not supported",
-                        "application/pdf" => "PDF uploads are not supported",
-
-                        // Alternative text formats
-                        "application/xml" | "text/xml" => "XML content is not supported",
-                        "application/x-www-form-urlencoded" => "form-encoded data is not supported",
-                        "text/plain" => "plain text content is not supported",
-                        "text/csv" => "CSV content is not supported",
-
-                        // JSON-compatible formats
-                        "application/x-ndjson" => "newline-delimited JSON is not supported",
-                        "application/graphql" => "GraphQL content is not supported",
-
-                        // Generic fallback
-                        _ => &format!("content type '{content_type}' is not supported"),
-                    };
-
-                    let warning = ValidationWarning {
-                        endpoint: UnsupportedEndpoint {
-                            path: path.to_string(),
-                            method: method.to_uppercase(),
-                            content_type: content_type.clone(),
-                        },
-                        reason: reason.to_string(),
-                    };
-                    result.add_warning(warning);
                 }
+            } else if !has_json {
+                // In non-strict mode, only skip if there's NO supported content type
+                // Collect all unsupported types into a single warning
+                let content_types: Vec<String> = unsupported_types
+                    .iter()
+                    .map(|ct| {
+                        let reason = match ct.as_str() {
+                            // Binary file types
+                            "multipart/form-data" => "file uploads are not supported",
+                            "application/octet-stream" => "binary data uploads are not supported",
+                            ct if ct.starts_with("image/") => "image uploads are not supported",
+                            "application/pdf" => "PDF uploads are not supported",
+
+                            // Alternative text formats
+                            "application/xml" | "text/xml" => "XML content is not supported",
+                            "application/x-www-form-urlencoded" => {
+                                "form-encoded data is not supported"
+                            }
+                            "text/plain" => "plain text content is not supported",
+                            "text/csv" => "CSV content is not supported",
+
+                            // JSON-compatible formats
+                            "application/x-ndjson" => "newline-delimited JSON is not supported",
+                            "application/graphql" => "GraphQL content is not supported",
+
+                            // Generic fallback
+                            _ => "is not supported",
+                        };
+                        format!("{ct} ({reason})")
+                    })
+                    .collect();
+
+                let warning = ValidationWarning {
+                    endpoint: UnsupportedEndpoint {
+                        path: path.to_string(),
+                        method: method.to_uppercase(),
+                        content_type: content_types.join(", "),
+                    },
+                    reason: "endpoint has no supported content types".to_string(),
+                };
+                result.add_warning(warning);
             }
+            // If has_json && !strict, the endpoint is usable with JSON, so no warning needed
         }
     }
 }
@@ -479,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_with_mode_non_strict() {
+    fn test_validate_with_mode_non_strict_mixed_content() {
         use openapiv3::{
             MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
         };
@@ -487,6 +504,7 @@ mod tests {
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();
 
+        // Endpoint with both JSON and multipart - should be accepted without warnings
         let mut request_body = RequestBody::default();
         request_body
             .content
@@ -509,7 +527,47 @@ mod tests {
             .paths
             .insert("/upload".to_string(), PathRef::Item(path_item));
 
-        // Non-strict mode should produce warnings, not errors
+        // Non-strict mode should NOT produce warnings when JSON is also supported
+        let result = validator.validate_with_mode(&spec, false);
+        assert!(result.is_valid(), "Non-strict mode should be valid");
+        assert_eq!(
+            result.warnings.len(),
+            0,
+            "Should have no warnings for mixed content types"
+        );
+        assert_eq!(result.errors.len(), 0, "Should have no errors");
+    }
+
+    #[test]
+    fn test_validate_with_mode_non_strict_only_unsupported() {
+        use openapiv3::{
+            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
+        };
+
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+
+        // Endpoint with only unsupported content type - should produce warning
+        let mut request_body = RequestBody::default();
+        request_body
+            .content
+            .insert("multipart/form-data".to_string(), MediaType::default());
+        request_body.required = true;
+
+        let mut path_item = PathItem::default();
+        path_item.post = Some(Operation {
+            operation_id: Some("uploadFile".to_string()),
+            tags: vec!["files".to_string()],
+            request_body: Some(ReferenceOr::Item(request_body)),
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/upload".to_string(), PathRef::Item(path_item));
+
+        // Non-strict mode should produce warning for endpoint with no supported types
         let result = validator.validate_with_mode(&spec, false);
         assert!(result.is_valid(), "Non-strict mode should be valid");
         assert_eq!(result.warnings.len(), 1, "Should have one warning");
@@ -518,8 +576,11 @@ mod tests {
         let warning = &result.warnings[0];
         assert_eq!(warning.endpoint.path, "/upload");
         assert_eq!(warning.endpoint.method, "POST");
-        assert_eq!(warning.endpoint.content_type, "multipart/form-data");
-        assert!(warning.reason.contains("not supported"));
+        assert!(warning
+            .endpoint
+            .content_type
+            .contains("multipart/form-data"));
+        assert!(warning.reason.contains("no supported content types"));
     }
 
     #[test]
@@ -619,6 +680,60 @@ mod tests {
             .collect();
         assert!(warning_paths.contains(&"/xml"));
         assert!(warning_paths.contains(&"/text"));
+    }
+
+    #[test]
+    fn test_validate_with_mode_multiple_unsupported_types_single_endpoint() {
+        use openapiv3::{
+            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
+        };
+
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+
+        // Endpoint with multiple unsupported content types - should produce single warning
+        let mut request_body = RequestBody::default();
+        request_body
+            .content
+            .insert("multipart/form-data".to_string(), MediaType::default());
+        request_body
+            .content
+            .insert("application/xml".to_string(), MediaType::default());
+        request_body
+            .content
+            .insert("text/plain".to_string(), MediaType::default());
+        request_body.required = true;
+
+        let mut path_item = PathItem::default();
+        path_item.post = Some(Operation {
+            operation_id: Some("uploadData".to_string()),
+            tags: vec!["data".to_string()],
+            request_body: Some(ReferenceOr::Item(request_body)),
+            responses: Responses::default(),
+            ..Default::default()
+        });
+
+        spec.paths
+            .paths
+            .insert("/data".to_string(), PathRef::Item(path_item));
+
+        // Non-strict mode should produce single warning listing all unsupported types
+        let result = validator.validate_with_mode(&spec, false);
+        assert!(result.is_valid(), "Non-strict mode should be valid");
+        assert_eq!(result.warnings.len(), 1, "Should have exactly one warning");
+        assert_eq!(result.errors.len(), 0, "Should have no errors");
+
+        let warning = &result.warnings[0];
+        assert_eq!(warning.endpoint.path, "/data");
+        assert_eq!(warning.endpoint.method, "POST");
+        // Check that all content types are mentioned
+        assert!(warning
+            .endpoint
+            .content_type
+            .contains("multipart/form-data"));
+        assert!(warning.endpoint.content_type.contains("application/xml"));
+        assert!(warning.endpoint.content_type.contains("text/plain"));
+        assert!(warning.reason.contains("no supported content types"));
     }
 
     #[test]

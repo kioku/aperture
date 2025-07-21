@@ -261,14 +261,23 @@ paths:
     let result = config_manager.add_spec("mixed-test", &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
-    // Both endpoints should be skipped because they have unsupported content types
+    // Both endpoints should be INCLUDED because they support JSON
     let cache_dir = _temp_dir.path().join(".cache");
     let cached_spec = load_cached_spec(&cache_dir, "mixed-test").unwrap();
     assert_eq!(
         cached_spec.commands.len(),
-        0,
-        "Both endpoints should be skipped due to mixed content types"
+        2,
+        "Both endpoints should be included because they support JSON"
     );
+
+    // Verify both operations are present
+    let operation_ids: Vec<&str> = cached_spec
+        .commands
+        .iter()
+        .map(|cmd| cmd.operation_id.as_str())
+        .collect();
+    assert!(operation_ids.contains(&"uploadMixed"));
+    assert!(operation_ids.contains(&"putData"));
 }
 
 #[test]
