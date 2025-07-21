@@ -1,6 +1,71 @@
 use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 
+/// Result of validating an `OpenAPI` specification
+#[derive(Debug, Default)]
+pub struct ValidationResult {
+    /// Validation warnings for skipped endpoints
+    pub warnings: Vec<ValidationWarning>,
+    /// Validation errors that prevent spec usage
+    pub errors: Vec<Error>,
+}
+
+impl ValidationResult {
+    /// Creates a new empty validation result
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            warnings: Vec::new(),
+            errors: Vec::new(),
+        }
+    }
+
+    /// Converts to a Result for backward compatibility
+    ///
+    /// # Errors
+    ///
+    /// Returns the first validation error if any exist
+    pub fn into_result(self) -> Result<(), Error> {
+        self.errors.into_iter().next().map_or_else(|| Ok(()), Err)
+    }
+
+    /// Checks if validation passed (may have warnings but no errors)
+    #[must_use]
+    pub const fn is_valid(&self) -> bool {
+        self.errors.is_empty()
+    }
+
+    /// Adds a validation error
+    pub fn add_error(&mut self, error: Error) {
+        self.errors.push(error);
+    }
+
+    /// Adds a validation warning
+    pub fn add_warning(&mut self, warning: ValidationWarning) {
+        self.warnings.push(warning);
+    }
+}
+
+/// Warning about skipped functionality
+#[derive(Debug, Clone)]
+pub struct ValidationWarning {
+    /// The endpoint that was skipped
+    pub endpoint: UnsupportedEndpoint,
+    /// Human-readable reason for skipping
+    pub reason: String,
+}
+
+/// Details about an unsupported endpoint
+#[derive(Debug, Clone)]
+pub struct UnsupportedEndpoint {
+    /// HTTP path (e.g., "/api/upload")
+    pub path: String,
+    /// HTTP method (e.g., "POST")
+    pub method: String,
+    /// Content type that caused the skip (e.g., "multipart/form-data")
+    pub content_type: String,
+}
+
 /// Validates `OpenAPI` specifications for compatibility with Aperture
 pub struct SpecValidator;
 
