@@ -87,15 +87,34 @@ impl SpecValidator {
     /// - Parameters use content-based serialization
     /// - Request bodies use non-JSON content types
     pub fn validate(&self, spec: &OpenAPI) -> Result<(), Error> {
+        self.validate_with_mode(spec, true).into_result()
+    }
+
+    /// Validates an `OpenAPI` specification with configurable strictness
+    ///
+    /// # Arguments
+    ///
+    /// * `spec` - The `OpenAPI` specification to validate
+    /// * `strict` - If true, returns errors for unsupported features. If false, collects warnings.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `ValidationResult` containing any errors and/or warnings found
+    #[must_use]
+    pub fn validate_with_mode(&self, spec: &OpenAPI, strict: bool) -> ValidationResult {
+        let mut result = ValidationResult::new();
+
         // Validate security schemes
         if let Some(components) = &spec.components {
             for (name, scheme_ref) in &components.security_schemes {
                 match scheme_ref {
                     ReferenceOr::Item(scheme) => {
-                        Self::validate_security_scheme(name, scheme)?;
+                        if let Err(e) = Self::validate_security_scheme(name, scheme) {
+                            result.add_error(e);
+                        }
                     }
                     ReferenceOr::Reference { .. } => {
-                        return Err(Error::Validation(format!(
+                        result.add_error(Error::Validation(format!(
                             "Security scheme references are not supported: '{name}'"
                         )));
                     }
@@ -108,13 +127,19 @@ impl SpecValidator {
             if let ReferenceOr::Item(path_item) = path_item_ref {
                 for (method, operation_opt) in crate::spec::http_methods_iter(path_item) {
                     if let Some(operation) = operation_opt {
-                        Self::validate_operation(path, &method.to_lowercase(), operation)?;
+                        Self::validate_operation(
+                            path,
+                            &method.to_lowercase(),
+                            operation,
+                            &mut result,
+                            strict,
+                        );
                     }
                 }
             }
         }
 
-        Ok(())
+        result
     }
 
     /// Validates a single security scheme
@@ -219,12 +244,20 @@ impl SpecValidator {
     }
 
     /// Validates an operation against Aperture's supported features
-    fn validate_operation(path: &str, method: &str, operation: &Operation) -> Result<(), Error> {
+    fn validate_operation(
+        path: &str,
+        method: &str,
+        operation: &Operation,
+        result: &mut ValidationResult,
+        strict: bool,
+    ) {
         // Validate parameters
         for param_ref in &operation.parameters {
             match param_ref {
                 ReferenceOr::Item(param) => {
-                    Self::validate_parameter(path, method, param)?;
+                    if let Err(e) = Self::validate_parameter(path, method, param) {
+                        result.add_error(e);
+                    }
                 }
                 ReferenceOr::Reference { .. } => {
                     // Parameter references are now allowed and will be resolved during transformation
@@ -236,17 +269,15 @@ impl SpecValidator {
         if let Some(request_body_ref) = &operation.request_body {
             match request_body_ref {
                 ReferenceOr::Item(request_body) => {
-                    Self::validate_request_body(path, method, request_body)?;
+                    Self::validate_request_body(path, method, request_body, result, strict);
                 }
                 ReferenceOr::Reference { .. } => {
-                    return Err(Error::Validation(format!(
+                    result.add_error(Error::Validation(format!(
                         "Request body references are not supported in {method} {path}."
                     )));
                 }
             }
         }
-
-        Ok(())
     }
 
     /// Validates a parameter against Aperture's supported features
@@ -274,17 +305,32 @@ impl SpecValidator {
         path: &str,
         method: &str,
         request_body: &RequestBody,
-    ) -> Result<(), Error> {
+        result: &mut ValidationResult,
+        strict: bool,
+    ) {
         // Check for unsupported content types
         for (content_type, _) in &request_body.content {
             if content_type != "application/json" {
-                return Err(Error::Validation(format!(
+                let error = Error::Validation(format!(
                     "Unsupported request body content type '{content_type}' in {method} {path}. Only 'application/json' is supported in v1.0."
-                )));
+                ));
+
+                if strict {
+                    result.add_error(error);
+                } else {
+                    // In non-strict mode, add as warning
+                    let warning = ValidationWarning {
+                        endpoint: UnsupportedEndpoint {
+                            path: path.to_string(),
+                            method: method.to_uppercase(),
+                            content_type: content_type.clone(),
+                        },
+                        reason: format!("content type '{content_type}' is not supported"),
+                    };
+                    result.add_warning(warning);
+                }
             }
         }
-
-        Ok(())
     }
 }
 
