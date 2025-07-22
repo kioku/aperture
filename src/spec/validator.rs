@@ -350,16 +350,17 @@ impl SpecValidator {
         result: &mut ValidationResult,
         strict: bool,
     ) {
-        // Check if request body has any supported content types
-        let has_json = request_body
-            .content
-            .keys()
-            .any(|ct| Self::is_json_content_type(ct));
-        let unsupported_types: Vec<&String> = request_body
-            .content
-            .keys()
-            .filter(|ct| !Self::is_json_content_type(ct))
-            .collect();
+        // Check content types in a single pass
+        let mut has_json = false;
+        let mut unsupported_types = Vec::new();
+
+        for content_type in request_body.content.keys() {
+            if Self::is_json_content_type(content_type) {
+                has_json = true;
+            } else {
+                unsupported_types.push(content_type);
+            }
+        }
 
         if !unsupported_types.is_empty() {
             if strict {
