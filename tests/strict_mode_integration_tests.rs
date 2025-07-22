@@ -396,7 +396,7 @@ fn test_cli_list_verbose_shows_skipped_endpoints() {
 
     assert!(output.status.success());
     assert!(stdout.contains("test-api"));
-    assert!(stdout.contains("Skipped endpoints:"));
+    assert!(stdout.contains("Skipping 2 endpoints with unsupported content types"));
     // Check for the new format where multiple unsupported types are shown together
     assert!(stdout.contains("POST /users/{userId}/avatar"));
     assert!(stdout.contains("POST /documents"));

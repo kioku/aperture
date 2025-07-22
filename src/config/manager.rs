@@ -40,6 +40,24 @@ impl<F: FileSystem> ConfigManager<F> {
         &self.config_dir
     }
 
+    /// Convert skipped endpoints to validation warnings for display
+    #[must_use]
+    pub fn skipped_endpoints_to_warnings(
+        skipped_endpoints: &[crate::cache::models::SkippedEndpoint],
+    ) -> Vec<crate::spec::validator::ValidationWarning> {
+        skipped_endpoints
+            .iter()
+            .map(|endpoint| crate::spec::validator::ValidationWarning {
+                endpoint: crate::spec::validator::UnsupportedEndpoint {
+                    path: endpoint.path.clone(),
+                    method: endpoint.method.clone(),
+                    content_type: endpoint.content_type.clone(),
+                },
+                reason: endpoint.reason.clone(),
+            })
+            .collect()
+    }
+
     /// Save the strict mode preference for an API
     fn save_strict_preference(&self, api_name: &str, strict: bool) -> Result<(), Error> {
         let mut config = self.load_global_config()?;
@@ -108,68 +126,95 @@ impl<F: FileSystem> ConfigManager<F> {
             .sum()
     }
 
-    /// Display validation warnings to stderr
-    fn display_validation_warnings(
+    /// Display validation warnings with custom prefix
+    #[must_use]
+    pub fn format_validation_warnings(
         warnings: &[crate::spec::validator::ValidationWarning],
         total_operations: Option<usize>,
-    ) {
+        indent: &str,
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+
         if !warnings.is_empty() {
             // Separate warnings into skipped endpoints and mixed content warnings
             let (skipped_warnings, mixed_warnings): (Vec<_>, Vec<_>) = warnings
                 .iter()
                 .partition(|w| w.reason.contains("no supported content types"));
 
-            // Display skipped endpoints warning if any
+            // Format skipped endpoints warning if any
             if !skipped_warnings.is_empty() {
                 let warning_msg = total_operations.map_or_else(
                     || {
                         format!(
-                            "Warning: Skipping {} endpoints with unsupported content types:",
+                            "{}Skipping {} endpoints with unsupported content types:",
+                            indent,
                             skipped_warnings.len()
                         )
                     },
                     |total| {
                         let available = total.saturating_sub(skipped_warnings.len());
                         format!(
-                            "Warning: Skipping {} endpoints with unsupported content types ({} of {} endpoints will be available):",
+                            "{}Skipping {} endpoints with unsupported content types ({} of {} endpoints will be available):",
+                            indent,
                             skipped_warnings.len(),
                             available,
                             total
                         )
                     },
                 );
-                eprintln!("{warning_msg}");
+                lines.push(warning_msg);
 
                 for warning in &skipped_warnings {
-                    eprintln!(
-                        "  - {} {} ({}) - {}",
+                    lines.push(format!(
+                        "{}  - {} {} ({}) - {}",
+                        indent,
                         warning.endpoint.method,
                         warning.endpoint.path,
                         warning.endpoint.content_type,
                         warning.reason
-                    );
+                    ));
                 }
             }
 
-            // Display mixed content warnings if any
+            // Format mixed content warnings if any
             if !mixed_warnings.is_empty() {
                 if !skipped_warnings.is_empty() {
-                    eprintln!(); // Add blank line between sections
+                    lines.push(String::new()); // Add blank line between sections
                 }
-                eprintln!(
-                    "Warning: {} endpoints have partial content type support:",
-                    mixed_warnings.len()
-                );
+                lines.push(format!(
+                    "{indent}Endpoints with partial content type support:"
+                ));
                 for warning in &mixed_warnings {
-                    eprintln!(
-                        "  - {} {} supports JSON but not: {}",
+                    lines.push(format!(
+                        "{}  - {} {} supports JSON but not: {}",
+                        indent,
                         warning.endpoint.method,
                         warning.endpoint.path,
                         warning.endpoint.content_type
-                    );
+                    ));
                 }
             }
+        }
 
+        lines
+    }
+
+    /// Display validation warnings to stderr
+    pub fn display_validation_warnings(
+        warnings: &[crate::spec::validator::ValidationWarning],
+        total_operations: Option<usize>,
+    ) {
+        if !warnings.is_empty() {
+            let lines = Self::format_validation_warnings(warnings, total_operations, "");
+            for line in lines {
+                if line.is_empty() {
+                    eprintln!();
+                } else if line.starts_with("Skipping") || line.starts_with("Endpoints") {
+                    eprintln!("Warning: {line}");
+                } else {
+                    eprintln!("{line}");
+                }
+            }
             eprintln!("\nUse --strict to reject specs with unsupported content types.");
         }
     }

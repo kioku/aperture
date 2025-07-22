@@ -881,8 +881,8 @@ paths:
     assert!(stderr.contains("POST /no-json"));
     assert!(stderr.contains("endpoint has no supported content types"));
 
-    // Check for mixed content warnings
-    assert!(stderr.contains("Warning: 2 endpoints have partial content type support:"));
+    // Check for mixed content warnings - updated to match new format
+    assert!(stderr.contains("Endpoints with partial content type support:"));
     assert!(stderr.contains("POST /upload supports JSON but not:"));
     assert!(stderr.contains("multipart/form-data"));
     assert!(stderr.contains("application/xml"));

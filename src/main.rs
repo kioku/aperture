@@ -66,15 +66,33 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                                 &cache_dir, &spec_name,
                             ) {
                                 if !cached_spec.skipped_endpoints.is_empty() {
-                                    println!("  Skipped endpoints:");
-                                    for endpoint in &cached_spec.skipped_endpoints {
-                                        println!(
-                                            "    - {} {} ({}) - {}",
-                                            endpoint.method,
-                                            endpoint.path,
-                                            endpoint.content_type,
-                                            endpoint.reason
-                                        );
+                                    // Convert to warnings for consistent display
+                                    let warnings = aperture_cli::config::manager::ConfigManager::<
+                                        aperture_cli::fs::OsFileSystem,
+                                    >::skipped_endpoints_to_warnings(
+                                        &cached_spec.skipped_endpoints,
+                                    );
+
+                                    // Count total operations for the spec
+                                    let total_operations = cached_spec.commands.len()
+                                        + warnings
+                                            .iter()
+                                            .filter(|w| {
+                                                w.reason.contains("no supported content types")
+                                            })
+                                            .count();
+
+                                    // Format warnings with indentation
+                                    let lines = aperture_cli::config::manager::ConfigManager::<
+                                        aperture_cli::fs::OsFileSystem,
+                                    >::format_validation_warnings(
+                                        &warnings,
+                                        Some(total_operations),
+                                        "  ",
+                                    );
+
+                                    for line in lines {
+                                        println!("{line}");
                                     }
                                 }
                             }
