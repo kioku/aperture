@@ -157,7 +157,7 @@ paths:
     let config_manager = ConfigManager::with_fs(fs, config_dir);
 
     // Should successfully add the spec with parameter references
-    let result = config_manager.add_spec("test-api", &spec_path, false);
+    let result = config_manager.add_spec("test-api", &spec_path, false, true);
     assert!(
         result.is_ok(),
         "Should successfully add spec with parameter references: {:?}",
@@ -278,7 +278,7 @@ paths:
     let config_manager = ConfigManager::with_fs(fs, config_dir);
 
     // Should successfully add the spec with special parameter names
-    let result = config_manager.add_spec("test-special-api", &spec_path, false);
+    let result = config_manager.add_spec("test-special-api", &spec_path, false, true);
     assert!(
         result.is_ok(),
         "Should successfully add spec with special parameter names: {:?}",
@@ -465,7 +465,7 @@ paths:
     let config_manager = ConfigManager::with_fs(fs, config_dir);
 
     // Should fail to add the spec with invalid reference
-    let result = config_manager.add_spec("test-api", &spec_path, false);
+    let result = config_manager.add_spec("test-api", &spec_path, false, true);
     assert!(
         result.is_err(),
         "Should fail to add spec with invalid parameter reference"

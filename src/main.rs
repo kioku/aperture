@@ -43,19 +43,20 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 name,
                 file_or_url,
                 force,
+                strict,
             } => {
-                manager.add_spec_auto(&name, &file_or_url, force).await?;
+                manager
+                    .add_spec_auto(&name, &file_or_url, force, strict)
+                    .await?;
                 println!("Spec '{name}' added successfully.");
             }
-            ConfigCommands::List {} => {
+            ConfigCommands::List { verbose } => {
                 let specs = manager.list_specs()?;
                 if specs.is_empty() {
                     println!("No API specifications found.");
                 } else {
                     println!("Registered API specifications:");
-                    for spec in specs {
-                        println!("- {spec}");
-                    }
+                    list_specs_with_details(manager, specs, verbose);
                 }
             }
             ConfigCommands::Remove { name } => {
@@ -253,8 +254,11 @@ fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result
     let specs_dir = config_dir.join("specs");
     let spec_path = specs_dir.join(format!("{spec_name}.yaml"));
 
-    // Re-add the spec with force to regenerate the cache
-    manager.add_spec(spec_name, &spec_path, true)?;
+    // Get the original strict mode preference (default to false if not set)
+    let strict = manager.get_strict_preference(spec_name).unwrap_or(false);
+
+    // Re-add the spec with force to regenerate the cache using original strict preference
+    manager.add_spec(spec_name, &spec_path, true, strict)?;
 
     println!("Successfully reinitialized cache for '{spec_name}'");
     Ok(())
@@ -283,6 +287,63 @@ fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> 
 
     println!("Reinitialization complete.");
     Ok(())
+}
+
+fn list_specs_with_details(
+    manager: &ConfigManager<OsFileSystem>,
+    specs: Vec<String>,
+    verbose: bool,
+) {
+    let cache_dir = manager.config_dir().join(".cache");
+
+    for spec_name in specs {
+        println!("- {spec_name}");
+
+        if !verbose {
+            continue;
+        }
+
+        // Try to load cached spec for verbose details
+        let Ok(cached_spec) =
+            aperture_cli::engine::loader::load_cached_spec(&cache_dir, &spec_name)
+        else {
+            continue;
+        };
+
+        if cached_spec.skipped_endpoints.is_empty() {
+            continue;
+        }
+
+        display_skipped_endpoints_info(&cached_spec);
+    }
+}
+
+fn display_skipped_endpoints_info(cached_spec: &aperture_cli::cache::models::CachedSpec) {
+    use aperture_cli::config::manager::ConfigManager;
+    use aperture_cli::fs::OsFileSystem;
+
+    // Convert to warnings for consistent display
+    let warnings = ConfigManager::<OsFileSystem>::skipped_endpoints_to_warnings(
+        &cached_spec.skipped_endpoints,
+    );
+
+    // Count total operations including skipped ones
+    let skipped_count = warnings
+        .iter()
+        .filter(|w| w.reason.contains("no supported content types"))
+        .count();
+    let total_operations = cached_spec.commands.len() + skipped_count;
+
+    // Format and display warnings
+    let lines = ConfigManager::<OsFileSystem>::format_validation_warnings(
+        &warnings,
+        Some(total_operations),
+        "  ",
+    );
+
+    for line in lines {
+        println!("{line}");
+    }
 }
 
 #[allow(clippy::too_many_lines)]

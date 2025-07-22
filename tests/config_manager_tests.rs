@@ -184,7 +184,7 @@ paths: {}
     let temp_spec_path = PathBuf::from("/tmp/new_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_ok());
 
     let expected_path = PathBuf::from(TEST_CONFIG_DIR)
@@ -213,7 +213,7 @@ paths: {}
     let temp_spec_path = PathBuf::from("/tmp/updated_api.yaml");
     fs.add_file(&temp_spec_path, "updated content");
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::SpecAlreadyExists { name }) = result {
         assert_eq!(name, spec_name);
@@ -253,7 +253,7 @@ paths: {}
     let temp_spec_path = PathBuf::from("/tmp/updated_api.yaml");
     fs.add_file(&temp_spec_path, updated_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, true);
+    let result = manager.add_spec(spec_name, &temp_spec_path, true, true);
     assert!(result.is_ok());
 
     assert_eq!(
@@ -270,7 +270,7 @@ fn test_add_spec_invalid_openapi() {
     let temp_spec_path = PathBuf::from("/tmp/invalid_api.yaml");
     fs.add_file(&temp_spec_path, invalid_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Yaml(err)) = result {
         assert!(err.to_string().contains("invalid type: string"));
@@ -287,7 +287,7 @@ fn test_add_spec_io_error_on_read() {
     fs.add_file(&temp_spec_path, "dummy content");
     fs.set_io_error_on_read(true);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Io(err)) = result {
         assert!(err.to_string().contains("Mock I/O error on read"));
@@ -311,7 +311,7 @@ paths: {}
     fs.add_file(&temp_spec_path, spec_content);
     fs.set_io_error_on_write(true);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Io(err)) = result {
         assert!(err.to_string().contains("Mock I/O error on write"));
@@ -436,7 +436,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/api_key_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_ok());
 
     // Verify both spec and cache files were created
@@ -485,7 +485,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/bearer_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_ok());
 }
 
@@ -519,7 +519,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/oauth2_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("OAuth2 security scheme"));
@@ -554,7 +554,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/openid_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("OpenID Connect security scheme"));
@@ -589,7 +589,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/digest_auth_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("Unsupported HTTP scheme 'digest'"));
@@ -625,7 +625,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/xml_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("Unsupported request body content type 'application/xml'"));
@@ -661,7 +661,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/no_json_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Validation(msg)) = result {
         assert!(msg.contains("Unsupported request body content type 'text/plain'"));
@@ -713,7 +713,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/caching_test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_ok());
 
     // Verify cache file was created
@@ -774,7 +774,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/no_operation_id_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false);
+    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_ok());
 
     // Verify cache was created with method name as command
@@ -801,7 +801,9 @@ fn test_set_url_base_override() {
     let spec_content = create_minimal_spec();
     let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
-    manager.add_spec(spec_name, &temp_spec_path, false).unwrap();
+    manager
+        .add_spec(spec_name, &temp_spec_path, false, true)
+        .unwrap();
 
     // Set base URL
     let result = manager.set_url(spec_name, "https://custom.example.com", None);
@@ -830,7 +832,9 @@ fn test_set_url_environment_specific() {
     let spec_content = create_minimal_spec();
     let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
-    manager.add_spec(spec_name, &temp_spec_path, false).unwrap();
+    manager
+        .add_spec(spec_name, &temp_spec_path, false, true)
+        .unwrap();
 
     // Set environment-specific URLs
     manager
@@ -884,7 +888,9 @@ paths:
 "#;
     let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
-    manager.add_spec(spec_name, &temp_spec_path, false).unwrap();
+    manager
+        .add_spec(spec_name, &temp_spec_path, false, true)
+        .unwrap();
 
     // Set some URLs
     manager
@@ -921,8 +927,12 @@ fn test_list_urls_shows_all_configs() {
     fs.add_file(&temp_spec_path1, spec_content);
     fs.add_file(&temp_spec_path2, spec_content);
 
-    manager.add_spec("api1", &temp_spec_path1, false).unwrap();
-    manager.add_spec("api2", &temp_spec_path2, false).unwrap();
+    manager
+        .add_spec("api1", &temp_spec_path1, false, true)
+        .unwrap();
+    manager
+        .add_spec("api2", &temp_spec_path2, false, true)
+        .unwrap();
 
     // Set URLs for both
     manager
@@ -1010,7 +1020,7 @@ paths:
 
     // Test that adding a remote spec works
     let result = manager
-        .add_spec_from_url("remote-api", &spec_url, false)
+        .add_spec_from_url("remote-api", &spec_url, false, true)
         .await;
     assert!(result.is_ok());
 
@@ -1080,7 +1090,7 @@ async fn test_remote_spec_fetching_size_limit() {
 
     // Test that large responses are rejected
     let result = manager
-        .add_spec_from_url("large-api", &spec_url, false)
+        .add_spec_from_url("large-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
     if let Err(Error::RequestFailed { reason }) = result {
@@ -1104,6 +1114,7 @@ async fn test_remote_spec_fetching_invalid_url() {
             "invalid-api",
             "https://nonexistent-domain-12345.com/spec.yaml",
             false,
+            true,
         )
         .await;
     assert!(result.is_err());
@@ -1133,7 +1144,7 @@ async fn test_remote_spec_fetching_http_error() {
 
     // Test that HTTP errors are handled properly
     let result = manager
-        .add_spec_from_url("not-found-api", &spec_url, false)
+        .add_spec_from_url("not-found-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
     if let Err(Error::RequestFailed { reason }) = result {
@@ -1164,7 +1175,7 @@ async fn test_remote_spec_fetching_invalid_yaml() {
 
     // Test that invalid YAML is rejected
     let result = manager
-        .add_spec_from_url("invalid-yaml-api", &spec_url, false)
+        .add_spec_from_url("invalid-yaml-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
     // Should get a YAML parsing error
@@ -1212,7 +1223,7 @@ paths:
 
     // Test that remote specs are validated the same as local files
     let result = manager
-        .add_spec_from_url("oauth2-api", &spec_url, false)
+        .add_spec_from_url("oauth2-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
     if let Err(Error::Validation(msg)) = result {

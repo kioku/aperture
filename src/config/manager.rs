@@ -5,7 +5,7 @@ use crate::engine::loader;
 use crate::error::Error;
 use crate::fs::{FileSystem, OsFileSystem};
 use crate::spec::{SpecTransformer, SpecValidator};
-use openapiv3::OpenAPI;
+use openapiv3::{OpenAPI, ReferenceOr};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,6 +35,190 @@ impl<F: FileSystem> ConfigManager<F> {
         Self { fs, config_dir }
     }
 
+    /// Get the configuration directory path
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
+    }
+
+    /// Convert skipped endpoints to validation warnings for display
+    #[must_use]
+    pub fn skipped_endpoints_to_warnings(
+        skipped_endpoints: &[crate::cache::models::SkippedEndpoint],
+    ) -> Vec<crate::spec::validator::ValidationWarning> {
+        skipped_endpoints
+            .iter()
+            .map(|endpoint| crate::spec::validator::ValidationWarning {
+                endpoint: crate::spec::validator::UnsupportedEndpoint {
+                    path: endpoint.path.clone(),
+                    method: endpoint.method.clone(),
+                    content_type: endpoint.content_type.clone(),
+                },
+                reason: endpoint.reason.clone(),
+            })
+            .collect()
+    }
+
+    /// Save the strict mode preference for an API
+    fn save_strict_preference(&self, api_name: &str, strict: bool) -> Result<(), Error> {
+        let mut config = self.load_global_config()?;
+        let api_config = config
+            .api_configs
+            .entry(api_name.to_string())
+            .or_insert_with(|| ApiConfig {
+                base_url_override: None,
+                environment_urls: HashMap::new(),
+                strict_mode: false,
+            });
+        api_config.strict_mode = strict;
+        self.save_global_config(&config)?;
+        Ok(())
+    }
+
+    /// Get the strict mode preference for an API
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the global config cannot be loaded
+    pub fn get_strict_preference(&self, api_name: &str) -> Result<bool, Error> {
+        let config = self.load_global_config()?;
+        Ok(config
+            .api_configs
+            .get(api_name)
+            .is_some_and(|c| c.strict_mode))
+    }
+
+    /// Count total operations in an `OpenAPI` spec
+    fn count_total_operations(spec: &OpenAPI) -> usize {
+        spec.paths
+            .iter()
+            .filter_map(|(_, path_item)| match path_item {
+                ReferenceOr::Item(item) => Some(item),
+                ReferenceOr::Reference { .. } => None,
+            })
+            .map(|item| {
+                let mut count = 0;
+                if item.get.is_some() {
+                    count += 1;
+                }
+                if item.post.is_some() {
+                    count += 1;
+                }
+                if item.put.is_some() {
+                    count += 1;
+                }
+                if item.delete.is_some() {
+                    count += 1;
+                }
+                if item.patch.is_some() {
+                    count += 1;
+                }
+                if item.head.is_some() {
+                    count += 1;
+                }
+                if item.options.is_some() {
+                    count += 1;
+                }
+                if item.trace.is_some() {
+                    count += 1;
+                }
+                count
+            })
+            .sum()
+    }
+
+    /// Display validation warnings with custom prefix
+    #[must_use]
+    pub fn format_validation_warnings(
+        warnings: &[crate::spec::validator::ValidationWarning],
+        total_operations: Option<usize>,
+        indent: &str,
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+
+        if !warnings.is_empty() {
+            // Separate warnings into skipped endpoints and mixed content warnings
+            let (skipped_warnings, mixed_warnings): (Vec<_>, Vec<_>) = warnings
+                .iter()
+                .partition(|w| w.reason.contains("no supported content types"));
+
+            // Format skipped endpoints warning if any
+            if !skipped_warnings.is_empty() {
+                let warning_msg = total_operations.map_or_else(
+                    || {
+                        format!(
+                            "{}Skipping {} endpoints with unsupported content types:",
+                            indent,
+                            skipped_warnings.len()
+                        )
+                    },
+                    |total| {
+                        let available = total.saturating_sub(skipped_warnings.len());
+                        format!(
+                            "{}Skipping {} endpoints with unsupported content types ({} of {} endpoints will be available):",
+                            indent,
+                            skipped_warnings.len(),
+                            available,
+                            total
+                        )
+                    },
+                );
+                lines.push(warning_msg);
+
+                for warning in &skipped_warnings {
+                    lines.push(format!(
+                        "{}  - {} {} ({}) - {}",
+                        indent,
+                        warning.endpoint.method,
+                        warning.endpoint.path,
+                        warning.endpoint.content_type,
+                        warning.reason
+                    ));
+                }
+            }
+
+            // Format mixed content warnings if any
+            if !mixed_warnings.is_empty() {
+                if !skipped_warnings.is_empty() {
+                    lines.push(String::new()); // Add blank line between sections
+                }
+                lines.push(format!(
+                    "{indent}Endpoints with partial content type support:"
+                ));
+                for warning in &mixed_warnings {
+                    lines.push(format!(
+                        "{}  - {} {} supports JSON but not: {}",
+                        indent,
+                        warning.endpoint.method,
+                        warning.endpoint.path,
+                        warning.endpoint.content_type
+                    ));
+                }
+            }
+        }
+
+        lines
+    }
+
+    /// Display validation warnings to stderr
+    pub fn display_validation_warnings(
+        warnings: &[crate::spec::validator::ValidationWarning],
+        total_operations: Option<usize>,
+    ) {
+        if !warnings.is_empty() {
+            let lines = Self::format_validation_warnings(warnings, total_operations, "");
+            for line in lines {
+                if line.is_empty() {
+                    eprintln!();
+                } else if line.starts_with("Skipping") || line.starts_with("Endpoints") {
+                    eprintln!("Warning: {line}");
+                } else {
+                    eprintln!("{line}");
+                }
+            }
+            eprintln!("\nUse --strict to reject specs with unsupported content types.");
+        }
+    }
+
     /// Adds a new `OpenAPI` specification to the configuration from a local file.
     ///
     /// # Errors
@@ -48,7 +232,13 @@ impl<F: FileSystem> ConfigManager<F> {
     /// # Panics
     ///
     /// Panics if the spec path parent directory is None (should not happen in normal usage).
-    pub fn add_spec(&self, name: &str, file_path: &Path, force: bool) -> Result<(), Error> {
+    pub fn add_spec(
+        &self,
+        name: &str,
+        file_path: &Path,
+        force: bool,
+        strict: bool,
+    ) -> Result<(), Error> {
         let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
 
@@ -63,11 +253,36 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Validate against Aperture's supported feature set using SpecValidator
         let validator = SpecValidator::new();
-        validator.validate(&openapi_spec)?;
+        let validation_result = validator.validate_with_mode(&openapi_spec, strict);
+
+        // Check for errors first
+        if !validation_result.is_valid() {
+            return validation_result.into_result();
+        }
+
+        // Count total operations for better UX
+        let total_operations = Self::count_total_operations(&openapi_spec);
+
+        // Display warnings if any
+        Self::display_validation_warnings(&validation_result.warnings, Some(total_operations));
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
-        let cached_spec = transformer.transform(name, &openapi_spec)?;
+
+        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
+        let skip_endpoints: Vec<(String, String)> = validation_result
+            .warnings
+            .iter()
+            .filter(|w| w.reason.contains("no supported content types"))
+            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .collect();
+
+        let cached_spec = transformer.transform_with_warnings(
+            name,
+            &openapi_spec,
+            &skip_endpoints,
+            &validation_result.warnings,
+        )?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
@@ -95,6 +310,9 @@ impl<F: FileSystem> ConfigManager<F> {
         let cache_dir = self.config_dir.join(".cache");
         let metadata_manager = CacheMetadataManager::new(&self.fs);
         metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
+
+        // Save strict mode preference
+        self.save_strict_preference(name, strict)?;
 
         Ok(())
     }
@@ -115,7 +333,13 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// Panics if the spec path parent directory is None (should not happen in normal usage).
     #[allow(clippy::future_not_send)]
-    pub async fn add_spec_from_url(&self, name: &str, url: &str, force: bool) -> Result<(), Error> {
+    pub async fn add_spec_from_url(
+        &self,
+        name: &str,
+        url: &str,
+        force: bool,
+        strict: bool,
+    ) -> Result<(), Error> {
         let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
 
@@ -131,11 +355,36 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Validate against Aperture's supported feature set using SpecValidator
         let validator = SpecValidator::new();
-        validator.validate(&openapi_spec)?;
+        let validation_result = validator.validate_with_mode(&openapi_spec, strict);
+
+        // Check for errors first
+        if !validation_result.is_valid() {
+            return validation_result.into_result();
+        }
+
+        // Count total operations for better UX
+        let total_operations = Self::count_total_operations(&openapi_spec);
+
+        // Display warnings if any
+        Self::display_validation_warnings(&validation_result.warnings, Some(total_operations));
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
-        let cached_spec = transformer.transform(name, &openapi_spec)?;
+
+        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
+        let skip_endpoints: Vec<(String, String)> = validation_result
+            .warnings
+            .iter()
+            .filter(|w| w.reason.contains("no supported content types"))
+            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .collect();
+
+        let cached_spec = transformer.transform_with_warnings(
+            name,
+            &openapi_spec,
+            &skip_endpoints,
+            &validation_result.warnings,
+        )?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
@@ -163,6 +412,9 @@ impl<F: FileSystem> ConfigManager<F> {
         let cache_dir = self.config_dir.join(".cache");
         let metadata_manager = CacheMetadataManager::new(&self.fs);
         metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
+
+        // Save strict mode preference
+        self.save_strict_preference(name, strict)?;
 
         Ok(())
     }
@@ -188,13 +440,15 @@ impl<F: FileSystem> ConfigManager<F> {
         name: &str,
         file_or_url: &str,
         force: bool,
+        strict: bool,
     ) -> Result<(), Error> {
         if is_url(file_or_url) {
-            self.add_spec_from_url(name, file_or_url, force).await
+            self.add_spec_from_url(name, file_or_url, force, strict)
+                .await
         } else {
             // Convert file path string to Path and call sync method
             let path = std::path::Path::new(file_or_url);
-            self.add_spec(name, path, force)
+            self.add_spec(name, path, force, strict)
         }
     }
 
@@ -357,6 +611,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .or_insert_with(|| ApiConfig {
                 base_url_override: None,
                 environment_urls: HashMap::new(),
+                strict_mode: false,
             });
 
         // Set the URL
@@ -467,6 +722,22 @@ impl<F: FileSystem> ConfigManager<F> {
         force: bool,
         timeout: std::time::Duration,
     ) -> Result<(), Error> {
+        // Default to non-strict mode to match CLI behavior
+        self.add_spec_from_url_with_timeout_and_mode(name, url, force, timeout, false)
+            .await
+    }
+
+    /// Test-only method to add spec from URL with custom timeout and validation mode
+    #[doc(hidden)]
+    #[allow(clippy::future_not_send)]
+    async fn add_spec_from_url_with_timeout_and_mode(
+        &self,
+        name: &str,
+        url: &str,
+        force: bool,
+        timeout: std::time::Duration,
+        strict: bool,
+    ) -> Result<(), Error> {
         let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
         let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
 
@@ -482,11 +753,32 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Validate against Aperture's supported feature set using SpecValidator
         let validator = SpecValidator::new();
-        validator.validate(&openapi_spec)?;
+        let validation_result = validator.validate_with_mode(&openapi_spec, strict);
+
+        // Check for errors first
+        if !validation_result.is_valid() {
+            return validation_result.into_result();
+        }
+
+        // Note: Not displaying warnings in test method
 
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
-        let cached_spec = transformer.transform(name, &openapi_spec)?;
+
+        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
+        let skip_endpoints: Vec<(String, String)> = validation_result
+            .warnings
+            .iter()
+            .filter(|w| w.reason.contains("no supported content types"))
+            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .collect();
+
+        let cached_spec = transformer.transform_with_warnings(
+            name,
+            &openapi_spec,
+            &skip_endpoints,
+            &validation_result.warnings,
+        )?;
 
         // Create directories
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
@@ -504,9 +796,14 @@ impl<F: FileSystem> ConfigManager<F> {
         self.fs.write_all(&spec_path, content.as_bytes())?;
 
         // Serialize and write cached representation
-        let cached_data = bincode::serialize(&cached_spec)
-            .map_err(|e| Error::Config(format!("Failed to serialize cached spec: {e}")))?;
+        let cached_data =
+            bincode::serialize(&cached_spec).map_err(|e| Error::SerializationError {
+                reason: e.to_string(),
+            })?;
         self.fs.write_all(&cache_path, &cached_data)?;
+
+        // Save strict mode preference
+        self.save_strict_preference(name, strict)?;
 
         Ok(())
     }

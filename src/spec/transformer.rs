@@ -1,6 +1,6 @@
 use crate::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
-    CachedSecurityScheme, CachedSpec, CACHE_FORMAT_VERSION,
+    CachedSecurityScheme, CachedSpec, SkippedEndpoint, CACHE_FORMAT_VERSION,
 };
 use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
@@ -26,6 +26,51 @@ impl SpecTransformer {
     ///
     /// Returns an error if parameter reference resolution fails
     pub fn transform(&self, name: &str, spec: &OpenAPI) -> Result<CachedSpec, Error> {
+        self.transform_with_filter(name, spec, &[])
+    }
+
+    /// Transforms an `OpenAPI` specification into a cached representation with endpoint filtering
+    ///
+    /// This method converts the full `OpenAPI` spec into an optimized format
+    /// that can be quickly loaded and used for CLI generation, filtering out specified endpoints.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name for the cached spec
+    /// * `spec` - The `OpenAPI` specification to transform
+    /// * `skip_endpoints` - List of endpoints to skip (path, method pairs)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parameter reference resolution fails
+    pub fn transform_with_filter(
+        &self,
+        name: &str,
+        spec: &OpenAPI,
+        skip_endpoints: &[(String, String)],
+    ) -> Result<CachedSpec, Error> {
+        self.transform_with_warnings(name, spec, skip_endpoints, &[])
+    }
+
+    /// Transforms an `OpenAPI` specification with full warning information
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name for the cached spec
+    /// * `spec` - The `OpenAPI` specification to transform
+    /// * `skip_endpoints` - List of endpoints to skip (path, method pairs)
+    /// * `warnings` - Validation warnings to store in the cached spec
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parameter reference resolution fails
+    pub fn transform_with_warnings(
+        &self,
+        name: &str,
+        spec: &OpenAPI,
+        skip_endpoints: &[(String, String)],
+        warnings: &[crate::spec::validator::ValidationWarning],
+    ) -> Result<CachedSpec, Error> {
         let mut commands = Vec::new();
 
         // Extract version from info
@@ -48,25 +93,29 @@ impl SpecTransformer {
 
         // Process all paths and operations
         for (path, path_item) in spec.paths.iter() {
-            if let ReferenceOr::Item(item) = path_item {
-                // Process each HTTP method
-                for (method, operation) in crate::spec::http_methods_iter(item) {
-                    if let Some(op) = operation {
-                        let command = Self::transform_operation(
-                            spec,
-                            method,
-                            path,
-                            op,
-                            &global_security_requirements,
-                        )?;
-                        commands.push(command);
-                    }
-                }
-            }
+            Self::process_path_item(
+                spec,
+                path,
+                path_item,
+                skip_endpoints,
+                &global_security_requirements,
+                &mut commands,
+            )?;
         }
 
         // Extract security schemes
         let security_schemes = Self::extract_security_schemes(spec);
+
+        // Convert warnings to skipped endpoints
+        let skipped_endpoints: Vec<SkippedEndpoint> = warnings
+            .iter()
+            .map(|w| SkippedEndpoint {
+                path: w.endpoint.path.clone(),
+                method: w.endpoint.method.clone(),
+                content_type: w.endpoint.content_type.clone(),
+                reason: w.reason.clone(),
+            })
+            .collect();
 
         Ok(CachedSpec {
             cache_format_version: CACHE_FORMAT_VERSION,
@@ -76,6 +125,45 @@ impl SpecTransformer {
             base_url,
             servers,
             security_schemes,
+            skipped_endpoints,
+        })
+    }
+
+    /// Process a single path item and its operations
+    fn process_path_item(
+        spec: &OpenAPI,
+        path: &str,
+        path_item: &ReferenceOr<openapiv3::PathItem>,
+        skip_endpoints: &[(String, String)],
+        global_security_requirements: &[String],
+        commands: &mut Vec<CachedCommand>,
+    ) -> Result<(), Error> {
+        let ReferenceOr::Item(item) = path_item else {
+            return Ok(());
+        };
+
+        // Process each HTTP method
+        for (method, operation) in crate::spec::http_methods_iter(item) {
+            let Some(op) = operation else {
+                continue;
+            };
+
+            if Self::should_skip_endpoint(path, method, skip_endpoints) {
+                continue;
+            }
+
+            let command =
+                Self::transform_operation(spec, method, path, op, global_security_requirements)?;
+            commands.push(command);
+        }
+
+        Ok(())
+    }
+
+    /// Check if an endpoint should be skipped
+    fn should_skip_endpoint(path: &str, method: &str, skip_endpoints: &[(String, String)]) -> bool {
+        skip_endpoints.iter().any(|(skip_path, skip_method)| {
+            skip_path == path && skip_method.eq_ignore_ascii_case(method)
         })
     }
 

@@ -40,6 +40,9 @@ pub struct ApiConfig {
     /// Environment-specific base URLs (e.g., "dev", "staging", "prod")
     #[serde(default)]
     pub environment_urls: HashMap<String, String>,
+    /// Whether this spec was added with --strict flag (preserved for reinit)
+    #[serde(default)]
+    pub strict_mode: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]

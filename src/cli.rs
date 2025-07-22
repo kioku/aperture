@@ -207,6 +207,12 @@ pub enum ConfigCommands {
         /// Overwrite existing specification if it already exists
         #[arg(long, help = "Replace the specification if it already exists")]
         force: bool,
+        /// Reject specs with unsupported features instead of skipping endpoints
+        #[arg(
+            long,
+            help = "Reject entire spec if any endpoints have unsupported content types (e.g., multipart/form-data, XML). Default behavior skips unsupported endpoints with warnings."
+        )]
+        strict: bool,
     },
     /// List all registered API specifications
     #[command(
@@ -214,7 +220,11 @@ pub enum ConfigCommands {
                       Shows the names you can use as contexts with 'aperture api'.\n\
                       Use this to see what APIs are available for command generation."
     )]
-    List {},
+    List {
+        /// Show detailed information including skipped endpoints
+        #[arg(long, help = "Show detailed information about each API")]
+        verbose: bool,
+    },
     /// Remove an API specification from configuration
     #[command(
         long_about = "Remove a registered API specification and its cached data.\n\n\

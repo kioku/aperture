@@ -176,6 +176,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
         security_schemes,
+        skipped_endpoints: vec![],
     }
 }
 
@@ -349,6 +350,7 @@ fn test_manifest_with_global_config() {
         ApiConfig {
             base_url_override: Some("https://override.example.com".to_string()),
             environment_urls: HashMap::new(),
+            strict_mode: false,
         },
     );
 

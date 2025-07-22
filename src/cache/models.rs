@@ -14,10 +14,23 @@ pub struct CachedSpec {
     pub servers: Vec<String>,
     /// Security schemes defined in the `OpenAPI` spec with `x-aperture-secret` mappings
     pub security_schemes: HashMap<String, CachedSecurityScheme>,
+    /// Endpoints skipped during validation due to unsupported features (added in v0.1.2)
+    #[serde(default)]
+    pub skipped_endpoints: Vec<SkippedEndpoint>,
+}
+
+/// Information about an endpoint that was skipped during spec validation
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SkippedEndpoint {
+    pub path: String,
+    pub method: String,
+    pub content_type: String,
+    pub reason: String,
 }
 
 /// Current cache format version - increment when making breaking changes to `CachedSpec`
-pub const CACHE_FORMAT_VERSION: u32 = 1;
+/// Version 2: Added `skipped_endpoints` field to track endpoints skipped during validation
+pub const CACHE_FORMAT_VERSION: u32 = 2;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]

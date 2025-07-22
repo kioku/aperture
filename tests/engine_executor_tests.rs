@@ -64,6 +64,7 @@ fn create_test_spec() -> CachedSpec {
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
     }
 }
 
@@ -131,6 +132,7 @@ async fn test_execute_request_with_query_params() {
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
     };
 
     Mock::given(method("GET"))
@@ -239,6 +241,7 @@ async fn test_execute_request_with_global_config_base_url() {
         base_url: None, // No base URL in spec
         servers: vec![],
         security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
     };
 
     // Create global config with API override
@@ -248,6 +251,7 @@ async fn test_execute_request_with_global_config_base_url() {
         ApiConfig {
             base_url_override: Some(mock_server.uri()),
             environment_urls: HashMap::new(),
+            strict_mode: false,
         },
     );
 
