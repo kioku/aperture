@@ -906,3 +906,64 @@ paths:
     assert!(operation_ids.contains(&"postJsonOnly"));
     assert!(!operation_ids.contains(&"postNoJson"));
 }
+
+#[test]
+fn test_empty_request_body_content() {
+    let (config_manager, _temp_dir) = create_temp_config_manager();
+
+    // Create a spec with endpoints that have empty request body content
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Empty Content API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users:
+    post:
+      operationId: createUser
+      requestBody:
+        content: {}
+        required: true
+      responses:
+        '200':
+          description: Success
+  /data:
+    put:
+      operationId: updateData
+      requestBody:
+        content: {}
+        required: false
+      responses:
+        '200':
+          description: Success
+"#;
+
+    // Write spec to temp file
+    let spec_file = _temp_dir.path().join("empty-content.yaml");
+    std::fs::write(&spec_file, spec_content).unwrap();
+
+    // Add spec - should succeed even with empty content
+    let result = config_manager.add_spec("empty-test", &spec_file, false, false);
+    assert!(
+        result.is_ok(),
+        "Should accept spec with empty request body content"
+    );
+
+    // Verify endpoints were included
+    let cache_dir = _temp_dir.path().join(".cache");
+    let cached_spec = load_cached_spec(&cache_dir, "empty-test").unwrap();
+
+    // Both endpoints should be included
+    assert_eq!(cached_spec.commands.len(), 2);
+
+    let operation_ids: Vec<&str> = cached_spec
+        .commands
+        .iter()
+        .map(|cmd| cmd.operation_id.as_str())
+        .collect();
+
+    assert!(operation_ids.contains(&"createUser"));
+    assert!(operation_ids.contains(&"updateData"));
+}

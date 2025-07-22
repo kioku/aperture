@@ -485,3 +485,75 @@ paths:
         .success()
         .stdout(predicate::str::contains("Successfully reinitialized"));
 }
+
+#[test]
+fn test_strict_mode_with_url_spec() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // Start a mock server
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mock_server = runtime.block_on(async { MockServer::start().await });
+
+    // Create a spec with multipart content
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Remote API with Multipart
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        '200':
+          description: Success
+  /upload:
+    post:
+      operationId: uploadFile
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+"#;
+
+    // Mock the GET request for the spec
+    runtime.block_on(async {
+        Mock::given(method("GET"))
+            .and(path("/spec.yaml"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(spec_content))
+            .mount(&mock_server)
+            .await;
+    });
+
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().join(".aperture");
+    let spec_url = format!("{}/spec.yaml", mock_server.uri());
+
+    // Test with --strict flag (should fail)
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(["config", "add", "--strict", "url-strict-api", &spec_url])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Unsupported request body content type",
+        ));
+
+    // Test without --strict flag (should succeed)
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(["config", "add", "url-non-strict-api", &spec_url])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Warning: Skipping 1 endpoints"));
+}
