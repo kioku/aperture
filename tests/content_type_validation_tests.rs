@@ -784,3 +784,125 @@ paths:
     assert!(operation_ids.contains(&"postProblem"));
     assert!(operation_ids.contains(&"postCustom"));
 }
+
+#[test]
+fn test_mixed_content_type_warnings() {
+    let (_config_manager, _temp_dir) = create_temp_config_manager();
+
+    // Create a spec with endpoints that have mixed content types
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Mixed Content API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /upload:
+    post:
+      operationId: uploadMixed
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+          multipart/form-data:
+            schema:
+              type: object
+          application/xml:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /data:
+    put:
+      operationId: putData
+      requestBody:
+        content:
+          text/plain:
+            schema:
+              type: string
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /json-only:
+    post:
+      operationId: postJsonOnly
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /no-json:
+    post:
+      operationId: postNoJson
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+"#;
+
+    // Write spec to temp file
+    let spec_file = _temp_dir.path().join("mixed-warnings.yaml");
+    std::fs::write(&spec_file, spec_content).unwrap();
+
+    // Use a custom test that captures stderr to check warnings
+    use std::process::Command;
+    let output = Command::new(env!("CARGO_BIN_EXE_aperture"))
+        .env("APERTURE_CONFIG_DIR", _temp_dir.path().to_str().unwrap())
+        .args(["config", "add", "mixed-test", spec_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "Should accept spec in non-strict mode"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Check for skipped endpoint warning
+    assert!(stderr.contains("Warning: Skipping 1 endpoints with unsupported content types"));
+    assert!(stderr.contains("POST /no-json"));
+    assert!(stderr.contains("endpoint has no supported content types"));
+
+    // Check for mixed content warnings
+    assert!(stderr.contains("Warning: 2 endpoints have partial content type support:"));
+    assert!(stderr.contains("POST /upload supports JSON but not:"));
+    assert!(stderr.contains("multipart/form-data"));
+    assert!(stderr.contains("application/xml"));
+    assert!(stderr.contains("PUT /data supports JSON but not: text/plain"));
+
+    // Verify the correct endpoints were included in cache
+    let cache_dir = _temp_dir.path().join(".cache");
+    let cached_spec = load_cached_spec(&cache_dir, "mixed-test").unwrap();
+
+    // Should have 3 endpoints (excluding /no-json)
+    assert_eq!(cached_spec.commands.len(), 3);
+
+    let operation_ids: Vec<&str> = cached_spec
+        .commands
+        .iter()
+        .map(|cmd| cmd.operation_id.as_str())
+        .collect();
+
+    assert!(operation_ids.contains(&"uploadMixed"));
+    assert!(operation_ids.contains(&"putData"));
+    assert!(operation_ids.contains(&"postJsonOnly"));
+    assert!(!operation_ids.contains(&"postNoJson"));
+}

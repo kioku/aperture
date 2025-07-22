@@ -114,34 +114,62 @@ impl<F: FileSystem> ConfigManager<F> {
         total_operations: Option<usize>,
     ) {
         if !warnings.is_empty() {
-            let warning_msg = total_operations.map_or_else(
-                || {
-                    format!(
-                        "Warning: Skipping {} endpoints with unsupported content types:",
-                        warnings.len()
-                    )
-                },
-                |total| {
-                    let available = total.saturating_sub(warnings.len());
-                    format!(
-                        "Warning: Skipping {} endpoints with unsupported content types ({} of {} endpoints will be available):",
-                        warnings.len(),
-                        available,
-                        total
-                    )
-                },
-            );
-            eprintln!("{warning_msg}");
+            // Separate warnings into skipped endpoints and mixed content warnings
+            let (skipped_warnings, mixed_warnings): (Vec<_>, Vec<_>) = warnings
+                .iter()
+                .partition(|w| w.reason.contains("no supported content types"));
 
-            for warning in warnings {
-                eprintln!(
-                    "  - {} {} ({}) - {}",
-                    warning.endpoint.method,
-                    warning.endpoint.path,
-                    warning.endpoint.content_type,
-                    warning.reason
+            // Display skipped endpoints warning if any
+            if !skipped_warnings.is_empty() {
+                let warning_msg = total_operations.map_or_else(
+                    || {
+                        format!(
+                            "Warning: Skipping {} endpoints with unsupported content types:",
+                            skipped_warnings.len()
+                        )
+                    },
+                    |total| {
+                        let available = total.saturating_sub(skipped_warnings.len());
+                        format!(
+                            "Warning: Skipping {} endpoints with unsupported content types ({} of {} endpoints will be available):",
+                            skipped_warnings.len(),
+                            available,
+                            total
+                        )
+                    },
                 );
+                eprintln!("{warning_msg}");
+
+                for warning in &skipped_warnings {
+                    eprintln!(
+                        "  - {} {} ({}) - {}",
+                        warning.endpoint.method,
+                        warning.endpoint.path,
+                        warning.endpoint.content_type,
+                        warning.reason
+                    );
+                }
             }
+
+            // Display mixed content warnings if any
+            if !mixed_warnings.is_empty() {
+                if !skipped_warnings.is_empty() {
+                    eprintln!(); // Add blank line between sections
+                }
+                eprintln!(
+                    "Warning: {} endpoints have partial content type support:",
+                    mixed_warnings.len()
+                );
+                for warning in &mixed_warnings {
+                    eprintln!(
+                        "  - {} {} supports JSON but not: {}",
+                        warning.endpoint.method,
+                        warning.endpoint.path,
+                        warning.endpoint.content_type
+                    );
+                }
+            }
+
             eprintln!("\nUse --strict to reject specs with unsupported content types.");
         }
     }
@@ -196,10 +224,11 @@ impl<F: FileSystem> ConfigManager<F> {
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
 
-        // Convert warnings to skip_endpoints format
+        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
+            .filter(|w| w.reason.contains("no supported content types"))
             .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
             .collect();
 
@@ -297,10 +326,11 @@ impl<F: FileSystem> ConfigManager<F> {
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
 
-        // Convert warnings to skip_endpoints format
+        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
+            .filter(|w| w.reason.contains("no supported content types"))
             .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
             .collect();
 
@@ -690,10 +720,11 @@ impl<F: FileSystem> ConfigManager<F> {
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
 
-        // Convert warnings to skip_endpoints format
+        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
+            .filter(|w| w.reason.contains("no supported content types"))
             .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
             .collect();
 

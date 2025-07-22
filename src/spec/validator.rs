@@ -370,9 +370,8 @@ impl SpecValidator {
                     ));
                     result.add_error(error);
                 }
-            } else if !has_json {
-                // In non-strict mode, only skip if there's NO supported content type
-                // Collect all unsupported types into a single warning
+            } else {
+                // In non-strict mode, generate appropriate warning
                 let content_types: Vec<String> = unsupported_types
                     .iter()
                     .map(|ct| {
@@ -381,17 +380,29 @@ impl SpecValidator {
                     })
                     .collect();
 
-                let warning = ValidationWarning {
-                    endpoint: UnsupportedEndpoint {
-                        path: path.to_string(),
-                        method: method.to_uppercase(),
-                        content_type: content_types.join(", "),
-                    },
-                    reason: "endpoint has no supported content types".to_string(),
+                let warning = if has_json {
+                    // Endpoint has JSON support, but also has unsupported types
+                    ValidationWarning {
+                        endpoint: UnsupportedEndpoint {
+                            path: path.to_string(),
+                            method: method.to_uppercase(),
+                            content_type: content_types.join(", "),
+                        },
+                        reason: "endpoint has unsupported content types alongside JSON".to_string(),
+                    }
+                } else {
+                    // Endpoint has NO JSON support, will be skipped
+                    ValidationWarning {
+                        endpoint: UnsupportedEndpoint {
+                            path: path.to_string(),
+                            method: method.to_uppercase(),
+                            content_type: content_types.join(", "),
+                        },
+                        reason: "endpoint has no supported content types".to_string(),
+                    }
                 };
                 result.add_warning(warning);
             }
-            // If has_json && !strict, the endpoint is usable with JSON, so no warning needed
         }
     }
 }
@@ -557,15 +568,27 @@ mod tests {
             .paths
             .insert("/upload".to_string(), PathRef::Item(path_item));
 
-        // Non-strict mode should NOT produce warnings when JSON is also supported
+        // Non-strict mode should produce warnings for unsupported types even when JSON is supported
         let result = validator.validate_with_mode(&spec, false);
         assert!(result.is_valid(), "Non-strict mode should be valid");
         assert_eq!(
             result.warnings.len(),
-            0,
-            "Should have no warnings for mixed content types"
+            1,
+            "Should have one warning for mixed content types"
         );
         assert_eq!(result.errors.len(), 0, "Should have no errors");
+
+        // Check the warning details
+        let warning = &result.warnings[0];
+        assert_eq!(warning.endpoint.path, "/upload");
+        assert_eq!(warning.endpoint.method, "POST");
+        assert!(warning
+            .endpoint
+            .content_type
+            .contains("multipart/form-data"));
+        assert!(warning
+            .reason
+            .contains("unsupported content types alongside JSON"));
     }
 
     #[test]
