@@ -56,48 +56,7 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                     println!("No API specifications found.");
                 } else {
                     println!("Registered API specifications:");
-                    let cache_dir = manager.config_dir().join(".cache");
-                    for spec_name in specs {
-                        println!("- {spec_name}");
-
-                        // Show skipped endpoints in verbose mode
-                        if verbose {
-                            if let Ok(cached_spec) = aperture_cli::engine::loader::load_cached_spec(
-                                &cache_dir, &spec_name,
-                            ) {
-                                if !cached_spec.skipped_endpoints.is_empty() {
-                                    // Convert to warnings for consistent display
-                                    let warnings = aperture_cli::config::manager::ConfigManager::<
-                                        aperture_cli::fs::OsFileSystem,
-                                    >::skipped_endpoints_to_warnings(
-                                        &cached_spec.skipped_endpoints,
-                                    );
-
-                                    // Count total operations for the spec
-                                    let total_operations = cached_spec.commands.len()
-                                        + warnings
-                                            .iter()
-                                            .filter(|w| {
-                                                w.reason.contains("no supported content types")
-                                            })
-                                            .count();
-
-                                    // Format warnings with indentation
-                                    let lines = aperture_cli::config::manager::ConfigManager::<
-                                        aperture_cli::fs::OsFileSystem,
-                                    >::format_validation_warnings(
-                                        &warnings,
-                                        Some(total_operations),
-                                        "  ",
-                                    );
-
-                                    for line in lines {
-                                        println!("{line}");
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    list_specs_with_details(manager, specs, verbose);
                 }
             }
             ConfigCommands::Remove { name } => {
@@ -328,6 +287,63 @@ fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> 
 
     println!("Reinitialization complete.");
     Ok(())
+}
+
+fn list_specs_with_details(
+    manager: &ConfigManager<OsFileSystem>,
+    specs: Vec<String>,
+    verbose: bool,
+) {
+    let cache_dir = manager.config_dir().join(".cache");
+
+    for spec_name in specs {
+        println!("- {spec_name}");
+
+        if !verbose {
+            continue;
+        }
+
+        // Try to load cached spec for verbose details
+        let Ok(cached_spec) =
+            aperture_cli::engine::loader::load_cached_spec(&cache_dir, &spec_name)
+        else {
+            continue;
+        };
+
+        if cached_spec.skipped_endpoints.is_empty() {
+            continue;
+        }
+
+        display_skipped_endpoints_info(&cached_spec);
+    }
+}
+
+fn display_skipped_endpoints_info(cached_spec: &aperture_cli::cache::models::CachedSpec) {
+    use aperture_cli::config::manager::ConfigManager;
+    use aperture_cli::fs::OsFileSystem;
+
+    // Convert to warnings for consistent display
+    let warnings = ConfigManager::<OsFileSystem>::skipped_endpoints_to_warnings(
+        &cached_spec.skipped_endpoints,
+    );
+
+    // Count total operations including skipped ones
+    let skipped_count = warnings
+        .iter()
+        .filter(|w| w.reason.contains("no supported content types"))
+        .count();
+    let total_operations = cached_spec.commands.len() + skipped_count;
+
+    // Format and display warnings
+    let lines = ConfigManager::<OsFileSystem>::format_validation_warnings(
+        &warnings,
+        Some(total_operations),
+        "  ",
+    );
+
+    for line in lines {
+        println!("{line}");
+    }
 }
 
 #[allow(clippy::too_many_lines)]

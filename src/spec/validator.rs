@@ -350,7 +350,21 @@ impl SpecValidator {
         result: &mut ValidationResult,
         strict: bool,
     ) {
-        // Check content types in a single pass
+        let (has_json, unsupported_types) = Self::categorize_content_types(request_body);
+
+        if unsupported_types.is_empty() {
+            return;
+        }
+
+        if strict {
+            Self::add_strict_mode_errors(path, method, &unsupported_types, result);
+        } else {
+            Self::add_non_strict_warning(path, method, has_json, &unsupported_types, result);
+        }
+    }
+
+    /// Categorize content types into JSON and unsupported
+    fn categorize_content_types(request_body: &RequestBody) -> (bool, Vec<&String>) {
         let mut has_json = false;
         let mut unsupported_types = Vec::new();
 
@@ -362,49 +376,56 @@ impl SpecValidator {
             }
         }
 
-        if !unsupported_types.is_empty() {
-            if strict {
-                // In strict mode, any unsupported content type is an error
-                for content_type in unsupported_types {
-                    let error = Error::Validation(format!(
-                        "Unsupported request body content type '{content_type}' in {method} {path}. Only 'application/json' is supported in v1.0."
-                    ));
-                    result.add_error(error);
-                }
-            } else {
-                // In non-strict mode, generate appropriate warning
-                let content_types: Vec<String> = unsupported_types
-                    .iter()
-                    .map(|ct| {
-                        let reason = Self::get_unsupported_content_type_reason(ct);
-                        format!("{ct} ({reason})")
-                    })
-                    .collect();
+        (has_json, unsupported_types)
+    }
 
-                let warning = if has_json {
-                    // Endpoint has JSON support, but also has unsupported types
-                    ValidationWarning {
-                        endpoint: UnsupportedEndpoint {
-                            path: path.to_string(),
-                            method: method.to_uppercase(),
-                            content_type: content_types.join(", "),
-                        },
-                        reason: "endpoint has unsupported content types alongside JSON".to_string(),
-                    }
-                } else {
-                    // Endpoint has NO JSON support, will be skipped
-                    ValidationWarning {
-                        endpoint: UnsupportedEndpoint {
-                            path: path.to_string(),
-                            method: method.to_uppercase(),
-                            content_type: content_types.join(", "),
-                        },
-                        reason: "endpoint has no supported content types".to_string(),
-                    }
-                };
-                result.add_warning(warning);
-            }
+    /// Add errors for unsupported content types in strict mode
+    fn add_strict_mode_errors(
+        path: &str,
+        method: &str,
+        unsupported_types: &[&String],
+        result: &mut ValidationResult,
+    ) {
+        for content_type in unsupported_types {
+            let error = Error::Validation(format!(
+                "Unsupported request body content type '{content_type}' in {method} {path}. Only 'application/json' is supported in v1.0."
+            ));
+            result.add_error(error);
         }
+    }
+
+    /// Add warning for unsupported content types in non-strict mode
+    fn add_non_strict_warning(
+        path: &str,
+        method: &str,
+        has_json: bool,
+        unsupported_types: &[&String],
+        result: &mut ValidationResult,
+    ) {
+        let content_types: Vec<String> = unsupported_types
+            .iter()
+            .map(|ct| {
+                let reason = Self::get_unsupported_content_type_reason(ct);
+                format!("{ct} ({reason})")
+            })
+            .collect();
+
+        let reason = if has_json {
+            "endpoint has unsupported content types alongside JSON"
+        } else {
+            "endpoint has no supported content types"
+        };
+
+        let warning = ValidationWarning {
+            endpoint: UnsupportedEndpoint {
+                path: path.to_string(),
+                method: method.to_uppercase(),
+                content_type: content_types.join(", "),
+            },
+            reason: reason.to_string(),
+        };
+
+        result.add_warning(warning);
     }
 }
 

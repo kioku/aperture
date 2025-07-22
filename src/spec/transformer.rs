@@ -93,28 +93,14 @@ impl SpecTransformer {
 
         // Process all paths and operations
         for (path, path_item) in spec.paths.iter() {
-            if let ReferenceOr::Item(item) = path_item {
-                // Process each HTTP method
-                for (method, operation) in crate::spec::http_methods_iter(item) {
-                    if let Some(op) = operation {
-                        // Check if this endpoint should be skipped
-                        let should_skip = skip_endpoints.iter().any(|(skip_path, skip_method)| {
-                            skip_path == path && skip_method.eq_ignore_ascii_case(method)
-                        });
-
-                        if !should_skip {
-                            let command = Self::transform_operation(
-                                spec,
-                                method,
-                                path,
-                                op,
-                                &global_security_requirements,
-                            )?;
-                            commands.push(command);
-                        }
-                    }
-                }
-            }
+            Self::process_path_item(
+                spec,
+                path,
+                path_item,
+                skip_endpoints,
+                &global_security_requirements,
+                &mut commands,
+            )?;
         }
 
         // Extract security schemes
@@ -140,6 +126,44 @@ impl SpecTransformer {
             servers,
             security_schemes,
             skipped_endpoints,
+        })
+    }
+
+    /// Process a single path item and its operations
+    fn process_path_item(
+        spec: &OpenAPI,
+        path: &str,
+        path_item: &ReferenceOr<openapiv3::PathItem>,
+        skip_endpoints: &[(String, String)],
+        global_security_requirements: &[String],
+        commands: &mut Vec<CachedCommand>,
+    ) -> Result<(), Error> {
+        let ReferenceOr::Item(item) = path_item else {
+            return Ok(());
+        };
+
+        // Process each HTTP method
+        for (method, operation) in crate::spec::http_methods_iter(item) {
+            let Some(op) = operation else {
+                continue;
+            };
+
+            if Self::should_skip_endpoint(path, method, skip_endpoints) {
+                continue;
+            }
+
+            let command =
+                Self::transform_operation(spec, method, path, op, global_security_requirements)?;
+            commands.push(command);
+        }
+
+        Ok(())
+    }
+
+    /// Check if an endpoint should be skipped
+    fn should_skip_endpoint(path: &str, method: &str, skip_endpoints: &[(String, String)]) -> bool {
+        skip_endpoints.iter().any(|(skip_path, skip_method)| {
+            skip_path == path && skip_method.eq_ignore_ascii_case(method)
         })
     }
 
