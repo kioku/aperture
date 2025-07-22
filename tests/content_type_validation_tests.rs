@@ -192,13 +192,20 @@ paths:
     let result = config_manager.add_spec("content-test", &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
-    // Load cached spec and verify only JSON endpoint was included
+    // Load cached spec and verify only JSON endpoints were included
     let cache_dir = _temp_dir.path().join(".cache");
     let cached_spec = load_cached_spec(&cache_dir, "content-test").unwrap();
 
-    // Should have only 1 endpoint (the JSON one)
-    assert_eq!(cached_spec.commands.len(), 1);
-    assert_eq!(cached_spec.commands[0].operation_id, "postJson");
+    // Should have 2 endpoints (standard JSON and the custom+json)
+    assert_eq!(cached_spec.commands.len(), 2);
+
+    let operation_ids: Vec<&str> = cached_spec
+        .commands
+        .iter()
+        .map(|cmd| cmd.operation_id.as_str())
+        .collect();
+    assert!(operation_ids.contains(&"postJson"));
+    assert!(operation_ids.contains(&"postCustom")); // application/vnd.custom+json is now accepted
 
     // Try in strict mode - should fail
     let result_strict = config_manager.add_spec("content-test-strict", &spec_file, false, true);
@@ -675,6 +682,66 @@ paths:
       responses:
         '200':
           description: Success
+  /jsonapi:
+    post:
+      operationId: postJsonApi
+      requestBody:
+        content:
+          application/vnd.api+json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /jsonld:
+    post:
+      operationId: postJsonLd
+      requestBody:
+        content:
+          application/ld+json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /hal:
+    post:
+      operationId: postHal
+      requestBody:
+        content:
+          application/hal+json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /problem:
+    post:
+      operationId: postProblem
+      requestBody:
+        content:
+          application/problem+json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /custom:
+    post:
+      operationId: postCustom
+      requestBody:
+        content:
+          application/vnd.custom+json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
 "#;
 
     // Write spec to temp file
@@ -693,7 +760,7 @@ paths:
     let cached_spec = load_cached_spec(&cache_dir, "json-test").unwrap();
     assert_eq!(
         cached_spec.commands.len(),
-        7,
+        12,
         "All JSON content type variations should be accepted"
     );
 
@@ -711,4 +778,9 @@ paths:
     assert!(operation_ids.contains(&"postBoundary"));
     assert!(operation_ids.contains(&"postSpaces"));
     assert!(operation_ids.contains(&"postTabs"));
+    assert!(operation_ids.contains(&"postJsonApi"));
+    assert!(operation_ids.contains(&"postJsonLd"));
+    assert!(operation_ids.contains(&"postHal"));
+    assert!(operation_ids.contains(&"postProblem"));
+    assert!(operation_ids.contains(&"postCustom"));
 }

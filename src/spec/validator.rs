@@ -336,7 +336,10 @@ impl SpecValidator {
             .next()
             .unwrap_or(content_type)
             .trim();
+
+        // Support standard JSON and all JSON variants (e.g., application/vnd.api+json, application/ld+json)
         base_type.eq_ignore_ascii_case("application/json")
+            || base_type.to_lowercase().ends_with("+json")
     }
 
     /// Validates a request body against Aperture's supported features
