@@ -106,3 +106,35 @@ fn test_load_cached_spec_corrupted_data() {
         panic!("Expected CachedSpecCorrupted error, got: {:?}", result);
     }
 }
+
+#[test]
+fn test_load_cached_spec_version_mismatch() {
+    let temp_dir = TempDir::new().unwrap();
+    let cache_dir = temp_dir.path();
+
+    // Create a cached spec with old version
+    let mut test_spec = create_test_cached_spec();
+    test_spec.cache_format_version = 1; // Old version (current is 2)
+
+    let cache_data = bincode::serialize(&test_spec).unwrap();
+    let cache_file = cache_dir.join("old-version-api.bin");
+    fs::write(&cache_file, cache_data).unwrap();
+
+    // Attempt to load the cached spec with old version
+    let result = load_cached_spec(cache_dir, "old-version-api");
+
+    // Should fail with version mismatch error
+    assert!(result.is_err());
+    if let Err(Error::CacheVersionMismatch {
+        name,
+        found,
+        expected,
+    }) = result
+    {
+        assert_eq!(name, "old-version-api");
+        assert_eq!(found, 1);
+        assert_eq!(expected, aperture_cli::cache::models::CACHE_FORMAT_VERSION);
+    } else {
+        panic!("Expected CacheVersionMismatch error, got: {:?}", result);
+    }
+}

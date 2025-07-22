@@ -37,6 +37,16 @@ Use --strict to reject specs with unsupported content types.
 #### Filtering Mechanism
 The `SpecTransformer` filters out endpoints flagged during validation, ensuring they are not included in the cached spec and therefore not available at runtime.
 
+#### Content Type Matching
+Content type validation is case-insensitive and ignores parameters after semicolons, following HTTP standards:
+- `application/json` ✓
+- `APPLICATION/JSON` ✓ 
+- `Application/Json` ✓
+- `application/json; charset=utf-8` ✓
+- `application/json; boundary=something` ✓
+
+This ensures maximum compatibility with real-world OpenAPI specifications that may use different content type representations.
+
 ## Consequences
 
 ### Positive

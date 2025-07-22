@@ -29,7 +29,8 @@ pub struct SkippedEndpoint {
 }
 
 /// Current cache format version - increment when making breaking changes to `CachedSpec`
-pub const CACHE_FORMAT_VERSION: u32 = 1;
+/// Version 2: Added `skipped_endpoints` field to track endpoints skipped during validation
+pub const CACHE_FORMAT_VERSION: u32 = 2;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]

@@ -611,8 +611,8 @@ impl<F: FileSystem> ConfigManager<F> {
         force: bool,
         timeout: std::time::Duration,
     ) -> Result<(), Error> {
-        // Default to strict mode for backward compatibility in tests
-        self.add_spec_from_url_with_timeout_and_mode(name, url, force, timeout, true)
+        // Default to non-strict mode to match CLI behavior
+        self.add_spec_from_url_with_timeout_and_mode(name, url, force, timeout, false)
             .await
     }
 

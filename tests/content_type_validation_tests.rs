@@ -355,11 +355,36 @@ paths:
     let cache_dir = _temp_dir.path().join(".cache");
     let cached_spec = load_cached_spec(&cache_dir, "malformed-test").unwrap();
 
-    // Only exact "application/json" should be accepted
+    // All valid JSON content types should be accepted (case-insensitive, with/without params)
     assert_eq!(
         cached_spec.commands.len(),
-        0,
-        "No endpoints should match due to case sensitivity and extra content"
+        3,
+        "Should accept: spaces, case variations, and charset parameters"
+    );
+
+    // Verify the correct endpoints were included
+    let operation_ids: Vec<&str> = cached_spec
+        .commands
+        .iter()
+        .map(|cmd| cmd.operation_id.as_str())
+        .collect();
+    assert!(
+        operation_ids.contains(&"postSpaces"),
+        "Should include endpoint with spaces around content type"
+    );
+    assert!(
+        operation_ids.contains(&"postCase"),
+        "Should include endpoint with uppercase content type"
+    );
+    assert!(
+        operation_ids.contains(&"postCharset"),
+        "Should include endpoint with charset parameter"
+    );
+
+    // Empty content type should still be skipped
+    assert!(
+        !operation_ids.contains(&"postEmpty"),
+        "Should skip endpoint with empty content type"
     );
 }
 
@@ -551,4 +576,139 @@ paths:
         0,
         "All image endpoints should be skipped"
     );
+}
+
+#[test]
+fn test_json_content_type_variations() {
+    let (config_manager, _temp_dir) = create_temp_config_manager();
+
+    // Create a spec with various valid JSON content type variations
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: JSON Content Type Variations
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /standard:
+    post:
+      operationId: postStandard
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /uppercase:
+    post:
+      operationId: postUppercase
+      requestBody:
+        content:
+          APPLICATION/JSON:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /mixedcase:
+    post:
+      operationId: postMixedCase
+      requestBody:
+        content:
+          Application/Json:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /charset:
+    post:
+      operationId: postCharset
+      requestBody:
+        content:
+          "application/json; charset=utf-8":
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /boundary:
+    post:
+      operationId: postBoundary
+      requestBody:
+        content:
+          "application/json; boundary=something":
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /spaces:
+    post:
+      operationId: postSpaces
+      requestBody:
+        content:
+          "  application/json  ":
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+  /tabs:
+    post:
+      operationId: postTabs
+      requestBody:
+        content:
+          "\tapplication/json\t":
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+"#;
+
+    // Write spec to temp file
+    let spec_file = _temp_dir.path().join("json-variations.yaml");
+    std::fs::write(&spec_file, spec_content).unwrap();
+
+    // Add spec in non-strict mode
+    let result = config_manager.add_spec("json-test", &spec_file, false, false);
+    assert!(
+        result.is_ok(),
+        "Should accept spec with JSON content type variations"
+    );
+
+    // All endpoints should be accepted
+    let cache_dir = _temp_dir.path().join(".cache");
+    let cached_spec = load_cached_spec(&cache_dir, "json-test").unwrap();
+    assert_eq!(
+        cached_spec.commands.len(),
+        7,
+        "All JSON content type variations should be accepted"
+    );
+
+    // Verify all operations are included
+    let operation_ids: Vec<&str> = cached_spec
+        .commands
+        .iter()
+        .map(|cmd| cmd.operation_id.as_str())
+        .collect();
+
+    assert!(operation_ids.contains(&"postStandard"));
+    assert!(operation_ids.contains(&"postUppercase"));
+    assert!(operation_ids.contains(&"postMixedCase"));
+    assert!(operation_ids.contains(&"postCharset"));
+    assert!(operation_ids.contains(&"postBoundary"));
+    assert!(operation_ids.contains(&"postSpaces"));
+    assert!(operation_ids.contains(&"postTabs"));
 }

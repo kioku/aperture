@@ -110,6 +110,10 @@ impl SpecValidator {
     /// - Required x-aperture-secret extensions are missing
     /// - Parameters use content-based serialization
     /// - Request bodies use non-JSON content types
+    #[deprecated(
+        since = "0.1.2",
+        note = "Use `validate_with_mode()` instead. This method defaults to strict mode which may not be desired."
+    )]
     pub fn validate(&self, spec: &OpenAPI) -> Result<(), Error> {
         self.validate_with_mode(spec, true).into_result()
     }
@@ -324,6 +328,17 @@ impl SpecValidator {
         }
     }
 
+    /// Helper function to check if a content type is JSON
+    fn is_json_content_type(content_type: &str) -> bool {
+        // Extract base type before any parameters (e.g., "application/json; charset=utf-8" -> "application/json")
+        let base_type = content_type
+            .split(';')
+            .next()
+            .unwrap_or(content_type)
+            .trim();
+        base_type.eq_ignore_ascii_case("application/json")
+    }
+
     /// Validates a request body against Aperture's supported features
     fn validate_request_body(
         path: &str,
@@ -333,11 +348,14 @@ impl SpecValidator {
         strict: bool,
     ) {
         // Check if request body has any supported content types
-        let has_json = request_body.content.contains_key("application/json");
+        let has_json = request_body
+            .content
+            .keys()
+            .any(|ct| Self::is_json_content_type(ct));
         let unsupported_types: Vec<&String> = request_body
             .content
             .keys()
-            .filter(|ct| *ct != "application/json")
+            .filter(|ct| !Self::is_json_content_type(ct))
             .collect();
 
         if !unsupported_types.is_empty() {
@@ -402,7 +420,10 @@ mod tests {
     fn test_validate_empty_spec() {
         let validator = SpecValidator::new();
         let spec = create_test_spec();
-        assert!(validator.validate(&spec).is_ok());
+        assert!(validator
+            .validate_with_mode(&spec, true)
+            .into_result()
+            .is_ok());
     }
 
     #[test]
@@ -420,7 +441,7 @@ mod tests {
         );
         spec.components = Some(components);
 
-        let result = validator.validate(&spec);
+        let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
@@ -444,7 +465,7 @@ mod tests {
         );
         spec.components = Some(components);
 
-        let result = validator.validate(&spec);
+        let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
@@ -495,7 +516,10 @@ mod tests {
 
         spec.components = Some(components);
 
-        assert!(validator.validate(&spec).is_ok());
+        assert!(validator
+            .validate_with_mode(&spec, true)
+            .into_result()
+            .is_ok());
     }
 
     #[test]
@@ -757,7 +781,7 @@ mod tests {
 
         spec.components = Some(components);
 
-        let result = validator.validate(&spec);
+        let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
@@ -788,7 +812,7 @@ mod tests {
             .insert("/users/{id}".to_string(), PathRef::Item(path_item));
 
         // Parameter references should now be allowed
-        let result = validator.validate(&spec);
+        let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_ok());
     }
 
@@ -818,7 +842,7 @@ mod tests {
             .paths
             .insert("/users".to_string(), PathRef::Item(path_item));
 
-        let result = validator.validate(&spec);
+        let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
@@ -855,7 +879,10 @@ mod tests {
         );
         spec.components = Some(components);
 
-        assert!(validator.validate(&spec).is_ok());
+        assert!(validator
+            .validate_with_mode(&spec, true)
+            .into_result()
+            .is_ok());
     }
 
     #[test]
@@ -884,7 +911,7 @@ mod tests {
         );
         spec.components = Some(components);
 
-        let result = validator.validate(&spec);
+        let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
@@ -920,7 +947,7 @@ mod tests {
         );
         spec.components = Some(components);
 
-        let result = validator.validate(&spec);
+        let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
@@ -957,7 +984,7 @@ mod tests {
         );
         spec.components = Some(components);
 
-        let result = validator.validate(&spec);
+        let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
@@ -994,7 +1021,7 @@ mod tests {
         );
         spec.components = Some(components);
 
-        let result = validator.validate(&spec);
+        let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
