@@ -277,8 +277,11 @@ fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result
     let specs_dir = config_dir.join("specs");
     let spec_path = specs_dir.join(format!("{spec_name}.yaml"));
 
-    // Re-add the spec with force to regenerate the cache (use strict=false to match new default behavior)
-    manager.add_spec(spec_name, &spec_path, true, false)?;
+    // Get the original strict mode preference (default to false if not set)
+    let strict = manager.get_strict_preference(spec_name).unwrap_or(false);
+
+    // Re-add the spec with force to regenerate the cache using original strict preference
+    manager.add_spec(spec_name, &spec_path, true, strict)?;
 
     println!("Successfully reinitialized cache for '{spec_name}'");
     Ok(())

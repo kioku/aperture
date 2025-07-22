@@ -40,6 +40,35 @@ impl<F: FileSystem> ConfigManager<F> {
         &self.config_dir
     }
 
+    /// Save the strict mode preference for an API
+    fn save_strict_preference(&self, api_name: &str, strict: bool) -> Result<(), Error> {
+        let mut config = self.load_global_config()?;
+        let api_config = config
+            .api_configs
+            .entry(api_name.to_string())
+            .or_insert_with(|| ApiConfig {
+                base_url_override: None,
+                environment_urls: HashMap::new(),
+                strict_mode: false,
+            });
+        api_config.strict_mode = strict;
+        self.save_global_config(&config)?;
+        Ok(())
+    }
+
+    /// Get the strict mode preference for an API
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the global config cannot be loaded
+    pub fn get_strict_preference(&self, api_name: &str) -> Result<bool, Error> {
+        let config = self.load_global_config()?;
+        Ok(config
+            .api_configs
+            .get(api_name)
+            .is_some_and(|c| c.strict_mode))
+    }
+
     /// Count total operations in an `OpenAPI` spec
     fn count_total_operations(spec: &OpenAPI) -> usize {
         spec.paths
@@ -208,6 +237,9 @@ impl<F: FileSystem> ConfigManager<F> {
         let metadata_manager = CacheMetadataManager::new(&self.fs);
         metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
 
+        // Save strict mode preference
+        self.save_strict_preference(name, strict)?;
+
         Ok(())
     }
 
@@ -305,6 +337,9 @@ impl<F: FileSystem> ConfigManager<F> {
         let cache_dir = self.config_dir.join(".cache");
         let metadata_manager = CacheMetadataManager::new(&self.fs);
         metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
+
+        // Save strict mode preference
+        self.save_strict_preference(name, strict)?;
 
         Ok(())
     }
@@ -501,6 +536,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .or_insert_with(|| ApiConfig {
                 base_url_override: None,
                 environment_urls: HashMap::new(),
+                strict_mode: false,
             });
 
         // Set the URL
@@ -689,6 +725,9 @@ impl<F: FileSystem> ConfigManager<F> {
                 reason: e.to_string(),
             })?;
         self.fs.write_all(&cache_path, &cached_data)?;
+
+        // Save strict mode preference
+        self.save_strict_preference(name, strict)?;
 
         Ok(())
     }

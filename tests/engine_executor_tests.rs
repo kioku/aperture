@@ -251,6 +251,7 @@ async fn test_execute_request_with_global_config_base_url() {
         ApiConfig {
             base_url_override: Some(mock_server.uri()),
             environment_urls: HashMap::new(),
+            strict_mode: false,
         },
     );
 

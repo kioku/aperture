@@ -403,3 +403,85 @@ fn test_cli_list_verbose_shows_skipped_endpoints() {
     assert!(stdout.contains("multipart/form-data (file uploads are not supported)"));
     assert!(stdout.contains("endpoint has no supported content types"));
 }
+
+#[test]
+fn test_reinit_preserves_strict_mode_preference() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().join(".aperture");
+
+    // Create a spec that passes non-strict but fails strict
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        '200':
+          description: Success
+  /upload:
+    post:
+      operationId: uploadFile
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+        required: true
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_file = temp_dir.path().join("test-spec.yaml");
+    std::fs::write(&spec_file, spec_content).unwrap();
+
+    // Add spec with --strict flag
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args([
+            "config",
+            "add",
+            "--strict",
+            "strict-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Unsupported request body content type",
+        ));
+
+    // Add spec without --strict flag (should succeed)
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args([
+            "config",
+            "add",
+            "non-strict-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Now test reinit - it should preserve the non-strict preference
+    // First, corrupt the cache to force a reinit
+    let cache_file = config_dir.join(".cache/non-strict-api.bin");
+    std::fs::write(&cache_file, b"corrupted data").unwrap();
+
+    // Reinit should succeed because it uses the saved non-strict preference
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(["config", "reinit", "non-strict-api"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Successfully reinitialized"));
+}
