@@ -521,9 +521,17 @@ fn add_authentication_header(
                             headers.insert("Authorization", header_value);
                         }
                         _ => {
-                            return Err(Error::UnsupportedAuthScheme {
-                                scheme: scheme.clone(),
-                            });
+                            // Treat any other HTTP scheme as a bearer-like token
+                            // Format: "Authorization: <scheme> <token>"
+                            // This supports Token, ApiKey, DSN, and any custom schemes
+                            let auth_value = format!("{scheme} {secret_value}");
+                            let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
+                                Error::InvalidHeaderValue {
+                                    name: "Authorization".to_string(),
+                                    reason: e.to_string(),
+                                }
+                            })?;
+                            headers.insert("Authorization", header_value);
                         }
                     }
                 }

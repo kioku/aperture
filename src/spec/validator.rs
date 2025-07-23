@@ -181,11 +181,15 @@ impl SpecValidator {
                 scheme: http_scheme,
                 ..
             } => {
-                if http_scheme != "bearer" && http_scheme != "basic" {
+                // Only reject known complex schemes that we explicitly don't support
+                // All other schemes are treated as bearer-like tokens
+                let unsupported_complex_schemes = ["negotiate", "oauth", "oauth2", "openidconnect"];
+                if unsupported_complex_schemes.contains(&http_scheme.to_lowercase().as_str()) {
                     return Err(Error::Validation(format!(
-                        "Unsupported HTTP scheme '{http_scheme}' in security scheme '{name}'. Only 'bearer' and 'basic' are supported."
+                        "HTTP scheme '{http_scheme}' in security scheme '{name}' requires complex authentication flows that are not supported in v1.0."
                     )));
                 }
+                // Any other HTTP scheme (bearer, basic, token, apikey, custom, etc.) is allowed
             }
             SecurityScheme::OAuth2 { .. } => {
                 return Err(Error::Validation(format!(
@@ -817,10 +821,11 @@ mod tests {
         let mut spec = create_test_spec();
         let mut components = Components::default();
 
+        // Use 'negotiate' which is explicitly rejected
         components.security_schemes.insert(
-            "digest".to_string(),
+            "negotiate".to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
-                scheme: "digest".to_string(),
+                scheme: "negotiate".to_string(),
                 bearer_format: None,
                 description: None,
                 extensions: Default::default(),
@@ -833,10 +838,38 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
-                assert!(msg.contains("Unsupported HTTP scheme 'digest'"));
+                assert!(msg.contains("requires complex authentication flows"));
             }
             _ => panic!("Expected Validation error"),
         }
+    }
+
+    #[test]
+    fn test_validate_custom_http_schemes_allowed() {
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+        let mut components = Components::default();
+
+        // Test various custom schemes that should now be allowed
+        let custom_schemes = vec!["digest", "token", "apikey", "dsn", "custom-auth"];
+
+        for scheme in custom_schemes {
+            components.security_schemes.insert(
+                format!("{}_auth", scheme),
+                ReferenceOr::Item(SecurityScheme::HTTP {
+                    scheme: scheme.to_string(),
+                    bearer_format: None,
+                    description: None,
+                    extensions: Default::default(),
+                }),
+            );
+        }
+
+        spec.components = Some(components);
+
+        // All custom schemes should be valid
+        let result = validator.validate_with_mode(&spec, true);
+        assert!(result.is_valid(), "Custom HTTP schemes should be allowed");
     }
 
     #[test]
