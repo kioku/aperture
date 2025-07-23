@@ -27,9 +27,37 @@ components:
 
 #### Supported Authentication Methods
 
-- **Bearer Token Authentication**: Uses `Authorization: Bearer <token>` header
-- **API Key Authentication**: Supports header-based API keys
-- **Basic Authentication**: Supports HTTP Basic auth (base64 encoded)
+1. **API Key Authentication**: Supports header, query, or cookie-based API keys
+   ```yaml
+   apiKey:
+     type: apiKey
+     in: header  # or 'query' or 'cookie'
+     name: X-API-Key
+   ```
+
+2. **HTTP Bearer Token**: Uses `Authorization: Bearer <token>` header
+   ```yaml
+   bearerAuth:
+     type: http
+     scheme: bearer
+   ```
+
+3. **HTTP Basic Authentication**: Uses `Authorization: Basic <base64>` header
+   ```yaml
+   basicAuth:
+     type: http
+     scheme: basic
+   ```
+
+4. **Custom HTTP Schemes**: Any HTTP scheme not explicitly rejected
+   ```yaml
+   # Examples: Token, DSN, ApiKey, X-Custom-Auth, etc.
+   tokenAuth:
+     type: http
+     scheme: Token  # Results in: Authorization: Token <token>
+   ```
+
+All custom HTTP schemes are treated as bearer-like tokens with the format: `Authorization: <scheme> <token>`
 
 #### Security Features
 
@@ -60,9 +88,14 @@ Aperture properly implements OpenAPI 3.0 global security inheritance, applying s
 
 ## Limitations
 
-- OAuth2 and OpenID Connect are not currently supported
-- Only header-based API key authentication is supported (query parameters are not supported)
-- Basic authentication credentials must be provided as separate username/password environment variables
+The following authentication types are explicitly not supported due to their complexity:
+
+- **OAuth2** (all flows) - Requires token management, refresh flows, and state persistence
+- **OpenID Connect** - Even more complex than OAuth2 with discovery endpoints
+- **HTTP Negotiate** (Kerberos/NTLM) - Requires complex authentication handshakes
+- **HTTP OAuth scheme** - Indicates OAuth 1.0 which requires request signing
+
+For APIs using these authentication methods, consider using alternative authentication schemes if available (e.g., API tokens or personal access tokens).
 
 ## Updates
 

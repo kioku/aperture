@@ -120,7 +120,7 @@ Aperture's v1.0 implementation will support a well-defined subset of the OpenAPI
 | `parameters` (`style`)       | **Unsupported**         | Default styles are assumed. Complex serialization is not supported.                                                       |
 | `requestBody`                | **Partially Supported** | Only `content` type `application/json` is supported. Other content types (e.g., `multipart/form-data`, `application/xml`) are skipped with warnings in non-strict mode. |
 | `responses`                  | **Supported**           | Used to validate successful response bodies.                                                                              |
-| `securitySchemes`            | **Partially Supported** | See §6 for the detailed security model. `apiKey` and `http` (bearer) are supported. `oauth2` and `openIdConnect` are not. |
+| `securitySchemes`            | **Partially Supported** | See §6 for the detailed security model. `apiKey` and `http` (bearer, basic, and custom schemes) are supported. `oauth2` and `openIdConnect` are not. |
 
 Any unsupported keyword or feature encountered during `config add` will result in a clear validation error, preventing the spec from being registered.
 
@@ -187,6 +187,21 @@ components:
 
 This configuration instructs Aperture to use the value of the `SENTRY_AUTH_TOKEN` environment variable for any operation secured by `sentryAuthToken`. If the extension is missing or the environment variable is unset, Aperture will fail with a `Config.SecretNotFound` error.
 
+**Supported Authentication Types:**
+
+1. **API Key** (`type: apiKey`): Supports header, query, or cookie placement
+2. **HTTP Bearer** (`type: http`, `scheme: bearer`): Standard Bearer token authentication
+3. **HTTP Basic** (`type: http`, `scheme: basic`): Basic authentication with base64 encoding
+4. **Custom HTTP Schemes** (`type: http`, `scheme: <custom>`): Any scheme not explicitly rejected (e.g., Token, DSN, ApiKey)
+
+Custom HTTP schemes are treated as bearer-like tokens, resulting in `Authorization: <scheme> <token>` headers.
+
+**Explicitly Unsupported:**
+- OAuth2 (all flows)
+- OpenID Connect
+- HTTP Negotiate (Kerberos/NTLM)
+- HTTP OAuth
+
 ## 7. Agent-Facing Contracts
 
 ### 7.1. Global Agent Flags
@@ -224,7 +239,7 @@ Aperture is **strict by default**. If an API returns a successful (2xx) status c
 
 This SDD describes Product v1.0. Future development will focus on:
 
-- **v1.1:** Introduce a generic pagination helper (`--auto-paginate`). Add support for non-interactive OAuth2 grants (`client_credentials`).
+- **v1.1:** Introduce a generic pagination helper (`--auto-paginate`). Add support for non-interactive OAuth2 grants (`client_credentials`). ~~Custom HTTP scheme support~~ (COMPLETED in v0.1.4).
 - **v1.2:** Add a `aperture config set <key> <value>` command for managing `config.toml`. Expand command validation and error reporting capabilities.
 - **v2.0:** Introduce keychain integration as an additional `SecretSource`. Expand OpenAPI support to include more complex features.
 

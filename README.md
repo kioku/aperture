@@ -33,18 +33,85 @@ Aperture follows a two-phase approach:
 
 ### Security Model
 
-Authentication is handled through custom `x-aperture-secret` extensions in OpenAPI specs that map security schemes to environment variables:
+Authentication is handled through custom `x-aperture-secret` extensions in OpenAPI specs that map security schemes to environment variables.
 
+#### Supported Authentication Schemes
+
+1. **API Key** (header, query, or cookie)
 ```yaml
 components:
   securitySchemes:
-    apiToken:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      x-aperture-secret:
+        source: env
+        name: API_KEY
+```
+
+2. **HTTP Bearer Token**
+```yaml
+components:
+  securitySchemes:
+    bearerAuth:
       type: http
       scheme: bearer
       x-aperture-secret:
         source: env
         name: API_TOKEN
 ```
+
+3. **HTTP Basic Authentication**
+```yaml
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      x-aperture-secret:
+        source: env
+        name: BASIC_CREDENTIALS  # Format: base64(username:password)
+```
+
+4. **Custom HTTP Schemes** (Token, DSN, ApiKey, proprietary schemes)
+```yaml
+components:
+  securitySchemes:
+    # Common alternative to Bearer
+    tokenAuth:
+      type: http
+      scheme: Token
+      x-aperture-secret:
+        source: env
+        name: API_TOKEN
+    
+    # Sentry-style DSN authentication
+    dsnAuth:
+      type: http
+      scheme: DSN
+      x-aperture-secret:
+        source: env
+        name: SENTRY_DSN
+    
+    # Any custom scheme name
+    customAuth:
+      type: http
+      scheme: X-CompanyAuth-V2
+      x-aperture-secret:
+        source: env
+        name: COMPANY_TOKEN
+```
+
+All custom HTTP schemes are treated as bearer-like tokens and formatted as: `Authorization: <scheme> <token>`
+
+#### Unsupported Authentication
+
+The following authentication types require complex flows and are not supported:
+- OAuth2 (all flows)
+- OpenID Connect
+- HTTP Negotiate (Kerberos/NTLM)
+- HTTP OAuth scheme
 
 ### Parameter References
 
