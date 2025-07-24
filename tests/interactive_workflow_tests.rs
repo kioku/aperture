@@ -6,7 +6,9 @@ use mockall::mock;
 use aperture_cli::interactive::mock::InputOutput;
 use aperture_cli::interactive::{
     confirm_with_io, prompt_for_input_with_io, select_from_options_with_io, validate_env_var_name,
+    prompt_for_input_with_io_and_timeout, confirm_with_io_and_timeout,
 };
+use std::time::Duration;
 
 // Create our own mock for integration tests since the one in the lib is only available in unit tests
 mock! {
@@ -17,6 +19,7 @@ mock! {
         fn println(&self, text: &str) -> Result<(), aperture_cli::error::Error>;
         fn flush(&self) -> Result<(), aperture_cli::error::Error>;
         fn read_line(&self) -> Result<String, aperture_cli::error::Error>;
+        fn read_line_with_timeout(&self, timeout: std::time::Duration) -> Result<String, aperture_cli::error::Error>;
     }
 }
 
@@ -33,9 +36,9 @@ fn test_prompt_for_input_with_valid_input() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("test_value\n".to_string()));
+        .returning(|_| Ok("test_value\n".to_string()));
     
     let result = prompt_for_input_with_io("Enter name: ", &mock);
     assert!(result.is_ok());
@@ -56,9 +59,9 @@ fn test_prompt_for_input_with_too_long_input() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(move || Ok(format!("{long_input}\n")));
+        .returning(move |_| Ok(format!("{long_input}\n")));
     
     let result = prompt_for_input_with_io("Enter text: ", &mock);
     assert!(result.is_err());
@@ -78,9 +81,9 @@ fn test_prompt_for_input_with_control_characters() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("test\x00invalid\n".to_string()));
+        .returning(|_| Ok("test\x00invalid\n".to_string()));
     
     let result = prompt_for_input_with_io("Enter text: ", &mock);
     assert!(result.is_err());
@@ -120,9 +123,9 @@ fn test_select_from_options_with_number_selection() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("2\n".to_string()));
+        .returning(|_| Ok("2\n".to_string()));
     
     let result = select_from_options_with_io("Choose an option:", &options, &mock);
     assert!(result.is_ok());
@@ -162,9 +165,9 @@ fn test_select_from_options_with_name_selection() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("apikey\n".to_string())); // case insensitive
+        .returning(|_| Ok("apikey\n".to_string())); // case insensitive
     
     let result = select_from_options_with_io("Choose auth method:", &options, &mock);
     assert!(result.is_ok());
@@ -198,9 +201,9 @@ fn test_select_from_options_with_empty_input_and_cancellation() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("\n".to_string())); // empty input
+        .returning(|_| Ok("\n".to_string())); // empty input
     
     // Cancellation confirmation
     mock.expect_print()
@@ -212,9 +215,9 @@ fn test_select_from_options_with_empty_input_and_cancellation() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("n\n".to_string())); // choose to cancel
+        .returning(|_| Ok("n\n".to_string())); // choose to cancel
     
     let result = select_from_options_with_io("Choose:", &options, &mock);
     assert!(result.is_err());
@@ -248,9 +251,9 @@ fn test_select_from_options_with_invalid_input_retry() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("invalid\n".to_string()));
+        .returning(|_| Ok("invalid\n".to_string()));
     
     // Error message
     mock.expect_println()
@@ -268,9 +271,9 @@ fn test_select_from_options_with_invalid_input_retry() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("1\n".to_string()));
+        .returning(|_| Ok("1\n".to_string()));
     
     let result = select_from_options_with_io("Choose:", &options, &mock);
     assert!(result.is_ok());
@@ -290,9 +293,9 @@ fn test_confirm_with_yes_response() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("y\n".to_string()));
+        .returning(|_| Ok("y\n".to_string()));
     
     let result = confirm_with_io("Continue?", &mock);
     assert!(result.is_ok());
@@ -312,9 +315,9 @@ fn test_confirm_with_no_response() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("no\n".to_string()));
+        .returning(|_| Ok("no\n".to_string()));
     
     let result = confirm_with_io("Delete file?", &mock);
     assert!(result.is_ok());
@@ -334,9 +337,9 @@ fn test_confirm_with_empty_input() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("\n".to_string())); // empty input
+        .returning(|_| Ok("\n".to_string())); // empty input
     
     let result = confirm_with_io("Continue?", &mock);
     assert!(result.is_ok());
@@ -357,9 +360,9 @@ fn test_confirm_with_invalid_input_retry() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("maybe\n".to_string()));
+        .returning(|_| Ok("maybe\n".to_string()));
     
     // Error message
     mock.expect_println()
@@ -377,9 +380,9 @@ fn test_confirm_with_invalid_input_retry() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("yes\n".to_string()));
+        .returning(|_| Ok("yes\n".to_string()));
     
     let result = confirm_with_io("Save changes?", &mock);
     assert!(result.is_ok());
@@ -441,9 +444,9 @@ fn test_end_to_end_interactive_workflow() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("bearerAuth\n".to_string()));
+        .returning(|_| Ok("bearerAuth\n".to_string()));
     
     // Confirm selection
     mock.expect_print()
@@ -455,9 +458,9 @@ fn test_end_to_end_interactive_workflow() {
         .times(1)
         .returning(|| Ok(()));
     
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("y\n".to_string()));
+        .returning(|_| Ok("y\n".to_string()));
     
     // Execute the workflow
     let selected = select_from_options_with_io("Select authentication method:", &options, &mock);
@@ -492,9 +495,9 @@ fn test_multiple_retry_attempts_until_max() {
         .times(1)
         .returning(|_| Ok(()));
     mock.expect_flush().times(1).returning(|| Ok(()));
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("invalid1\n".to_string()));
+        .returning(|_| Ok("invalid1\n".to_string()));
     mock.expect_println()
         .with(eq("Invalid selection. Please enter a number (1-1) or a valid name. (Attempt 1 of 3)"))
         .times(1)
@@ -506,9 +509,9 @@ fn test_multiple_retry_attempts_until_max() {
         .times(1)
         .returning(|_| Ok(()));
     mock.expect_flush().times(1).returning(|| Ok(()));
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("invalid2\n".to_string()));
+        .returning(|_| Ok("invalid2\n".to_string()));
     mock.expect_println()
         .with(eq("Invalid selection. Please enter a number (1-1) or a valid name. (Attempt 2 of 3)"))
         .times(1)
@@ -520,11 +523,111 @@ fn test_multiple_retry_attempts_until_max() {
         .times(1)
         .returning(|_| Ok(()));
     mock.expect_flush().times(1).returning(|| Ok(()));
-    mock.expect_read_line()
+    mock.expect_read_line_with_timeout()
         .times(1)
-        .returning(|| Ok("invalid3\n".to_string()));
+        .returning(|_| Ok("invalid3\n".to_string()));
     
     let result = select_from_options_with_io("Choose:", &options, &mock);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Maximum retry attempts"));
+}
+
+#[test]
+fn test_prompt_with_timeout_success() {
+    let mut mock = MockInputOutputImpl::new();
+    let timeout = Duration::from_secs(5);
+    
+    mock.expect_print()
+        .with(eq("Enter value: "))
+        .times(1)
+        .returning(|_| Ok(()));
+    
+    mock.expect_flush()
+        .times(1)
+        .returning(|| Ok(()));
+    
+    mock.expect_read_line_with_timeout()
+        .with(eq(timeout))
+        .times(1)
+        .returning(|_| Ok("test_value\n".to_string()));
+    
+    let result = prompt_for_input_with_io_and_timeout("Enter value: ", &mock, timeout);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), "test_value");
+}
+
+#[test]
+fn test_prompt_with_timeout_failure() {
+    let mut mock = MockInputOutputImpl::new();
+    let timeout = Duration::from_secs(1);
+    
+    mock.expect_print()
+        .with(eq("Enter value: "))
+        .times(1)
+        .returning(|_| Ok(()));
+    
+    mock.expect_flush()
+        .times(1)
+        .returning(|| Ok(()));
+    
+    mock.expect_read_line_with_timeout()
+        .with(eq(timeout))
+        .times(1)
+        .returning(|_| Err(aperture_cli::error::Error::InvalidConfig {
+            reason: "Input timeout after 1 seconds".to_string(),
+        }));
+    
+    let result = prompt_for_input_with_io_and_timeout("Enter value: ", &mock, timeout);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("timeout"));
+}
+
+#[test]
+fn test_confirm_with_timeout_success() {
+    let mut mock = MockInputOutputImpl::new();
+    let timeout = Duration::from_secs(5);
+    
+    mock.expect_print()
+        .with(eq("Continue? (y/n): "))
+        .times(1)
+        .returning(|_| Ok(()));
+    
+    mock.expect_flush()
+        .times(1)
+        .returning(|| Ok(()));
+    
+    mock.expect_read_line_with_timeout()
+        .with(eq(timeout))
+        .times(1)
+        .returning(|_| Ok("y\n".to_string()));
+    
+    let result = confirm_with_io_and_timeout("Continue?", &mock, timeout);
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+}
+
+#[test]
+fn test_confirm_with_timeout_failure() {
+    let mut mock = MockInputOutputImpl::new();
+    let timeout = Duration::from_secs(1);
+    
+    mock.expect_print()
+        .with(eq("Save? (y/n): "))
+        .times(1)
+        .returning(|_| Ok(()));
+    
+    mock.expect_flush()
+        .times(1)
+        .returning(|| Ok(()));
+    
+    mock.expect_read_line_with_timeout()
+        .with(eq(timeout))
+        .times(1)
+        .returning(|_| Err(aperture_cli::error::Error::InvalidConfig {
+            reason: "Input timeout after 1 seconds".to_string(),
+        }));
+    
+    let result = confirm_with_io_and_timeout("Save?", &mock, timeout);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("timeout"));
 }

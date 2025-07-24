@@ -1,4 +1,5 @@
 use crate::error::Error;
+use std::time::Duration;
 
 pub mod mock;
 
@@ -9,6 +10,9 @@ const MAX_INPUT_LENGTH: usize = 1024;
 
 /// Maximum number of retry attempts for invalid input
 const MAX_RETRIES: usize = 3;
+
+/// Default timeout for user input operations
+const INPUT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Reserved environment variable names that should not be used
 const RESERVED_ENV_VARS: &[&str] = &[
@@ -41,6 +45,16 @@ pub fn prompt_for_input(prompt: &str) -> Result<String, Error> {
     prompt_for_input_with_io(prompt, &io)
 }
 
+/// Prompt the user for input with a custom timeout
+///
+/// # Errors
+/// Returns an error if stdin/stdout operations fail, input is too long,
+/// contains invalid characters, or times out
+pub fn prompt_for_input_with_timeout(prompt: &str, timeout: Duration) -> Result<String, Error> {
+    let io = mock::RealInputOutput;
+    prompt_for_input_with_io_and_timeout(prompt, &io, timeout)
+}
+
 /// Present a menu of options and return the selected value
 ///
 /// # Errors
@@ -51,6 +65,20 @@ pub fn select_from_options(prompt: &str, options: &[(String, String)]) -> Result
     select_from_options_with_io(prompt, options, &io)
 }
 
+/// Present a menu of options with timeout and return the selected value
+///
+/// # Errors
+/// Returns an error if no options are provided, if stdin operations fail,
+/// maximum retry attempts are exceeded, or timeout occurs
+pub fn select_from_options_with_timeout(
+    prompt: &str,
+    options: &[(String, String)],
+    timeout: Duration,
+) -> Result<String, Error> {
+    let io = mock::RealInputOutput;
+    select_from_options_with_io_and_timeout(prompt, options, &io, timeout)
+}
+
 /// Ask for user confirmation with yes/no prompt
 ///
 /// # Errors
@@ -58,6 +86,15 @@ pub fn select_from_options(prompt: &str, options: &[(String, String)]) -> Result
 pub fn confirm(prompt: &str) -> Result<bool, Error> {
     let io = mock::RealInputOutput;
     confirm_with_io(prompt, &io)
+}
+
+/// Ask for user confirmation with yes/no prompt and timeout
+///
+/// # Errors
+/// Returns an error if stdin operations fail, maximum retry attempts are exceeded, or timeout occurs
+pub fn confirm_with_timeout(prompt: &str, timeout: Duration) -> Result<bool, Error> {
+    let io = mock::RealInputOutput;
+    confirm_with_io_and_timeout(prompt, &io, timeout)
 }
 
 /// Validates an environment variable name
@@ -117,10 +154,19 @@ pub fn prompt_for_input_with_io<T: InputOutput>(
     prompt: &str,
     io: &T,
 ) -> Result<String, Error> {
+    prompt_for_input_with_io_and_timeout(prompt, io, INPUT_TIMEOUT)
+}
+
+/// Testable version of prompt_for_input with configurable timeout
+pub fn prompt_for_input_with_io_and_timeout<T: InputOutput>(
+    prompt: &str,
+    io: &T,
+    timeout: Duration,
+) -> Result<String, Error> {
     io.print(prompt)?;
     io.flush()?;
 
-    let input = io.read_line()?;
+    let input = io.read_line_with_timeout(timeout)?;
     let trimmed_input = input.trim();
 
     // Validate input length
@@ -149,6 +195,16 @@ pub fn select_from_options_with_io<T: InputOutput>(
     options: &[(String, String)],
     io: &T,
 ) -> Result<String, Error> {
+    select_from_options_with_io_and_timeout(prompt, options, io, INPUT_TIMEOUT)
+}
+
+/// Testable version of select_from_options with configurable timeout
+pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
+    prompt: &str,
+    options: &[(String, String)],
+    io: &T,
+    timeout: Duration,
+) -> Result<String, Error> {
     if options.is_empty() {
         return Err(Error::InvalidConfig {
             reason: "No options available for selection".to_string(),
@@ -161,11 +217,11 @@ pub fn select_from_options_with_io<T: InputOutput>(
     }
 
     for attempt in 1..=MAX_RETRIES {
-        let selection = prompt_for_input_with_io("Enter your choice (number or name): ", io)?;
+        let selection = prompt_for_input_with_io_and_timeout("Enter your choice (number or name): ", io, timeout)?;
 
         // Handle empty input as cancellation
         if selection.is_empty() {
-            if !confirm_with_io("Do you want to continue with the current operation?", io)? {
+            if !confirm_with_io_and_timeout("Do you want to continue with the current operation?", io, timeout)? {
                 return Err(Error::InvalidConfig {
                     reason: "Selection cancelled by user".to_string(),
                 });
@@ -204,8 +260,17 @@ pub fn select_from_options_with_io<T: InputOutput>(
 
 /// Testable version of confirm that accepts an InputOutput trait
 pub fn confirm_with_io<T: InputOutput>(prompt: &str, io: &T) -> Result<bool, Error> {
+    confirm_with_io_and_timeout(prompt, io, INPUT_TIMEOUT)
+}
+
+/// Testable version of confirm with configurable timeout
+pub fn confirm_with_io_and_timeout<T: InputOutput>(
+    prompt: &str,
+    io: &T,
+    timeout: Duration,
+) -> Result<bool, Error> {
     for attempt in 1..=MAX_RETRIES {
-        let response = prompt_for_input_with_io(&format!("{prompt} (y/n): "), io)?;
+        let response = prompt_for_input_with_io_and_timeout(&format!("{prompt} (y/n): "), io, timeout)?;
 
         // Handle empty input as cancellation
         if response.is_empty() {
