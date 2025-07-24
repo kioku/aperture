@@ -316,7 +316,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should fail - 'oauth' as HTTP scheme suggests complex flows
-    let result = manager.add_spec("oauth-http", &spec_path, false, false);
+    let result = manager.add_spec("oauth-http", &spec_path, false, true); // Use strict mode
     assert!(result.is_err());
     if let Err(Error::Validation(msg)) = result {
         assert!(
@@ -360,7 +360,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should fail - Negotiate requires complex Kerberos/NTLM flows
-    let result = manager.add_spec("negotiate-api", &spec_path, false, false);
+    let result = manager.add_spec("negotiate-api", &spec_path, false, true); // Use strict mode
     assert!(result.is_err());
     if let Err(Error::Validation(msg)) = result {
         assert!(
