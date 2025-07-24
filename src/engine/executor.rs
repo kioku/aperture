@@ -430,6 +430,17 @@ fn build_headers(
     Ok(headers)
 }
 
+/// Validates that a header value doesn't contain control characters
+fn validate_header_value(name: &str, value: &str) -> Result<(), Error> {
+    if value.chars().any(|c| c == '\r' || c == '\n' || c == '\0') {
+        return Err(Error::InvalidHeaderValue {
+            name: name.to_string(),
+            reason: "Header value contains invalid control characters (newline, carriage return, or null)".to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Parses a custom header string in the format "Name: Value" or "Name:Value"
 fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
     // Find the colon separator
@@ -455,6 +466,9 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
         value.to_string()
     };
 
+    // Validate the header value
+    validate_header_value(name, &expanded_value)?;
+
     Ok((name.to_string(), expanded_value))
 }
 
@@ -471,6 +485,9 @@ fn add_authentication_header(
                 scheme_name: security_scheme.name.clone(),
                 env_var: aperture_secret.name.clone(),
             })?;
+
+        // Validate the secret doesn't contain control characters
+        validate_header_value("Authorization", &secret_value)?;
 
         // Build the appropriate header based on scheme type
         match security_scheme.scheme_type.as_str() {
