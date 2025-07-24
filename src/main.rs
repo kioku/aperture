@@ -142,8 +142,7 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 interactive,
             } => {
                 if interactive {
-                    // TODO: Implement interactive mode
-                    println!("Interactive mode not yet implemented for API '{api_name}'");
+                    manager.set_secret_interactive(&api_name)?;
                 } else if let (Some(scheme), Some(env_var)) = (scheme_name, env) {
                     manager.set_secret(&api_name, &scheme, &env_var)?;
                     println!("Set secret for scheme '{scheme}' in API '{api_name}' to use environment variable '{env_var}'");
