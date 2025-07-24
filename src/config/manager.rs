@@ -319,11 +319,14 @@ impl<F: FileSystem> ConfigManager<F> {
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
 
-        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
+        // Convert warnings to skip_endpoints format - skip endpoints with unsupported content types or auth
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
-            .filter(|w| w.reason.contains("no supported content types"))
+            .filter(|w| {
+                w.reason.contains("no supported content types")
+                    || w.reason.contains("unsupported authentication")
+            })
             .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
             .collect();
 
@@ -421,11 +424,14 @@ impl<F: FileSystem> ConfigManager<F> {
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
 
-        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
+        // Convert warnings to skip_endpoints format - skip endpoints with unsupported content types or auth
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
-            .filter(|w| w.reason.contains("no supported content types"))
+            .filter(|w| {
+                w.reason.contains("no supported content types")
+                    || w.reason.contains("unsupported authentication")
+            })
             .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
             .collect();
 
@@ -815,11 +821,14 @@ impl<F: FileSystem> ConfigManager<F> {
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
 
-        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
+        // Convert warnings to skip_endpoints format - skip endpoints with unsupported content types or auth
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
-            .filter(|w| w.reason.contains("no supported content types"))
+            .filter(|w| {
+                w.reason.contains("no supported content types")
+                    || w.reason.contains("unsupported authentication")
+            })
             .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
             .collect();
 
