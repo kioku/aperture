@@ -71,7 +71,7 @@ components:
       scheme: basic
       x-aperture-secret:
         source: env
-        name: BASIC_CREDENTIALS  # Format: base64(username:password)
+        name: BASIC_CREDENTIALS  # Format: username:password (will be base64 encoded automatically)
 ```
 
 4. **Custom HTTP Schemes** (Token, DSN, ApiKey, proprietary schemes)

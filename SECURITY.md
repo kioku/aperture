@@ -47,6 +47,9 @@ components:
    basicAuth:
      type: http
      scheme: basic
+     x-aperture-secret:
+       source: env
+       name: BASIC_CREDS  # Format: username:password (base64 encoding handled automatically)
    ```
 
 4. **Custom HTTP Schemes**: Any HTTP scheme not explicitly rejected
