@@ -477,6 +477,13 @@ fn add_authentication_header(
     headers: &mut HeaderMap,
     security_scheme: &CachedSecurityScheme,
 ) -> Result<(), Error> {
+    // Debug logging when RUST_LOG is set
+    if std::env::var("RUST_LOG").is_ok() {
+        eprintln!(
+            "[DEBUG] Adding authentication header for scheme: {} (type: {})",
+            security_scheme.name, security_scheme.scheme_type
+        );
+    }
     // Only process schemes that have aperture_secret mappings
     if let Some(aperture_secret) = &security_scheme.aperture_secret {
         // Read the secret from the environment variable
@@ -525,6 +532,11 @@ fn add_authentication_header(
                                 }
                             })?;
                             headers.insert("Authorization", header_value);
+
+                            // Debug logging
+                            if std::env::var("RUST_LOG").is_ok() {
+                                eprintln!("[DEBUG] Added Bearer authentication header");
+                            }
                         }
                         "basic" => {
                             // Basic auth expects "username:password" format in the secret
@@ -540,6 +552,13 @@ fn add_authentication_header(
                                 }
                             })?;
                             headers.insert("Authorization", header_value);
+
+                            // Debug logging
+                            if std::env::var("RUST_LOG").is_ok() {
+                                eprintln!(
+                                    "[DEBUG] Added Basic authentication header (base64 encoded)"
+                                );
+                            }
                         }
                         _ => {
                             // Treat any other HTTP scheme as a bearer-like token
@@ -553,6 +572,13 @@ fn add_authentication_header(
                                 }
                             })?;
                             headers.insert("Authorization", header_value);
+
+                            // Debug logging
+                            if std::env::var("RUST_LOG").is_ok() {
+                                eprintln!(
+                                    "[DEBUG] Added custom HTTP auth header with scheme: {scheme}"
+                                );
+                            }
                         }
                     }
                 }
