@@ -56,6 +56,25 @@ pub struct ValidationWarning {
     pub reason: String,
 }
 
+impl ValidationWarning {
+    /// Determines if this warning should result in a skipped endpoint
+    #[must_use]
+    pub fn should_skip_endpoint(&self) -> bool {
+        self.reason.contains("no supported content types")
+            || self.reason.contains("unsupported authentication")
+    }
+
+    /// Converts to a skipped endpoint tuple if applicable
+    #[must_use]
+    pub fn to_skip_endpoint(&self) -> Option<(String, String)> {
+        if self.should_skip_endpoint() {
+            Some((self.endpoint.path.clone(), self.endpoint.method.clone()))
+        } else {
+            None
+        }
+    }
+}
+
 /// Details about an unsupported endpoint
 #[derive(Debug, Clone)]
 pub struct UnsupportedEndpoint {

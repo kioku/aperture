@@ -7,6 +7,46 @@ use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, Securit
 use serde_json;
 use std::collections::HashMap;
 
+/// Options for transforming an `OpenAPI` specification
+#[derive(Debug, Clone)]
+pub struct TransformOptions {
+    /// The name of the API
+    pub name: String,
+    /// Endpoints to skip during transformation
+    pub skip_endpoints: Vec<(String, String)>,
+    /// Validation warnings to include in the cached spec
+    pub warnings: Vec<crate::spec::validator::ValidationWarning>,
+}
+
+impl TransformOptions {
+    /// Creates new transform options with the given API name
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            skip_endpoints: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    /// Sets the endpoints to skip
+    #[must_use]
+    pub fn with_skip_endpoints(mut self, endpoints: Vec<(String, String)>) -> Self {
+        self.skip_endpoints = endpoints;
+        self
+    }
+
+    /// Sets the validation warnings
+    #[must_use]
+    pub fn with_warnings(
+        mut self,
+        warnings: Vec<crate::spec::validator::ValidationWarning>,
+    ) -> Self {
+        self.warnings = warnings;
+        self
+    }
+}
+
 /// Transforms `OpenAPI` specifications into Aperture's cached format
 pub struct SpecTransformer;
 
@@ -15,6 +55,27 @@ impl SpecTransformer {
     #[must_use]
     pub const fn new() -> Self {
         Self
+    }
+
+    /// Transforms an `OpenAPI` specification into a cached representation using options
+    ///
+    /// This method converts the full `OpenAPI` spec into an optimized format
+    /// that can be quickly loaded and used for CLI generation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parameter reference resolution fails
+    pub fn transform_with_options(
+        &self,
+        spec: &OpenAPI,
+        options: &TransformOptions,
+    ) -> Result<CachedSpec, Error> {
+        self.transform_with_warnings(
+            &options.name,
+            spec,
+            &options.skip_endpoints,
+            &options.warnings,
+        )
     }
 
     /// Transforms an `OpenAPI` specification into a cached representation

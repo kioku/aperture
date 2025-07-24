@@ -323,11 +323,7 @@ impl<F: FileSystem> ConfigManager<F> {
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
-            .filter(|w| {
-                w.reason.contains("no supported content types")
-                    || w.reason.contains("unsupported authentication")
-            })
-            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .filter_map(super::super::spec::validator::ValidationWarning::to_skip_endpoint)
             .collect();
 
         let cached_spec = transformer.transform_with_warnings(
@@ -428,11 +424,7 @@ impl<F: FileSystem> ConfigManager<F> {
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
-            .filter(|w| {
-                w.reason.contains("no supported content types")
-                    || w.reason.contains("unsupported authentication")
-            })
-            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .filter_map(super::super::spec::validator::ValidationWarning::to_skip_endpoint)
             .collect();
 
         let cached_spec = transformer.transform_with_warnings(
@@ -825,11 +817,7 @@ impl<F: FileSystem> ConfigManager<F> {
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
-            .filter(|w| {
-                w.reason.contains("no supported content types")
-                    || w.reason.contains("unsupported authentication")
-            })
-            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .filter_map(super::super::spec::validator::ValidationWarning::to_skip_endpoint)
             .collect();
 
         let cached_spec = transformer.transform_with_warnings(

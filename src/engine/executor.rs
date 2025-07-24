@@ -11,6 +11,30 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
 
+/// Represents supported authentication schemes
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthScheme {
+    Bearer,
+    Basic,
+    Token,
+    DSN,
+    ApiKey,
+    Custom(String),
+}
+
+impl From<&str> for AuthScheme {
+    fn from(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "bearer" => Self::Bearer,
+            "basic" => Self::Basic,
+            "token" => Self::Token,
+            "dsn" => Self::DSN,
+            "apikey" => Self::ApiKey,
+            _ => Self::Custom(s.to_string()),
+        }
+    }
+}
+
 /// Maximum number of rows to display in table format to prevent memory exhaustion
 const MAX_TABLE_ROWS: usize = 1000;
 
@@ -521,64 +545,51 @@ fn add_authentication_header(
                 }
             }
             "http" => {
-                if let Some(scheme) = &security_scheme.scheme {
-                    match scheme.as_str() {
-                        "bearer" => {
-                            let auth_value = format!("Bearer {secret_value}");
-                            let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
-                                Error::InvalidHeaderValue {
-                                    name: "Authorization".to_string(),
-                                    reason: e.to_string(),
-                                }
-                            })?;
-                            headers.insert("Authorization", header_value);
-
-                            // Debug logging
-                            if std::env::var("RUST_LOG").is_ok() {
-                                eprintln!("[DEBUG] Added Bearer authentication header");
-                            }
+                if let Some(scheme_str) = &security_scheme.scheme {
+                    let auth_scheme: AuthScheme = scheme_str.as_str().into();
+                    let auth_value = match &auth_scheme {
+                        AuthScheme::Bearer => {
+                            format!("Bearer {secret_value}")
                         }
-                        "basic" => {
+                        AuthScheme::Basic => {
                             // Basic auth expects "username:password" format in the secret
                             // The secret should contain the raw "username:password" string
                             // We'll base64 encode it before adding to the header
                             use base64::{engine::general_purpose, Engine as _};
                             let encoded = general_purpose::STANDARD.encode(&secret_value);
-                            let auth_value = format!("Basic {encoded}");
-                            let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
-                                Error::InvalidHeaderValue {
-                                    name: "Authorization".to_string(),
-                                    reason: e.to_string(),
-                                }
-                            })?;
-                            headers.insert("Authorization", header_value);
-
-                            // Debug logging
-                            if std::env::var("RUST_LOG").is_ok() {
-                                eprintln!(
-                                    "[DEBUG] Added Basic authentication header (base64 encoded)"
-                                );
-                            }
+                            format!("Basic {encoded}")
                         }
-                        _ => {
+                        AuthScheme::Token
+                        | AuthScheme::DSN
+                        | AuthScheme::ApiKey
+                        | AuthScheme::Custom(_) => {
                             // Treat any other HTTP scheme as a bearer-like token
                             // Format: "Authorization: <scheme> <token>"
                             // This supports Token, ApiKey, DSN, and any custom schemes
-                            let auth_value = format!("{scheme} {secret_value}");
-                            let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
-                                Error::InvalidHeaderValue {
-                                    name: "Authorization".to_string(),
-                                    reason: e.to_string(),
-                                }
-                            })?;
-                            headers.insert("Authorization", header_value);
+                            format!("{scheme_str} {secret_value}")
+                        }
+                    };
 
-                            // Debug logging
-                            if std::env::var("RUST_LOG").is_ok() {
-                                eprintln!(
-                                    "[DEBUG] Added custom HTTP auth header with scheme: {scheme}"
-                                );
+                    let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
+                        Error::InvalidHeaderValue {
+                            name: "Authorization".to_string(),
+                            reason: e.to_string(),
+                        }
+                    })?;
+                    headers.insert("Authorization", header_value);
+
+                    // Debug logging
+                    if std::env::var("RUST_LOG").is_ok() {
+                        match &auth_scheme {
+                            AuthScheme::Bearer => {
+                                eprintln!("[DEBUG] Added Bearer authentication header");
                             }
+                            AuthScheme::Basic => eprintln!(
+                                "[DEBUG] Added Basic authentication header (base64 encoded)"
+                            ),
+                            _ => eprintln!(
+                                "[DEBUG] Added custom HTTP auth header with scheme: {scheme_str}"
+                            ),
                         }
                     }
                 }
