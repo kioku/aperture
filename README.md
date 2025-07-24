@@ -113,6 +113,27 @@ The following authentication types require complex flows and are not supported:
 - HTTP Negotiate (Kerberos/NTLM)
 - HTTP OAuth scheme
 
+#### Partial API Support
+
+Starting from v0.1.5, Aperture handles APIs with unsupported features gracefully:
+
+- **Non-Strict Mode (Default)**: APIs containing unsupported authentication schemes or content types are accepted
+  - Only endpoints that require unsupported features are skipped
+  - Endpoints with multiple authentication options (where at least one is supported) remain available
+  - Clear warnings show which endpoints are skipped and why
+  
+- **Strict Mode**: Use the `--strict` flag with `aperture config add` to reject specs with any unsupported features
+
+This allows you to use most endpoints of an API even if some require unsupported authentication methods or content types:
+
+```bash
+# Default behavior - accepts spec, skips unsupported endpoints with warnings
+aperture config add my-api ./openapi.yml
+
+# Strict mode - rejects spec if any unsupported features found
+aperture config add --strict my-api ./openapi.yml
+```
+
 ### Parameter References
 
 Aperture fully supports OpenAPI parameter references, allowing you to define reusable parameters:
@@ -184,6 +205,9 @@ aperture api my-api get-data --jq '.items | map(select(.active)) | .[0:5]'
 ```bash
 # Register an API specification
 aperture config add my-api ./openapi.yml
+
+# Register with strict validation (rejects specs with any unsupported features)
+aperture config add --strict my-api ./openapi.yml
 
 # List available APIs
 aperture config list

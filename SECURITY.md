@@ -97,6 +97,16 @@ The following authentication types are explicitly not supported due to their com
 
 For APIs using these authentication methods, consider using alternative authentication schemes if available (e.g., API tokens or personal access tokens).
 
+### Partial API Support
+
+Starting from v0.1.5, Aperture uses a non-strict validation mode by default:
+- APIs containing unsupported authentication schemes are accepted
+- Only endpoints that require unsupported authentication are skipped
+- Endpoints with multiple authentication options (where at least one is supported) remain available
+- Use the `--strict` flag with `aperture config add` to reject specs with any unsupported features
+
+This allows you to use most endpoints of an API even if some require unsupported authentication methods.
+
 ## Updates
 
 This security policy may be updated as new features are added. Check the latest version in the repository.

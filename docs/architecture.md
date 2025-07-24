@@ -120,7 +120,7 @@ Aperture's v1.0 implementation will support a well-defined subset of the OpenAPI
 | `parameters` (`style`)       | **Unsupported**         | Default styles are assumed. Complex serialization is not supported.                                                       |
 | `requestBody`                | **Partially Supported** | Only `content` type `application/json` is supported. Other content types (e.g., `multipart/form-data`, `application/xml`) are skipped with warnings in non-strict mode. |
 | `responses`                  | **Supported**           | Used to validate successful response bodies.                                                                              |
-| `securitySchemes`            | **Partially Supported** | See §6 for the detailed security model. `apiKey` and `http` (bearer, basic, and custom schemes) are supported. `oauth2` and `openIdConnect` are not. |
+| `securitySchemes`            | **Partially Supported** | See §6 for the detailed security model. `apiKey` and `http` (bearer, basic, and custom schemes) are supported. `oauth2` and `openIdConnect` are skipped with warnings in non-strict mode. |
 
 Any unsupported keyword or feature encountered during `config add` will result in a clear validation error, preventing the spec from being registered.
 
@@ -130,7 +130,8 @@ Starting from v0.1.2, Aperture supports two validation modes during `config add`
 
 1. **Non-Strict Mode (Default):** Accepts specifications with unsupported features but intelligently handles endpoints:
    - Endpoints that support `application/json` alongside unsupported content types remain available
-   - Only endpoints with NO supported content types are skipped with warnings
+   - Endpoints with at least one supported authentication scheme remain available
+   - Only endpoints with NO supported content types or ONLY unsupported auth schemes are skipped with warnings
    - This maximizes API usability while clearly communicating limitations
    
 2. **Strict Mode (`--strict` flag):** Rejects specifications that contain any unsupported features. This ensures complete compatibility but may prevent usage of APIs that have mixed endpoint support.
@@ -147,11 +148,14 @@ aperture config add --strict my-api ./spec.yaml
 **Warning Display:**
 When endpoints are skipped in non-strict mode, Aperture displays detailed warnings:
 ```
-Warning: Skipping 2 endpoints with unsupported content types (3 of 5 endpoints will be available):
+Warning: Skipping 2 endpoints with unsupported content types (8 of 10 endpoints will be available):
   - POST /upload (multipart/form-data (file uploads are not supported)) - endpoint has no supported content types
   - PUT /binary (application/octet-stream (binary data uploads are not supported)) - endpoint has no supported content types
 
-Use --strict to reject specs with unsupported content types.
+Warning: Skipping 1 endpoints with unsupported authentication (7 of 8 endpoints will be available):
+  - GET /admin - endpoint requires unsupported authentication schemes: oauth2
+
+Use --strict to reject specs with unsupported features.
 ```
 
 ### 5.1. Command Generation Strategy
