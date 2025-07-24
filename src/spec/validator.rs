@@ -328,8 +328,24 @@ impl SpecValidator {
                 // Fall through to normal validation
             } else if Self::should_skip_due_to_auth(reqs, unsupported_schemes) {
                 // All auth schemes are unsupported - skip this operation
-                let schemes: Vec<String> =
-                    reqs.iter().flat_map(|req| req.keys()).cloned().collect();
+                let scheme_details: Vec<String> = reqs
+                    .iter()
+                    .flat_map(|req| req.keys())
+                    .filter_map(|scheme_name| {
+                        unsupported_schemes.get(scheme_name).map(|msg| {
+                            // Extract the specific reason from the validation message
+                            if msg.contains("OAuth2") {
+                                format!("{scheme_name} (OAuth2)")
+                            } else if msg.contains("OpenID Connect") {
+                                format!("{scheme_name} (OpenID Connect)")
+                            } else if msg.contains("complex authentication flows") {
+                                format!("{scheme_name} (requires complex flow)")
+                            } else {
+                                scheme_name.clone()
+                            }
+                        })
+                    })
+                    .collect();
 
                 result.add_warning(ValidationWarning {
                     endpoint: UnsupportedEndpoint {
@@ -337,10 +353,21 @@ impl SpecValidator {
                         method: method.to_uppercase(),
                         content_type: String::new(),
                     },
-                    reason: format!(
-                        "endpoint requires unsupported authentication schemes: {}",
-                        schemes.join(", ")
-                    ),
+                    reason: if scheme_details.is_empty() {
+                        format!(
+                            "endpoint requires unsupported authentication schemes: {}",
+                            reqs.iter()
+                                .flat_map(|req| req.keys())
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    } else {
+                        format!(
+                            "endpoint requires unsupported authentication: {}",
+                            scheme_details.join(", ")
+                        )
+                    },
                 });
                 return;
             }
