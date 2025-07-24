@@ -968,6 +968,167 @@ impl<F: FileSystem> ConfigManager<F> {
         let secrets = self.list_secrets(api_name)?;
         Ok(secrets.get(scheme_name).cloned())
     }
+
+    /// Configure secrets interactively for an API specification
+    ///
+    /// Loads the cached spec to discover available security schemes and
+    /// presents an interactive menu for configuration.
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The spec doesn't exist
+    /// - Cannot load cached spec
+    /// - User interaction fails
+    /// - Cannot save configuration
+    ///
+    /// # Panics
+    ///
+    /// Panics if the selected scheme is not found in the cached spec
+    /// (this should never happen due to menu validation)
+    #[allow(clippy::too_many_lines)]
+    pub fn set_secret_interactive(&self, api_name: &str) -> Result<(), Error> {
+        use crate::interactive::{confirm, prompt_for_input, select_from_options};
+
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load cached spec to get security schemes
+        let cache_dir = self.config_dir.join(".cache");
+        let cached_spec = loader::load_cached_spec(&cache_dir, api_name)?;
+
+        if cached_spec.security_schemes.is_empty() {
+            println!("No security schemes found in API '{api_name}'.");
+            return Ok(());
+        }
+
+        // Get current configuration
+        let current_secrets = self.list_secrets(api_name)?;
+
+        println!("🔐 Interactive Secret Configuration for API: {api_name}");
+        println!(
+            "Found {} security scheme(s):\n",
+            cached_spec.security_schemes.len()
+        );
+
+        // Create options for selection with rich descriptions
+        let options: Vec<(String, String)> = cached_spec
+            .security_schemes
+            .values()
+            .map(|scheme| {
+                let mut description = format!("{} ({})", scheme.scheme_type, scheme.name);
+
+                // Add type-specific details
+                match scheme.scheme_type.as_str() {
+                    "apiKey" => {
+                        if let (Some(location), Some(param)) =
+                            (&scheme.location, &scheme.parameter_name)
+                        {
+                            description = format!("{description} - {location} parameter: {param}");
+                        }
+                    }
+                    "http" => {
+                        if let Some(http_scheme) = &scheme.scheme {
+                            description = format!("{description} - {http_scheme} authentication");
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Show current configuration status
+                if current_secrets.contains_key(&scheme.name) {
+                    description = format!("{description} [CONFIGURED]");
+                } else if scheme.aperture_secret.is_some() {
+                    description = format!("{description} [x-aperture-secret]");
+                } else {
+                    description = format!("{description} [NOT CONFIGURED]");
+                }
+
+                // Add OpenAPI description if available
+                if let Some(openapi_desc) = &scheme.description {
+                    description = format!("{description} - {openapi_desc}");
+                }
+
+                (scheme.name.clone(), description)
+            })
+            .collect();
+
+        // Interactive loop for configuration
+        loop {
+            let selected_scheme =
+                select_from_options("\nSelect a security scheme to configure:", &options)?;
+
+            let scheme = cached_spec.security_schemes.get(&selected_scheme).unwrap();
+
+            println!("\n📋 Configuration for '{selected_scheme}':");
+            println!("   Type: {}", scheme.scheme_type);
+            if let Some(desc) = &scheme.description {
+                println!("   Description: {desc}");
+            }
+
+            // Show current configuration
+            if let Some(current_secret) = current_secrets.get(&selected_scheme) {
+                println!("   Current: environment variable '{}'", current_secret.name);
+            } else if let Some(aperture_secret) = &scheme.aperture_secret {
+                println!(
+                    "   Current: x-aperture-secret -> '{}'",
+                    aperture_secret.name
+                );
+            } else {
+                println!("   Current: not configured");
+            }
+
+            // Prompt for environment variable
+            let env_var = prompt_for_input(&format!(
+                "\nEnter environment variable name for '{selected_scheme}' (or press Enter to skip): "
+            ))?;
+
+            if env_var.is_empty() {
+                println!("Skipping configuration for '{selected_scheme}'");
+            } else {
+                // Validate environment variable name
+                if !env_var
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                {
+                    println!("❌ Invalid environment variable name. Use only letters, numbers, and underscores.");
+                    continue;
+                }
+
+                // Show preview and confirm
+                println!("\n📝 Configuration Preview:");
+                println!("   API: {api_name}");
+                println!("   Scheme: {selected_scheme}");
+                println!("   Environment Variable: {env_var}");
+
+                if confirm("Apply this configuration?")? {
+                    self.set_secret(api_name, &selected_scheme, &env_var)?;
+                    println!("✅ Configuration saved successfully!");
+                } else {
+                    println!("Configuration cancelled.");
+                }
+            }
+
+            // Ask if user wants to configure another scheme
+            if !confirm("\nConfigure another security scheme?")? {
+                break;
+            }
+        }
+
+        println!("\n🎉 Interactive configuration complete!");
+        Ok(())
+    }
 }
 
 /// Gets the default configuration directory path.
