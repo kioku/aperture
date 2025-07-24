@@ -327,11 +327,8 @@ fn display_skipped_endpoints_info(cached_spec: &aperture_cli::cache::models::Cac
         &cached_spec.skipped_endpoints,
     );
 
-    // Count total operations including skipped ones
-    let skipped_count = warnings
-        .iter()
-        .filter(|w| w.reason.contains("no supported content types"))
-        .count();
+    // Count total operations including all skipped ones
+    let skipped_count = warnings.len();
     let total_operations = cached_spec.commands.len() + skipped_count;
 
     // Format and display warnings
