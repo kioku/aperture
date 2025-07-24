@@ -362,3 +362,195 @@ paths:
         .success()
         .stdout(predicate::str::contains("\"status\": \"authenticated\""));
 }
+
+#[tokio::test]
+async fn test_header_injection_protection() {
+    let (temp_dir, config_dir) = setup_test_env();
+
+    // Create a simple OpenAPI spec
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Header Injection Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      x-aperture-secret:
+        source: env
+        name: API_TOKEN
+paths:
+  /test:
+    get:
+      operationId: getTest
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: custom-header
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_file = temp_dir.path().join("injection-api.yaml");
+    fs::write(&spec_file, spec_content).unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .args(&[
+            "config",
+            "add",
+            "injection-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Test 1: Newline in custom header value
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .env("API_TOKEN", "valid-token")
+        .args(&[
+            "api",
+            "injection-api",
+            "default",
+            "get-test",
+            "--header",
+            "X-Custom: value\nX-Injected: malicious",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid control characters"));
+
+    // Test 2: Carriage return in custom header
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .env("API_TOKEN", "valid-token")
+        .args(&[
+            "api",
+            "injection-api",
+            "default",
+            "get-test",
+            "--header",
+            "X-Custom: value\rX-Injected: malicious",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid control characters"));
+
+    // Test 3: Valid header should work
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .env("API_TOKEN", "valid-token")
+        .args(&[
+            "api",
+            "--dry-run",
+            "injection-api",
+            "default",
+            "get-test",
+            "--header",
+            "X-Custom: valid-value",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"x-custom\": \"valid-value\""));
+
+    // Test 4: Environment variable expansion with newline
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .env("API_TOKEN", "valid-token")
+        .env("MALICIOUS_VAR", "value\nX-Injected: bad")
+        .args(&[
+            "api",
+            "injection-api",
+            "default",
+            "get-test",
+            "--header",
+            "X-Custom: ${MALICIOUS_VAR}",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid control characters"));
+}
+
+#[tokio::test]
+async fn test_auth_token_injection_protection() {
+    let (temp_dir, config_dir) = setup_test_env();
+
+    // Create OpenAPI spec
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Token Injection Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      x-aperture-secret:
+        source: env
+        name: BEARER_TOKEN
+paths:
+  /protected:
+    get:
+      operationId: getProtected
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_file = temp_dir.path().join("token-injection-api.yaml");
+    fs::write(&spec_file, spec_content).unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .args(&[
+            "config",
+            "add",
+            "token-injection-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Test auth token with newline
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .env("BEARER_TOKEN", "token\nX-Injected: malicious")
+        .args(&["api", "token-injection-api", "default", "get-protected"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid control characters"));
+
+    // Test auth token with carriage return
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .env("BEARER_TOKEN", "token\rmalicious")
+        .args(&["api", "token-injection-api", "default", "get-protected"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid control characters"));
+}
