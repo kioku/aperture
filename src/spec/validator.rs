@@ -1,5 +1,6 @@
 use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
+use std::collections::HashMap;
 
 /// Result of validating an `OpenAPI` specification
 #[derive(Debug, Default)]
@@ -53,6 +54,25 @@ pub struct ValidationWarning {
     pub endpoint: UnsupportedEndpoint,
     /// Human-readable reason for skipping
     pub reason: String,
+}
+
+impl ValidationWarning {
+    /// Determines if this warning should result in a skipped endpoint
+    #[must_use]
+    pub fn should_skip_endpoint(&self) -> bool {
+        self.reason.contains("no supported content types")
+            || self.reason.contains("unsupported authentication")
+    }
+
+    /// Converts to a skipped endpoint tuple if applicable
+    #[must_use]
+    pub fn to_skip_endpoint(&self) -> Option<(String, String)> {
+        if self.should_skip_endpoint() {
+            Some((self.endpoint.path.clone(), self.endpoint.method.clone()))
+        } else {
+            None
+        }
+    }
 }
 
 /// Details about an unsupported endpoint
@@ -132,13 +152,20 @@ impl SpecValidator {
     pub fn validate_with_mode(&self, spec: &OpenAPI, strict: bool) -> ValidationResult {
         let mut result = ValidationResult::new();
 
-        // Validate security schemes
+        // Validate security schemes and track unsupported ones
+        let mut unsupported_schemes = HashMap::new();
         if let Some(components) = &spec.components {
             for (name, scheme_ref) in &components.security_schemes {
                 match scheme_ref {
                     ReferenceOr::Item(scheme) => {
                         if let Err(e) = Self::validate_security_scheme(name, scheme) {
-                            result.add_error(e);
+                            Self::handle_security_scheme_error(
+                                e,
+                                strict,
+                                name,
+                                &mut result,
+                                &mut unsupported_schemes,
+                            );
                         }
                     }
                     ReferenceOr::Reference { .. } => {
@@ -161,6 +188,8 @@ impl SpecValidator {
                             operation,
                             &mut result,
                             strict,
+                            &unsupported_schemes,
+                            spec,
                         );
                     }
                 }
@@ -170,40 +199,49 @@ impl SpecValidator {
         result
     }
 
-    /// Validates a single security scheme
-    fn validate_security_scheme(name: &str, scheme: &SecurityScheme) -> Result<(), Error> {
-        // First validate the scheme type
-        match scheme {
-            SecurityScheme::APIKey { .. } => {
-                // API Key schemes are supported
-            }
+    /// Validates a single security scheme and returns the scheme type for tracking
+    fn validate_security_scheme(
+        name: &str,
+        scheme: &SecurityScheme,
+    ) -> Result<Option<String>, Error> {
+        // First validate the scheme type and identify if it's unsupported
+        let unsupported_reason = match scheme {
+            SecurityScheme::APIKey { .. } => None, // API Key schemes are supported
             SecurityScheme::HTTP {
                 scheme: http_scheme,
                 ..
             } => {
-                if http_scheme != "bearer" && http_scheme != "basic" {
-                    return Err(Error::Validation(format!(
-                        "Unsupported HTTP scheme '{http_scheme}' in security scheme '{name}'. Only 'bearer' and 'basic' are supported."
-                    )));
+                // Only reject known complex schemes that we explicitly don't support
+                // All other schemes are treated as bearer-like tokens
+                let unsupported_complex_schemes = ["negotiate", "oauth", "oauth2", "openidconnect"];
+                if unsupported_complex_schemes.contains(&http_scheme.to_lowercase().as_str()) {
+                    Some(format!(
+                        "HTTP scheme '{http_scheme}' requires complex authentication flows"
+                    ))
+                } else {
+                    None // Any other HTTP scheme (bearer, basic, token, apikey, custom, etc.) is allowed
                 }
             }
             SecurityScheme::OAuth2 { .. } => {
-                return Err(Error::Validation(format!(
-                    "OAuth2 security scheme '{name}' is not supported in v1.0."
-                )));
+                Some("OAuth2 authentication is not supported".to_string())
             }
             SecurityScheme::OpenIDConnect { .. } => {
-                return Err(Error::Validation(format!(
-                    "OpenID Connect security scheme '{name}' is not supported in v1.0."
-                )));
+                Some("OpenID Connect authentication is not supported".to_string())
             }
+        };
+
+        // If we found an unsupported scheme, return it as an error (to be converted to warning later)
+        if let Some(reason) = unsupported_reason {
+            return Err(Error::Validation(format!(
+                "Security scheme '{name}' uses unsupported authentication: {reason}"
+            )));
         }
 
         // Now validate x-aperture-secret extension if present
         let (SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. }) =
             scheme
         else {
-            return Ok(());
+            return Ok(None);
         };
 
         if let Some(aperture_secret) = extensions.get("x-aperture-secret") {
@@ -268,7 +306,136 @@ impl SpecValidator {
             }
         }
 
-        Ok(())
+        Ok(None)
+    }
+
+    /// Handles security scheme validation errors with proper error/warning categorization
+    fn handle_security_scheme_error(
+        error: Error,
+        strict: bool,
+        scheme_name: &str,
+        result: &mut ValidationResult,
+        unsupported_schemes: &mut HashMap<String, String>,
+    ) {
+        if strict {
+            result.add_error(error);
+            return;
+        }
+
+        match error {
+            Error::Validation(ref msg) if msg.contains("unsupported authentication") => {
+                // Track unsupported schemes for later operation validation
+                unsupported_schemes.insert(scheme_name.to_string(), msg.clone());
+            }
+            _ => {
+                // Other validation errors are still errors even in non-strict mode
+                result.add_error(error);
+            }
+        }
+    }
+
+    /// Determines if an operation should be skipped due to unsupported authentication
+    /// Returns true if the operation was skipped (warning added), false otherwise
+    fn should_skip_operation_for_auth(
+        path: &str,
+        method: &str,
+        operation: &Operation,
+        spec: &OpenAPI,
+        strict: bool,
+        unsupported_schemes: &HashMap<String, String>,
+        result: &mut ValidationResult,
+    ) -> bool {
+        // Skip auth validation in strict mode or when no schemes are unsupported
+        if strict || unsupported_schemes.is_empty() {
+            return false;
+        }
+
+        // Get security requirements (operation-level or global)
+        let Some(reqs) = operation.security.as_ref().or(spec.security.as_ref()) else {
+            return false;
+        };
+
+        // Skip if empty security requirements
+        if reqs.is_empty() {
+            return false;
+        }
+
+        // Check if all auth schemes are unsupported
+        if !Self::should_skip_due_to_auth(reqs, unsupported_schemes) {
+            return false;
+        }
+
+        // Generate warning for skipped operation
+        let scheme_details = Self::format_unsupported_scheme_details(reqs, unsupported_schemes);
+        let reason = Self::format_auth_skip_reason(reqs, &scheme_details);
+
+        result.add_warning(ValidationWarning {
+            endpoint: UnsupportedEndpoint {
+                path: path.to_string(),
+                method: method.to_uppercase(),
+                content_type: String::new(),
+            },
+            reason,
+        });
+
+        true
+    }
+
+    /// Formats unsupported scheme details for warning messages
+    fn format_unsupported_scheme_details(
+        reqs: &[openapiv3::SecurityRequirement],
+        unsupported_schemes: &HashMap<String, String>,
+    ) -> Vec<String> {
+        reqs.iter()
+            .flat_map(|req| req.keys())
+            .filter_map(|scheme_name| {
+                unsupported_schemes.get(scheme_name).map(|msg| {
+                    // Extract the specific reason from the validation message
+                    if msg.contains("OAuth2") {
+                        format!("{scheme_name} (OAuth2)")
+                    } else if msg.contains("OpenID Connect") {
+                        format!("{scheme_name} (OpenID Connect)")
+                    } else if msg.contains("complex authentication flows") {
+                        format!("{scheme_name} (requires complex flow)")
+                    } else {
+                        scheme_name.clone()
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Formats the reason message for authentication-related skips
+    fn format_auth_skip_reason(
+        reqs: &[openapiv3::SecurityRequirement],
+        scheme_details: &[String],
+    ) -> String {
+        if scheme_details.is_empty() {
+            format!(
+                "endpoint requires unsupported authentication schemes: {}",
+                reqs.iter()
+                    .flat_map(|req| req.keys())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            format!(
+                "endpoint requires unsupported authentication: {}",
+                scheme_details.join(", ")
+            )
+        }
+    }
+
+    /// Check if operation should be skipped because all its auth schemes are unsupported
+    fn should_skip_due_to_auth(
+        security_reqs: &[openapiv3::SecurityRequirement],
+        unsupported_schemes: &HashMap<String, String>,
+    ) -> bool {
+        security_reqs.iter().all(|req| {
+            req.keys()
+                .all(|scheme| unsupported_schemes.contains_key(scheme))
+        })
     }
 
     /// Validates an operation against Aperture's supported features
@@ -278,7 +445,22 @@ impl SpecValidator {
         operation: &Operation,
         result: &mut ValidationResult,
         strict: bool,
+        unsupported_schemes: &HashMap<String, String>,
+        spec: &OpenAPI,
     ) {
+        // Check if operation should be skipped due to unsupported authentication
+        if Self::should_skip_operation_for_auth(
+            path,
+            method,
+            operation,
+            spec,
+            strict,
+            unsupported_schemes,
+            result,
+        ) {
+            return;
+        }
+
         // Validate parameters
         for param_ref in &operation.parameters {
             match param_ref {
@@ -817,10 +999,11 @@ mod tests {
         let mut spec = create_test_spec();
         let mut components = Components::default();
 
+        // Use 'negotiate' which is explicitly rejected
         components.security_schemes.insert(
-            "digest".to_string(),
+            "negotiate".to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
-                scheme: "digest".to_string(),
+                scheme: "negotiate".to_string(),
                 bearer_format: None,
                 description: None,
                 extensions: Default::default(),
@@ -833,10 +1016,38 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::Validation(msg) => {
-                assert!(msg.contains("Unsupported HTTP scheme 'digest'"));
+                assert!(msg.contains("requires complex authentication flows"));
             }
             _ => panic!("Expected Validation error"),
         }
+    }
+
+    #[test]
+    fn test_validate_custom_http_schemes_allowed() {
+        let validator = SpecValidator::new();
+        let mut spec = create_test_spec();
+        let mut components = Components::default();
+
+        // Test various custom schemes that should now be allowed
+        let custom_schemes = vec!["digest", "token", "apikey", "dsn", "custom-auth"];
+
+        for scheme in custom_schemes {
+            components.security_schemes.insert(
+                format!("{}_auth", scheme),
+                ReferenceOr::Item(SecurityScheme::HTTP {
+                    scheme: scheme.to_string(),
+                    bearer_format: None,
+                    description: None,
+                    extensions: Default::default(),
+                }),
+            );
+        }
+
+        spec.components = Some(components);
+
+        // All custom schemes should be valid
+        let result = validator.validate_with_mode(&spec, true);
+        assert!(result.is_valid(), "Custom HTTP schemes should be allowed");
     }
 
     #[test]

@@ -11,7 +11,7 @@ When implementing Phase 6 of Aperture (Security and Custom Headers), we needed t
 3. **Agent Discovery Gap**: The `--describe-json` capability manifest didn't expose security requirements to autonomous agents
 4. **Security Separation**: Need to maintain strict separation between OpenAPI specs (configuration) and credentials (secrets)
 
-The solution needed to support common authentication schemes (Bearer tokens, API keys) while maintaining backward compatibility and enabling agent automation.
+The solution needed to support common authentication schemes (Bearer tokens, API keys, Basic auth, and custom HTTP schemes) while maintaining backward compatibility and enabling agent automation.
 
 **Update**: Implementation completed successfully with full x-aperture-secret extension parsing, comprehensive test coverage, and end-to-end functionality verification.
 
@@ -26,7 +26,7 @@ Extended the cached spec representation to include security information:
 pub struct CachedSecurityScheme {
     pub name: String,
     pub scheme_type: String,          // "http", "apiKey", etc.
-    pub scheme: Option<String>,       // "bearer", "basic", etc.  
+    pub scheme: Option<String>,       // "bearer", "basic", "token", "dsn", etc.  
     pub location: Option<String>,     // "header", "query", "cookie"
     pub parameter_name: Option<String>, // Header/parameter name
     pub aperture_secret: Option<CachedApertureSecret>,
@@ -99,5 +99,6 @@ Updated the agent manifest to expose security information:
 1. OAuth2 flow support with refresh tokens
 2. External secret manager integration (Vault, AWS Secrets Manager)
 3. Certificate-based authentication
-4. Basic authentication support (currently only Bearer tokens supported)
+4. ~~Basic authentication support~~ (COMPLETED - Basic auth is now supported)
+5. ~~Custom HTTP scheme support~~ (COMPLETED - Any HTTP scheme except OAuth2/OIDC/Negotiate is now supported)
 5. Advanced security scheme validation against OpenAPI specs

@@ -226,7 +226,7 @@ Beyond the original plan, the following major features have been successfully im
 
 ### **Phase 8: Comprehensive Security Implementation**
 - `[x]` **x-aperture-secret Extension**: Full OpenAPI extension parsing and integration
-- `[x]` **Authentication Support**: Bearer tokens, API keys, Basic auth via environment variables
+- `[x]` **Authentication Support**: Bearer tokens, API keys, Basic auth, and custom HTTP schemes via environment variables
 - `[x]` **Custom Headers**: `--header` flag with environment variable expansion
 - `[x]` **Security Discovery**: Agent capability manifest includes security requirements
 - `[x]` **Global Security Inheritance**: Proper OpenAPI 3.0 spec-level security handling

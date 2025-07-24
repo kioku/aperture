@@ -136,27 +136,42 @@ impl<F: FileSystem> ConfigManager<F> {
         let mut lines = Vec::new();
 
         if !warnings.is_empty() {
-            // Separate warnings into skipped endpoints and mixed content warnings
-            let (skipped_warnings, mixed_warnings): (Vec<_>, Vec<_>) = warnings
-                .iter()
-                .partition(|w| w.reason.contains("no supported content types"));
+            // Categorize warnings by type
+            let mut content_type_warnings = Vec::new();
+            let mut auth_warnings = Vec::new();
+            let mut mixed_content_warnings = Vec::new();
 
-            // Format skipped endpoints warning if any
-            if !skipped_warnings.is_empty() {
+            for warning in warnings {
+                if warning.reason.contains("no supported content types") {
+                    content_type_warnings.push(warning);
+                } else if warning.reason.contains("unsupported authentication") {
+                    auth_warnings.push(warning);
+                } else if warning
+                    .reason
+                    .contains("unsupported content types alongside JSON")
+                {
+                    mixed_content_warnings.push(warning);
+                }
+            }
+
+            let total_skipped = content_type_warnings.len() + auth_warnings.len();
+
+            // Format content type warnings if any
+            if !content_type_warnings.is_empty() {
                 let warning_msg = total_operations.map_or_else(
                     || {
                         format!(
                             "{}Skipping {} endpoints with unsupported content types:",
                             indent,
-                            skipped_warnings.len()
+                            content_type_warnings.len()
                         )
                     },
                     |total| {
-                        let available = total.saturating_sub(skipped_warnings.len());
+                        let available = total.saturating_sub(total_skipped);
                         format!(
                             "{}Skipping {} endpoints with unsupported content types ({} of {} endpoints will be available):",
                             indent,
-                            skipped_warnings.len(),
+                            content_type_warnings.len(),
                             available,
                             total
                         )
@@ -164,7 +179,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 );
                 lines.push(warning_msg);
 
-                for warning in &skipped_warnings {
+                for warning in &content_type_warnings {
                     lines.push(format!(
                         "{}  - {} {} ({}) - {}",
                         indent,
@@ -176,15 +191,50 @@ impl<F: FileSystem> ConfigManager<F> {
                 }
             }
 
+            // Format auth warnings if any
+            if !auth_warnings.is_empty() {
+                if !content_type_warnings.is_empty() {
+                    lines.push(String::new()); // Add blank line between sections
+                }
+
+                let warning_msg = total_operations.map_or_else(
+                    || {
+                        format!(
+                            "{}Skipping {} endpoints with unsupported authentication:",
+                            indent,
+                            auth_warnings.len()
+                        )
+                    },
+                    |total| {
+                        let available = total.saturating_sub(total_skipped);
+                        format!(
+                            "{}Skipping {} endpoints with unsupported authentication ({} of {} endpoints will be available):",
+                            indent,
+                            auth_warnings.len(),
+                            available,
+                            total
+                        )
+                    },
+                );
+                lines.push(warning_msg);
+
+                for warning in &auth_warnings {
+                    lines.push(format!(
+                        "{}  - {} {} - {}",
+                        indent, warning.endpoint.method, warning.endpoint.path, warning.reason
+                    ));
+                }
+            }
+
             // Format mixed content warnings if any
-            if !mixed_warnings.is_empty() {
-                if !skipped_warnings.is_empty() {
+            if !mixed_content_warnings.is_empty() {
+                if !content_type_warnings.is_empty() || !auth_warnings.is_empty() {
                     lines.push(String::new()); // Add blank line between sections
                 }
                 lines.push(format!(
                     "{indent}Endpoints with partial content type support:"
                 ));
-                for warning in &mixed_warnings {
+                for warning in &mixed_content_warnings {
                     lines.push(format!(
                         "{}  - {} {} supports JSON but not: {}",
                         indent,
@@ -215,7 +265,7 @@ impl<F: FileSystem> ConfigManager<F> {
                     eprintln!("{line}");
                 }
             }
-            eprintln!("\nUse --strict to reject specs with unsupported content types.");
+            eprintln!("\nUse --strict to reject specs with unsupported features.");
         }
     }
 
@@ -269,12 +319,11 @@ impl<F: FileSystem> ConfigManager<F> {
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
 
-        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
+        // Convert warnings to skip_endpoints format - skip endpoints with unsupported content types or auth
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
-            .filter(|w| w.reason.contains("no supported content types"))
-            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .filter_map(super::super::spec::validator::ValidationWarning::to_skip_endpoint)
             .collect();
 
         let cached_spec = transformer.transform_with_warnings(
@@ -371,12 +420,11 @@ impl<F: FileSystem> ConfigManager<F> {
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
 
-        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
+        // Convert warnings to skip_endpoints format - skip endpoints with unsupported content types or auth
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
-            .filter(|w| w.reason.contains("no supported content types"))
-            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .filter_map(super::super::spec::validator::ValidationWarning::to_skip_endpoint)
             .collect();
 
         let cached_spec = transformer.transform_with_warnings(
@@ -765,12 +813,11 @@ impl<F: FileSystem> ConfigManager<F> {
         // Transform into internal cached representation using SpecTransformer
         let transformer = SpecTransformer::new();
 
-        // Convert warnings to skip_endpoints format - only skip endpoints with NO JSON support
+        // Convert warnings to skip_endpoints format - skip endpoints with unsupported content types or auth
         let skip_endpoints: Vec<(String, String)> = validation_result
             .warnings
             .iter()
-            .filter(|w| w.reason.contains("no supported content types"))
-            .map(|w| (w.endpoint.path.clone(), w.endpoint.method.clone()))
+            .filter_map(super::super::spec::validator::ValidationWarning::to_skip_endpoint)
             .collect();
 
         let cached_spec = transformer.transform_with_warnings(

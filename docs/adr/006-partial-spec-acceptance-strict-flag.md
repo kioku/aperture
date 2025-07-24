@@ -4,20 +4,26 @@
 Accepted
 
 ## Context
-Aperture v1.0 only supports `application/json` content types for request bodies. When users attempt to add OpenAPI specifications containing endpoints with unsupported content types (such as `multipart/form-data` for file uploads), the entire specification is rejected with a validation error.
+Aperture v1.0 has limitations on supported features:
+1. **Content Types**: Only supports `application/json` content types for request bodies
+2. **Authentication**: Only supports certain authentication schemes (Bearer, Basic, API Key, and custom HTTP schemes)
+
+When users attempt to add OpenAPI specifications containing endpoints with unsupported features (such as `multipart/form-data` for file uploads or OAuth2 authentication), the entire specification is rejected with a validation error.
 
 This creates a significant usability issue:
-- Many real-world APIs mix JSON endpoints with file upload endpoints
+- Many real-world APIs mix supported endpoints with unsupported ones
 - Users cannot use Aperture for APIs that have even a single unsupported endpoint
 - The only workarounds are to manually edit specs or maintain forked versions
+- APIs using OAuth2, OpenID Connect, or other complex authentication cannot be used at all
 
 ## Decision
 We will implement partial OpenAPI spec acceptance that:
 
-1. **Changes the default behavior** to accept specs with unsupported content types while skipping affected endpoints
+1. **Changes the default behavior** to accept specs with unsupported features while skipping affected endpoints
 2. **Adds a `--strict` flag** to maintain the previous behavior for users who require strict validation
 3. **Displays clear warnings** about skipped endpoints during `config add`
 4. **Filters out unsupported endpoints** from the cached spec to prevent runtime errors
+5. **Skips endpoints based on both content type and authentication requirements**
 
 ### Implementation Details
 
@@ -27,11 +33,14 @@ We will implement partial OpenAPI spec acceptance that:
 
 #### Warning Display
 ```
-Warning: Skipping 2 endpoints with unsupported content types:
-  - POST /upload (multipart/form-data) - content type 'multipart/form-data' is not supported
-  - PUT /data (application/xml) - content type 'application/xml' is not supported
+Warning: Skipping 2 endpoints with unsupported content types (8 of 10 endpoints will be available):
+  - POST /upload (multipart/form-data) - endpoint has no supported content types
+  - PUT /data (application/xml) - endpoint has no supported content types
 
-Use --strict to reject specs with unsupported content types.
+Warning: Skipping 1 endpoints with unsupported authentication (7 of 8 endpoints will be available):
+  - GET /admin - endpoint requires unsupported authentication schemes: oauth2
+
+Use --strict to reject specs with unsupported features.
 ```
 
 #### Filtering Mechanism
@@ -46,6 +55,18 @@ Content type validation is case-insensitive and ignores parameters after semicol
 - `application/json; boundary=something` ✓
 
 This ensures maximum compatibility with real-world OpenAPI specifications that may use different content type representations.
+
+#### Authentication Scheme Handling
+Endpoints are skipped if they require ONLY unsupported authentication schemes:
+- **Unsupported**: OAuth2 (all flows), OpenID Connect, HTTP Negotiate, HTTP OAuth
+- **Supported**: Bearer, Basic, API Key, and any custom HTTP schemes (Token, DSN, etc.)
+
+If an endpoint has multiple authentication options (OR relationship) and at least one is supported, the endpoint remains available:
+```yaml
+security:
+  - oauth2: []      # Unsupported
+  - bearerAuth: []  # Supported - endpoint is available
+```
 
 ## Consequences
 

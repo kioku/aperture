@@ -33,17 +33,105 @@ Aperture follows a two-phase approach:
 
 ### Security Model
 
-Authentication is handled through custom `x-aperture-secret` extensions in OpenAPI specs that map security schemes to environment variables:
+Authentication is handled through custom `x-aperture-secret` extensions in OpenAPI specs that map security schemes to environment variables.
 
+#### Supported Authentication Schemes
+
+1. **API Key** (header, query, or cookie)
 ```yaml
 components:
   securitySchemes:
-    apiToken:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      x-aperture-secret:
+        source: env
+        name: API_KEY
+```
+
+2. **HTTP Bearer Token**
+```yaml
+components:
+  securitySchemes:
+    bearerAuth:
       type: http
       scheme: bearer
       x-aperture-secret:
         source: env
         name: API_TOKEN
+```
+
+3. **HTTP Basic Authentication**
+```yaml
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      x-aperture-secret:
+        source: env
+        name: BASIC_CREDENTIALS  # Format: username:password (will be base64 encoded automatically)
+```
+
+4. **Custom HTTP Schemes** (Token, DSN, ApiKey, proprietary schemes)
+```yaml
+components:
+  securitySchemes:
+    # Common alternative to Bearer
+    tokenAuth:
+      type: http
+      scheme: Token
+      x-aperture-secret:
+        source: env
+        name: API_TOKEN
+    
+    # Sentry-style DSN authentication
+    dsnAuth:
+      type: http
+      scheme: DSN
+      x-aperture-secret:
+        source: env
+        name: SENTRY_DSN
+    
+    # Any custom scheme name
+    customAuth:
+      type: http
+      scheme: X-CompanyAuth-V2
+      x-aperture-secret:
+        source: env
+        name: COMPANY_TOKEN
+```
+
+All custom HTTP schemes are treated as bearer-like tokens and formatted as: `Authorization: <scheme> <token>`
+
+#### Unsupported Authentication
+
+The following authentication types require complex flows and are not supported:
+- OAuth2 (all flows)
+- OpenID Connect
+- HTTP Negotiate (Kerberos/NTLM)
+- HTTP OAuth scheme
+
+#### Partial API Support
+
+Starting from v0.1.4, Aperture handles APIs with unsupported features gracefully:
+
+- **Non-Strict Mode (Default)**: APIs containing unsupported authentication schemes or content types are accepted
+  - Only endpoints that require unsupported features are skipped
+  - Endpoints with multiple authentication options (where at least one is supported) remain available
+  - Clear warnings show which endpoints are skipped and why
+  
+- **Strict Mode**: Use the `--strict` flag with `aperture config add` to reject specs with any unsupported features
+
+This allows you to use most endpoints of an API even if some require unsupported authentication methods or content types:
+
+```bash
+# Default behavior - accepts spec, skips unsupported endpoints with warnings
+aperture config add my-api ./openapi.yml
+
+# Strict mode - rejects spec if any unsupported features found
+aperture config add --strict my-api ./openapi.yml
 ```
 
 ### Parameter References
@@ -117,6 +205,9 @@ aperture api my-api get-data --jq '.items | map(select(.active)) | .[0:5]'
 ```bash
 # Register an API specification
 aperture config add my-api ./openapi.yml
+
+# Register with strict validation (rejects specs with any unsupported features)
+aperture config add --strict my-api ./openapi.yml
 
 # List available APIs
 aperture config list
