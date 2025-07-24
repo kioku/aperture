@@ -1097,12 +1097,9 @@ impl<F: FileSystem> ConfigManager<F> {
             if env_var.is_empty() {
                 println!("Skipping configuration for '{selected_scheme}'");
             } else {
-                // Validate environment variable name
-                if !env_var
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
-                {
-                    println!("❌ Invalid environment variable name. Use only letters, numbers, and underscores.");
+                // Validate environment variable name using the comprehensive validator
+                if let Err(e) = crate::interactive::validate_env_var_name(&env_var) {
+                    println!("❌ Invalid environment variable name: {e}");
                     continue;
                 }
 
