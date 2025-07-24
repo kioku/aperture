@@ -317,6 +317,146 @@ paths:
 }
 
 #[test]
+fn test_operation_with_empty_security_array() {
+    let (manager, fs) = setup_manager();
+
+    // Create a spec with operations having empty security arrays
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Empty Security API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+components:
+  securitySchemes:
+    oauth2Auth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://example.com/auth
+          tokenUrl: https://example.com/token
+          scopes:
+            read: Read access
+security:
+  - oauth2Auth: [read]
+paths:
+  /public:
+    get:
+      operationId: getPublic
+      security: []  # Empty array means no auth required
+      responses:
+        '200':
+          description: Success
+  /private:
+    get:
+      operationId: getPrivate
+      # Uses global security (OAuth2)
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_path = PathBuf::from("/tmp/empty-security.yaml");
+    fs.write_all(&spec_path, spec_content.as_bytes())
+        .expect("Failed to write spec");
+
+    // Should succeed in non-strict mode
+    let result = manager.add_spec("empty-security", &spec_path, false, false);
+    assert!(
+        result.is_ok(),
+        "Expected success in non-strict mode, got: {:?}",
+        result
+    );
+
+    // Check cached spec
+    let cache_path = PathBuf::from("/tmp/aperture_test/.cache/empty-security.bin");
+    assert!(fs.exists(&cache_path), "Cache file should exist");
+
+    let cached_content = fs.read(&cache_path).expect("Failed to read cache");
+    let cached_spec: aperture_cli::cache::models::CachedSpec =
+        bincode::deserialize(&cached_content).expect("Failed to deserialize");
+
+    // Should have only getPublic operation (getPrivate uses global OAuth2)
+    assert_eq!(
+        cached_spec.commands.len(),
+        1,
+        "Should have 1 available operation"
+    );
+    assert_eq!(
+        cached_spec.commands[0].operation_id, "getPublic",
+        "Should include getPublic"
+    );
+
+    // Should have one skipped endpoint
+    assert_eq!(
+        cached_spec.skipped_endpoints.len(),
+        1,
+        "Should have 1 skipped endpoint"
+    );
+    assert_eq!(cached_spec.skipped_endpoints[0].path, "/private");
+}
+
+#[test]
+fn test_invalid_env_var_characters_in_auth() {
+    let (manager, fs) = setup_manager();
+
+    // Create a spec with basic auth for testing environment variables
+    let spec_content = r#"
+openapi: 3.0.0
+info:
+  title: Env Var Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      x-aperture-secret:
+        source: env
+        name: BEARER_TOKEN_123  # Valid env var name
+    invalidAuth:
+      type: http
+      scheme: bearer
+      x-aperture-secret:
+        source: env
+        name: 123_INVALID  # Starts with digit - invalid
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_path = PathBuf::from("/tmp/env-var-test.yaml");
+    fs.write_all(&spec_path, spec_content.as_bytes())
+        .expect("Failed to write spec");
+
+    // Should fail due to invalid environment variable name
+    let result = manager.add_spec("env-var-test", &spec_path, false, false);
+    assert!(
+        result.is_err(),
+        "Expected failure due to invalid env var name"
+    );
+
+    if let Err(Error::Validation(msg)) = result {
+        assert!(
+            msg.contains("Invalid environment variable name"),
+            "Expected invalid env var error, got: {}",
+            msg
+        );
+    } else {
+        panic!("Expected Validation error, got: {:?}", result);
+    }
+}
+
+#[test]
 fn test_global_security_with_unsupported_auth() {
     let (manager, fs) = setup_manager();
 
