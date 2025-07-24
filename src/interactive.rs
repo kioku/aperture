@@ -85,9 +85,13 @@ pub fn select_from_options(prompt: &str, options: &[(String, String)]) -> Result
 
         // Handle empty input as cancellation
         if selection.is_empty() {
-            return Err(Error::InvalidConfig {
-                reason: "Selection cancelled by user".to_string(),
-            });
+            if !handle_cancellation_input()? {
+                return Err(Error::InvalidConfig {
+                    reason: "Selection cancelled by user".to_string(),
+                });
+            }
+            // User chose to continue, skip this iteration
+            continue;
         }
 
         // Try parsing as a number first
@@ -201,6 +205,22 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+/// Prompts for confirmation to exit/cancel an interactive session
+///
+/// # Errors
+/// Returns an error if stdin operations fail
+pub fn confirm_exit() -> Result<bool, Error> {
+    println!("\n⚠️  Interactive session interrupted.");
+    confirm("Do you want to exit without saving changes?")
+}
+
+/// Checks if the user wants to cancel the current operation
+/// This is called when empty input is provided as a cancellation signal
+pub fn handle_cancellation_input() -> Result<bool, Error> {
+    println!("Empty input detected. This will cancel the current operation.");
+    confirm("Do you want to continue with the current operation?")
 }
 
 #[cfg(test)]
