@@ -243,6 +243,84 @@ paths:
 }
 
 #[test]
+fn test_rejected_complex_auth_schemes() {
+    let (manager, fs) = setup_manager();
+
+    // Test OAuth scheme (should be rejected)
+    let oauth_spec = r#"
+openapi: 3.0.0
+info:
+  title: OAuth API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+components:
+  securitySchemes:
+    oauthScheme:
+      type: http
+      scheme: oauth
+      x-aperture-secret:
+        source: env
+        name: OAUTH_TOKEN
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      security:
+        - oauthScheme: []
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_path = setup_dir(&fs).join("oauth-api.yaml");
+    fs.write_all(&spec_path, oauth_spec.as_bytes())
+        .expect("Failed to write spec");
+
+    // Should fail in strict mode
+    let result = manager.add_spec("oauth-api", &spec_path, false, true);
+    assert!(
+        result.is_err(),
+        "OAuth HTTP scheme should be rejected in strict mode"
+    );
+
+    // Test Negotiate scheme (should be rejected)
+    let negotiate_spec = r#"
+openapi: 3.0.0
+info:
+  title: Negotiate API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+components:
+  securitySchemes:
+    negotiateAuth:
+      type: http
+      scheme: negotiate
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      security:
+        - negotiateAuth: []
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_path = setup_dir(&fs).join("negotiate-api.yaml");
+    fs.write_all(&spec_path, negotiate_spec.as_bytes())
+        .expect("Failed to write spec");
+
+    // Should fail in strict mode
+    let result = manager.add_spec("negotiate-api", &spec_path, false, true);
+    assert!(
+        result.is_err(),
+        "Negotiate HTTP scheme should be rejected in strict mode"
+    );
+}
+
+#[test]
 fn test_add_spec_with_proprietary_http_scheme() {
     let (manager, fs) = setup_manager();
 
