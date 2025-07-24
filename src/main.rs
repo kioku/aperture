@@ -135,6 +135,19 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
             ConfigCommands::CacheStats { api_name } => {
                 show_cache_stats(manager, api_name.as_deref()).await?;
             }
+            ConfigCommands::SetSecret {
+                api_name,
+                scheme_name,
+                env,
+                interactive,
+            } => {
+                // TODO: Implement set_secret functionality
+                println!("SetSecret not yet implemented - api_name: {api_name}, scheme_name: {scheme_name:?}, env: {env:?}, interactive: {interactive}");
+            }
+            ConfigCommands::ListSecrets { api_name } => {
+                // TODO: Implement list_secrets functionality
+                println!("ListSecrets not yet implemented - api_name: {api_name}");
+            }
         },
         Commands::ListCommands { ref context } => {
             list_commands(context)?;

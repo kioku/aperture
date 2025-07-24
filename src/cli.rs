@@ -289,6 +289,42 @@ pub enum ConfigCommands {
                       at a glance."
     )]
     ListUrls {},
+    /// Set secret configuration for an API specification security scheme
+    #[command(
+        long_about = "Configure authentication secrets for API specifications.\n\n\
+                      This allows you to set environment variable mappings for security\n\
+                      schemes without modifying the OpenAPI specification file. These\n\
+                      settings take precedence over x-aperture-secret extensions.\n\n\
+                      Examples:\n  \
+                      aperture config set-secret myapi bearerAuth --env API_TOKEN\n  \
+                      aperture config set-secret myapi apiKey --env API_KEY\n  \
+                      aperture config set-secret myapi --interactive"
+    )]
+    SetSecret {
+        /// Name of the API specification
+        api_name: String,
+        /// Name of the security scheme (omit for interactive mode)
+        scheme_name: Option<String>,
+        /// Environment variable name containing the secret
+        #[arg(long, value_name = "VAR", help = "Environment variable name")]
+        env: Option<String>,
+        /// Interactive mode to configure all undefined secrets
+        #[arg(long, conflicts_with_all = ["scheme_name", "env"], help = "Configure secrets interactively")]
+        interactive: bool,
+    },
+    /// List configured secrets for an API specification
+    #[command(
+        long_about = "Display configured secret mappings for an API specification.\n\n\
+                      Shows which security schemes are configured with environment\n\
+                      variables and which ones still rely on x-aperture-secret\n\
+                      extensions or are undefined.\n\n\
+                      Example:\n  \
+                      aperture config list-secrets myapi"
+    )]
+    ListSecrets {
+        /// Name of the API specification
+        api_name: String,
+    },
     /// Re-initialize cached specifications
     #[command(
         long_about = "Regenerate binary cache files for API specifications.\n\n\
