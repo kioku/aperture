@@ -3,7 +3,7 @@ use aperture_cli::batch::{BatchConfig, BatchProcessor};
 use aperture_cli::cache::models::CachedSpec;
 use aperture_cli::cli::{Cli, Commands, ConfigCommands};
 use aperture_cli::config::manager::{get_config_dir, ConfigManager};
-use aperture_cli::config::models::GlobalConfig;
+use aperture_cli::config::models::{GlobalConfig, SecretSource};
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
@@ -141,12 +141,33 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 env,
                 interactive,
             } => {
-                // TODO: Implement set_secret functionality
-                println!("SetSecret not yet implemented - api_name: {api_name}, scheme_name: {scheme_name:?}, env: {env:?}, interactive: {interactive}");
+                if interactive {
+                    // TODO: Implement interactive mode
+                    println!("Interactive mode not yet implemented for API '{api_name}'");
+                } else if let (Some(scheme), Some(env_var)) = (scheme_name, env) {
+                    manager.set_secret(&api_name, &scheme, &env_var)?;
+                    println!("Set secret for scheme '{scheme}' in API '{api_name}' to use environment variable '{env_var}'");
+                } else {
+                    return Err(Error::InvalidConfig {
+                        reason: "Either provide --scheme and --env, or use --interactive"
+                            .to_string(),
+                    });
+                }
             }
             ConfigCommands::ListSecrets { api_name } => {
-                // TODO: Implement list_secrets functionality
-                println!("ListSecrets not yet implemented - api_name: {api_name}");
+                let secrets = manager.list_secrets(&api_name)?;
+                if secrets.is_empty() {
+                    println!("No secrets configured for API '{api_name}'");
+                } else {
+                    println!("Configured secrets for API '{api_name}':");
+                    for (scheme_name, secret) in secrets {
+                        match secret.source {
+                            SecretSource::Env => {
+                                println!("  {scheme_name}: environment variable '{}'", secret.name);
+                            }
+                        }
+                    }
+                }
             }
         },
         Commands::ListCommands { ref context } => {

@@ -1,5 +1,5 @@
 use crate::cache::metadata::CacheMetadataManager;
-use crate::config::models::{ApiConfig, GlobalConfig};
+use crate::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::engine::loader;
 use crate::error::Error;
@@ -855,6 +855,118 @@ impl<F: FileSystem> ConfigManager<F> {
         self.save_strict_preference(name, strict)?;
 
         Ok(())
+    }
+
+    /// Sets a secret configuration for a specific security scheme
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    /// * `scheme_name` - The name of the security scheme
+    /// * `env_var_name` - The environment variable name containing the secret
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    pub fn set_secret(
+        &self,
+        api_name: &str,
+        scheme_name: &str,
+        env_var_name: &str,
+    ) -> Result<(), Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load current config
+        let mut config = self.load_global_config()?;
+
+        // Get or create API config
+        let api_config = config
+            .api_configs
+            .entry(api_name.to_string())
+            .or_insert_with(|| ApiConfig {
+                base_url_override: None,
+                environment_urls: HashMap::new(),
+                strict_mode: false,
+                secrets: HashMap::new(),
+            });
+
+        // Set the secret
+        api_config.secrets.insert(
+            scheme_name.to_string(),
+            ApertureSecret {
+                source: SecretSource::Env,
+                name: env_var_name.to_string(),
+            },
+        );
+
+        // Save updated config
+        self.save_global_config(&config)?;
+        Ok(())
+    }
+
+    /// Lists configured secrets for an API specification
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    ///
+    /// # Returns
+    /// A map of scheme names to their secret configurations
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist.
+    pub fn list_secrets(&self, api_name: &str) -> Result<HashMap<String, ApertureSecret>, Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load global config
+        let config = self.load_global_config()?;
+
+        // Get API config secrets
+        let secrets = config
+            .api_configs
+            .get(api_name)
+            .map(|c| c.secrets.clone())
+            .unwrap_or_default();
+
+        Ok(secrets)
+    }
+
+    /// Gets a secret configuration for a specific security scheme
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    /// * `scheme_name` - The name of the security scheme
+    ///
+    /// # Returns
+    /// The secret configuration if found
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist.
+    pub fn get_secret(
+        &self,
+        api_name: &str,
+        scheme_name: &str,
+    ) -> Result<Option<ApertureSecret>, Error> {
+        let secrets = self.list_secrets(api_name)?;
+        Ok(secrets.get(scheme_name).cloned())
     }
 }
 
