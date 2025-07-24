@@ -124,6 +124,7 @@ dependencies = [
  "anyhow",
  "aperture-cli",
  "assert_cmd",
+ "base64",
  "bincode",
  "chrono",
  "clap",

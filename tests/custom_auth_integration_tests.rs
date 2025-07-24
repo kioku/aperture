@@ -292,3 +292,73 @@ paths:
             "\"url\": \"https://api.example.com/users\"",
         ));
 }
+
+#[tokio::test]
+async fn test_basic_auth_base64_encoding() {
+    let (temp_dir, config_dir) = setup_test_env();
+    let mock_server = MockServer::start().await;
+
+    // Create OpenAPI spec with Basic auth
+    let spec_content = format!(
+        r#"
+openapi: 3.0.0
+info:
+  title: Basic Auth Test API
+  version: 1.0.0
+servers:
+  - url: {}
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      x-aperture-secret:
+        source: env
+        name: BASIC_CREDS
+paths:
+  /api/secure:
+    get:
+      operationId: getSecure
+      security:
+        - basicAuth: []
+      responses:
+        '200':
+          description: Success
+"#,
+        mock_server.uri()
+    );
+
+    let spec_file = temp_dir.path().join("basic-api.yaml");
+    fs::write(&spec_file, spec_content).unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .args(&["config", "add", "basic-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Set up mock to verify the correct Basic Authorization header
+    // "testuser:testpass" base64 encoded is "dGVzdHVzZXI6dGVzdHBhc3M="
+    Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/api/secure"))
+        .and(wiremock::matchers::header(
+            "Authorization",
+            "Basic dGVzdHVzZXI6dGVzdHBhc3M=",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"status": "authenticated"}"#))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    // Execute the command with Basic auth
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .env("BASIC_CREDS", "testuser:testpass")
+        .args(&["api", "basic-api", "default", "get-secure"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"status\": \"authenticated\""));
+}

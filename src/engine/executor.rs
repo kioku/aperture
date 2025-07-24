@@ -511,7 +511,11 @@ fn add_authentication_header(
                         }
                         "basic" => {
                             // Basic auth expects "username:password" format in the secret
-                            let auth_value = format!("Basic {secret_value}");
+                            // The secret should contain the raw "username:password" string
+                            // We'll base64 encode it before adding to the header
+                            use base64::{engine::general_purpose, Engine as _};
+                            let encoded = general_purpose::STANDARD.encode(&secret_value);
+                            let auth_value = format!("Basic {encoded}");
                             let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
                                 Error::InvalidHeaderValue {
                                     name: "Authorization".to_string(),
