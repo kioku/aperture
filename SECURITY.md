@@ -102,7 +102,7 @@ For APIs using these authentication methods, consider using alternative authenti
 
 ### Partial API Support
 
-Starting from v0.1.5, Aperture uses a non-strict validation mode by default:
+Starting from v0.1.4, Aperture uses a non-strict validation mode by default:
 - APIs containing unsupported authentication schemes are accepted
 - Only endpoints that require unsupported authentication are skipped
 - Endpoints with multiple authentication options (where at least one is supported) remain available

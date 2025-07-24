@@ -157,25 +157,17 @@ impl SpecValidator {
         if let Some(components) = &spec.components {
             for (name, scheme_ref) in &components.security_schemes {
                 match scheme_ref {
-                    ReferenceOr::Item(scheme) => match Self::validate_security_scheme(name, scheme)
-                    {
-                        Ok(_) => {}
-                        Err(e) => {
-                            if strict {
-                                result.add_error(e);
-                            } else if let Error::Validation(msg) = &e {
-                                if msg.contains("unsupported authentication") {
-                                    // Track unsupported schemes for later operation validation
-                                    unsupported_schemes.insert(name.clone(), msg.clone());
-                                } else {
-                                    // Other validation errors are still errors
-                                    result.add_error(e);
-                                }
-                            } else {
-                                result.add_error(e);
-                            }
+                    ReferenceOr::Item(scheme) => {
+                        if let Err(e) = Self::validate_security_scheme(name, scheme) {
+                            Self::handle_security_scheme_error(
+                                e,
+                                strict,
+                                name,
+                                &mut result,
+                                &mut unsupported_schemes,
+                            );
                         }
-                    },
+                    }
                     ReferenceOr::Reference { .. } => {
                         result.add_error(Error::Validation(format!(
                             "Security scheme references are not supported: '{name}'"
@@ -317,6 +309,124 @@ impl SpecValidator {
         Ok(None)
     }
 
+    /// Handles security scheme validation errors with proper error/warning categorization
+    fn handle_security_scheme_error(
+        error: Error,
+        strict: bool,
+        scheme_name: &str,
+        result: &mut ValidationResult,
+        unsupported_schemes: &mut HashMap<String, String>,
+    ) {
+        if strict {
+            result.add_error(error);
+            return;
+        }
+
+        match error {
+            Error::Validation(ref msg) if msg.contains("unsupported authentication") => {
+                // Track unsupported schemes for later operation validation
+                unsupported_schemes.insert(scheme_name.to_string(), msg.clone());
+            }
+            _ => {
+                // Other validation errors are still errors even in non-strict mode
+                result.add_error(error);
+            }
+        }
+    }
+
+    /// Determines if an operation should be skipped due to unsupported authentication
+    /// Returns true if the operation was skipped (warning added), false otherwise
+    fn should_skip_operation_for_auth(
+        path: &str,
+        method: &str,
+        operation: &Operation,
+        spec: &OpenAPI,
+        strict: bool,
+        unsupported_schemes: &HashMap<String, String>,
+        result: &mut ValidationResult,
+    ) -> bool {
+        // Skip auth validation in strict mode or when no schemes are unsupported
+        if strict || unsupported_schemes.is_empty() {
+            return false;
+        }
+
+        // Get security requirements (operation-level or global)
+        let Some(reqs) = operation.security.as_ref().or(spec.security.as_ref()) else {
+            return false;
+        };
+
+        // Skip if empty security requirements
+        if reqs.is_empty() {
+            return false;
+        }
+
+        // Check if all auth schemes are unsupported
+        if !Self::should_skip_due_to_auth(reqs, unsupported_schemes) {
+            return false;
+        }
+
+        // Generate warning for skipped operation
+        let scheme_details = Self::format_unsupported_scheme_details(reqs, unsupported_schemes);
+        let reason = Self::format_auth_skip_reason(reqs, &scheme_details);
+
+        result.add_warning(ValidationWarning {
+            endpoint: UnsupportedEndpoint {
+                path: path.to_string(),
+                method: method.to_uppercase(),
+                content_type: String::new(),
+            },
+            reason,
+        });
+
+        true
+    }
+
+    /// Formats unsupported scheme details for warning messages
+    fn format_unsupported_scheme_details(
+        reqs: &[openapiv3::SecurityRequirement],
+        unsupported_schemes: &HashMap<String, String>,
+    ) -> Vec<String> {
+        reqs.iter()
+            .flat_map(|req| req.keys())
+            .filter_map(|scheme_name| {
+                unsupported_schemes.get(scheme_name).map(|msg| {
+                    // Extract the specific reason from the validation message
+                    if msg.contains("OAuth2") {
+                        format!("{scheme_name} (OAuth2)")
+                    } else if msg.contains("OpenID Connect") {
+                        format!("{scheme_name} (OpenID Connect)")
+                    } else if msg.contains("complex authentication flows") {
+                        format!("{scheme_name} (requires complex flow)")
+                    } else {
+                        scheme_name.clone()
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Formats the reason message for authentication-related skips
+    fn format_auth_skip_reason(
+        reqs: &[openapiv3::SecurityRequirement],
+        scheme_details: &[String],
+    ) -> String {
+        if scheme_details.is_empty() {
+            format!(
+                "endpoint requires unsupported authentication schemes: {}",
+                reqs.iter()
+                    .flat_map(|req| req.keys())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            format!(
+                "endpoint requires unsupported authentication: {}",
+                scheme_details.join(", ")
+            )
+        }
+    }
+
     /// Check if operation should be skipped because all its auth schemes are unsupported
     fn should_skip_due_to_auth(
         security_reqs: &[openapiv3::SecurityRequirement],
@@ -338,58 +448,17 @@ impl SpecValidator {
         unsupported_schemes: &HashMap<String, String>,
         spec: &OpenAPI,
     ) {
-        // Skip auth validation in strict mode or when no schemes are unsupported
-        if strict || unsupported_schemes.is_empty() {
-            // Fall through to normal validation
-        } else if let Some(reqs) = operation.security.as_ref().or(spec.security.as_ref()) {
-            // Skip if empty security requirements
-            if reqs.is_empty() {
-                // Fall through to normal validation
-            } else if Self::should_skip_due_to_auth(reqs, unsupported_schemes) {
-                // All auth schemes are unsupported - skip this operation
-                let scheme_details: Vec<String> = reqs
-                    .iter()
-                    .flat_map(|req| req.keys())
-                    .filter_map(|scheme_name| {
-                        unsupported_schemes.get(scheme_name).map(|msg| {
-                            // Extract the specific reason from the validation message
-                            if msg.contains("OAuth2") {
-                                format!("{scheme_name} (OAuth2)")
-                            } else if msg.contains("OpenID Connect") {
-                                format!("{scheme_name} (OpenID Connect)")
-                            } else if msg.contains("complex authentication flows") {
-                                format!("{scheme_name} (requires complex flow)")
-                            } else {
-                                scheme_name.clone()
-                            }
-                        })
-                    })
-                    .collect();
-
-                result.add_warning(ValidationWarning {
-                    endpoint: UnsupportedEndpoint {
-                        path: path.to_string(),
-                        method: method.to_uppercase(),
-                        content_type: String::new(),
-                    },
-                    reason: if scheme_details.is_empty() {
-                        format!(
-                            "endpoint requires unsupported authentication schemes: {}",
-                            reqs.iter()
-                                .flat_map(|req| req.keys())
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )
-                    } else {
-                        format!(
-                            "endpoint requires unsupported authentication: {}",
-                            scheme_details.join(", ")
-                        )
-                    },
-                });
-                return;
-            }
+        // Check if operation should be skipped due to unsupported authentication
+        if Self::should_skip_operation_for_auth(
+            path,
+            method,
+            operation,
+            spec,
+            strict,
+            unsupported_schemes,
+            result,
+        ) {
+            return;
         }
 
         // Validate parameters

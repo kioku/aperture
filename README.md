@@ -115,7 +115,7 @@ The following authentication types require complex flows and are not supported:
 
 #### Partial API Support
 
-Starting from v0.1.5, Aperture handles APIs with unsupported features gracefully:
+Starting from v0.1.4, Aperture handles APIs with unsupported features gracefully:
 
 - **Non-Strict Mode (Default)**: APIs containing unsupported authentication schemes or content types are accepted
   - Only endpoints that require unsupported features are skipped
