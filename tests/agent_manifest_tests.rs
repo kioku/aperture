@@ -351,6 +351,7 @@ fn test_manifest_with_global_config() {
             base_url_override: Some("https://override.example.com".to_string()),
             environment_urls: HashMap::new(),
             strict_mode: false,
+            secrets: HashMap::new(),
         },
     );
 
