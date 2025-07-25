@@ -149,15 +149,18 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Testable version of prompt_for_input that accepts an InputOutput trait
-pub fn prompt_for_input_with_io<T: InputOutput>(
-    prompt: &str,
-    io: &T,
-) -> Result<String, Error> {
+/// Testable version of `prompt_for_input` that accepts an `InputOutput` trait
+///
+/// # Errors
+/// Returns an error if input operations fail, input is too long, or contains invalid characters
+pub fn prompt_for_input_with_io<T: InputOutput>(prompt: &str, io: &T) -> Result<String, Error> {
     prompt_for_input_with_io_and_timeout(prompt, io, INPUT_TIMEOUT)
 }
 
-/// Testable version of prompt_for_input with configurable timeout
+/// Testable version of `prompt_for_input` with configurable timeout
+///
+/// # Errors
+/// Returns an error if input operations fail, input is too long, contains invalid characters, or times out
 pub fn prompt_for_input_with_io_and_timeout<T: InputOutput>(
     prompt: &str,
     io: &T,
@@ -189,7 +192,10 @@ pub fn prompt_for_input_with_io_and_timeout<T: InputOutput>(
     Ok(trimmed_input.to_string())
 }
 
-/// Testable version of select_from_options that accepts an InputOutput trait
+/// Testable version of `select_from_options` that accepts an `InputOutput` trait
+///
+/// # Errors
+/// Returns an error if no options provided, input operations fail, or maximum retries exceeded
 pub fn select_from_options_with_io<T: InputOutput>(
     prompt: &str,
     options: &[(String, String)],
@@ -198,7 +204,10 @@ pub fn select_from_options_with_io<T: InputOutput>(
     select_from_options_with_io_and_timeout(prompt, options, io, INPUT_TIMEOUT)
 }
 
-/// Testable version of select_from_options with configurable timeout
+/// Testable version of `select_from_options` with configurable timeout
+///
+/// # Errors
+/// Returns an error if no options provided, input operations fail, maximum retries exceeded, or timeout occurs
 pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
     prompt: &str,
     options: &[(String, String)],
@@ -217,11 +226,19 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
     }
 
     for attempt in 1..=MAX_RETRIES {
-        let selection = prompt_for_input_with_io_and_timeout("Enter your choice (number or name): ", io, timeout)?;
+        let selection = prompt_for_input_with_io_and_timeout(
+            "Enter your choice (number or name): ",
+            io,
+            timeout,
+        )?;
 
         // Handle empty input as cancellation
         if selection.is_empty() {
-            if !confirm_with_io_and_timeout("Do you want to continue with the current operation?", io, timeout)? {
+            if !confirm_with_io_and_timeout(
+                "Do you want to continue with the current operation?",
+                io,
+                timeout,
+            )? {
                 return Err(Error::InvalidConfig {
                     reason: "Selection cancelled by user".to_string(),
                 });
@@ -258,19 +275,26 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
     })
 }
 
-/// Testable version of confirm that accepts an InputOutput trait
+/// Testable version of `confirm` that accepts an `InputOutput` trait
+///
+/// # Errors
+/// Returns an error if input operations fail or maximum retries exceeded
 pub fn confirm_with_io<T: InputOutput>(prompt: &str, io: &T) -> Result<bool, Error> {
     confirm_with_io_and_timeout(prompt, io, INPUT_TIMEOUT)
 }
 
-/// Testable version of confirm with configurable timeout
+/// Testable version of `confirm` with configurable timeout
+///
+/// # Errors
+/// Returns an error if input operations fail, maximum retries exceeded, or timeout occurs
 pub fn confirm_with_io_and_timeout<T: InputOutput>(
     prompt: &str,
     io: &T,
     timeout: Duration,
 ) -> Result<bool, Error> {
     for attempt in 1..=MAX_RETRIES {
-        let response = prompt_for_input_with_io_and_timeout(&format!("{prompt} (y/n): "), io, timeout)?;
+        let response =
+            prompt_for_input_with_io_and_timeout(&format!("{prompt} (y/n): "), io, timeout)?;
 
         // Handle empty input as cancellation
         if response.is_empty() {
@@ -306,6 +330,9 @@ pub fn confirm_exit() -> Result<bool, Error> {
 
 /// Checks if the user wants to cancel the current operation
 /// This is called when empty input is provided as a cancellation signal
+///
+/// # Errors
+/// Returns an error if the confirmation input operation fails
 pub fn handle_cancellation_input() -> Result<bool, Error> {
     println!("Empty input detected. This will cancel the current operation.");
     confirm("Do you want to continue with the current operation?")

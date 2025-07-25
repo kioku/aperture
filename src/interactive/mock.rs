@@ -3,29 +3,42 @@ use std::time::Duration;
 
 #[cfg(test)]
 use mockall::predicate::*;
-#[cfg(test)]
-use mockall::*;
 
 /// Trait abstraction for input/output operations to enable mocking
 #[cfg_attr(test, mockall::automock)]
 pub trait InputOutput {
     /// Print text to output
+    ///
+    /// # Errors
+    /// Returns an error if the output operation fails
     fn print(&self, text: &str) -> Result<(), Error>;
-    
+
     /// Print text to output with newline
+    ///
+    /// # Errors
+    /// Returns an error if the output operation fails
     fn println(&self, text: &str) -> Result<(), Error>;
-    
+
     /// Flush output buffer
+    ///
+    /// # Errors
+    /// Returns an error if the flush operation fails
     fn flush(&self) -> Result<(), Error>;
-    
+
     /// Read a line of input from user
+    ///
+    /// # Errors
+    /// Returns an error if the input operation fails
     fn read_line(&self) -> Result<String, Error>;
-    
+
     /// Read a line of input from user with timeout
+    ///
+    /// # Errors
+    /// Returns an error if the input operation fails or times out
     fn read_line_with_timeout(&self, timeout: Duration) -> Result<String, Error>;
 }
 
-/// Real implementation of InputOutput that uses stdin/stdout
+/// Real implementation of `InputOutput` that uses stdin/stdout
 pub struct RealInputOutput;
 
 impl InputOutput for RealInputOutput {
@@ -33,17 +46,17 @@ impl InputOutput for RealInputOutput {
         print!("{text}");
         Ok(())
     }
-    
+
     fn println(&self, text: &str) -> Result<(), Error> {
         println!("{text}");
         Ok(())
     }
-    
+
     fn flush(&self) -> Result<(), Error> {
         use std::io::Write;
         std::io::stdout().flush().map_err(Error::Io)
     }
-    
+
     fn read_line(&self) -> Result<String, Error> {
         use std::io::BufRead;
         let stdin = std::io::stdin();
@@ -51,24 +64,25 @@ impl InputOutput for RealInputOutput {
         stdin.lock().read_line(&mut line).map_err(Error::Io)?;
         Ok(line)
     }
-    
+
     fn read_line_with_timeout(&self, timeout: Duration) -> Result<String, Error> {
+        use std::io::BufRead;
         use std::sync::mpsc;
         use std::thread;
-        use std::io::BufRead;
-        
+
         let (tx, rx) = mpsc::channel();
-        
+
         // Spawn a thread to read from stdin
         let read_thread = thread::spawn(move || {
             let stdin = std::io::stdin();
             let mut line = String::new();
-            match stdin.lock().read_line(&mut line) {
+            let result = stdin.lock().read_line(&mut line);
+            match result {
                 Ok(_) => tx.send(Ok(line)).unwrap_or(()),
                 Err(e) => tx.send(Err(Error::Io(e))).unwrap_or(()),
             }
         });
-        
+
         // Wait for either input or timeout
         match rx.recv_timeout(timeout) {
             Ok(result) => {
@@ -83,11 +97,9 @@ impl InputOutput for RealInputOutput {
                     reason: format!("Input timeout after {} seconds", timeout.as_secs()),
                 })
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                Err(Error::InvalidConfig {
-                    reason: "Input channel disconnected".to_string(),
-                })
-            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::InvalidConfig {
+                reason: "Input channel disconnected".to_string(),
+            }),
         }
     }
 }
@@ -99,17 +111,17 @@ mod tests {
     #[test]
     fn test_mock_input_output() {
         let mut mock = MockInputOutput::new();
-        
+
         // Set up expectations
         mock.expect_print()
             .with(eq("Hello"))
             .times(1)
             .returning(|_| Ok(()));
-            
+
         mock.expect_read_line()
             .times(1)
             .returning(|| Ok("test input\n".to_string()));
-        
+
         // Test the mock
         assert!(mock.print("Hello").is_ok());
         assert_eq!(mock.read_line().unwrap(), "test input\n");
