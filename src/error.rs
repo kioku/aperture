@@ -91,6 +91,54 @@ pub enum Error {
     #[error("Invalid path '{path}': {reason}")]
     InvalidPath { path: String, reason: String },
 
+    // Interactive error handling enhancements
+    #[error("Input too long: {provided} characters (max: {max}). {suggestion}")]
+    InteractiveInputTooLong {
+        provided: usize,
+        max: usize,
+        suggestion: String,
+    },
+    #[error("Input contains invalid characters: {invalid_chars}. {suggestion}")]
+    InteractiveInvalidCharacters {
+        invalid_chars: String,
+        suggestion: String,
+    },
+    #[error("Interactive operation timed out after {timeout_secs} seconds. {suggestion}")]
+    InteractiveTimeout {
+        timeout_secs: u64,
+        suggestion: String,
+    },
+    #[error("Maximum retry attempts ({max_attempts}) exceeded. Last error: {last_error}")]
+    InteractiveRetriesExhausted {
+        max_attempts: usize,
+        last_error: String,
+        suggestions: Vec<String>,
+    },
+    #[error("Environment variable name '{name}' is invalid: {reason}. {suggestion}")]
+    InvalidEnvironmentVariableName {
+        name: String,
+        reason: String,
+        suggestion: String,
+    },
+
+    // Network resilience error handling
+    #[error("Request timed out after {attempts} retries (max timeout: {timeout_ms}ms)")]
+    RequestTimeout {
+        attempts: usize,
+        timeout_ms: u64,
+    },
+    #[error("Retry limit exceeded: {attempts} attempts failed over {duration_ms}ms. Last error: {last_error}")]
+    RetryLimitExceeded {
+        attempts: usize,
+        duration_ms: u64,
+        last_error: String,
+    },
+    #[error("Transient network error - request can be retried: {reason}")]
+    TransientNetworkError {
+        reason: String,
+        retryable: bool,
+    },
+
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
 }
@@ -112,6 +160,36 @@ impl Error {
         match self {
             Self::Network(e) => Self::Config(format!("{context}: {e}")),
             Self::Io(e) => Self::Config(format!("{context}: {e}")),
+            Self::Config(msg) => Self::Config(format!("{context}: {msg}")),
+            Self::Validation(msg) => Self::Validation(format!("{context}: {msg}")),
+            _ => self,
+        }
+    }
+
+    /// Add operation context to an error for better debugging
+    #[must_use]
+    pub fn with_operation_context(self, operation: &str, api: &str) -> Self {
+        match self {
+            Self::RequestFailed { reason } => Self::RequestFailed {
+                reason: format!("Operation '{operation}' on API '{api}': {reason}"),
+            },
+            Self::ResponseReadError { reason } => Self::ResponseReadError {
+                reason: format!("Operation '{operation}' on API '{api}': {reason}"),
+            },
+            Self::Network(e) => Self::Config(format!("Operation '{operation}' on API '{api}': {e}")),
+            _ => self,
+        }
+    }
+
+    /// Add suggestions to error messages for better user guidance
+    #[must_use]
+    pub fn with_suggestion(self, suggestion: &str) -> Self {
+        match self {
+            Self::Config(msg) => Self::Config(format!("{msg}. Suggestion: {suggestion}")),
+            Self::Validation(msg) => Self::Validation(format!("{msg}. Suggestion: {suggestion}")),
+            Self::InvalidConfig { reason } => Self::InvalidConfig {
+                reason: format!("{reason}. Suggestion: {suggestion}"),
+            },
             _ => self,
         }
     }
@@ -385,6 +463,55 @@ impl Error {
                 format!("Invalid path '{path}': {reason}"),
                 Some("Check that the path is valid and properly formatted.".to_string()),
                 Some(json!({ "path": path, "reason": reason })),
+            ),
+            Self::InteractiveInputTooLong { provided, max, suggestion } => (
+                "InteractiveInputTooLong",
+                format!("Input too long: {provided} characters (max: {max}). {suggestion}"),
+                Some("Consider shortening your input or breaking it into multiple parts.".to_string()),
+                Some(json!({ "provided_length": provided, "max_length": max, "suggestion": suggestion })),
+            ),
+            Self::InteractiveInvalidCharacters { invalid_chars, suggestion } => (
+                "InteractiveInvalidCharacters",
+                format!("Input contains invalid characters: {invalid_chars}. {suggestion}"),
+                Some("Use only alphanumeric characters, underscores, and hyphens.".to_string()),
+                Some(json!({ "invalid_characters": invalid_chars, "suggestion": suggestion })),
+            ),
+            Self::InteractiveTimeout { timeout_secs, suggestion } => (
+                "InteractiveTimeout",
+                format!("Interactive operation timed out after {timeout_secs} seconds. {suggestion}"),
+                Some("Try again with a faster response or increase the timeout.".to_string()),
+                Some(json!({ "timeout_seconds": timeout_secs, "suggestion": suggestion })),
+            ),
+            Self::InteractiveRetriesExhausted { max_attempts, last_error, suggestions } => (
+                "InteractiveRetriesExhausted",
+                format!("Maximum retry attempts ({max_attempts}) exceeded. Last error: {last_error}"),
+                Some(suggestions.join("; ")),
+                Some(json!({ "max_attempts": max_attempts, "last_error": last_error, "suggestions": suggestions })),
+            ),
+            Self::InvalidEnvironmentVariableName { name, reason, suggestion } => (
+                "InvalidEnvironmentVariableName",
+                format!("Environment variable name '{name}' is invalid: {reason}. {suggestion}"),
+                Some("Use uppercase letters, numbers, and underscores only.".to_string()),
+                Some(json!({ "variable_name": name, "reason": reason, "suggestion": suggestion })),
+            ),
+            Self::RequestTimeout { attempts, timeout_ms } => (
+                "RequestTimeout",
+                format!("Request timed out after {attempts} retries (max timeout: {timeout_ms}ms)"),
+                Some("The server may be slow or unresponsive. Try again later or increase timeout.".to_string()),
+                Some(json!({ "retry_attempts": attempts, "timeout_ms": timeout_ms })),
+            ),
+            Self::RetryLimitExceeded { attempts, duration_ms, last_error } => (
+                "RetryLimitExceeded",
+                format!("Retry limit exceeded: {attempts} attempts failed over {duration_ms}ms. Last error: {last_error}"),
+                Some("The service may be experiencing issues. Check API status or try again later.".to_string()),
+                Some(json!({ "retry_attempts": attempts, "duration_ms": duration_ms, "last_error": last_error })),
+            ),
+            Self::TransientNetworkError { reason, retryable } => (
+                "TransientNetworkError",
+                format!("Transient network error - request can be retried: {reason}"),
+                if *retryable { Some("This error is retryable. The request will be automatically retried.".to_string()) }
+                else { Some("This error is not retryable. Check your network connection and API configuration.".to_string()) },
+                Some(json!({ "reason": reason, "retryable": retryable })),
             ),
             Self::Anyhow(err) => (
                 "Unexpected",

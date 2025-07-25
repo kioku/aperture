@@ -7,5 +7,6 @@ pub mod engine;
 pub mod error;
 pub mod fs;
 pub mod interactive;
+pub mod resilience;
 pub mod response_cache;
 pub mod spec;

@@ -129,6 +129,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "fastrand",
  "governor",
  "indexmap",
  "jaq-interpret",

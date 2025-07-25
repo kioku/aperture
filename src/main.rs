@@ -942,6 +942,40 @@ fn print_error(error: &Error) {
         Error::InvalidPath { .. } => {
             eprintln!("Invalid Path\n{error}\n\nHint: Check that the path is valid and properly formatted.");
         }
+        Error::InteractiveInputTooLong { provided, max, suggestion } => {
+            eprintln!("Input Too Long\nProvided {provided} characters (max: {max})\n{suggestion}");
+        }
+        Error::InteractiveInvalidCharacters { invalid_chars, suggestion } => {
+            eprintln!("Invalid Input Characters\nInvalid characters: {invalid_chars}\n{suggestion}");
+        }
+        Error::InteractiveTimeout { timeout_secs, suggestion } => {
+            eprintln!("Input Timeout\nTimed out after {timeout_secs} seconds\n{suggestion}");
+        }
+        Error::InteractiveRetriesExhausted { max_attempts, last_error, suggestions } => {
+            eprintln!("Maximum Retries Exceeded\nFailed after {max_attempts} attempts. Last error: {last_error}");
+            if !suggestions.is_empty() {
+                eprintln!("\nSuggestions:");
+                for suggestion in suggestions {
+                    eprintln!("  • {suggestion}");
+                }
+            }
+        }
+        Error::InvalidEnvironmentVariableName { name, reason, suggestion } => {
+            eprintln!("Invalid Environment Variable Name\nName '{name}' is invalid: {reason}\n{suggestion}");
+        }
+        Error::RequestTimeout { attempts, timeout_ms } => {
+            eprintln!("Request Timeout\nRequest timed out after {attempts} retries (max timeout: {timeout_ms}ms)\n\nHint: The server may be slow or unresponsive. Try again later or increase timeout.");
+        }
+        Error::RetryLimitExceeded { attempts, duration_ms, last_error } => {
+            eprintln!("Retry Limit Exceeded\nFailed after {attempts} attempts over {duration_ms}ms\nLast error: {last_error}\n\nHint: The service may be experiencing issues. Check API status or try again later.");
+        }
+        Error::TransientNetworkError { reason, retryable } => {
+            if *retryable {
+                eprintln!("Transient Network Error\n{reason}\n\nHint: This error is retryable. The request will be automatically retried.");
+            } else {
+                eprintln!("Network Error\n{reason}\n\nHint: This error is not retryable. Check your network connection and API configuration.");
+            }
+        }
         Error::Anyhow(err) => {
             eprintln!("💥 Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
         }

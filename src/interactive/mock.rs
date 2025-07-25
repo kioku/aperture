@@ -93,8 +93,9 @@ impl InputOutput for RealInputOutput {
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // Note: The thread will continue running until user provides input
                 // This is a limitation of stdin reading in Rust - we can't easily cancel it
-                Err(Error::InvalidConfig {
-                    reason: format!("Input timeout after {} seconds", timeout.as_secs()),
+                Err(Error::InteractiveTimeout {
+                    timeout_secs: timeout.as_secs(),
+                    suggestion: "Try again with a faster response or increase timeout with APERTURE_INPUT_TIMEOUT".to_string(),
                 })
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::InvalidConfig {

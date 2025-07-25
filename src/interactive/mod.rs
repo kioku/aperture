@@ -104,19 +104,19 @@ pub fn confirm_with_timeout(prompt: &str, timeout: Duration) -> Result<bool, Err
 pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
     // Check if empty
     if name.is_empty() {
-        return Err(Error::InvalidConfig {
-            reason: "Environment variable name cannot be empty".to_string(),
+        return Err(Error::InvalidEnvironmentVariableName {
+            name: name.to_string(),
+            reason: "name cannot be empty".to_string(),
+            suggestion: "Provide a non-empty environment variable name like 'API_TOKEN'".to_string(),
         });
     }
 
     // Check length
     if name.len() > MAX_INPUT_LENGTH {
-        return Err(Error::InvalidConfig {
-            reason: format!(
-                "Environment variable name too long: {} characters (maximum: {})",
-                name.len(),
-                MAX_INPUT_LENGTH
-            ),
+        return Err(Error::InvalidEnvironmentVariableName {
+            name: name.to_string(),
+            reason: format!("too long: {} characters (maximum: {})", name.len(), MAX_INPUT_LENGTH),
+            suggestion: format!("Shorten the name to {MAX_INPUT_LENGTH} characters or less"),
         });
     }
 
@@ -126,23 +126,38 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
         .iter()
         .any(|&reserved| reserved == name_upper)
     {
-        return Err(Error::InvalidConfig {
-            reason: format!("Cannot use reserved environment variable name: {name}"),
+        return Err(Error::InvalidEnvironmentVariableName {
+            name: name.to_string(),
+            reason: "uses a reserved system variable name".to_string(),
+            suggestion: "Use a different name like 'MY_API_TOKEN' or 'APP_SECRET'".to_string(),
         });
     }
 
     // Check format - must start with letter or underscore, followed by alphanumeric or underscore
     if !name.chars().next().unwrap_or('_').is_ascii_alphabetic() && !name.starts_with('_') {
-        return Err(Error::InvalidConfig {
-            reason: "Environment variable name must start with a letter or underscore".to_string(),
+        let first_char = name.chars().next().unwrap_or('?');
+        let suggested_name = if first_char.is_ascii_digit() {
+            format!("VAR_{name}")
+        } else {
+            format!("_{name}")
+        };
+        return Err(Error::InvalidEnvironmentVariableName {
+            name: name.to_string(),
+            reason: "must start with a letter or underscore".to_string(),
+            suggestion: format!("Try '{suggested_name}' instead"),
         });
     }
 
     // Check all characters are valid - alphanumeric or underscore only
-    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err(Error::InvalidConfig {
-            reason: "Environment variable name must contain only letters, numbers, and underscores"
-                .to_string(),
+    let invalid_chars: Vec<char> = name.chars().filter(|c| !c.is_ascii_alphanumeric() && *c != '_').collect();
+    if !invalid_chars.is_empty() {
+        let invalid_chars_str: String = invalid_chars.iter().collect();
+        let suggested_name = name.chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+            .collect::<String>();
+        return Err(Error::InteractiveInvalidCharacters {
+            invalid_chars: invalid_chars_str,
+            suggestion: format!("Try '{suggested_name}' instead"),
         });
     }
 
@@ -174,18 +189,20 @@ pub fn prompt_for_input_with_io_and_timeout<T: InputOutput>(
 
     // Validate input length
     if trimmed_input.len() > MAX_INPUT_LENGTH {
-        return Err(Error::InvalidConfig {
-            reason: format!(
-                "Input too long: {} characters (maximum: {MAX_INPUT_LENGTH})",
-                trimmed_input.len()
-            ),
+        return Err(Error::InteractiveInputTooLong {
+            provided: trimmed_input.len(),
+            max: MAX_INPUT_LENGTH,
+            suggestion: "Try shortening your input or using a configuration file for longer values".to_string(),
         });
     }
 
     // Sanitize input - check for control characters
-    if trimmed_input.chars().any(|c| c.is_control() && c != '\t') {
-        return Err(Error::InvalidConfig {
-            reason: "Input contains invalid control characters".to_string(),
+    let control_chars: Vec<char> = trimmed_input.chars().filter(|c| c.is_control() && *c != '\t').collect();
+    if !control_chars.is_empty() {
+        let control_chars_str = control_chars.iter().map(|c| format!("U+{:04X}", *c as u32)).collect::<Vec<_>>().join(", ");
+        return Err(Error::InteractiveInvalidCharacters {
+            invalid_chars: control_chars_str,
+            suggestion: "Remove control characters and use only printable text".to_string(),
         });
     }
 
@@ -270,8 +287,15 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
         }
     }
 
-    Err(Error::InvalidConfig {
-        reason: format!("Maximum retry attempts ({MAX_RETRIES}) exceeded"),
+    let suggestions = vec![
+        format!("Valid options: {}", options.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>().join(", ")),
+        "You can enter either a number or the exact name".to_string(),
+        "Leave empty and answer 'no' to cancel the operation".to_string(),
+    ];
+    Err(Error::InteractiveRetriesExhausted {
+        max_attempts: MAX_RETRIES,
+        last_error: "Invalid selection".to_string(),
+        suggestions,
     })
 }
 
@@ -314,8 +338,14 @@ pub fn confirm_with_io_and_timeout<T: InputOutput>(
         }
     }
 
-    Err(Error::InvalidConfig {
-        reason: format!("Maximum retry attempts ({MAX_RETRIES}) exceeded for confirmation"),
+    let suggestions = vec![
+        "Valid responses: 'y', 'yes', 'n', 'no' (case insensitive)".to_string(),
+        "Leave empty to default to 'no'".to_string(),
+    ];
+    Err(Error::InteractiveRetriesExhausted {
+        max_attempts: MAX_RETRIES,
+        last_error: "Invalid confirmation response".to_string(),
+        suggestions,
     })
 }
 
@@ -425,20 +455,20 @@ mod tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("letters, numbers, and underscores"));
+            .contains("invalid characters"));
 
         let result = validate_env_var_name("API.TOKEN");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("letters, numbers, and underscores"));
+            .contains("invalid characters"));
 
         let result = validate_env_var_name("API TOKEN");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("letters, numbers, and underscores"));
+            .contains("invalid characters"));
     }
 }
