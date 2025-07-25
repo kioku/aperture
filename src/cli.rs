@@ -325,6 +325,39 @@ pub enum ConfigCommands {
         /// Name of the API specification
         api_name: String,
     },
+    /// Remove a specific configured secret for an API specification
+    #[command(
+        long_about = "Remove a configured secret mapping for a specific security scheme.\n\n\
+                      This will remove the environment variable mapping for the specified\n\
+                      security scheme, causing it to fall back to x-aperture-secret\n\
+                      extensions or become undefined.\n\n\
+                      Examples:\n  \
+                      aperture config remove-secret myapi bearerAuth\n  \
+                      aperture config remove-secret myapi apiKey"
+    )]
+    RemoveSecret {
+        /// Name of the API specification
+        api_name: String,
+        /// Name of the security scheme to remove
+        scheme_name: String,
+    },
+    /// Clear all configured secrets for an API specification
+    #[command(
+        long_about = "Remove all configured secret mappings for an API specification.\n\n\
+                      This will remove all environment variable mappings for the API,\n\
+                      causing all security schemes to fall back to x-aperture-secret\n\
+                      extensions or become undefined. Use with caution.\n\n\
+                      Examples:\n  \
+                      aperture config clear-secrets myapi\n  \
+                      aperture config clear-secrets myapi --force"
+    )]
+    ClearSecrets {
+        /// Name of the API specification
+        api_name: String,
+        /// Skip confirmation prompt
+        #[arg(long, help = "Skip confirmation prompt")]
+        force: bool,
+    },
     /// Re-initialize cached specifications
     #[command(
         long_about = "Regenerate binary cache files for API specifications.\n\n\

@@ -168,6 +168,40 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                     }
                 }
             }
+            ConfigCommands::RemoveSecret {
+                api_name,
+                scheme_name,
+            } => {
+                manager.remove_secret(&api_name, &scheme_name)?;
+                println!("✓ Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'");
+            }
+            ConfigCommands::ClearSecrets { api_name, force } => {
+                // Check if API exists and has secrets
+                let secrets = manager.list_secrets(&api_name)?;
+                if secrets.is_empty() {
+                    println!("No secrets configured for API '{api_name}'");
+                    return Ok(());
+                }
+
+                // Confirm operation unless --force is used
+                if !force {
+                    use aperture_cli::interactive::confirm;
+                    println!(
+                        "This will remove all {} secret configuration(s) for API '{api_name}':",
+                        secrets.len()
+                    );
+                    for scheme_name in secrets.keys() {
+                        println!("  - {scheme_name}");
+                    }
+                    if !confirm("Are you sure you want to continue?")? {
+                        println!("Operation cancelled");
+                        return Ok(());
+                    }
+                }
+
+                manager.clear_secrets(&api_name)?;
+                println!("✓ Cleared all secret configurations for API '{api_name}'");
+            }
         },
         Commands::ListCommands { ref context } => {
             list_commands(context)?;

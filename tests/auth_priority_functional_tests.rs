@@ -154,21 +154,33 @@ fn create_global_config_with_secrets(
 async fn test_config_secret_overrides_aperture_secret() {
     let mock_server = MockServer::start().await;
 
+    // Use unique environment variable names for this test
+    let test_id = "CONFIG_OVERRIDE_TEST";
+    let spec_bearer_env = format!("{}_SPEC_BEARER_TOKEN", test_id);
+    let config_bearer_env = format!("{}_CONFIG_BEARER_TOKEN", test_id);
+    let spec_api_key_env = format!("{}_SPEC_API_KEY", test_id);
+    let config_api_key_env = format!("{}_CONFIG_API_KEY", test_id);
+
     // Clean up any existing environment variables first
     cleanup_env_vars();
+    // Clean up test-specific variables
+    std::env::remove_var(&spec_bearer_env);
+    std::env::remove_var(&config_bearer_env);
+    std::env::remove_var(&spec_api_key_env);
+    std::env::remove_var(&config_api_key_env);
 
     // Set up environment variables
-    std::env::set_var("SPEC_BEARER_TOKEN", "spec-bearer-value");
-    std::env::set_var("CONFIG_BEARER_TOKEN", "config-bearer-value");
-    std::env::set_var("SPEC_API_KEY", "spec-api-key-value");
-    std::env::set_var("CONFIG_API_KEY", "config-api-key-value");
+    std::env::set_var(&spec_bearer_env, "spec-bearer-value");
+    std::env::set_var(&config_bearer_env, "config-bearer-value");
+    std::env::set_var(&spec_api_key_env, "spec-api-key-value");
+    std::env::set_var(&config_api_key_env, "config-api-key-value");
 
     // Create spec with x-aperture-secret extensions
-    let spec = create_test_spec_with_auth("SPEC_BEARER_TOKEN", "SPEC_API_KEY");
+    let spec = create_test_spec_with_auth(&spec_bearer_env, &spec_api_key_env);
 
     // Create global config that overrides the secrets
     let global_config =
-        create_global_config_with_secrets("test-api", "CONFIG_BEARER_TOKEN", "CONFIG_API_KEY");
+        create_global_config_with_secrets("test-api", &config_bearer_env, &config_api_key_env);
 
     // Mock should expect config values, not spec values
     Mock::given(method("GET"))
@@ -209,6 +221,10 @@ async fn test_config_secret_overrides_aperture_secret() {
 
     // Clean up environment variables
     cleanup_env_vars();
+    std::env::remove_var(&spec_bearer_env);
+    std::env::remove_var(&config_bearer_env);
+    std::env::remove_var(&spec_api_key_env);
+    std::env::remove_var(&config_api_key_env);
 }
 
 /// Test that x-aperture-secret extensions are used when no config secret exists
@@ -216,15 +232,22 @@ async fn test_config_secret_overrides_aperture_secret() {
 async fn test_aperture_secret_used_when_no_config() {
     let mock_server = MockServer::start().await;
 
+    // Use unique environment variable names for this test
+    let test_id = "APERTURE_SECRET_TEST";
+    let spec_bearer_env = format!("{}_SPEC_BEARER_TOKEN", test_id);
+    let spec_api_key_env = format!("{}_SPEC_API_KEY", test_id);
+
     // Clean up any existing environment variables first
     cleanup_env_vars();
+    std::env::remove_var(&spec_bearer_env);
+    std::env::remove_var(&spec_api_key_env);
 
     // Set up only spec environment variables
-    std::env::set_var("SPEC_BEARER_TOKEN", "spec-bearer-value");
-    std::env::set_var("SPEC_API_KEY", "spec-api-key-value");
+    std::env::set_var(&spec_bearer_env, "spec-bearer-value");
+    std::env::set_var(&spec_api_key_env, "spec-api-key-value");
 
     // Create spec with x-aperture-secret extensions
-    let spec = create_test_spec_with_auth("SPEC_BEARER_TOKEN", "SPEC_API_KEY");
+    let spec = create_test_spec_with_auth(&spec_bearer_env, &spec_api_key_env);
 
     // No global config (empty)
     let global_config = GlobalConfig {
@@ -272,6 +295,8 @@ async fn test_aperture_secret_used_when_no_config() {
 
     // Clean up environment variables
     cleanup_env_vars();
+    std::env::remove_var(&spec_bearer_env);
+    std::env::remove_var(&spec_api_key_env);
 }
 
 /// Test that missing config secret environment variable produces appropriate error
@@ -407,17 +432,26 @@ async fn test_missing_spec_secret_env_var_error() {
 async fn test_partial_config_override() {
     let mock_server = MockServer::start().await;
 
+    // Use unique environment variable names for this test
+    let test_id = "PARTIAL_CONFIG_TEST";
+    let spec_bearer_env = format!("{}_SPEC_BEARER_TOKEN", test_id);
+    let config_bearer_env = format!("{}_CONFIG_BEARER_TOKEN", test_id);
+    let spec_api_key_env = format!("{}_SPEC_API_KEY", test_id);
+
     // Clean up any existing environment variables first
     cleanup_env_vars();
+    std::env::remove_var(&spec_bearer_env);
+    std::env::remove_var(&config_bearer_env);
+    std::env::remove_var(&spec_api_key_env);
 
     // Set up environment variables
-    std::env::set_var("SPEC_BEARER_TOKEN", "spec-bearer-value");
-    std::env::set_var("CONFIG_BEARER_TOKEN", "config-bearer-value");
-    std::env::set_var("SPEC_API_KEY", "spec-api-key-value");
+    std::env::set_var(&spec_bearer_env, "spec-bearer-value");
+    std::env::set_var(&config_bearer_env, "config-bearer-value");
+    std::env::set_var(&spec_api_key_env, "spec-api-key-value");
     // Note: No CONFIG_API_KEY set
 
     // Create spec with x-aperture-secret extensions
-    let spec = create_test_spec_with_auth("SPEC_BEARER_TOKEN", "SPEC_API_KEY");
+    let spec = create_test_spec_with_auth(&spec_bearer_env, &spec_api_key_env);
 
     // Create global config that only overrides bearer auth
     let mut secrets = HashMap::new();
@@ -425,7 +459,7 @@ async fn test_partial_config_override() {
         "bearerAuth".to_string(),
         ApertureSecret {
             source: SecretSource::Env,
-            name: "CONFIG_BEARER_TOKEN".to_string(),
+            name: config_bearer_env.clone(),
         },
     );
     // Note: No override for apiKeyAuth
@@ -489,6 +523,9 @@ async fn test_partial_config_override() {
 
     // Clean up environment variables
     cleanup_env_vars();
+    std::env::remove_var(&spec_bearer_env);
+    std::env::remove_var(&config_bearer_env);
+    std::env::remove_var(&spec_api_key_env);
 }
 
 /// Test that requests proceed when no authentication is configured
@@ -586,22 +623,33 @@ async fn test_no_authentication_configured() {
 async fn test_different_api_configs() {
     let mock_server = MockServer::start().await;
 
+    // Use unique environment variable names for this test
+    let test_id = "DIFFERENT_API_TEST";
+    let spec_bearer_env = format!("{}_SPEC_BEARER_TOKEN", test_id);
+    let spec_api_key_env = format!("{}_SPEC_API_KEY", test_id);
+    let other_bearer_env = format!("{}_OTHER_API_BEARER_TOKEN", test_id);
+    let other_api_key_env = format!("{}_OTHER_API_KEY", test_id);
+
     // Clean up any existing environment variables first
     cleanup_env_vars();
+    std::env::remove_var(&spec_bearer_env);
+    std::env::remove_var(&spec_api_key_env);
+    std::env::remove_var(&other_bearer_env);
+    std::env::remove_var(&other_api_key_env);
 
     // Set up environment variables
-    std::env::set_var("SPEC_BEARER_TOKEN", "spec-bearer-value");
-    std::env::set_var("SPEC_API_KEY", "spec-api-key-value"); // Both auth schemes need env vars
-    std::env::set_var("OTHER_API_BEARER_TOKEN", "other-api-bearer-value");
+    std::env::set_var(&spec_bearer_env, "spec-bearer-value");
+    std::env::set_var(&spec_api_key_env, "spec-api-key-value"); // Both auth schemes need env vars
+    std::env::set_var(&other_bearer_env, "other-api-bearer-value");
 
     // Create spec with x-aperture-secret extensions
-    let spec = create_test_spec_with_auth("SPEC_BEARER_TOKEN", "SPEC_API_KEY");
+    let spec = create_test_spec_with_auth(&spec_bearer_env, &spec_api_key_env);
 
     // Create global config for a different API (not "test-api")
     let global_config = create_global_config_with_secrets(
         "other-api", // Different API name
-        "OTHER_API_BEARER_TOKEN",
-        "OTHER_API_KEY",
+        &other_bearer_env,
+        &other_api_key_env,
     );
 
     // Mock should expect spec values since config is for different API
@@ -645,4 +693,8 @@ async fn test_different_api_configs() {
 
     // Clean up environment variables
     cleanup_env_vars();
+    std::env::remove_var(&spec_bearer_env);
+    std::env::remove_var(&spec_api_key_env);
+    std::env::remove_var(&other_bearer_env);
+    std::env::remove_var(&other_api_key_env);
 }

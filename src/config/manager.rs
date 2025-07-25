@@ -755,6 +755,106 @@ impl<F: FileSystem> ConfigManager<F> {
         Ok(secrets.get(scheme_name).cloned())
     }
 
+    /// Removes a specific secret configuration for a security scheme
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    /// * `scheme_name` - The name of the security scheme to remove
+    ///
+    /// # Errors
+    /// Returns an error if the spec doesn't exist or if the scheme is not configured
+    pub fn remove_secret(&self, api_name: &str, scheme_name: &str) -> Result<(), Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load global config
+        let mut config = self.load_global_config()?;
+
+        // Check if the API has any configured secrets
+        let Some(api_config) = config.api_configs.get_mut(api_name) else {
+            return Err(Error::InvalidConfig {
+                reason: format!("No secrets configured for API '{api_name}'"),
+            });
+        };
+
+        // Check if the API config exists but has no secrets
+        if api_config.secrets.is_empty() {
+            return Err(Error::InvalidConfig {
+                reason: format!("No secrets configured for API '{api_name}'"),
+            });
+        }
+
+        // Check if the specific scheme exists
+        if !api_config.secrets.contains_key(scheme_name) {
+            return Err(Error::InvalidConfig {
+                reason: format!(
+                    "Secret for scheme '{scheme_name}' is not configured for API '{api_name}'"
+                ),
+            });
+        }
+
+        // Remove the secret
+        api_config.secrets.remove(scheme_name);
+
+        // If no secrets remain, remove the entire API config
+        if api_config.secrets.is_empty() && api_config.base_url_override.is_none() {
+            config.api_configs.remove(api_name);
+        }
+
+        // Save the updated config
+        self.save_global_config(&config)?;
+
+        Ok(())
+    }
+
+    /// Removes all secret configurations for an API specification
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    ///
+    /// # Errors
+    /// Returns an error if the spec doesn't exist
+    pub fn clear_secrets(&self, api_name: &str) -> Result<(), Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load global config
+        let mut config = self.load_global_config()?;
+
+        // Check if the API exists in config
+        if let Some(api_config) = config.api_configs.get_mut(api_name) {
+            // Clear all secrets
+            api_config.secrets.clear();
+
+            // If no other configuration remains, remove the entire API config
+            if api_config.base_url_override.is_none() {
+                config.api_configs.remove(api_name);
+            }
+
+            // Save the updated config
+            self.save_global_config(&config)?;
+        }
+        // If API config doesn't exist, that's fine - no secrets to clear
+
+        Ok(())
+    }
+
     /// Configure secrets interactively for an API specification
     ///
     /// Loads the cached spec to discover available security schemes and
