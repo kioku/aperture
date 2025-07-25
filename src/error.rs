@@ -123,10 +123,7 @@ pub enum Error {
 
     // Network resilience error handling
     #[error("Request timed out after {attempts} retries (max timeout: {timeout_ms}ms)")]
-    RequestTimeout {
-        attempts: usize,
-        timeout_ms: u64,
-    },
+    RequestTimeout { attempts: usize, timeout_ms: u64 },
     #[error("Retry limit exceeded: {attempts} attempts failed over {duration_ms}ms. Last error: {last_error}")]
     RetryLimitExceeded {
         attempts: usize,
@@ -134,10 +131,7 @@ pub enum Error {
         last_error: String,
     },
     #[error("Transient network error - request can be retried: {reason}")]
-    TransientNetworkError {
-        reason: String,
-        retryable: bool,
-    },
+    TransientNetworkError { reason: String, retryable: bool },
 
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
@@ -176,7 +170,9 @@ impl Error {
             Self::ResponseReadError { reason } => Self::ResponseReadError {
                 reason: format!("Operation '{operation}' on API '{api}': {reason}"),
             },
-            Self::Network(e) => Self::Config(format!("Operation '{operation}' on API '{api}': {e}")),
+            Self::Network(e) => {
+                Self::Config(format!("Operation '{operation}' on API '{api}': {e}"))
+            }
             _ => self,
         }
     }

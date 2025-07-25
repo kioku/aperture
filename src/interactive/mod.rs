@@ -107,7 +107,8 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
         return Err(Error::InvalidEnvironmentVariableName {
             name: name.to_string(),
             reason: "name cannot be empty".to_string(),
-            suggestion: "Provide a non-empty environment variable name like 'API_TOKEN'".to_string(),
+            suggestion: "Provide a non-empty environment variable name like 'API_TOKEN'"
+                .to_string(),
         });
     }
 
@@ -115,7 +116,11 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
     if name.len() > MAX_INPUT_LENGTH {
         return Err(Error::InvalidEnvironmentVariableName {
             name: name.to_string(),
-            reason: format!("too long: {} characters (maximum: {})", name.len(), MAX_INPUT_LENGTH),
+            reason: format!(
+                "too long: {} characters (maximum: {})",
+                name.len(),
+                MAX_INPUT_LENGTH
+            ),
             suggestion: format!("Shorten the name to {MAX_INPUT_LENGTH} characters or less"),
         });
     }
@@ -149,11 +154,21 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
     }
 
     // Check all characters are valid - alphanumeric or underscore only
-    let invalid_chars: Vec<char> = name.chars().filter(|c| !c.is_ascii_alphanumeric() && *c != '_').collect();
+    let invalid_chars: Vec<char> = name
+        .chars()
+        .filter(|c| !c.is_ascii_alphanumeric() && *c != '_')
+        .collect();
     if !invalid_chars.is_empty() {
         let invalid_chars_str: String = invalid_chars.iter().collect();
-        let suggested_name = name.chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        let suggested_name = name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>();
         return Err(Error::InteractiveInvalidCharacters {
             invalid_chars: invalid_chars_str,
@@ -192,14 +207,22 @@ pub fn prompt_for_input_with_io_and_timeout<T: InputOutput>(
         return Err(Error::InteractiveInputTooLong {
             provided: trimmed_input.len(),
             max: MAX_INPUT_LENGTH,
-            suggestion: "Try shortening your input or using a configuration file for longer values".to_string(),
+            suggestion: "Try shortening your input or using a configuration file for longer values"
+                .to_string(),
         });
     }
 
     // Sanitize input - check for control characters
-    let control_chars: Vec<char> = trimmed_input.chars().filter(|c| c.is_control() && *c != '\t').collect();
+    let control_chars: Vec<char> = trimmed_input
+        .chars()
+        .filter(|c| c.is_control() && *c != '\t')
+        .collect();
     if !control_chars.is_empty() {
-        let control_chars_str = control_chars.iter().map(|c| format!("U+{:04X}", *c as u32)).collect::<Vec<_>>().join(", ");
+        let control_chars_str = control_chars
+            .iter()
+            .map(|c| format!("U+{:04X}", *c as u32))
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(Error::InteractiveInvalidCharacters {
             invalid_chars: control_chars_str,
             suggestion: "Remove control characters and use only printable text".to_string(),
@@ -288,7 +311,14 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
     }
 
     let suggestions = vec![
-        format!("Valid options: {}", options.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>().join(", ")),
+        format!(
+            "Valid options: {}",
+            options
+                .iter()
+                .map(|(k, _)| k.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         "You can enter either a number or the exact name".to_string(),
         "Leave empty and answer 'no' to cancel the operation".to_string(),
     ];

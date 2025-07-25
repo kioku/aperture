@@ -84,7 +84,7 @@ fn test_prompt_for_input_with_control_characters() {
     assert!(result
         .unwrap_err()
         .to_string()
-        .contains("invalid control characters"));
+        .contains("invalid characters"));
 }
 
 #[test]
