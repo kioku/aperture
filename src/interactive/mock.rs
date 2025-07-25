@@ -73,6 +73,7 @@ impl InputOutput for RealInputOutput {
         let (tx, rx) = mpsc::channel();
 
         // Spawn a thread to read from stdin
+        // Note: This thread will continue running even after timeout due to blocking stdin read
         let read_thread = thread::spawn(move || {
             let stdin = std::io::stdin();
             let mut line = String::new();
@@ -91,8 +92,12 @@ impl InputOutput for RealInputOutput {
                 result
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Note: The thread will continue running until user provides input
-                // This is a limitation of stdin reading in Rust - we can't easily cancel it
+                // Important: The read thread will continue running until user provides input.
+                // This is a known limitation of stdin reading in Rust - blocking reads cannot
+                // be cancelled. The thread will eventually clean up when:
+                // 1. The user provides input (thread completes normally)
+                // 2. The process exits (OS cleans up all threads)
+                // This is the standard approach for stdin timeout handling in Rust.
                 Err(Error::InteractiveTimeout {
                     timeout_secs: timeout.as_secs(),
                     suggestion: "Try again with a faster response or increase timeout with APERTURE_INPUT_TIMEOUT".to_string(),
