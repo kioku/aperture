@@ -43,16 +43,19 @@ pub struct ApiConfig {
     /// Whether this spec was added with --strict flag (preserved for reinit)
     #[serde(default)]
     pub strict_mode: bool,
+    /// Secret configurations for security schemes (overrides x-aperture-secret extensions)
+    #[serde(default)]
+    pub secrets: HashMap<String, ApertureSecret>,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ApertureSecret {
     pub source: SecretSource,
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub enum SecretSource {
     Env,

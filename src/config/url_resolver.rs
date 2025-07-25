@@ -175,6 +175,7 @@ mod tests {
                     base_url_override: Some("https://config.example.com".to_string()),
                     environment_urls: HashMap::new(),
                     strict_mode: false,
+                    secrets: HashMap::new(),
                 },
             );
 
@@ -208,6 +209,7 @@ mod tests {
                     base_url_override: Some("https://config.example.com".to_string()),
                     environment_urls,
                     strict_mode: false,
+                    secrets: HashMap::new(),
                 },
             );
 
@@ -240,6 +242,7 @@ mod tests {
                     base_url_override: Some("https://config.example.com".to_string()),
                     environment_urls: HashMap::new(),
                     strict_mode: false,
+                    secrets: HashMap::new(),
                 },
             );
 
