@@ -13,12 +13,25 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Clean up all environment variables used in tests to avoid pollution between tests
 fn cleanup_env_vars() {
-    std::env::remove_var("SPEC_BEARER_TOKEN");
-    std::env::remove_var("CONFIG_BEARER_TOKEN");
-    std::env::remove_var("SPEC_API_KEY");
-    std::env::remove_var("CONFIG_API_KEY");
-    std::env::remove_var("OTHER_API_BEARER_TOKEN");
-    std::env::remove_var("OTHER_API_KEY");
+    // Remove all test environment variables
+    let test_env_vars = [
+        "SPEC_BEARER_TOKEN",
+        "CONFIG_BEARER_TOKEN",
+        "SPEC_API_KEY",
+        "CONFIG_API_KEY",
+        "OTHER_API_BEARER_TOKEN",
+        "OTHER_API_KEY",
+        "MISSING_SPEC_BEARER_TOKEN",
+        "MISSING_SPEC_API_KEY",
+        "MISSING_CONFIG_BEARER_TOKEN",
+        "MISSING_CONFIG_API_KEY",
+        "MISSING_CONFIG_SPEC_BEARER_TOKEN",
+        "MISSING_CONFIG_SPEC_API_KEY",
+    ];
+
+    for var in &test_env_vars {
+        std::env::remove_var(var);
+    }
 }
 
 /// Creates a test API spec with authentication schemes for priority testing
@@ -195,10 +208,7 @@ async fn test_config_secret_overrides_aperture_secret() {
     assert!(result.is_ok(), "Request should succeed with config secrets");
 
     // Clean up environment variables
-    std::env::remove_var("SPEC_BEARER_TOKEN");
-    std::env::remove_var("CONFIG_BEARER_TOKEN");
-    std::env::remove_var("SPEC_API_KEY");
-    std::env::remove_var("CONFIG_API_KEY");
+    cleanup_env_vars();
 }
 
 /// Test that x-aperture-secret extensions are used when no config secret exists
@@ -261,8 +271,7 @@ async fn test_aperture_secret_used_when_no_config() {
     assert!(result.is_ok(), "Request should succeed with spec secrets");
 
     // Clean up environment variables
-    std::env::remove_var("SPEC_BEARER_TOKEN");
-    std::env::remove_var("SPEC_API_KEY");
+    cleanup_env_vars();
 }
 
 /// Test that missing config secret environment variable produces appropriate error
@@ -273,18 +282,22 @@ async fn test_missing_config_secret_env_var_error() {
     // Clean up any existing environment variables first
     cleanup_env_vars();
 
-    // Set up spec environment variables but not config ones
-    std::env::set_var("SPEC_BEARER_TOKEN", "spec-bearer-value");
-    std::env::remove_var("CONFIG_BEARER_TOKEN"); // Ensure it's not set
+    // Set up unique spec environment variables for this test
+    std::env::set_var("MISSING_CONFIG_SPEC_BEARER_TOKEN", "spec-bearer-value");
+    std::env::set_var("MISSING_CONFIG_SPEC_API_KEY", "spec-api-key-value");
+    // MISSING_CONFIG_BEARER_TOKEN is intentionally not set
 
     // Create spec with x-aperture-secret extensions
-    let spec = create_test_spec_with_auth("SPEC_BEARER_TOKEN", "SPEC_API_KEY");
+    let spec = create_test_spec_with_auth(
+        "MISSING_CONFIG_SPEC_BEARER_TOKEN",
+        "MISSING_CONFIG_SPEC_API_KEY",
+    );
 
     // Create global config with missing environment variable
     let global_config = create_global_config_with_secrets(
         "test-api",
-        "CONFIG_BEARER_TOKEN", // This env var doesn't exist
-        "SPEC_API_KEY",
+        "MISSING_CONFIG_BEARER_TOKEN", // This env var doesn't exist
+        "MISSING_CONFIG_SPEC_API_KEY",
     );
 
     // No mock expectations - the request should fail before reaching the server
@@ -319,14 +332,14 @@ async fn test_missing_config_secret_env_var_error() {
     // Verify error message mentions config env var name or secret not set
     let error_message = result.unwrap_err().to_string();
     assert!(
-        error_message.contains("CONFIG_BEARER_TOKEN")
+        error_message.contains("MISSING_CONFIG_BEARER_TOKEN")
             || error_message.contains("secret not set")
             || error_message.contains("SecretNotSet"),
         "Error should mention config env var name or secret error, got: {error_message}"
     );
 
     // Clean up environment variables
-    std::env::remove_var("SPEC_BEARER_TOKEN");
+    cleanup_env_vars();
 }
 
 /// Test that missing spec secret environment variable produces appropriate error
@@ -337,11 +350,11 @@ async fn test_missing_spec_secret_env_var_error() {
     // Clean up any existing environment variables first
     cleanup_env_vars();
 
-    // Remove spec environment variable
-    std::env::remove_var("SPEC_BEARER_TOKEN");
+    // Use unique env vars to avoid conflicts with other tests
+    // MISSING_SPEC_BEARER_TOKEN is not set, which will cause the auth to fail
 
     // Create spec with x-aperture-secret extensions
-    let spec = create_test_spec_with_auth("SPEC_BEARER_TOKEN", "SPEC_API_KEY");
+    let spec = create_test_spec_with_auth("MISSING_SPEC_BEARER_TOKEN", "MISSING_SPEC_API_KEY");
 
     // No global config (empty) - so it should fall back to spec extension
     let global_config = GlobalConfig {
@@ -382,7 +395,7 @@ async fn test_missing_spec_secret_env_var_error() {
     // Verify error message mentions spec env var name or secret not set
     let error_message = result.unwrap_err().to_string();
     assert!(
-        error_message.contains("SPEC_BEARER_TOKEN")
+        error_message.contains("MISSING_SPEC_BEARER_TOKEN")
             || error_message.contains("secret not set")
             || error_message.contains("SecretNotSet"),
         "Error should mention spec env var name or secret error, got: {error_message}"
@@ -475,9 +488,7 @@ async fn test_partial_config_override() {
     );
 
     // Clean up environment variables
-    std::env::remove_var("SPEC_BEARER_TOKEN");
-    std::env::remove_var("CONFIG_BEARER_TOKEN");
-    std::env::remove_var("SPEC_API_KEY");
+    cleanup_env_vars();
 }
 
 /// Test that requests proceed when no authentication is configured
@@ -580,6 +591,7 @@ async fn test_different_api_configs() {
 
     // Set up environment variables
     std::env::set_var("SPEC_BEARER_TOKEN", "spec-bearer-value");
+    std::env::set_var("SPEC_API_KEY", "spec-api-key-value"); // Both auth schemes need env vars
     std::env::set_var("OTHER_API_BEARER_TOKEN", "other-api-bearer-value");
 
     // Create spec with x-aperture-secret extensions
@@ -596,6 +608,7 @@ async fn test_different_api_configs() {
     Mock::given(method("GET"))
         .and(path("/users/123"))
         .and(header("Authorization", "Bearer spec-bearer-value"))
+        .and(header("X-API-Key", "spec-api-key-value"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "id": "123",
             "name": "Test User"
@@ -631,6 +644,5 @@ async fn test_different_api_configs() {
     );
 
     // Clean up environment variables
-    std::env::remove_var("SPEC_BEARER_TOKEN");
-    std::env::remove_var("OTHER_API_BEARER_TOKEN");
+    cleanup_env_vars();
 }
