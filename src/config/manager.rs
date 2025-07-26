@@ -1138,7 +1138,9 @@ impl<F: FileSystem> ConfigManager<F> {
             let selected_scheme =
                 select_from_options("\nSelect a security scheme to configure:", options)?;
 
-            let scheme = cached_spec.security_schemes.get(&selected_scheme).unwrap();
+            let scheme = cached_spec.security_schemes.get(&selected_scheme).expect(
+                "Selected scheme should exist in cached spec - menu validation ensures this",
+            );
 
             Self::display_scheme_configuration_details(&selected_scheme, scheme, current_secrets);
 
