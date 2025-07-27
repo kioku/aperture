@@ -3,7 +3,7 @@ use aperture_cli::batch::{BatchConfig, BatchProcessor};
 use aperture_cli::cache::models::CachedSpec;
 use aperture_cli::cli::{Cli, Commands, ConfigCommands};
 use aperture_cli::config::manager::{get_config_dir, ConfigManager};
-use aperture_cli::config::models::GlobalConfig;
+use aperture_cli::config::models::{GlobalConfig, SecretSource};
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
@@ -135,6 +135,73 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
             ConfigCommands::CacheStats { api_name } => {
                 show_cache_stats(manager, api_name.as_deref()).await?;
             }
+            ConfigCommands::SetSecret {
+                api_name,
+                scheme_name,
+                env,
+                interactive,
+            } => {
+                if interactive {
+                    manager.set_secret_interactive(&api_name)?;
+                } else if let (Some(scheme), Some(env_var)) = (scheme_name, env) {
+                    manager.set_secret(&api_name, &scheme, &env_var)?;
+                    println!("Set secret for scheme '{scheme}' in API '{api_name}' to use environment variable '{env_var}'");
+                } else {
+                    return Err(Error::InvalidConfig {
+                        reason: "Either provide --scheme and --env, or use --interactive"
+                            .to_string(),
+                    });
+                }
+            }
+            ConfigCommands::ListSecrets { api_name } => {
+                let secrets = manager.list_secrets(&api_name)?;
+                if secrets.is_empty() {
+                    println!("No secrets configured for API '{api_name}'");
+                } else {
+                    println!("Configured secrets for API '{api_name}':");
+                    for (scheme_name, secret) in secrets {
+                        match secret.source {
+                            SecretSource::Env => {
+                                println!("  {scheme_name}: environment variable '{}'", secret.name);
+                            }
+                        }
+                    }
+                }
+            }
+            ConfigCommands::RemoveSecret {
+                api_name,
+                scheme_name,
+            } => {
+                manager.remove_secret(&api_name, &scheme_name)?;
+                println!("Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'");
+            }
+            ConfigCommands::ClearSecrets { api_name, force } => {
+                // Check if API exists and has secrets
+                let secrets = manager.list_secrets(&api_name)?;
+                if secrets.is_empty() {
+                    println!("No secrets configured for API '{api_name}'");
+                    return Ok(());
+                }
+
+                // Confirm operation unless --force is used
+                if !force {
+                    use aperture_cli::interactive::confirm;
+                    println!(
+                        "This will remove all {} secret configuration(s) for API '{api_name}':",
+                        secrets.len()
+                    );
+                    for scheme_name in secrets.keys() {
+                        println!("  - {scheme_name}");
+                    }
+                    if !confirm("Are you sure you want to continue?")? {
+                        println!("Operation cancelled");
+                        return Ok(());
+                    }
+                }
+
+                manager.clear_secrets(&api_name)?;
+                println!("Cleared all secret configurations for API '{api_name}'");
+            }
         },
         Commands::ListCommands { ref context } => {
             list_commands(context)?;
@@ -194,7 +261,7 @@ fn list_commands(context: &str) -> Result<(), Error> {
     }
 
     for (tag, commands) in tag_groups {
-        println!("📁 {tag}");
+        println!("{tag}");
         for command in commands {
             let kebab_id = to_kebab_case(&command.operation_id);
             let description = command
@@ -277,10 +344,10 @@ fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> 
     for spec_name in &specs {
         match reinit_spec(manager, spec_name) {
             Ok(()) => {
-                println!("  ✓ {spec_name}");
+                println!("  {spec_name}");
             }
             Err(e) => {
-                eprintln!("  ✗ {spec_name}: {e}");
+                eprintln!("  {spec_name}: {e}");
             }
         }
     }
@@ -875,8 +942,69 @@ fn print_error(error: &Error) {
         Error::InvalidPath { .. } => {
             eprintln!("Invalid Path\n{error}\n\nHint: Check that the path is valid and properly formatted.");
         }
+        Error::InteractiveInputTooLong {
+            provided,
+            max,
+            suggestion,
+        } => {
+            eprintln!("Input Too Long\nProvided {provided} characters (max: {max})\n{suggestion}");
+        }
+        Error::InteractiveInvalidCharacters {
+            invalid_chars,
+            suggestion,
+        } => {
+            eprintln!(
+                "Invalid Input Characters\nInvalid characters: {invalid_chars}\n{suggestion}"
+            );
+        }
+        Error::InteractiveTimeout {
+            timeout_secs,
+            suggestion,
+        } => {
+            eprintln!("Input Timeout\nTimed out after {timeout_secs} seconds\n{suggestion}");
+        }
+        Error::InteractiveRetriesExhausted {
+            max_attempts,
+            last_error,
+            suggestions,
+        } => {
+            eprintln!("Maximum Retries Exceeded\nFailed after {max_attempts} attempts. Last error: {last_error}");
+            if !suggestions.is_empty() {
+                eprintln!("\nSuggestions:");
+                for suggestion in suggestions {
+                    eprintln!("  • {suggestion}");
+                }
+            }
+        }
+        Error::InvalidEnvironmentVariableName {
+            name,
+            reason,
+            suggestion,
+        } => {
+            eprintln!("Invalid Environment Variable Name\nName '{name}' is invalid: {reason}\n{suggestion}");
+        }
+        Error::RequestTimeout {
+            attempts,
+            timeout_ms,
+        } => {
+            eprintln!("Request Timeout\nRequest timed out after {attempts} retries (max timeout: {timeout_ms}ms)\n\nHint: The server may be slow or unresponsive. Try again later or increase timeout.");
+        }
+        Error::RetryLimitExceeded {
+            attempts,
+            duration_ms,
+            last_error,
+        } => {
+            eprintln!("Retry Limit Exceeded\nFailed after {attempts} attempts over {duration_ms}ms\nLast error: {last_error}\n\nHint: The service may be experiencing issues. Check API status or try again later.");
+        }
+        Error::TransientNetworkError { reason, retryable } => {
+            if *retryable {
+                eprintln!("Transient Network Error\n{reason}\n\nHint: This error is retryable. The request will be automatically retried.");
+            } else {
+                eprintln!("Network Error\n{reason}\n\nHint: This error is not retryable. Check your network connection and API configuration.");
+            }
+        }
         Error::Anyhow(err) => {
-            eprintln!("💥 Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
+            eprintln!("Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
         }
     }
 }

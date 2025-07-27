@@ -289,6 +289,75 @@ pub enum ConfigCommands {
                       at a glance."
     )]
     ListUrls {},
+    /// Set secret configuration for an API specification security scheme
+    #[command(
+        long_about = "Configure authentication secrets for API specifications.\n\n\
+                      This allows you to set environment variable mappings for security\n\
+                      schemes without modifying the OpenAPI specification file. These\n\
+                      settings take precedence over x-aperture-secret extensions.\n\n\
+                      Examples:\n  \
+                      aperture config set-secret myapi bearerAuth --env API_TOKEN\n  \
+                      aperture config set-secret myapi apiKey --env API_KEY\n  \
+                      aperture config set-secret myapi --interactive"
+    )]
+    SetSecret {
+        /// Name of the API specification
+        api_name: String,
+        /// Name of the security scheme (omit for interactive mode)
+        scheme_name: Option<String>,
+        /// Environment variable name containing the secret
+        #[arg(long, value_name = "VAR", help = "Environment variable name")]
+        env: Option<String>,
+        /// Interactive mode to configure all undefined secrets
+        #[arg(long, conflicts_with_all = ["scheme_name", "env"], help = "Configure secrets interactively")]
+        interactive: bool,
+    },
+    /// List configured secrets for an API specification
+    #[command(
+        long_about = "Display configured secret mappings for an API specification.\n\n\
+                      Shows which security schemes are configured with environment\n\
+                      variables and which ones still rely on x-aperture-secret\n\
+                      extensions or are undefined.\n\n\
+                      Example:\n  \
+                      aperture config list-secrets myapi"
+    )]
+    ListSecrets {
+        /// Name of the API specification
+        api_name: String,
+    },
+    /// Remove a specific configured secret for an API specification
+    #[command(
+        long_about = "Remove a configured secret mapping for a specific security scheme.\n\n\
+                      This will remove the environment variable mapping for the specified\n\
+                      security scheme, causing it to fall back to x-aperture-secret\n\
+                      extensions or become undefined.\n\n\
+                      Examples:\n  \
+                      aperture config remove-secret myapi bearerAuth\n  \
+                      aperture config remove-secret myapi apiKey"
+    )]
+    RemoveSecret {
+        /// Name of the API specification
+        api_name: String,
+        /// Name of the security scheme to remove
+        scheme_name: String,
+    },
+    /// Clear all configured secrets for an API specification
+    #[command(
+        long_about = "Remove all configured secret mappings for an API specification.\n\n\
+                      This will remove all environment variable mappings for the API,\n\
+                      causing all security schemes to fall back to x-aperture-secret\n\
+                      extensions or become undefined. Use with caution.\n\n\
+                      Examples:\n  \
+                      aperture config clear-secrets myapi\n  \
+                      aperture config clear-secrets myapi --force"
+    )]
+    ClearSecrets {
+        /// Name of the API specification
+        api_name: String,
+        /// Skip confirmation prompt
+        #[arg(long, help = "Skip confirmation prompt")]
+        force: bool,
+    },
     /// Re-initialize cached specifications
     #[command(
         long_about = "Regenerate binary cache files for API specifications.\n\n\

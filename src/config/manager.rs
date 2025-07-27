@@ -1,5 +1,5 @@
 use crate::cache::metadata::CacheMetadataManager;
-use crate::config::models::{ApiConfig, GlobalConfig};
+use crate::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::engine::loader;
 use crate::error::Error;
@@ -9,6 +9,13 @@ use openapiv3::{OpenAPI, ReferenceOr};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Struct to hold categorized validation warnings
+struct CategorizedWarnings<'a> {
+    content_type: Vec<&'a crate::spec::validator::ValidationWarning>,
+    auth: Vec<&'a crate::spec::validator::ValidationWarning>,
+    mixed_content: Vec<&'a crate::spec::validator::ValidationWarning>,
+}
 
 pub struct ConfigManager<F: FileSystem> {
     fs: F,
@@ -68,6 +75,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 base_url_override: None,
                 environment_urls: HashMap::new(),
                 strict_mode: false,
+                secrets: HashMap::new(),
             });
         api_config.strict_mode = strict;
         self.save_global_config(&config)?;
@@ -136,114 +144,32 @@ impl<F: FileSystem> ConfigManager<F> {
         let mut lines = Vec::new();
 
         if !warnings.is_empty() {
-            // Categorize warnings by type
-            let mut content_type_warnings = Vec::new();
-            let mut auth_warnings = Vec::new();
-            let mut mixed_content_warnings = Vec::new();
+            let categorized_warnings = Self::categorize_warnings(warnings);
+            let total_skipped =
+                categorized_warnings.content_type.len() + categorized_warnings.auth.len();
 
-            for warning in warnings {
-                if warning.reason.contains("no supported content types") {
-                    content_type_warnings.push(warning);
-                } else if warning.reason.contains("unsupported authentication") {
-                    auth_warnings.push(warning);
-                } else if warning
-                    .reason
-                    .contains("unsupported content types alongside JSON")
-                {
-                    mixed_content_warnings.push(warning);
-                }
-            }
-
-            let total_skipped = content_type_warnings.len() + auth_warnings.len();
-
-            // Format content type warnings if any
-            if !content_type_warnings.is_empty() {
-                let warning_msg = total_operations.map_or_else(
-                    || {
-                        format!(
-                            "{}Skipping {} endpoints with unsupported content types:",
-                            indent,
-                            content_type_warnings.len()
-                        )
-                    },
-                    |total| {
-                        let available = total.saturating_sub(total_skipped);
-                        format!(
-                            "{}Skipping {} endpoints with unsupported content types ({} of {} endpoints will be available):",
-                            indent,
-                            content_type_warnings.len(),
-                            available,
-                            total
-                        )
-                    },
-                );
-                lines.push(warning_msg);
-
-                for warning in &content_type_warnings {
-                    lines.push(format!(
-                        "{}  - {} {} ({}) - {}",
-                        indent,
-                        warning.endpoint.method,
-                        warning.endpoint.path,
-                        warning.endpoint.content_type,
-                        warning.reason
-                    ));
-                }
-            }
-
-            // Format auth warnings if any
-            if !auth_warnings.is_empty() {
-                if !content_type_warnings.is_empty() {
-                    lines.push(String::new()); // Add blank line between sections
-                }
-
-                let warning_msg = total_operations.map_or_else(
-                    || {
-                        format!(
-                            "{}Skipping {} endpoints with unsupported authentication:",
-                            indent,
-                            auth_warnings.len()
-                        )
-                    },
-                    |total| {
-                        let available = total.saturating_sub(total_skipped);
-                        format!(
-                            "{}Skipping {} endpoints with unsupported authentication ({} of {} endpoints will be available):",
-                            indent,
-                            auth_warnings.len(),
-                            available,
-                            total
-                        )
-                    },
-                );
-                lines.push(warning_msg);
-
-                for warning in &auth_warnings {
-                    lines.push(format!(
-                        "{}  - {} {} - {}",
-                        indent, warning.endpoint.method, warning.endpoint.path, warning.reason
-                    ));
-                }
-            }
-
-            // Format mixed content warnings if any
-            if !mixed_content_warnings.is_empty() {
-                if !content_type_warnings.is_empty() || !auth_warnings.is_empty() {
-                    lines.push(String::new()); // Add blank line between sections
-                }
-                lines.push(format!(
-                    "{indent}Endpoints with partial content type support:"
-                ));
-                for warning in &mixed_content_warnings {
-                    lines.push(format!(
-                        "{}  - {} {} supports JSON but not: {}",
-                        indent,
-                        warning.endpoint.method,
-                        warning.endpoint.path,
-                        warning.endpoint.content_type
-                    ));
-                }
-            }
+            Self::format_content_type_warnings(
+                &mut lines,
+                &categorized_warnings.content_type,
+                total_operations,
+                total_skipped,
+                indent,
+            );
+            Self::format_auth_warnings(
+                &mut lines,
+                &categorized_warnings.auth,
+                total_operations,
+                total_skipped,
+                indent,
+                !categorized_warnings.content_type.is_empty(),
+            );
+            Self::format_mixed_content_warnings(
+                &mut lines,
+                &categorized_warnings.mixed_content,
+                indent,
+                !categorized_warnings.content_type.is_empty()
+                    || !categorized_warnings.auth.is_empty(),
+            );
         }
 
         lines
@@ -289,14 +215,7 @@ impl<F: FileSystem> ConfigManager<F> {
         force: bool,
         strict: bool,
     ) -> Result<(), Error> {
-        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
-        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
-
-        if self.fs.exists(&spec_path) && !force {
-            return Err(Error::SpecAlreadyExists {
-                name: name.to_string(),
-            });
-        }
+        self.check_spec_exists(name, force)?;
 
         let content = self.fs.read_to_string(file_path)?;
         let openapi_spec: OpenAPI = serde_yaml::from_str(&content)?;
@@ -316,54 +235,13 @@ impl<F: FileSystem> ConfigManager<F> {
         // Display warnings if any
         Self::display_validation_warnings(&validation_result.warnings, Some(total_operations));
 
-        // Transform into internal cached representation using SpecTransformer
-        let transformer = SpecTransformer::new();
-
-        // Convert warnings to skip_endpoints format - skip endpoints with unsupported content types or auth
-        let skip_endpoints: Vec<(String, String)> = validation_result
-            .warnings
-            .iter()
-            .filter_map(super::super::spec::validator::ValidationWarning::to_skip_endpoint)
-            .collect();
-
-        let cached_spec = transformer.transform_with_warnings(
+        self.add_spec_from_validated_openapi(
             name,
             &openapi_spec,
-            &skip_endpoints,
-            &validation_result.warnings,
-        )?;
-
-        // Create directories
-        let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
-            path: spec_path.display().to_string(),
-            reason: "Path has no parent directory".to_string(),
-        })?;
-        let cache_parent = cache_path.parent().ok_or_else(|| Error::InvalidPath {
-            path: cache_path.display().to_string(),
-            reason: "Path has no parent directory".to_string(),
-        })?;
-        self.fs.create_dir_all(spec_parent)?;
-        self.fs.create_dir_all(cache_parent)?;
-
-        // Write original spec file
-        self.fs.write_all(&spec_path, content.as_bytes())?;
-
-        // Serialize and write cached representation
-        let cached_data =
-            bincode::serialize(&cached_spec).map_err(|e| Error::SerializationError {
-                reason: e.to_string(),
-            })?;
-        self.fs.write_all(&cache_path, &cached_data)?;
-
-        // Update cache metadata for optimized version checking
-        let cache_dir = self.config_dir.join(".cache");
-        let metadata_manager = CacheMetadataManager::new(&self.fs);
-        metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
-
-        // Save strict mode preference
-        self.save_strict_preference(name, strict)?;
-
-        Ok(())
+            &content,
+            &validation_result,
+            strict,
+        )
     }
 
     /// Adds a new `OpenAPI` specification to the configuration from a URL.
@@ -389,14 +267,7 @@ impl<F: FileSystem> ConfigManager<F> {
         force: bool,
         strict: bool,
     ) -> Result<(), Error> {
-        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
-        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
-
-        if self.fs.exists(&spec_path) && !force {
-            return Err(Error::SpecAlreadyExists {
-                name: name.to_string(),
-            });
-        }
+        self.check_spec_exists(name, force)?;
 
         // Fetch content from URL
         let content = fetch_spec_from_url(url).await?;
@@ -417,54 +288,13 @@ impl<F: FileSystem> ConfigManager<F> {
         // Display warnings if any
         Self::display_validation_warnings(&validation_result.warnings, Some(total_operations));
 
-        // Transform into internal cached representation using SpecTransformer
-        let transformer = SpecTransformer::new();
-
-        // Convert warnings to skip_endpoints format - skip endpoints with unsupported content types or auth
-        let skip_endpoints: Vec<(String, String)> = validation_result
-            .warnings
-            .iter()
-            .filter_map(super::super::spec::validator::ValidationWarning::to_skip_endpoint)
-            .collect();
-
-        let cached_spec = transformer.transform_with_warnings(
+        self.add_spec_from_validated_openapi(
             name,
             &openapi_spec,
-            &skip_endpoints,
-            &validation_result.warnings,
-        )?;
-
-        // Create directories
-        let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
-            path: spec_path.display().to_string(),
-            reason: "Path has no parent directory".to_string(),
-        })?;
-        let cache_parent = cache_path.parent().ok_or_else(|| Error::InvalidPath {
-            path: cache_path.display().to_string(),
-            reason: "Path has no parent directory".to_string(),
-        })?;
-        self.fs.create_dir_all(spec_parent)?;
-        self.fs.create_dir_all(cache_parent)?;
-
-        // Write original spec file
-        self.fs.write_all(&spec_path, content.as_bytes())?;
-
-        // Serialize and write cached representation
-        let cached_data =
-            bincode::serialize(&cached_spec).map_err(|e| Error::SerializationError {
-                reason: e.to_string(),
-            })?;
-        self.fs.write_all(&cache_path, &cached_data)?;
-
-        // Update cache metadata for optimized version checking
-        let cache_dir = self.config_dir.join(".cache");
-        let metadata_manager = CacheMetadataManager::new(&self.fs);
-        metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
-
-        // Save strict mode preference
-        self.save_strict_preference(name, strict)?;
-
-        Ok(())
+            &content,
+            &validation_result,
+            strict,
+        )
     }
 
     /// Adds a new `OpenAPI` specification from either a file path or URL.
@@ -660,6 +490,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 base_url_override: None,
                 environment_urls: HashMap::new(),
                 strict_mode: false,
+                secrets: HashMap::new(),
             });
 
         // Set the URL
@@ -786,14 +617,7 @@ impl<F: FileSystem> ConfigManager<F> {
         timeout: std::time::Duration,
         strict: bool,
     ) -> Result<(), Error> {
-        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
-        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
-
-        if self.fs.exists(&spec_path) && !force {
-            return Err(Error::SpecAlreadyExists {
-                name: name.to_string(),
-            });
-        }
+        self.check_spec_exists(name, force)?;
 
         // Fetch content from URL with custom timeout
         let content = fetch_spec_from_url_with_timeout(url, timeout).await?;
@@ -808,9 +632,302 @@ impl<F: FileSystem> ConfigManager<F> {
             return validation_result.into_result();
         }
 
-        // Note: Not displaying warnings in test method
+        // Note: Not displaying warnings in test method to avoid polluting test output
 
-        // Transform into internal cached representation using SpecTransformer
+        self.add_spec_from_validated_openapi(
+            name,
+            &openapi_spec,
+            &content,
+            &validation_result,
+            strict,
+        )
+    }
+
+    /// Sets a secret configuration for a specific security scheme
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    /// * `scheme_name` - The name of the security scheme
+    /// * `env_var_name` - The environment variable name containing the secret
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    pub fn set_secret(
+        &self,
+        api_name: &str,
+        scheme_name: &str,
+        env_var_name: &str,
+    ) -> Result<(), Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load current config
+        let mut config = self.load_global_config()?;
+
+        // Get or create API config
+        let api_config = config
+            .api_configs
+            .entry(api_name.to_string())
+            .or_insert_with(|| ApiConfig {
+                base_url_override: None,
+                environment_urls: HashMap::new(),
+                strict_mode: false,
+                secrets: HashMap::new(),
+            });
+
+        // Set the secret
+        api_config.secrets.insert(
+            scheme_name.to_string(),
+            ApertureSecret {
+                source: SecretSource::Env,
+                name: env_var_name.to_string(),
+            },
+        );
+
+        // Save updated config
+        self.save_global_config(&config)?;
+        Ok(())
+    }
+
+    /// Lists configured secrets for an API specification
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    ///
+    /// # Returns
+    /// A map of scheme names to their secret configurations
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist.
+    pub fn list_secrets(&self, api_name: &str) -> Result<HashMap<String, ApertureSecret>, Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load global config
+        let config = self.load_global_config()?;
+
+        // Get API config secrets
+        let secrets = config
+            .api_configs
+            .get(api_name)
+            .map(|c| c.secrets.clone())
+            .unwrap_or_default();
+
+        Ok(secrets)
+    }
+
+    /// Gets a secret configuration for a specific security scheme
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    /// * `scheme_name` - The name of the security scheme
+    ///
+    /// # Returns
+    /// The secret configuration if found
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist.
+    pub fn get_secret(
+        &self,
+        api_name: &str,
+        scheme_name: &str,
+    ) -> Result<Option<ApertureSecret>, Error> {
+        let secrets = self.list_secrets(api_name)?;
+        Ok(secrets.get(scheme_name).cloned())
+    }
+
+    /// Removes a specific secret configuration for a security scheme
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    /// * `scheme_name` - The name of the security scheme to remove
+    ///
+    /// # Errors
+    /// Returns an error if the spec doesn't exist or if the scheme is not configured
+    pub fn remove_secret(&self, api_name: &str, scheme_name: &str) -> Result<(), Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load global config
+        let mut config = self.load_global_config()?;
+
+        // Check if the API has any configured secrets
+        let Some(api_config) = config.api_configs.get_mut(api_name) else {
+            return Err(Error::InvalidConfig {
+                reason: format!("No secrets configured for API '{api_name}'"),
+            });
+        };
+
+        // Check if the API config exists but has no secrets
+        if api_config.secrets.is_empty() {
+            return Err(Error::InvalidConfig {
+                reason: format!("No secrets configured for API '{api_name}'"),
+            });
+        }
+
+        // Check if the specific scheme exists
+        if !api_config.secrets.contains_key(scheme_name) {
+            return Err(Error::InvalidConfig {
+                reason: format!(
+                    "Secret for scheme '{scheme_name}' is not configured for API '{api_name}'"
+                ),
+            });
+        }
+
+        // Remove the secret
+        api_config.secrets.remove(scheme_name);
+
+        // If no secrets remain, remove the entire API config
+        if api_config.secrets.is_empty() && api_config.base_url_override.is_none() {
+            config.api_configs.remove(api_name);
+        }
+
+        // Save the updated config
+        self.save_global_config(&config)?;
+
+        Ok(())
+    }
+
+    /// Removes all secret configurations for an API specification
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    ///
+    /// # Errors
+    /// Returns an error if the spec doesn't exist
+    pub fn clear_secrets(&self, api_name: &str) -> Result<(), Error> {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load global config
+        let mut config = self.load_global_config()?;
+
+        // Check if the API exists in config
+        if let Some(api_config) = config.api_configs.get_mut(api_name) {
+            // Clear all secrets
+            api_config.secrets.clear();
+
+            // If no other configuration remains, remove the entire API config
+            if api_config.base_url_override.is_none() {
+                config.api_configs.remove(api_name);
+            }
+
+            // Save the updated config
+            self.save_global_config(&config)?;
+        }
+        // If API config doesn't exist, that's fine - no secrets to clear
+
+        Ok(())
+    }
+
+    /// Configure secrets interactively for an API specification
+    ///
+    /// Loads the cached spec to discover available security schemes and
+    /// presents an interactive menu for configuration.
+    ///
+    /// # Arguments
+    /// * `api_name` - The name of the API specification
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The spec doesn't exist
+    /// - Cannot load cached spec
+    /// - User interaction fails
+    /// - Cannot save configuration
+    ///
+    /// # Panics
+    ///
+    /// Panics if the selected scheme is not found in the cached spec
+    /// (this should never happen due to menu validation)
+    pub fn set_secret_interactive(&self, api_name: &str) -> Result<(), Error> {
+        // Verify the spec exists and load cached spec
+        let (cached_spec, current_secrets) = self.load_spec_for_interactive_config(api_name)?;
+
+        if cached_spec.security_schemes.is_empty() {
+            println!("No security schemes found in API '{api_name}'.");
+            return Ok(());
+        }
+
+        Self::display_interactive_header(api_name, &cached_spec);
+
+        // Create options for selection with rich descriptions
+        let options = Self::build_security_scheme_options(&cached_spec, &current_secrets);
+
+        // Interactive loop for configuration
+        self.run_interactive_configuration_loop(
+            api_name,
+            &cached_spec,
+            &current_secrets,
+            &options,
+        )?;
+
+        println!("\nInteractive configuration complete!");
+        Ok(())
+    }
+
+    /// Checks if a spec already exists and handles force flag
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec already exists and force is false
+    fn check_spec_exists(&self, name: &str, force: bool) -> Result<(), Error> {
+        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
+
+        if self.fs.exists(&spec_path) && !force {
+            return Err(Error::SpecAlreadyExists {
+                name: name.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Transforms an `OpenAPI` spec into cached representation
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if transformation fails
+    fn transform_spec_to_cached(
+        name: &str,
+        openapi_spec: &OpenAPI,
+        validation_result: &crate::spec::validator::ValidationResult,
+    ) -> Result<crate::cache::models::CachedSpec, Error> {
         let transformer = SpecTransformer::new();
 
         // Convert warnings to skip_endpoints format - skip endpoints with unsupported content types or auth
@@ -820,14 +937,23 @@ impl<F: FileSystem> ConfigManager<F> {
             .filter_map(super::super::spec::validator::ValidationWarning::to_skip_endpoint)
             .collect();
 
-        let cached_spec = transformer.transform_with_warnings(
+        transformer.transform_with_warnings(
             name,
-            &openapi_spec,
+            openapi_spec,
             &skip_endpoints,
             &validation_result.warnings,
-        )?;
+        )
+    }
 
-        // Create directories
+    /// Creates necessary directories for spec and cache files
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directory creation fails
+    fn create_spec_directories(&self, name: &str) -> Result<(PathBuf, PathBuf), Error> {
+        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
+        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
+
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
             path: spec_path.display().to_string(),
             reason: "Path has no parent directory".to_string(),
@@ -836,23 +962,412 @@ impl<F: FileSystem> ConfigManager<F> {
             path: cache_path.display().to_string(),
             reason: "Path has no parent directory".to_string(),
         })?;
+
         self.fs.create_dir_all(spec_parent)?;
         self.fs.create_dir_all(cache_parent)?;
 
+        Ok((spec_path, cache_path))
+    }
+
+    /// Writes spec and cache files to disk
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if file operations fail
+    fn write_spec_files(
+        &self,
+        name: &str,
+        content: &str,
+        cached_spec: &crate::cache::models::CachedSpec,
+        spec_path: &Path,
+        cache_path: &Path,
+    ) -> Result<(), Error> {
         // Write original spec file
-        self.fs.write_all(&spec_path, content.as_bytes())?;
+        self.fs.write_all(spec_path, content.as_bytes())?;
 
         // Serialize and write cached representation
         let cached_data =
-            bincode::serialize(&cached_spec).map_err(|e| Error::SerializationError {
+            bincode::serialize(cached_spec).map_err(|e| Error::SerializationError {
                 reason: e.to_string(),
             })?;
-        self.fs.write_all(&cache_path, &cached_data)?;
+        self.fs.write_all(cache_path, &cached_data)?;
+
+        // Update cache metadata for optimized version checking
+        let cache_dir = self.config_dir.join(".cache");
+        let metadata_manager = CacheMetadataManager::new(&self.fs);
+        metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
+
+        Ok(())
+    }
+
+    /// Common logic for adding a spec from a validated `OpenAPI` object
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if transformation or file operations fail
+    fn add_spec_from_validated_openapi(
+        &self,
+        name: &str,
+        openapi_spec: &OpenAPI,
+        content: &str,
+        validation_result: &crate::spec::validator::ValidationResult,
+        strict: bool,
+    ) -> Result<(), Error> {
+        // Transform to cached representation
+        let cached_spec = Self::transform_spec_to_cached(name, openapi_spec, validation_result)?;
+
+        // Create directories
+        let (spec_path, cache_path) = self.create_spec_directories(name)?;
+
+        // Write files
+        self.write_spec_files(name, content, &cached_spec, &spec_path, &cache_path)?;
 
         // Save strict mode preference
         self.save_strict_preference(name, strict)?;
 
         Ok(())
+    }
+
+    /// Loads spec and current secrets for interactive configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or cannot be loaded
+    fn load_spec_for_interactive_config(
+        &self,
+        api_name: &str,
+    ) -> Result<
+        (
+            crate::cache::models::CachedSpec,
+            std::collections::HashMap<String, ApertureSecret>,
+        ),
+        Error,
+    > {
+        // Verify the spec exists
+        let spec_path = self
+            .config_dir
+            .join("specs")
+            .join(format!("{api_name}.yaml"));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::SpecNotFound {
+                name: api_name.to_string(),
+            });
+        }
+
+        // Load cached spec to get security schemes
+        let cache_dir = self.config_dir.join(".cache");
+        let cached_spec = loader::load_cached_spec(&cache_dir, api_name)?;
+
+        // Get current configuration
+        let current_secrets = self.list_secrets(api_name)?;
+
+        Ok((cached_spec, current_secrets))
+    }
+
+    /// Displays the interactive configuration header
+    fn display_interactive_header(api_name: &str, cached_spec: &crate::cache::models::CachedSpec) {
+        println!("Interactive Secret Configuration for API: {api_name}");
+        println!(
+            "Found {} security scheme(s):\n",
+            cached_spec.security_schemes.len()
+        );
+    }
+
+    /// Builds options for security scheme selection with rich descriptions
+    fn build_security_scheme_options(
+        cached_spec: &crate::cache::models::CachedSpec,
+        current_secrets: &std::collections::HashMap<String, ApertureSecret>,
+    ) -> Vec<(String, String)> {
+        cached_spec
+            .security_schemes
+            .values()
+            .map(|scheme| {
+                let mut description = format!("{} ({})", scheme.scheme_type, scheme.name);
+
+                // Add type-specific details
+                match scheme.scheme_type.as_str() {
+                    "apiKey" => {
+                        if let (Some(location), Some(param)) =
+                            (&scheme.location, &scheme.parameter_name)
+                        {
+                            description = format!("{description} - {location} parameter: {param}");
+                        }
+                    }
+                    "http" => {
+                        if let Some(http_scheme) = &scheme.scheme {
+                            description = format!("{description} - {http_scheme} authentication");
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Show current configuration status
+                if current_secrets.contains_key(&scheme.name) {
+                    description = format!("{description} [CONFIGURED]");
+                } else if scheme.aperture_secret.is_some() {
+                    description = format!("{description} [x-aperture-secret]");
+                } else {
+                    description = format!("{description} [NOT CONFIGURED]");
+                }
+
+                // Add OpenAPI description if available
+                if let Some(openapi_desc) = &scheme.description {
+                    description = format!("{description} - {openapi_desc}");
+                }
+
+                (scheme.name.clone(), description)
+            })
+            .collect()
+    }
+
+    /// Runs the interactive configuration loop
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if user interaction fails or configuration cannot be saved
+    fn run_interactive_configuration_loop(
+        &self,
+        api_name: &str,
+        cached_spec: &crate::cache::models::CachedSpec,
+        current_secrets: &std::collections::HashMap<String, ApertureSecret>,
+        options: &[(String, String)],
+    ) -> Result<(), Error> {
+        use crate::interactive::{confirm, prompt_for_input, select_from_options};
+
+        loop {
+            let selected_scheme =
+                select_from_options("\nSelect a security scheme to configure:", options)?;
+
+            let scheme = cached_spec.security_schemes.get(&selected_scheme).expect(
+                "Selected scheme should exist in cached spec - menu validation ensures this",
+            );
+
+            Self::display_scheme_configuration_details(&selected_scheme, scheme, current_secrets);
+
+            // Prompt for environment variable
+            let env_var = prompt_for_input(&format!(
+                "\nEnter environment variable name for '{selected_scheme}' (or press Enter to skip): "
+            ))?;
+
+            if env_var.is_empty() {
+                println!("Skipping configuration for '{selected_scheme}'");
+            } else {
+                self.handle_secret_configuration(api_name, &selected_scheme, &env_var)?;
+            }
+
+            // Ask if user wants to configure another scheme
+            if !confirm("\nConfigure another security scheme?")? {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Displays configuration details for a selected security scheme
+    fn display_scheme_configuration_details(
+        selected_scheme: &str,
+        scheme: &crate::cache::models::CachedSecurityScheme,
+        current_secrets: &std::collections::HashMap<String, ApertureSecret>,
+    ) {
+        println!("\nConfiguration for '{selected_scheme}':");
+        println!("   Type: {}", scheme.scheme_type);
+        if let Some(desc) = &scheme.description {
+            println!("   Description: {desc}");
+        }
+
+        // Show current configuration
+        if let Some(current_secret) = current_secrets.get(selected_scheme) {
+            println!("   Current: environment variable '{}'", current_secret.name);
+        } else if let Some(aperture_secret) = &scheme.aperture_secret {
+            println!(
+                "   Current: x-aperture-secret -> '{}'",
+                aperture_secret.name
+            );
+        } else {
+            println!("   Current: not configured");
+        }
+    }
+
+    /// Handles secret configuration validation and saving
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if validation fails or configuration cannot be saved
+    fn handle_secret_configuration(
+        &self,
+        api_name: &str,
+        selected_scheme: &str,
+        env_var: &str,
+    ) -> Result<(), Error> {
+        use crate::interactive::confirm;
+
+        // Validate environment variable name using the comprehensive validator
+        if let Err(e) = crate::interactive::validate_env_var_name(env_var) {
+            println!("Invalid environment variable name: {e}");
+            return Ok(()); // Continue the loop, don't fail completely
+        }
+
+        // Show preview and confirm
+        println!("\nConfiguration Preview:");
+        println!("   API: {api_name}");
+        println!("   Scheme: {selected_scheme}");
+        println!("   Environment Variable: {env_var}");
+
+        if confirm("Apply this configuration?")? {
+            self.set_secret(api_name, selected_scheme, env_var)?;
+            println!("Configuration saved successfully!");
+        } else {
+            println!("Configuration cancelled.");
+        }
+
+        Ok(())
+    }
+
+    /// Categorizes warnings by type for better formatting
+    fn categorize_warnings(
+        warnings: &[crate::spec::validator::ValidationWarning],
+    ) -> CategorizedWarnings<'_> {
+        let mut categorized = CategorizedWarnings {
+            content_type: Vec::new(),
+            auth: Vec::new(),
+            mixed_content: Vec::new(),
+        };
+
+        for warning in warnings {
+            if warning.reason.contains("no supported content types") {
+                categorized.content_type.push(warning);
+            } else if warning.reason.contains("unsupported authentication") {
+                categorized.auth.push(warning);
+            } else if warning
+                .reason
+                .contains("unsupported content types alongside JSON")
+            {
+                categorized.mixed_content.push(warning);
+            }
+        }
+
+        categorized
+    }
+
+    /// Formats content type warnings
+    fn format_content_type_warnings(
+        lines: &mut Vec<String>,
+        content_type_warnings: &[&crate::spec::validator::ValidationWarning],
+        total_operations: Option<usize>,
+        total_skipped: usize,
+        indent: &str,
+    ) {
+        if content_type_warnings.is_empty() {
+            return;
+        }
+
+        let warning_msg = total_operations.map_or_else(
+            || {
+                format!(
+                    "{}Skipping {} endpoints with unsupported content types:",
+                    indent,
+                    content_type_warnings.len()
+                )
+            },
+            |total| {
+                let available = total.saturating_sub(total_skipped);
+                format!(
+                    "{}Skipping {} endpoints with unsupported content types ({} of {} endpoints will be available):",
+                    indent,
+                    content_type_warnings.len(),
+                    available,
+                    total
+                )
+            },
+        );
+        lines.push(warning_msg);
+
+        for warning in content_type_warnings {
+            lines.push(format!(
+                "{}  - {} {} ({}) - {}",
+                indent,
+                warning.endpoint.method,
+                warning.endpoint.path,
+                warning.endpoint.content_type,
+                warning.reason
+            ));
+        }
+    }
+
+    /// Formats authentication warnings
+    fn format_auth_warnings(
+        lines: &mut Vec<String>,
+        auth_warnings: &[&crate::spec::validator::ValidationWarning],
+        total_operations: Option<usize>,
+        total_skipped: usize,
+        indent: &str,
+        add_blank_line: bool,
+    ) {
+        if auth_warnings.is_empty() {
+            return;
+        }
+
+        if add_blank_line {
+            lines.push(String::new()); // Add blank line between sections
+        }
+
+        let warning_msg = total_operations.map_or_else(
+            || {
+                format!(
+                    "{}Skipping {} endpoints with unsupported authentication:",
+                    indent,
+                    auth_warnings.len()
+                )
+            },
+            |total| {
+                let available = total.saturating_sub(total_skipped);
+                format!(
+                    "{}Skipping {} endpoints with unsupported authentication ({} of {} endpoints will be available):",
+                    indent,
+                    auth_warnings.len(),
+                    available,
+                    total
+                )
+            },
+        );
+        lines.push(warning_msg);
+
+        for warning in auth_warnings {
+            lines.push(format!(
+                "{}  - {} {} - {}",
+                indent, warning.endpoint.method, warning.endpoint.path, warning.reason
+            ));
+        }
+    }
+
+    /// Formats mixed content warnings
+    fn format_mixed_content_warnings(
+        lines: &mut Vec<String>,
+        mixed_content_warnings: &[&crate::spec::validator::ValidationWarning],
+        indent: &str,
+        add_blank_line: bool,
+    ) {
+        if mixed_content_warnings.is_empty() {
+            return;
+        }
+
+        if add_blank_line {
+            lines.push(String::new()); // Add blank line between sections
+        }
+
+        lines.push(format!(
+            "{indent}Endpoints with partial content type support:"
+        ));
+        for warning in mixed_content_warnings {
+            lines.push(format!(
+                "{}  - {} {} supports JSON but not: {}",
+                indent,
+                warning.endpoint.method,
+                warning.endpoint.path,
+                warning.endpoint.content_type
+            ));
+        }
     }
 }
 
