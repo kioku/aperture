@@ -897,7 +897,7 @@ impl<F: FileSystem> ConfigManager<F> {
             &options,
         )?;
 
-        println!("\n🎉 Interactive configuration complete!");
+        println!("\nInteractive configuration complete!");
         Ok(())
     }
 
@@ -1066,7 +1066,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
     /// Displays the interactive configuration header
     fn display_interactive_header(api_name: &str, cached_spec: &crate::cache::models::CachedSpec) {
-        println!("🔐 Interactive Secret Configuration for API: {api_name}");
+        println!("Interactive Secret Configuration for API: {api_name}");
         println!(
             "Found {} security scheme(s):\n",
             cached_spec.security_schemes.len()
@@ -1170,7 +1170,7 @@ impl<F: FileSystem> ConfigManager<F> {
         scheme: &crate::cache::models::CachedSecurityScheme,
         current_secrets: &std::collections::HashMap<String, ApertureSecret>,
     ) {
-        println!("\n📋 Configuration for '{selected_scheme}':");
+        println!("\nConfiguration for '{selected_scheme}':");
         println!("   Type: {}", scheme.scheme_type);
         if let Some(desc) = &scheme.description {
             println!("   Description: {desc}");
@@ -1204,19 +1204,19 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Validate environment variable name using the comprehensive validator
         if let Err(e) = crate::interactive::validate_env_var_name(env_var) {
-            println!("❌ Invalid environment variable name: {e}");
+            println!("Invalid environment variable name: {e}");
             return Ok(()); // Continue the loop, don't fail completely
         }
 
         // Show preview and confirm
-        println!("\n📝 Configuration Preview:");
+        println!("\nConfiguration Preview:");
         println!("   API: {api_name}");
         println!("   Scheme: {selected_scheme}");
         println!("   Environment Variable: {env_var}");
 
         if confirm("Apply this configuration?")? {
             self.set_secret(api_name, selected_scheme, env_var)?;
-            println!("✅ Configuration saved successfully!");
+            println!("Configuration saved successfully!");
         } else {
             println!("Configuration cancelled.");
         }
