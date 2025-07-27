@@ -558,25 +558,27 @@ fn add_authentication_header(
     // Build the appropriate header based on scheme type
     match security_scheme.scheme_type.as_str() {
         "apiKey" => {
-            if let (Some(location), Some(param_name)) =
+            let (Some(location), Some(param_name)) =
                 (&security_scheme.location, &security_scheme.parameter_name)
-            {
-                if location == "header" {
-                    let header_name =
-                        HeaderName::from_str(param_name).map_err(|e| Error::InvalidHeaderName {
-                            name: param_name.clone(),
-                            reason: e.to_string(),
-                        })?;
-                    let header_value = HeaderValue::from_str(&secret_value).map_err(|e| {
-                        Error::InvalidHeaderValue {
-                            name: param_name.clone(),
-                            reason: e.to_string(),
-                        }
+            else {
+                return Ok(());
+            };
+
+            if location == "header" {
+                let header_name =
+                    HeaderName::from_str(param_name).map_err(|e| Error::InvalidHeaderName {
+                        name: param_name.clone(),
+                        reason: e.to_string(),
                     })?;
-                    headers.insert(header_name, header_value);
-                }
-                // Note: query and cookie locations are handled differently in request building
+                let header_value = HeaderValue::from_str(&secret_value).map_err(|e| {
+                    Error::InvalidHeaderValue {
+                        name: param_name.clone(),
+                        reason: e.to_string(),
+                    }
+                })?;
+                headers.insert(header_name, header_value);
             }
+            // Note: query and cookie locations are handled differently in request building
         }
         "http" => {
             if let Some(scheme_str) = &security_scheme.scheme {
