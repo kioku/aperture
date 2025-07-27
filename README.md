@@ -136,7 +136,7 @@ aperture config add --strict my-api ./openapi.yml
 
 #### Dynamic Secret Configuration
 
-Starting from v0.2.0, Aperture supports dynamic authentication configuration without modifying OpenAPI specifications. This allows you to:
+Starting from v0.1.4, Aperture supports dynamic authentication configuration without modifying OpenAPI specifications. This allows you to:
 
 - **Use unmodified third-party OpenAPI specs** - No need to fork and add `x-aperture-secret` extensions
 - **Easy credential management** - Configure authentication through simple CLI commands
@@ -242,7 +242,7 @@ aperture config add --strict my-api ./openapi.yml
 # List available APIs
 aperture config list
 
-# Configure authentication secrets (v0.2.0+)
+# Configure authentication secrets (v0.1.4)
 aperture config set-secret my-api bearerAuth --env API_TOKEN
 aperture config set-secret my-api --interactive  # Guided configuration
 aperture config list-secrets my-api
