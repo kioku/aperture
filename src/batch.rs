@@ -241,13 +241,13 @@ impl BatchProcessor {
                 let (success, error, response) = match result {
                     Ok(resp) => {
                         if show_progress {
-                            println!("✓ Operation {} completed", index + 1);
+                            println!("Operation {} completed", index + 1);
                         }
                         (true, None, Some(resp))
                     }
                     Err(e) => {
                         if show_progress {
-                            println!("✗ Operation {} failed: {}", index + 1, e);
+                            println!("Operation {} failed: {}", index + 1, e);
                         }
                         (false, Some(e.to_string()), None)
                     }

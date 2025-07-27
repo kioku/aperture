@@ -173,7 +173,7 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 scheme_name,
             } => {
                 manager.remove_secret(&api_name, &scheme_name)?;
-                println!("✓ Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'");
+                println!("Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'");
             }
             ConfigCommands::ClearSecrets { api_name, force } => {
                 // Check if API exists and has secrets
@@ -200,7 +200,7 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 }
 
                 manager.clear_secrets(&api_name)?;
-                println!("✓ Cleared all secret configurations for API '{api_name}'");
+                println!("Cleared all secret configurations for API '{api_name}'");
             }
         },
         Commands::ListCommands { ref context } => {
@@ -261,7 +261,7 @@ fn list_commands(context: &str) -> Result<(), Error> {
     }
 
     for (tag, commands) in tag_groups {
-        println!("📁 {tag}");
+        println!("{tag}");
         for command in commands {
             let kebab_id = to_kebab_case(&command.operation_id);
             let description = command
@@ -344,10 +344,10 @@ fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> 
     for spec_name in &specs {
         match reinit_spec(manager, spec_name) {
             Ok(()) => {
-                println!("  ✓ {spec_name}");
+                println!("  {spec_name}");
             }
             Err(e) => {
-                eprintln!("  ✗ {spec_name}: {e}");
+                eprintln!("  {spec_name}: {e}");
             }
         }
     }
@@ -1004,7 +1004,7 @@ fn print_error(error: &Error) {
             }
         }
         Error::Anyhow(err) => {
-            eprintln!("💥 Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
+            eprintln!("Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
         }
     }
 }

@@ -384,7 +384,7 @@ pub fn confirm_with_io_and_timeout<T: InputOutput>(
 /// # Errors
 /// Returns an error if stdin operations fail
 pub fn confirm_exit() -> Result<bool, Error> {
-    println!("\n⚠️  Interactive session interrupted.");
+    println!("\nInteractive session interrupted.");
     confirm("Do you want to exit without saving changes?")
 }
 
