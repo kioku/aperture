@@ -126,7 +126,7 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 
     // Build subcommands for each group
     for (group_name, commands) in command_groups {
-        let group_name_static = to_static_str(group_name.clone());
+        let group_name_static = to_static_str(group_name.to_lowercase());
         let mut group_command = Command::new(group_name_static)
             .about(format!("{} operations", capitalize_first(&group_name)));
 
