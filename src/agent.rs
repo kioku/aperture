@@ -209,12 +209,13 @@ pub fn generate_capability_manifest_from_openapi(
                         spec.security.as_ref(),
                     );
 
-                    // Group by first tag or "default"
+                    // Group by first tag or "default", converted to lowercase
                     let group_name = op
                         .tags
                         .first()
                         .cloned()
-                        .unwrap_or_else(|| "default".to_string());
+                        .unwrap_or_else(|| "default".to_string())
+                        .to_lowercase();
 
                     command_groups
                         .entry(group_name)
@@ -270,7 +271,7 @@ pub fn generate_capability_manifest(
         let group_name = if cached_command.name.is_empty() {
             "default".to_string()
         } else {
-            cached_command.name.clone()
+            cached_command.name.to_lowercase()
         };
 
         let command_info = convert_cached_command_to_info(cached_command);

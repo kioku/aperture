@@ -34,9 +34,25 @@ pub fn to_kebab_case(s: &str) -> String {
                     && is_upper
                     && chars.peek().is_some_and(|&next| next.is_lowercase())
                     && !result.is_empty()
+                    && !result.chars().last().unwrap_or(' ').is_numeric()
                 {
                     // Handle acronym followed by word (e.g., "HTTPSConnection" -> "https-connection")
-                    result.push('-');
+                    // But check if we're not in the middle of an all-caps word ending with 's' (APIs)
+                    // Collect the next few characters to check the pattern
+                    let remaining: Vec<char> = chars.clone().collect();
+                    let should_add_hyphen = match remaining.as_slice() {
+                        // If next char is lowercase and there are more chars after it, add hyphen
+                        [next, _, ..] if next.is_lowercase() => true,
+                        // If next char is lowercase and it's the last char, don't add hyphen
+                        // This prevents "APIs" from becoming "api-s"
+                        [next] if next.is_lowercase() => false,
+                        // No more characters
+                        _ => false,
+                    };
+
+                    if should_add_hyphen {
+                        result.push('-');
+                    }
                 }
 
                 // Use proper Unicode lowercase conversion
@@ -138,7 +154,7 @@ mod tests {
         assert_eq!(to_kebab_case("ABCDefg"), "abc-defg");
         assert_eq!(to_kebab_case("HTTPSProxy"), "https-proxy");
         assert_eq!(to_kebab_case("HTTPAPI"), "httpapi");
-        assert_eq!(to_kebab_case("HTTPAPIs"), "httpap-is");
+        assert_eq!(to_kebab_case("HTTPAPIs"), "httpapis");
 
         // Real-world OpenAPI operation IDs
         assert_eq!(
