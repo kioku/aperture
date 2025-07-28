@@ -332,30 +332,34 @@ fn find_operation<'a>(
 fn contains_template_variables(url: &str) -> bool {
     let mut chars = url.chars();
     while let Some(ch) = chars.next() {
-        if ch == '{' {
-            // Found opening brace, check if it forms a valid template variable
-            let mut var_name = String::new();
-            let mut found_closing = false;
+        if ch != '{' {
+            continue;
+        }
 
-            for next_ch in chars.by_ref() {
-                if next_ch == '}' {
-                    found_closing = true;
-                    break;
-                } else if next_ch.is_alphanumeric() || next_ch == '_' || next_ch == '-' {
-                    var_name.push(next_ch);
-                } else {
-                    // Invalid character in template variable name
-                    break;
-                }
+        // Found opening brace, check if it forms a valid template variable
+        let mut var_name = String::new();
+        let mut found_closing = false;
+
+        for next_ch in chars.by_ref() {
+            if next_ch == '}' {
+                found_closing = true;
+                break;
             }
 
-            // Valid template variable must have:
-            // 1. A closing brace
-            // 2. A non-empty variable name
-            // 3. Only alphanumeric, underscore, or hyphen characters
-            if found_closing && !var_name.is_empty() {
-                return true;
+            if next_ch.is_alphanumeric() || next_ch == '_' || next_ch == '-' {
+                var_name.push(next_ch);
+            } else {
+                // Invalid character in template variable name
+                break;
             }
+        }
+
+        // Valid template variable must have:
+        // 1. A closing brace
+        // 2. A non-empty variable name
+        // 3. Only alphanumeric, underscore, or hyphen characters
+        if found_closing && !var_name.is_empty() {
+            return true;
         }
     }
     false
