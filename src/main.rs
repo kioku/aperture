@@ -173,7 +173,9 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 scheme_name,
             } => {
                 manager.remove_secret(&api_name, &scheme_name)?;
-                println!("Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'");
+                println!(
+                    "Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'"
+                );
             }
             ConfigCommands::ClearSecrets { api_name, force } => {
                 // Check if API exists and has secrets

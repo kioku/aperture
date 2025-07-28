@@ -5,17 +5,50 @@ use std::collections::HashMap;
 /// Converts a string to kebab-case
 fn to_kebab_case(s: &str) -> String {
     let mut result = String::new();
-    let mut prev_lowercase = false;
+    let mut chars = s.chars().peekable();
+    let mut prev_was_lowercase = false;
+    let mut prev_was_uppercase = false;
+    let mut prev_was_separator = true; // Start true to avoid leading hyphen
 
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 && prev_lowercase {
+    while let Some(ch) = chars.next() {
+        if ch.is_alphanumeric() {
+            let is_upper = ch.is_uppercase();
+            let is_lower = ch.is_lowercase();
+
+            // Determine if we need a hyphen before this character
+            if !prev_was_separator && is_upper {
+                // Add hyphen if:
+                // 1. Previous was lowercase (camelCase boundary)
+                // 2. Previous was uppercase AND next is lowercase (XMLHttp -> XML-Http)
+                if prev_was_lowercase {
+                    result.push('-');
+                } else if prev_was_uppercase {
+                    // Check if next char is lowercase to detect acronym boundaries
+                    if let Some(&next_ch) = chars.peek() {
+                        if next_ch.is_lowercase() {
+                            result.push('-');
+                        }
+                    }
+                }
+            }
+
+            result.push(ch.to_ascii_lowercase());
+            prev_was_lowercase = is_lower;
+            prev_was_uppercase = is_upper;
+            prev_was_separator = false;
+        } else if ch == '\'' {
+            // Skip apostrophes entirely
+        } else if !prev_was_separator {
+            // Replace any non-alphanumeric with hyphen (but avoid consecutive hyphens)
             result.push('-');
+            prev_was_separator = true;
+            prev_was_lowercase = false;
+            prev_was_uppercase = false;
         }
-        result.push(ch.to_ascii_lowercase());
-        prev_lowercase = ch.is_lowercase();
     }
 
-    result
+    // Trim trailing hyphens
+    result.trim_end_matches('-').to_string()
 }
 
 /// Converts a String to a 'static str by leaking it
@@ -211,4 +244,40 @@ fn capitalize_first(s: &str) -> String {
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().chain(chars).collect()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_kebab_case() {
+        // Test cases from the requirements
+        assert_eq!(
+            to_kebab_case("List an Organization's Issues"),
+            "list-an-organizations-issues"
+        );
+        assert_eq!(to_kebab_case("getUser"), "get-user");
+        assert_eq!(to_kebab_case("get_user_by_id"), "get-user-by-id");
+        assert_eq!(
+            to_kebab_case("Some---Multiple   Spaces"),
+            "some-multiple-spaces"
+        );
+
+        // Additional test cases
+        assert_eq!(to_kebab_case("getUserByID"), "get-user-by-id");
+        assert_eq!(to_kebab_case("XMLHttpRequest"), "xml-http-request");
+        assert_eq!(to_kebab_case("Simple"), "simple");
+        assert_eq!(to_kebab_case("ALLCAPS"), "allcaps");
+        assert_eq!(
+            to_kebab_case("spaces between words"),
+            "spaces-between-words"
+        );
+        assert_eq!(to_kebab_case("special!@#$%^&*()chars"), "special-chars");
+        assert_eq!(to_kebab_case("trailing---"), "trailing");
+        assert_eq!(to_kebab_case("---leading"), "leading");
+        assert_eq!(to_kebab_case(""), "");
+        assert_eq!(to_kebab_case("a"), "a");
+        assert_eq!(to_kebab_case("A"), "a");
+    }
 }
