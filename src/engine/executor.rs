@@ -92,7 +92,7 @@ pub async fn execute_request(
     let base_url = resolver.resolve(base_url);
 
     // Build the full URL with path parameters
-    let url = build_url(&base_url, &operation.path, operation, matches)?;
+    let url = build_url(&base_url, &operation.path, operation, matches, &spec.name)?;
 
     // Create HTTP client with timeout
     let client = reqwest::Client::builder()
@@ -334,7 +334,18 @@ fn build_url(
     path_template: &str,
     operation: &CachedCommand,
     matches: &ArgMatches,
+    api_name: &str,
 ) -> Result<String, Error> {
+    // Check if base_url contains template variables
+    if base_url.contains('{') && base_url.contains('}') {
+        return Err(Error::InvalidConfig {
+            reason: format!(
+                "Server URL contains template variable(s): {base_url}. \
+                Please use 'aperture config set-url {api_name} <concrete-url>' to set a specific base URL."
+            ),
+        });
+    }
+
     let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
 
     // Get to the deepest subcommand matches
