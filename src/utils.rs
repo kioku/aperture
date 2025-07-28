@@ -6,72 +6,59 @@
 /// - `snake_case`: `"get_user_by_id"` -> "get-user-by-id"
 /// - Spaces: "List an Organization's Issues" -> "list-an-organizations-issues"
 /// - Mixed: `"XMLHttpRequest"` -> "xml-http-request"
+/// - Unicode: `"CAFÉ"` -> "café"
 ///
 /// Special handling:
 /// - Apostrophes are removed entirely: "Organization's" -> "organizations"
 /// - Special characters become hyphens: "hello!world" -> "hello-world"
 /// - Consecutive non-alphanumeric characters are collapsed: "a---b" -> "a-b"
 /// - Leading/trailing hyphens are trimmed
+/// - Unicode characters are properly lowercased
 #[must_use]
 pub fn to_kebab_case(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
-    let mut prev_was_lowercase = false;
-    let mut prev_was_uppercase = false;
-    let mut prev_was_separator = true; // Start true to avoid leading hyphen
+    let mut last_was_sep = true;
+    let mut last_was_lower = false;
 
     while let Some(ch) = chars.next() {
         match ch {
+            '\'' => {} // Skip apostrophes
             c if c.is_alphanumeric() => {
                 let is_upper = c.is_uppercase();
-                let is_lower = c.is_lowercase();
 
-                let needs_hyphen = should_insert_hyphen(
-                    is_upper,
-                    prev_was_lowercase,
-                    prev_was_uppercase,
-                    prev_was_separator,
-                    chars.peek().is_some_and(|&next| next.is_lowercase()),
-                );
-
-                if needs_hyphen {
+                // Insert hyphen at word boundaries
+                if !last_was_sep && is_upper && last_was_lower {
+                    result.push('-');
+                } else if !last_was_sep
+                    && is_upper
+                    && chars.peek().is_some_and(|&next| next.is_lowercase())
+                    && !result.is_empty()
+                {
+                    // Handle acronym followed by word (e.g., "HTTPSConnection" -> "https-connection")
                     result.push('-');
                 }
 
-                result.push(c.to_ascii_lowercase());
-                // Treat numbers as "lowercase" for transition purposes
-                prev_was_lowercase = is_lower || c.is_numeric();
-                prev_was_uppercase = is_upper;
-                prev_was_separator = false;
+                // Use proper Unicode lowercase conversion
+                for lower_ch in c.to_lowercase() {
+                    result.push(lower_ch);
+                }
+
+                last_was_sep = false;
+                last_was_lower = c.is_lowercase() || c.is_numeric();
             }
-            '\'' => {} // Skip apostrophes entirely
-            _ if !prev_was_separator => {
-                // Replace any non-alphanumeric with hyphen (but avoid consecutive hyphens)
-                result.push('-');
-                prev_was_separator = true;
-                prev_was_lowercase = false;
-                prev_was_uppercase = false;
+            _ => {
+                // Convert other chars to hyphen, but avoid consecutive hyphens
+                if !last_was_sep && !result.is_empty() {
+                    result.push('-');
+                    last_was_sep = true;
+                    last_was_lower = false;
+                }
             }
-            _ => {} // Skip consecutive non-alphanumeric characters
         }
     }
 
     result.trim_end_matches('-').to_string()
-}
-
-/// Determines if a hyphen should be inserted before the current character
-#[inline]
-#[allow(clippy::fn_params_excessive_bools)]
-const fn should_insert_hyphen(
-    is_upper: bool,
-    prev_was_lowercase: bool,
-    prev_was_uppercase: bool,
-    prev_was_separator: bool,
-    next_is_lowercase: bool,
-) -> bool {
-    !prev_was_separator
-        && is_upper
-        && (prev_was_lowercase || (prev_was_uppercase && next_is_lowercase))
 }
 
 #[cfg(test)]
@@ -139,6 +126,10 @@ mod tests {
 
         // Unicode and special cases
         assert_eq!(to_kebab_case("café"), "café"); // Non-ASCII preserved if alphanumeric
+        assert_eq!(to_kebab_case("CAFÉ"), "café"); // Unicode uppercase properly lowercased
+        assert_eq!(to_kebab_case("ÑOÑO"), "ñoño"); // Spanish characters
+        assert_eq!(to_kebab_case("ÄÖÜ"), "äöü"); // German umlauts
+        assert_eq!(to_kebab_case("МОСКВА"), "москва"); // Cyrillic
         assert_eq!(to_kebab_case("hello@world.com"), "hello-world-com");
         assert_eq!(to_kebab_case("price$99"), "price-99");
         assert_eq!(to_kebab_case("100%Complete"), "100-complete");
