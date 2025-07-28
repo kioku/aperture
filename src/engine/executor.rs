@@ -92,7 +92,7 @@ pub async fn execute_request(
     let base_url = resolver.resolve(base_url);
 
     // Build the full URL with path parameters
-    let url = build_url(&base_url, &operation.path, operation, matches)?;
+    let url = build_url(&base_url, &operation.path, operation, matches, &spec.name)?;
 
     // Create HTTP client with timeout
     let client = reqwest::Client::builder()
@@ -328,13 +328,61 @@ fn find_operation<'a>(
     Err(Error::OperationNotFound)
 }
 
+/// Checks if a URL contains `OpenAPI` server template variables
+fn contains_template_variables(url: &str) -> bool {
+    let mut chars = url.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '{' {
+            continue;
+        }
+
+        // Found opening brace, check if it forms a valid template variable
+        let mut var_name = String::new();
+        let mut found_closing = false;
+
+        for next_ch in chars.by_ref() {
+            if next_ch == '}' {
+                found_closing = true;
+                break;
+            }
+
+            if next_ch.is_alphanumeric() || next_ch == '_' || next_ch == '-' {
+                var_name.push(next_ch);
+            } else {
+                // Invalid character in template variable name
+                break;
+            }
+        }
+
+        // Valid template variable must have:
+        // 1. A closing brace
+        // 2. A non-empty variable name
+        // 3. Only alphanumeric, underscore, or hyphen characters
+        if found_closing && !var_name.is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Builds the full URL with path parameters substituted
 fn build_url(
     base_url: &str,
     path_template: &str,
     operation: &CachedCommand,
     matches: &ArgMatches,
+    api_name: &str,
 ) -> Result<String, Error> {
+    // Check if base_url contains template variables
+    if contains_template_variables(base_url) {
+        return Err(Error::InvalidConfig {
+            reason: format!(
+                "Server URL contains template variable(s): {base_url}. \
+                Please use 'aperture config set-url {api_name} <concrete-url>' to set a specific base URL."
+            ),
+        });
+    }
+
     let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
 
     // Get to the deepest subcommand matches

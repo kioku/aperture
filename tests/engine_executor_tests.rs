@@ -165,6 +165,71 @@ async fn test_execute_request_with_query_params() {
 }
 
 #[tokio::test]
+async fn test_build_url_with_server_template_variables() {
+    let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "sentry-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![{
+            let mut cmd = cached_command!(
+                "events",
+                "listEvents",
+                "GET",
+                "/api/0/projects/{organization}/{project}/events/",
+                vec![
+                    cached_parameter!("organization", "path", true),
+                    cached_parameter!("project", "path", true),
+                ]
+            );
+            cmd.description = Some("List events".to_string());
+            cmd
+        }],
+        base_url: Some("https://{region}.sentry.io".to_string()),
+        servers: vec!["https://{region}.sentry.io".to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+    };
+
+    let command = Command::new("api").subcommand(
+        Command::new("events").subcommand(
+            Command::new("list-events")
+                .arg(Arg::new("organization").required(true))
+                .arg(Arg::new("project").required(true)),
+        ),
+    );
+
+    let matches =
+        command.get_matches_from(vec!["api", "events", "list-events", "my-org", "my-project"]);
+
+    // Execute the request - should fail with InvalidConfig error
+    let result = execute_request(
+        &spec,
+        &matches,
+        None,
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+        None,
+        None,  // cache_config
+        false, // capture_output
+    )
+    .await;
+
+    assert!(result.is_err());
+    if let Err(e) = result {
+        match e {
+            aperture_cli::error::Error::InvalidConfig { reason } => {
+                assert!(reason.contains("Server URL contains template variable(s)"));
+                assert!(reason.contains("https://{region}.sentry.io"));
+                assert!(reason.contains("aperture config set-url sentry-api"));
+            }
+            _ => panic!("Expected InvalidConfig error, got: {:?}", e),
+        }
+    }
+}
+
+#[tokio::test]
 async fn test_execute_request_error_response() {
     let mock_server = MockServer::start().await;
 
@@ -283,4 +348,192 @@ async fn test_execute_request_with_global_config_base_url() {
     )
     .await;
     assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_url_with_json_query_params_not_detected_as_template() {
+    let mock_server = MockServer::start().await;
+
+    // URLs with JSON in query parameters should not be detected as template variables
+    let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "json-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![cached_command!(
+            "search",
+            "search",
+            "GET",
+            "/search",
+            vec![]
+        )],
+        base_url: Some(r#"https://api.example.com?filter={"type":"user"}"#.to_string()),
+        servers: vec![r#"https://api.example.com?filter={"type":"user"}"#.to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+    };
+
+    // Mock the endpoint
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&mock_server)
+        .await;
+
+    let command =
+        Command::new("api").subcommand(Command::new("search").subcommand(Command::new("search")));
+
+    let matches = command.get_matches_from(vec!["api", "search", "search"]);
+
+    // Should NOT fail with template error because {"type":"user"} is not a valid template
+    let result = execute_request(
+        &spec,
+        &matches,
+        Some(&mock_server.uri()), // Use mock server
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+        None,
+        None,
+        false,
+    )
+    .await;
+
+    // Should succeed because it's not detected as a template
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_url_with_path_braces_detected_as_template() {
+    // Path parameters in base URL should still be detected as templates
+    let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "path-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![cached_command!("test", "test", "GET", "/test", vec![])],
+        base_url: Some("https://api.example.com/{version}".to_string()),
+        servers: vec!["https://api.example.com/{version}".to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+    };
+
+    let command =
+        Command::new("api").subcommand(Command::new("test").subcommand(Command::new("test")));
+
+    let matches = command.get_matches_from(vec!["api", "test", "test"]);
+
+    let result = execute_request(
+        &spec,
+        &matches,
+        None,
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+        None,
+        None,
+        false,
+    )
+    .await;
+
+    assert!(result.is_err());
+    if let Err(e) = result {
+        match e {
+            aperture_cli::error::Error::InvalidConfig { reason } => {
+                assert!(reason.contains("Server URL contains template variable(s)"));
+                assert!(reason.contains("{version}"));
+            }
+            _ => panic!("Expected InvalidConfig error, got: {:?}", e),
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_url_with_multiple_templates_detected() {
+    // Multiple template variables should be detected
+    let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "multi-template-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![cached_command!("test", "test", "GET", "/test", vec![])],
+        base_url: Some("https://{region}-{env}.api.example.com".to_string()),
+        servers: vec!["https://{region}-{env}.api.example.com".to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+    };
+
+    let command =
+        Command::new("api").subcommand(Command::new("test").subcommand(Command::new("test")));
+
+    let matches = command.get_matches_from(vec!["api", "test", "test"]);
+
+    let result = execute_request(
+        &spec,
+        &matches,
+        None,
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+        None,
+        None,
+        false,
+    )
+    .await;
+
+    assert!(result.is_err());
+    if let Err(e) = result {
+        match e {
+            aperture_cli::error::Error::InvalidConfig { reason } => {
+                assert!(reason.contains("Server URL contains template variable(s)"));
+                assert!(reason.contains("{region}-{env}"));
+            }
+            _ => panic!("Expected InvalidConfig error, got: {:?}", e),
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_url_with_empty_braces_not_detected() {
+    // Empty braces should not be detected as template
+    let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "empty-braces-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![cached_command!("test", "test", "GET", "/test", vec![])],
+        base_url: Some("https://api.example.com/path{}".to_string()),
+        servers: vec!["https://api.example.com/path{}".to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+    };
+
+    let command =
+        Command::new("api").subcommand(Command::new("test").subcommand(Command::new("test")));
+
+    let matches = command.get_matches_from(vec!["api", "test", "test"]);
+
+    let result = execute_request(
+        &spec,
+        &matches,
+        None,
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+        None,
+        None,
+        false,
+    )
+    .await;
+
+    // Should not fail with template error - empty braces are not valid templates
+    assert!(result.is_err());
+    if let Err(e) = result {
+        match e {
+            aperture_cli::error::Error::InvalidConfig { reason } => {
+                panic!("Should not detect empty braces as template: {}", reason);
+            }
+            _ => {} // Expected - will fail at network level
+        }
+    }
 }
