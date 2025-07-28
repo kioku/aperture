@@ -122,5 +122,42 @@ mod tests {
         assert_eq!(to_kebab_case("base64Encode"), "base64-encode");
         assert_eq!(to_kebab_case("getV2API"), "get-v2-api");
         assert_eq!(to_kebab_case("v2APIResponse"), "v2-api-response");
+
+        // More edge cases
+        assert_eq!(
+            to_kebab_case("_startWithUnderscore"),
+            "start-with-underscore"
+        );
+        assert_eq!(to_kebab_case("endWithUnderscore_"), "end-with-underscore");
+        assert_eq!(
+            to_kebab_case("multiple___underscores"),
+            "multiple-underscores"
+        );
+        assert_eq!(to_kebab_case("mixedUP_down_CASE"), "mixed-up-down-case");
+        assert_eq!(to_kebab_case("123StartWithNumber"), "123-start-with-number");
+        assert_eq!(to_kebab_case("has123Numbers456"), "has123-numbers456");
+
+        // Unicode and special cases
+        assert_eq!(to_kebab_case("café"), "café"); // Non-ASCII preserved if alphanumeric
+        assert_eq!(to_kebab_case("hello@world.com"), "hello-world-com");
+        assert_eq!(to_kebab_case("price$99"), "price-99");
+        assert_eq!(to_kebab_case("100%Complete"), "100-complete");
+
+        // Consecutive uppercase handling
+        assert_eq!(to_kebab_case("ABCDefg"), "abc-defg");
+        assert_eq!(to_kebab_case("HTTPSProxy"), "https-proxy");
+        assert_eq!(to_kebab_case("HTTPAPI"), "httpapi");
+        assert_eq!(to_kebab_case("HTTPAPIs"), "httpap-is");
+
+        // Real-world OpenAPI operation IDs
+        assert_eq!(
+            to_kebab_case("List an Organization's Projects"),
+            "list-an-organizations-projects"
+        );
+        assert_eq!(to_kebab_case("Update User's Avatar"), "update-users-avatar");
+        assert_eq!(
+            to_kebab_case("Delete Team's Repository Access"),
+            "delete-teams-repository-access"
+        );
     }
 }
