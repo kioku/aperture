@@ -4,6 +4,7 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
 use crate::response_cache::{CacheConfig, CacheKey, CachedRequestInfo, ResponseCache};
+use crate::utils::to_kebab_case;
 use clap::ArgMatches;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
@@ -639,55 +640,6 @@ fn add_authentication_header(
     }
 
     Ok(())
-}
-
-/// Converts a string to kebab-case (copied from generator.rs)
-fn to_kebab_case(s: &str) -> String {
-    let mut result = String::new();
-    let mut chars = s.chars().peekable();
-    let mut prev_was_lowercase = false;
-    let mut prev_was_uppercase = false;
-    let mut prev_was_separator = true; // Start true to avoid leading hyphen
-
-    while let Some(ch) = chars.next() {
-        if ch.is_alphanumeric() {
-            let is_upper = ch.is_uppercase();
-            let is_lower = ch.is_lowercase();
-
-            // Determine if we need a hyphen before this character
-            if !prev_was_separator && is_upper {
-                // Add hyphen if:
-                // 1. Previous was lowercase (camelCase boundary)
-                // 2. Previous was uppercase AND next is lowercase (XMLHttp -> XML-Http)
-                if prev_was_lowercase {
-                    result.push('-');
-                } else if prev_was_uppercase {
-                    // Check if next char is lowercase to detect acronym boundaries
-                    if let Some(&next_ch) = chars.peek() {
-                        if next_ch.is_lowercase() {
-                            result.push('-');
-                        }
-                    }
-                }
-            }
-
-            result.push(ch.to_ascii_lowercase());
-            prev_was_lowercase = is_lower;
-            prev_was_uppercase = is_upper;
-            prev_was_separator = false;
-        } else if ch == '\'' {
-            // Skip apostrophes entirely
-        } else if !prev_was_separator {
-            // Replace any non-alphanumeric with hyphen (but avoid consecutive hyphens)
-            result.push('-');
-            prev_was_separator = true;
-            prev_was_lowercase = false;
-            prev_was_uppercase = false;
-        }
-    }
-
-    // Trim trailing hyphens
-    result.trim_end_matches('-').to_string()
 }
 
 /// Prints the response text in the specified format

@@ -5,6 +5,7 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
 use crate::spec::resolve_parameter_reference;
+use crate::utils::to_kebab_case;
 use openapiv3::{OpenAPI, Operation, Parameter as OpenApiParameter, ReferenceOr, SecurityScheme};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -144,22 +145,6 @@ pub enum SecuritySchemeDetails {
         /// Name of the parameter/header
         name: String,
     },
-}
-
-/// Converts a kebab-case string from operationId to a CLI command name
-fn to_kebab_case(s: &str) -> String {
-    let mut result = String::new();
-    let mut prev_lowercase = false;
-
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 && prev_lowercase {
-            result.push('-');
-        }
-        result.push(ch.to_ascii_lowercase());
-        prev_lowercase = ch.is_lowercase();
-    }
-
-    result
 }
 
 /// Generates a capability manifest from an `OpenAPI` specification.
@@ -706,11 +691,16 @@ mod tests {
     use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 
     #[test]
-    fn test_to_kebab_case() {
+    fn test_command_name_conversion() {
+        // Test that command names are properly converted
         assert_eq!(to_kebab_case("getUserById"), "get-user-by-id");
         assert_eq!(to_kebab_case("createUser"), "create-user");
         assert_eq!(to_kebab_case("list"), "list");
         assert_eq!(to_kebab_case("GET"), "get");
+        assert_eq!(
+            to_kebab_case("List an Organization's Issues"),
+            "list-an-organizations-issues"
+        );
     }
 
     #[test]
