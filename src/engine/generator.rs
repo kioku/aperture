@@ -1,22 +1,7 @@
 use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use crate::utils::to_kebab_case;
 use clap::{Arg, ArgAction, Command};
 use std::collections::HashMap;
-
-/// Converts a string to kebab-case
-fn to_kebab_case(s: &str) -> String {
-    let mut result = String::new();
-    let mut prev_lowercase = false;
-
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 && prev_lowercase {
-            result.push('-');
-        }
-        result.push(ch.to_ascii_lowercase());
-        prev_lowercase = ch.is_lowercase();
-    }
-
-    result
-}
 
 /// Converts a String to a 'static str by leaking it
 ///
@@ -93,7 +78,7 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 
     // Build subcommands for each group
     for (group_name, commands) in command_groups {
-        let group_name_static = to_static_str(group_name.clone());
+        let group_name_static = to_static_str(group_name.to_lowercase());
         let mut group_command = Command::new(group_name_static)
             .about(format!("{} operations", capitalize_first(&group_name)));
 

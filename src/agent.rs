@@ -5,6 +5,7 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
 use crate::spec::resolve_parameter_reference;
+use crate::utils::to_kebab_case;
 use openapiv3::{OpenAPI, Operation, Parameter as OpenApiParameter, ReferenceOr, SecurityScheme};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -146,22 +147,6 @@ pub enum SecuritySchemeDetails {
     },
 }
 
-/// Converts a kebab-case string from operationId to a CLI command name
-fn to_kebab_case(s: &str) -> String {
-    let mut result = String::new();
-    let mut prev_lowercase = false;
-
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 && prev_lowercase {
-            result.push('-');
-        }
-        result.push(ch.to_ascii_lowercase());
-        prev_lowercase = ch.is_lowercase();
-    }
-
-    result
-}
-
 /// Generates a capability manifest from an `OpenAPI` specification.
 ///
 /// This function creates a comprehensive JSON description of all available commands,
@@ -224,12 +209,13 @@ pub fn generate_capability_manifest_from_openapi(
                         spec.security.as_ref(),
                     );
 
-                    // Group by first tag or "default"
+                    // Group by first tag or "default", converted to lowercase
                     let group_name = op
                         .tags
                         .first()
                         .cloned()
-                        .unwrap_or_else(|| "default".to_string());
+                        .unwrap_or_else(|| "default".to_string())
+                        .to_lowercase();
 
                     command_groups
                         .entry(group_name)
@@ -285,7 +271,7 @@ pub fn generate_capability_manifest(
         let group_name = if cached_command.name.is_empty() {
             "default".to_string()
         } else {
-            cached_command.name.clone()
+            cached_command.name.to_lowercase()
         };
 
         let command_info = convert_cached_command_to_info(cached_command);
@@ -706,11 +692,16 @@ mod tests {
     use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 
     #[test]
-    fn test_to_kebab_case() {
+    fn test_command_name_conversion() {
+        // Test that command names are properly converted
         assert_eq!(to_kebab_case("getUserById"), "get-user-by-id");
         assert_eq!(to_kebab_case("createUser"), "create-user");
         assert_eq!(to_kebab_case("list"), "list");
         assert_eq!(to_kebab_case("GET"), "get");
+        assert_eq!(
+            to_kebab_case("List an Organization's Issues"),
+            "list-an-organizations-issues"
+        );
     }
 
     #[test]

@@ -8,6 +8,7 @@ use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
 use aperture_cli::response_cache::{CacheConfig, ResponseCache};
+use aperture_cli::utils::to_kebab_case;
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
@@ -173,7 +174,9 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 scheme_name,
             } => {
                 manager.remove_secret(&api_name, &scheme_name)?;
-                println!("Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'");
+                println!(
+                    "Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'"
+                );
             }
             ConfigCommands::ClearSecrets { api_name, force } => {
                 // Check if API exists and has secrets
@@ -281,22 +284,6 @@ fn list_commands(context: &str) -> Result<(), Error> {
     }
 
     Ok(())
-}
-
-/// Converts a string to kebab-case (copied from generator.rs)
-fn to_kebab_case(s: &str) -> String {
-    let mut result = String::new();
-    let mut prev_lowercase = false;
-
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 && prev_lowercase {
-            result.push('-');
-        }
-        result.push(ch.to_ascii_lowercase());
-        prev_lowercase = ch.is_lowercase();
-    }
-
-    result
 }
 
 fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result<(), Error> {

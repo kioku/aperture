@@ -4,6 +4,7 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::error::Error;
 use crate::response_cache::{CacheConfig, CacheKey, CachedRequestInfo, ResponseCache};
+use crate::utils::to_kebab_case;
 use clap::ArgMatches;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
@@ -639,22 +640,6 @@ fn add_authentication_header(
     }
 
     Ok(())
-}
-
-/// Converts a string to kebab-case (copied from generator.rs)
-fn to_kebab_case(s: &str) -> String {
-    let mut result = String::new();
-    let mut prev_lowercase = false;
-
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 && prev_lowercase {
-            result.push('-');
-        }
-        result.push(ch.to_ascii_lowercase());
-        prev_lowercase = ch.is_lowercase();
-    }
-
-    result
 }
 
 /// Prints the response text in the specified format
