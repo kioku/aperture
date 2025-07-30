@@ -168,6 +168,28 @@ fn test_generate_command_basic_functionality() {
 }
 
 #[test]
+fn test_server_var_flag_present() {
+    let spec = create_test_spec();
+    let command = generate_command_tree(&spec);
+
+    // Check that the --server-var global flag is present
+    // Try to parse with the --server-var flag to see if it's accepted
+    let result = command
+        .clone()
+        .try_get_matches_from(vec!["api", "--server-var", "region=us", "--help"]);
+    
+    // Should not fail due to unknown argument
+    match result {
+        Err(e) if e.kind() == clap::error::ErrorKind::UnknownArgument => {
+            panic!("--server-var flag not recognized: {}", e);
+        }
+        _ => {
+            // Expected: either success or help display, but not unknown argument error
+        }
+    }
+}
+
+#[test]
 fn test_kebab_case_conversion() {
     let spec = CachedSpec {
         cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,

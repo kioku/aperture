@@ -60,6 +60,14 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
                 .value_parser(["json", "yaml", "table"])
                 .default_value("json")
                 .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("server-var")
+                .long("server-var")
+                .global(true)
+                .help("Set server template variable (e.g., --server-var region=us --server-var env=prod)")
+                .value_name("KEY=VALUE")
+                .action(ArgAction::Append),
         );
 
     // Group commands by their tag (namespace)
