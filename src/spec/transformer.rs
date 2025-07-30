@@ -142,27 +142,32 @@ impl SpecTransformer {
         let base_url = servers.first().cloned();
 
         // Extract server variables from the first server (if any)
-        let server_variables: HashMap<String, crate::cache::models::ServerVariable> = 
-            if let Some(first_server) = spec.servers.first() {
-                if let Some(vars) = &first_server.variables {
-                    vars.iter()
-                        .map(|(name, variable)| {
-                            (
-                                name.clone(),
-                                crate::cache::models::ServerVariable {
-                                    default: if variable.default.is_empty() { None } else { Some(variable.default.clone()) },
-                                    enum_values: variable.enumeration.clone(),
-                                    description: variable.description.clone(),
-                                },
-                            )
-                        })
-                        .collect()
-                } else {
-                    HashMap::new()
-                }
-            } else {
-                HashMap::new()
-            };
+        let server_variables: HashMap<String, crate::cache::models::ServerVariable> = spec
+            .servers
+            .first()
+            .map_or_else(HashMap::new, |first_server| {
+                first_server
+                    .variables
+                    .as_ref()
+                    .map_or_else(HashMap::new, |vars| {
+                        vars.iter()
+                            .map(|(name, variable)| {
+                                (
+                                    name.clone(),
+                                    crate::cache::models::ServerVariable {
+                                        default: if variable.default.is_empty() {
+                                            None
+                                        } else {
+                                            Some(variable.default.clone())
+                                        },
+                                        enum_values: variable.enumeration.clone(),
+                                        description: variable.description.clone(),
+                                    },
+                                )
+                            })
+                            .collect()
+                    })
+            });
 
         // Extract global security requirements
         let global_security_requirements: Vec<String> = spec
@@ -689,15 +694,17 @@ mod tests {
 
     #[test]
     fn test_transform_spec_with_server_variables() {
-        
         let mut variables = indexmap::IndexMap::new();
-        variables.insert("region".to_string(), openapiv3::ServerVariable {
-            default: "us".to_string(),
-            description: Some("The regional instance".to_string()),
-            enumeration: vec!["us".to_string(), "eu".to_string()],
-            extensions: indexmap::IndexMap::new(),
-        });
-        
+        variables.insert(
+            "region".to_string(),
+            openapiv3::ServerVariable {
+                default: "us".to_string(),
+                description: Some("The regional instance".to_string()),
+                enumeration: vec!["us".to_string(), "eu".to_string()],
+                extensions: indexmap::IndexMap::new(),
+            },
+        );
+
         let spec = OpenAPI {
             openapi: "3.0.0".to_string(),
             info: Info {
@@ -713,22 +720,31 @@ mod tests {
             }],
             ..Default::default()
         };
-        
+
         let transformer = SpecTransformer::new();
         let cached = transformer.transform("test", &spec).unwrap();
 
         // Test server variable extraction
         assert_eq!(cached.server_variables.len(), 1);
         assert!(cached.server_variables.contains_key("region"));
-        
+
         let region_var = &cached.server_variables["region"];
         assert_eq!(region_var.default, Some("us".to_string()));
-        assert_eq!(region_var.description, Some("The regional instance".to_string()));
-        assert_eq!(region_var.enum_values, vec!["us".to_string(), "eu".to_string()]);
-        
+        assert_eq!(
+            region_var.description,
+            Some("The regional instance".to_string())
+        );
+        assert_eq!(
+            region_var.enum_values,
+            vec!["us".to_string(), "eu".to_string()]
+        );
+
         // Basic spec info
         assert_eq!(cached.name, "test");
-        assert_eq!(cached.base_url, Some("https://{region}.api.example.com".to_string()));
+        assert_eq!(
+            cached.base_url,
+            Some("https://{region}.api.example.com".to_string())
+        );
     }
 
     #[test]

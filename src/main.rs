@@ -1000,7 +1000,11 @@ fn print_error(error: &Error) {
         Error::InvalidServerVarFormat { arg, reason } => {
             eprintln!("Invalid Server Variable Format\nInvalid format '{arg}': {reason}\n\nHint: Use the format --server-var key=value");
         }
-        Error::InvalidServerVarValue { name, value, allowed_values } => {
+        Error::InvalidServerVarValue {
+            name,
+            value,
+            allowed_values,
+        } => {
             let allowed_list = allowed_values.join(", ");
             eprintln!("Invalid Server Variable Value\nInvalid value '{value}' for server variable '{name}'\nAllowed values: {allowed_list}\n\nHint: Use one of the allowed values listed above.");
         }

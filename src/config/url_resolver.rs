@@ -47,36 +47,47 @@ impl<'a> BaseUrlResolver<'a> {
     /// 5. Fallback: <https://api.example.com>
     #[must_use]
     pub fn resolve(&self, explicit_url: Option<&str>) -> String {
-        self.resolve_with_variables(explicit_url, &[]).unwrap_or_else(|_| {
-            // If server variable resolution fails, fallback to basic resolution
-            // This maintains backward compatibility for non-template URLs
-            self.resolve_basic(explicit_url)
-        })
+        self.resolve_with_variables(explicit_url, &[])
+            .unwrap_or_else(|_| {
+                // If server variable resolution fails, fallback to basic resolution
+                // This maintains backward compatibility for non-template URLs
+                self.resolve_basic(explicit_url)
+            })
     }
 
     /// Resolves the base URL with server variable substitution support
-    /// 
+    ///
     /// # Arguments
     /// * `explicit_url` - Explicit URL override (for testing)
-    /// * `server_var_args` - Server variable arguments from CLI (e.g., ["region=us", "env=prod"])
-    /// 
+    /// * `server_var_args` - Server variable arguments from CLI (e.g., `["region=us", "env=prod"]`)
+    ///
     /// # Returns
     /// * `Ok(String)` - Resolved URL with variables substituted
     /// * `Err(Error)` - Server variable validation or substitution errors
-    pub fn resolve_with_variables(&self, explicit_url: Option<&str>, server_var_args: &[String]) -> Result<String, Error> {
+    ///
+    /// # Errors
+    /// Returns errors for:
+    /// - Invalid server variable format or values
+    /// - Missing required server variables
+    /// - URL template substitution failures
+    pub fn resolve_with_variables(
+        &self,
+        explicit_url: Option<&str>,
+        server_var_args: &[String],
+    ) -> Result<String, Error> {
         // First resolve the base URL using the standard priority hierarchy
         let base_url = self.resolve_basic(explicit_url);
-        
+
         // If no server variables are defined in the spec, return the URL as-is
         if self.spec.server_variables.is_empty() {
             return Ok(base_url);
         }
-        
+
         // If the URL doesn't contain template variables, return as-is
         if !base_url.contains('{') {
             return Ok(base_url);
         }
-        
+
         // Resolve server variables and apply template substitution
         let resolver = ServerVariableResolver::new(self.spec);
         let resolved_variables = resolver.resolve_variables(server_var_args)?;
@@ -160,19 +171,25 @@ mod tests {
 
     fn create_test_spec_with_variables(name: &str, base_url: Option<&str>) -> CachedSpec {
         let mut server_variables = HashMap::new();
-        
+
         // Add test server variables
-        server_variables.insert("region".to_string(), ServerVariable {
-            default: Some("us".to_string()),
-            enum_values: vec!["us".to_string(), "eu".to_string(), "ap".to_string()],
-            description: Some("API region".to_string()),
-        });
-        
-        server_variables.insert("env".to_string(), ServerVariable {
-            default: None,
-            enum_values: vec!["dev".to_string(), "staging".to_string(), "prod".to_string()],
-            description: Some("Environment".to_string()),
-        });
+        server_variables.insert(
+            "region".to_string(),
+            ServerVariable {
+                default: Some("us".to_string()),
+                enum_values: vec!["us".to_string(), "eu".to_string(), "ap".to_string()],
+                description: Some("API region".to_string()),
+            },
+        );
+
+        server_variables.insert(
+            "env".to_string(),
+            ServerVariable {
+                default: None,
+                enum_values: vec!["dev".to_string(), "staging".to_string(), "prod".to_string()],
+                description: Some("Environment".to_string()),
+            },
+        );
 
         CachedSpec {
             cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
@@ -363,15 +380,18 @@ mod tests {
         });
     }
 
-    #[test] 
+    #[test]
     fn test_server_variable_resolution_with_all_provided() {
         test_with_env_isolation(|| {
-            let spec = create_test_spec_with_variables("test-api", Some("https://{region}-{env}.api.example.com"));
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
             let resolver = BaseUrlResolver::new(&spec);
-            
+
             let server_vars = vec!["region=eu".to_string(), "env=staging".to_string()];
             let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
-            
+
             assert_eq!(result, "https://eu-staging.api.example.com");
         });
     }
@@ -379,13 +399,16 @@ mod tests {
     #[test]
     fn test_server_variable_resolution_with_defaults() {
         test_with_env_isolation(|| {
-            let spec = create_test_spec_with_variables("test-api", Some("https://{region}-{env}.api.example.com"));
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
             let resolver = BaseUrlResolver::new(&spec);
-            
+
             // Only provide required variable, let region use default
             let server_vars = vec!["env=prod".to_string()];
             let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
-            
+
             assert_eq!(result, "https://us-prod.api.example.com");
         });
     }
@@ -393,13 +416,16 @@ mod tests {
     #[test]
     fn test_server_variable_resolution_missing_required() {
         test_with_env_isolation(|| {
-            let spec = create_test_spec_with_variables("test-api", Some("https://{region}-{env}.api.example.com"));
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
             let resolver = BaseUrlResolver::new(&spec);
-            
+
             // Missing required 'env' variable
             let server_vars = vec!["region=us".to_string()];
             let result = resolver.resolve_with_variables(None, &server_vars);
-            
+
             assert!(result.is_err());
         });
     }
@@ -407,12 +433,15 @@ mod tests {
     #[test]
     fn test_server_variable_resolution_invalid_enum() {
         test_with_env_isolation(|| {
-            let spec = create_test_spec_with_variables("test-api", Some("https://{region}-{env}.api.example.com"));
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
             let resolver = BaseUrlResolver::new(&spec);
-            
+
             let server_vars = vec!["region=invalid".to_string(), "env=prod".to_string()];
             let result = resolver.resolve_with_variables(None, &server_vars);
-            
+
             assert!(result.is_err());
         });
     }
@@ -422,11 +451,11 @@ mod tests {
         test_with_env_isolation(|| {
             let spec = create_test_spec_with_variables("test-api", Some("https://api.example.com"));
             let resolver = BaseUrlResolver::new(&spec);
-            
+
             // Non-template URL should be returned as-is even with server variables defined
             let server_vars = vec!["region=eu".to_string(), "env=prod".to_string()];
             let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
-            
+
             assert_eq!(result, "https://api.example.com");
         });
     }
@@ -436,11 +465,11 @@ mod tests {
         test_with_env_isolation(|| {
             let spec = create_test_spec("test-api", Some("https://{region}.api.example.com"));
             let resolver = BaseUrlResolver::new(&spec);
-            
+
             // Template URL but no server variables defined in spec
             let server_vars = vec!["region=eu".to_string()];
             let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
-            
+
             // Should return URL as-is without substitution
             assert_eq!(result, "https://{region}.api.example.com");
         });
@@ -449,13 +478,16 @@ mod tests {
     #[test]
     fn test_server_variable_fallback_compatibility() {
         test_with_env_isolation(|| {
-            let spec = create_test_spec_with_variables("test-api", Some("https://{region}-{env}.api.example.com"));
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
             let resolver = BaseUrlResolver::new(&spec);
-            
+
             // resolve() method should gracefully fallback when server variables fail
             // This tests backward compatibility
             let result = resolver.resolve(None);
-            
+
             // Should return the basic URL resolution (original template URL)
             assert_eq!(result, "https://{region}-{env}.api.example.com");
         });
@@ -464,8 +496,9 @@ mod tests {
     #[test]
     fn test_server_variable_with_config_override() {
         test_with_env_isolation(|| {
-            let spec = create_test_spec_with_variables("test-api", Some("https://{region}.original.com"));
-            
+            let spec =
+                create_test_spec_with_variables("test-api", Some("https://{region}.original.com"));
+
             let mut api_configs = HashMap::new();
             api_configs.insert(
                 "test-api".to_string(),
@@ -483,10 +516,10 @@ mod tests {
             };
 
             let resolver = BaseUrlResolver::new(&spec).with_global_config(&global_config);
-            
+
             let server_vars = vec!["env=prod".to_string()]; // region should use default 'us'
             let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
-            
+
             // Should use config override as base, then apply server variable substitution
             assert_eq!(result, "https://us-override.example.com");
         });

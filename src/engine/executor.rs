@@ -337,18 +337,16 @@ fn find_operation<'a>(
     Err(Error::OperationNotFound)
 }
 
-
 /// Builds the full URL with path parameters substituted
-/// 
-/// Note: Server variable substitution is now handled by BaseUrlResolver.resolve_with_variables()
-/// before calling this function, so base_url should already have server variables resolved.
+///
+/// Note: Server variable substitution is now handled by `BaseUrlResolver.resolve_with_variables()`
+/// before calling this function, so `base_url` should already have server variables resolved.
 fn build_url(
     base_url: &str,
     path_template: &str,
     operation: &CachedCommand,
     matches: &ArgMatches,
 ) -> Result<String, Error> {
-
     let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
 
     // Get to the deepest subcommand matches
@@ -366,7 +364,11 @@ fn build_url(
             let close_pos = open_pos + close;
             let param_name = &url[open_pos + 1..close_pos];
 
-            if let Some(value) = current_matches.get_one::<String>(param_name) {
+            if let Some(value) = current_matches
+                .try_get_one::<String>(param_name)
+                .ok()
+                .flatten()
+            {
                 url.replace_range(open_pos..=close_pos, value);
                 start = open_pos + value.len();
             } else {

@@ -204,7 +204,8 @@ async fn test_build_url_with_server_template_variables() {
     let matches =
         command.get_matches_from(vec!["api", "events", "list-events", "my-org", "my-project"]);
 
-    // Execute the request - should fail with InvalidConfig error
+    // Execute the request - should fail with MissingPathParameter error
+    // because {region} in base URL is treated as a path parameter when no server variables are defined
     let result = execute_request(
         &spec,
         &matches,
@@ -222,12 +223,10 @@ async fn test_build_url_with_server_template_variables() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            aperture_cli::error::Error::InvalidConfig { reason } => {
-                assert!(reason.contains("Server URL contains template variable(s)"));
-                assert!(reason.contains("https://{region}.sentry.io"));
-                assert!(reason.contains("aperture config set-url sentry-api"));
+            aperture_cli::error::Error::MissingPathParameter { name } => {
+                assert_eq!(name, "region");
             }
-            _ => panic!("Expected InvalidConfig error, got: {:?}", e),
+            _ => panic!("Expected MissingPathParameter error, got: {:?}", e),
         }
     }
 }
@@ -445,11 +444,10 @@ async fn test_url_with_path_braces_detected_as_template() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            aperture_cli::error::Error::InvalidConfig { reason } => {
-                assert!(reason.contains("Server URL contains template variable(s)"));
-                assert!(reason.contains("{version}"));
+            aperture_cli::error::Error::MissingPathParameter { name } => {
+                assert_eq!(name, "version");
             }
-            _ => panic!("Expected InvalidConfig error, got: {:?}", e),
+            _ => panic!("Expected MissingPathParameter error, got: {:?}", e),
         }
     }
 }
@@ -491,11 +489,11 @@ async fn test_url_with_multiple_templates_detected() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            aperture_cli::error::Error::InvalidConfig { reason } => {
-                assert!(reason.contains("Server URL contains template variable(s)"));
-                assert!(reason.contains("{region}-{env}"));
+            aperture_cli::error::Error::MissingPathParameter { name } => {
+                // Should fail on the first template variable encountered
+                assert_eq!(name, "region");
             }
-            _ => panic!("Expected InvalidConfig error, got: {:?}", e),
+            _ => panic!("Expected MissingPathParameter error, got: {:?}", e),
         }
     }
 }

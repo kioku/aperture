@@ -137,11 +137,20 @@ pub enum Error {
     #[error("Missing required server variable '{name}' with no default value")]
     MissingServerVariable { name: String },
     #[error("Unknown server variable '{name}'. Available variables: {available:?}")]
-    UnknownServerVariable { name: String, available: Vec<String> },
+    UnknownServerVariable {
+        name: String,
+        available: Vec<String>,
+    },
     #[error("Invalid server variable format '{arg}': {reason}")]
     InvalidServerVarFormat { arg: String, reason: String },
-    #[error("Invalid value '{value}' for server variable '{name}'. Allowed values: {allowed_values:?}")]
-    InvalidServerVarValue { name: String, value: String, allowed_values: Vec<String> },
+    #[error(
+        "Invalid value '{value}' for server variable '{name}'. Allowed values: {allowed_values:?}"
+    )]
+    InvalidServerVarValue {
+        name: String,
+        value: String,
+        allowed_values: Vec<String>,
+    },
     #[error("Unresolved template variable '{name}' in URL '{url}'")]
     UnresolvedTemplateVariable { name: String, url: String },
 

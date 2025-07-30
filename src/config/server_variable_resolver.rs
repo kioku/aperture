@@ -26,25 +26,28 @@ impl<'a> ServerVariableResolver<'a> {
     /// # Errors
     /// Returns errors for:
     /// - Invalid key=value format
-    /// - Unknown server variables not defined in OpenAPI spec
+    /// - Unknown server variables not defined in `OpenAPI` spec
     /// - Enum constraint violations
     /// - Missing required variables (when defaults are not available)
-    pub fn resolve_variables(&self, server_var_args: &[String]) -> Result<HashMap<String, String>, Error> {
+    pub fn resolve_variables(
+        &self,
+        server_var_args: &[String],
+    ) -> Result<HashMap<String, String>, Error> {
         let mut resolved_vars = HashMap::new();
-        
+
         // Parse CLI arguments
         for arg in server_var_args {
-            let (key, value) = self.parse_key_value(arg)?;
+            let (key, value) = Self::parse_key_value(arg)?;
             resolved_vars.insert(key, value);
         }
-        
+
         // Validate and apply defaults
         let mut final_vars = HashMap::new();
-        
+
         for (var_name, var_def) in &self.spec.server_variables {
             if let Some(provided_value) = resolved_vars.get(var_name) {
                 // Validate provided value against enum constraints
-                self.validate_enum_constraint(var_name, provided_value, var_def)?;
+                Self::validate_enum_constraint(var_name, provided_value, var_def)?;
                 final_vars.insert(var_name.clone(), provided_value.clone());
             } else if let Some(default_value) = &var_def.default {
                 // Use default value
@@ -56,7 +59,7 @@ impl<'a> ServerVariableResolver<'a> {
                 });
             }
         }
-        
+
         // Check for unknown variables provided by user
         for provided_var in resolved_vars.keys() {
             if !self.spec.server_variables.contains_key(provided_var) {
@@ -66,22 +69,30 @@ impl<'a> ServerVariableResolver<'a> {
                 });
             }
         }
-        
+
         Ok(final_vars)
     }
-    
+
     /// Substitutes server variables in a URL template
     ///
     /// # Arguments
-    /// * `url_template` - URL with template variables like "https://{region}.api.com"
+    /// * `url_template` - URL with template variables like `<https://{region}.api.com>`
     /// * `variables` - Resolved variable values from `resolve_variables`
     ///
     /// # Returns
     /// * `Ok(String)` - URL with all variables substituted
     /// * `Err(Error)` - If template contains variables not in the provided map
-    pub fn substitute_url(&self, url_template: &str, variables: &HashMap<String, String>) -> Result<String, Error> {
+    ///
+    /// # Errors
+    /// Returns errors for:
+    /// - Unresolved template variables not found in the provided variables map
+    pub fn substitute_url(
+        &self,
+        url_template: &str,
+        variables: &HashMap<String, String>,
+    ) -> Result<String, Error> {
         let mut result = url_template.to_string();
-        
+
         // Find and replace all {variable} patterns
         let mut start = 0;
         while let Some(open) = result[start..].find('{') {
@@ -89,7 +100,7 @@ impl<'a> ServerVariableResolver<'a> {
             if let Some(close) = result[open_pos..].find('}') {
                 let close_pos = open_pos + close;
                 let var_name = &result[open_pos + 1..close_pos];
-                
+
                 if let Some(value) = variables.get(var_name) {
                     result.replace_range(open_pos..=close_pos, value);
                     start = open_pos + value.len();
@@ -103,30 +114,30 @@ impl<'a> ServerVariableResolver<'a> {
                 break;
             }
         }
-        
+
         Ok(result)
     }
-    
+
     /// Parses a key=value string from CLI arguments
-    fn parse_key_value(&self, arg: &str) -> Result<(String, String), Error> {
+    fn parse_key_value(arg: &str) -> Result<(String, String), Error> {
         if let Some(eq_pos) = arg.find('=') {
             let key = arg[..eq_pos].trim();
             let value = arg[eq_pos + 1..].trim();
-            
+
             if key.is_empty() {
                 return Err(Error::InvalidServerVarFormat {
                     arg: arg.to_string(),
                     reason: "Empty variable name".to_string(),
                 });
             }
-            
+
             if value.is_empty() {
                 return Err(Error::InvalidServerVarFormat {
                     arg: arg.to_string(),
                     reason: "Empty variable value".to_string(),
                 });
             }
-            
+
             Ok((key.to_string(), value.to_string()))
         } else {
             Err(Error::InvalidServerVarFormat {
@@ -135,9 +146,13 @@ impl<'a> ServerVariableResolver<'a> {
             })
         }
     }
-    
+
     /// Validates a value against enum constraints if defined
-    fn validate_enum_constraint(&self, var_name: &str, value: &str, var_def: &ServerVariable) -> Result<(), Error> {
+    fn validate_enum_constraint(
+        var_name: &str,
+        value: &str,
+        var_def: &ServerVariable,
+    ) -> Result<(), Error> {
         if !var_def.enum_values.is_empty() && !var_def.enum_values.contains(&value.to_string()) {
             return Err(Error::InvalidServerVarValue {
                 name: var_name.to_string(),
@@ -157,21 +172,27 @@ mod tests {
 
     fn create_test_spec_with_variables() -> CachedSpec {
         let mut server_variables = HashMap::new();
-        
+
         // Required variable with enum constraint
-        server_variables.insert("region".to_string(), ServerVariable {
-            default: Some("us".to_string()),
-            enum_values: vec!["us".to_string(), "eu".to_string(), "ap".to_string()],
-            description: Some("API region".to_string()),
-        });
-        
+        server_variables.insert(
+            "region".to_string(),
+            ServerVariable {
+                default: Some("us".to_string()),
+                enum_values: vec!["us".to_string(), "eu".to_string(), "ap".to_string()],
+                description: Some("API region".to_string()),
+            },
+        );
+
         // Required variable without default
-        server_variables.insert("env".to_string(), ServerVariable {
-            default: None,
-            enum_values: vec!["dev".to_string(), "staging".to_string(), "prod".to_string()],
-            description: Some("Environment".to_string()),
-        });
-        
+        server_variables.insert(
+            "env".to_string(),
+            ServerVariable {
+                default: None,
+                enum_values: vec!["dev".to_string(), "staging".to_string(), "prod".to_string()],
+                description: Some("Environment".to_string()),
+            },
+        );
+
         CachedSpec {
             cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
             name: "test-api".to_string(),
@@ -189,10 +210,10 @@ mod tests {
     fn test_resolve_variables_with_all_provided() {
         let spec = create_test_spec_with_variables();
         let resolver = ServerVariableResolver::new(&spec);
-        
+
         let args = vec!["region=eu".to_string(), "env=staging".to_string()];
         let result = resolver.resolve_variables(&args).unwrap();
-        
+
         assert_eq!(result.get("region"), Some(&"eu".to_string()));
         assert_eq!(result.get("env"), Some(&"staging".to_string()));
     }
@@ -201,10 +222,10 @@ mod tests {
     fn test_resolve_variables_with_defaults() {
         let spec = create_test_spec_with_variables();
         let resolver = ServerVariableResolver::new(&spec);
-        
+
         let args = vec!["env=prod".to_string()]; // Only provide required var, let region use default
         let result = resolver.resolve_variables(&args).unwrap();
-        
+
         assert_eq!(result.get("region"), Some(&"us".to_string())); // Default value
         assert_eq!(result.get("env"), Some(&"prod".to_string()));
     }
@@ -213,13 +234,17 @@ mod tests {
     fn test_invalid_enum_value() {
         let spec = create_test_spec_with_variables();
         let resolver = ServerVariableResolver::new(&spec);
-        
+
         let args = vec!["region=invalid".to_string(), "env=prod".to_string()];
         let result = resolver.resolve_variables(&args);
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarValue { name, value, allowed_values } => {
+            Error::InvalidServerVarValue {
+                name,
+                value,
+                allowed_values,
+            } => {
                 assert_eq!(name, "region");
                 assert_eq!(value, "invalid");
                 assert!(allowed_values.contains(&"us".to_string()));
@@ -232,10 +257,10 @@ mod tests {
     fn test_missing_required_variable() {
         let spec = create_test_spec_with_variables();
         let resolver = ServerVariableResolver::new(&spec);
-        
+
         let args = vec!["region=us".to_string()]; // Missing required 'env'
         let result = resolver.resolve_variables(&args);
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::MissingServerVariable { name } => {
@@ -249,10 +274,14 @@ mod tests {
     fn test_unknown_variable() {
         let spec = create_test_spec_with_variables();
         let resolver = ServerVariableResolver::new(&spec);
-        
-        let args = vec!["region=us".to_string(), "env=prod".to_string(), "unknown=value".to_string()];
+
+        let args = vec![
+            "region=us".to_string(),
+            "env=prod".to_string(),
+            "unknown=value".to_string(),
+        ];
         let result = resolver.resolve_variables(&args);
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::UnknownServerVariable { name, .. } => {
@@ -266,10 +295,10 @@ mod tests {
     fn test_invalid_format() {
         let spec = create_test_spec_with_variables();
         let resolver = ServerVariableResolver::new(&spec);
-        
+
         let args = vec!["invalid-format".to_string()];
         let result = resolver.resolve_variables(&args);
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::InvalidServerVarFormat { .. } => {
@@ -283,12 +312,14 @@ mod tests {
     fn test_substitute_url() {
         let spec = create_test_spec_with_variables();
         let resolver = ServerVariableResolver::new(&spec);
-        
+
         let mut variables = HashMap::new();
         variables.insert("region".to_string(), "eu".to_string());
         variables.insert("env".to_string(), "staging".to_string());
-        
-        let result = resolver.substitute_url("https://{region}-{env}.api.example.com", &variables).unwrap();
+
+        let result = resolver
+            .substitute_url("https://{region}-{env}.api.example.com", &variables)
+            .unwrap();
         assert_eq!(result, "https://eu-staging.api.example.com");
     }
 
@@ -296,13 +327,13 @@ mod tests {
     fn test_substitute_url_missing_variable() {
         let spec = create_test_spec_with_variables();
         let resolver = ServerVariableResolver::new(&spec);
-        
+
         let mut variables = HashMap::new();
         variables.insert("region".to_string(), "eu".to_string());
         // Missing 'env' variable
-        
+
         let result = resolver.substitute_url("https://{region}-{env}.api.example.com", &variables);
-        
+
         assert!(result.is_err());
         match result.unwrap_err() {
             Error::UnresolvedTemplateVariable { name, .. } => {
