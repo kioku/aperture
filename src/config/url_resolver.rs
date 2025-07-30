@@ -78,13 +78,39 @@ impl<'a> BaseUrlResolver<'a> {
         // First resolve the base URL using the standard priority hierarchy
         let base_url = self.resolve_basic(explicit_url);
 
-        // If no server variables are defined in the spec, return the URL as-is
-        if self.spec.server_variables.is_empty() {
+        // If the URL doesn't contain template variables, return as-is
+        if !base_url.contains('{') {
             return Ok(base_url);
         }
 
-        // If the URL doesn't contain template variables, return as-is
-        if !base_url.contains('{') {
+        // If no server variables are defined in the spec but URL has templates,
+        // this indicates a backward compatibility issue - the spec has template
+        // URLs but no server variable definitions
+        if self.spec.server_variables.is_empty() {
+            // Extract template variable names for error reporting
+            let mut template_vars = Vec::new();
+            let mut start = 0;
+            while let Some(open) = base_url[start..].find('{') {
+                let open_pos = start + open;
+                if let Some(close) = base_url[open_pos..].find('}') {
+                    let close_pos = open_pos + close;
+                    let var_name = &base_url[open_pos + 1..close_pos];
+                    if !var_name.is_empty() {
+                        template_vars.push(var_name.to_string());
+                    }
+                    start = close_pos + 1;
+                } else {
+                    break;
+                }
+            }
+
+            if !template_vars.is_empty() {
+                return Err(Error::UnresolvedTemplateVariable {
+                    name: template_vars[0].clone(),
+                    url: base_url,
+                });
+            }
+
             return Ok(base_url);
         }
 
@@ -466,12 +492,19 @@ mod tests {
             let spec = create_test_spec("test-api", Some("https://{region}.api.example.com"));
             let resolver = BaseUrlResolver::new(&spec);
 
-            // Template URL but no server variables defined in spec
+            // Template URL but no server variables defined in spec should error
             let server_vars = vec!["region=eu".to_string()];
-            let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
+            let result = resolver.resolve_with_variables(None, &server_vars);
 
-            // Should return URL as-is without substitution
-            assert_eq!(result, "https://{region}.api.example.com");
+            // Should fail with UnresolvedTemplateVariable error
+            assert!(result.is_err());
+            match result.unwrap_err() {
+                Error::UnresolvedTemplateVariable { name, url } => {
+                    assert_eq!(name, "region");
+                    assert_eq!(url, "https://{region}.api.example.com");
+                }
+                _ => panic!("Expected UnresolvedTemplateVariable error"),
+            }
         });
     }
 
@@ -485,7 +518,8 @@ mod tests {
             let resolver = BaseUrlResolver::new(&spec);
 
             // resolve() method should gracefully fallback when server variables fail
-            // This tests backward compatibility
+            // This tests backward compatibility - when server variables are missing
+            // required values, it should fallback to basic resolution
             let result = resolver.resolve(None);
 
             // Should return the basic URL resolution (original template URL)
@@ -522,6 +556,31 @@ mod tests {
 
             // Should use config override as base, then apply server variable substitution
             assert_eq!(result, "https://us-override.example.com");
+        });
+    }
+
+    #[test]
+    fn test_malformed_templates_pass_through() {
+        test_with_env_isolation(|| {
+            // Test URLs with empty braces or malformed templates
+            let spec = create_test_spec("test-api", Some("https://api.example.com/path{}"));
+            let resolver = BaseUrlResolver::new(&spec);
+
+            let result = resolver.resolve_with_variables(None, &[]).unwrap();
+            // Empty braces should pass through as they're not valid template variables
+            assert_eq!(result, "https://api.example.com/path{}");
+        });
+    }
+
+    #[test]
+    fn test_backward_compatibility_no_server_vars_non_template() {
+        test_with_env_isolation(|| {
+            // Non-template URL with no server variables should work normally
+            let spec = create_test_spec("test-api", Some("https://api.example.com"));
+            let resolver = BaseUrlResolver::new(&spec);
+
+            let result = resolver.resolve_with_variables(None, &[]).unwrap();
+            assert_eq!(result, "https://api.example.com");
         });
     }
 }

@@ -204,8 +204,8 @@ async fn test_build_url_with_server_template_variables() {
     let matches =
         command.get_matches_from(vec!["api", "events", "list-events", "my-org", "my-project"]);
 
-    // Execute the request - should fail with MissingPathParameter error
-    // because {region} in base URL is treated as a path parameter when no server variables are defined
+    // Execute the request - should fail with UnresolvedTemplateVariable error
+    // because {region} in base URL cannot be resolved when no server variables are defined
     let result = execute_request(
         &spec,
         &matches,
@@ -223,10 +223,10 @@ async fn test_build_url_with_server_template_variables() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            aperture_cli::error::Error::MissingPathParameter { name } => {
+            aperture_cli::error::Error::UnresolvedTemplateVariable { name, url: _ } => {
                 assert_eq!(name, "region");
             }
-            _ => panic!("Expected MissingPathParameter error, got: {:?}", e),
+            _ => panic!("Expected UnresolvedTemplateVariable error, got: {:?}", e),
         }
     }
 }
@@ -409,7 +409,7 @@ async fn test_url_with_json_query_params_not_detected_as_template() {
 
 #[tokio::test]
 async fn test_url_with_path_braces_detected_as_template() {
-    // Path parameters in base URL should still be detected as templates
+    // Template variables in base URL should be detected and fail with UnresolvedTemplateVariable error
     let spec = CachedSpec {
         cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "path-api".to_string(),
@@ -444,17 +444,17 @@ async fn test_url_with_path_braces_detected_as_template() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            aperture_cli::error::Error::MissingPathParameter { name } => {
+            aperture_cli::error::Error::UnresolvedTemplateVariable { name, url: _ } => {
                 assert_eq!(name, "version");
             }
-            _ => panic!("Expected MissingPathParameter error, got: {:?}", e),
+            _ => panic!("Expected UnresolvedTemplateVariable error, got: {:?}", e),
         }
     }
 }
 
 #[tokio::test]
 async fn test_url_with_multiple_templates_detected() {
-    // Multiple template variables should be detected
+    // Multiple template variables should be detected and fail with UnresolvedTemplateVariable error
     let spec = CachedSpec {
         cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "multi-template-api".to_string(),
@@ -489,11 +489,11 @@ async fn test_url_with_multiple_templates_detected() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            aperture_cli::error::Error::MissingPathParameter { name } => {
+            aperture_cli::error::Error::UnresolvedTemplateVariable { name, url: _ } => {
                 // Should fail on the first template variable encountered
                 assert_eq!(name, "region");
             }
-            _ => panic!("Expected MissingPathParameter error, got: {:?}", e),
+            _ => panic!("Expected UnresolvedTemplateVariable error, got: {:?}", e),
         }
     }
 }
