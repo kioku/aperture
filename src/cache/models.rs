@@ -17,6 +17,27 @@ pub struct CachedSpec {
     /// Endpoints skipped during validation due to unsupported features (added in v0.1.2)
     #[serde(default)]
     pub skipped_endpoints: Vec<SkippedEndpoint>,
+    /// Server variables defined in the `OpenAPI` spec for URL template resolution (added in v0.1.3)
+    #[serde(default)]
+    pub server_variables: HashMap<String, ServerVariable>,
+}
+
+impl CachedSpec {
+    /// Creates a new CachedSpec with default values for testing
+    #[cfg(test)]
+    pub fn new_for_test(name: &str) -> Self {
+        Self {
+            cache_format_version: CACHE_FORMAT_VERSION,
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            commands: vec![],
+            base_url: None,
+            servers: vec![],
+            security_schemes: HashMap::new(),
+            skipped_endpoints: vec![],
+            server_variables: HashMap::new(),
+        }
+    }
 }
 
 /// Information about an endpoint that was skipped during spec validation
@@ -29,8 +50,10 @@ pub struct SkippedEndpoint {
 }
 
 /// Current cache format version - increment when making breaking changes to `CachedSpec`
+///
 /// Version 2: Added `skipped_endpoints` field to track endpoints skipped during validation
-pub const CACHE_FORMAT_VERSION: u32 = 2;
+/// Version 3: Added `server_variables` field to support `OpenAPI` server URL template variables
+pub const CACHE_FORMAT_VERSION: u32 = 3;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -139,4 +162,15 @@ pub struct CachedApertureSecret {
     pub source: String,
     /// Environment variable name to read the secret from
     pub name: String,
+}
+
+/// Cached representation of an `OpenAPI` server variable for URL template resolution
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ServerVariable {
+    /// Default value for the variable if not provided via CLI
+    pub default: Option<String>,
+    /// Allowed values for the variable (enum constraint)
+    pub enum_values: Vec<String>,
+    /// Description of the server variable from `OpenAPI` spec
+    pub description: Option<String>,
 }

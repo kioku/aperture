@@ -54,6 +54,7 @@ fn test_cached_spec_serialization_deserialization() {
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     // Test serialization

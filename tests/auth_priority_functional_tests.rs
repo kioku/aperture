@@ -106,6 +106,7 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
         servers: vec![],
         security_schemes,
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     }
 }
 
@@ -571,6 +572,7 @@ async fn test_no_authentication_configured() {
         servers: vec![],
         security_schemes: HashMap::new(), // No security schemes defined
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     // Mock should not expect any authentication headers

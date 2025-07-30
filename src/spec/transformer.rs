@@ -187,6 +187,7 @@ impl SpecTransformer {
             servers,
             security_schemes,
             skipped_endpoints,
+            server_variables: HashMap::new(), // Will be populated in the next commit
         })
     }
 

@@ -177,6 +177,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
         servers: vec!["https://api.example.com".to_string()],
         security_schemes,
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     }
 }
 

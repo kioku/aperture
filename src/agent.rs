@@ -182,6 +182,7 @@ pub fn generate_capability_manifest_from_openapi(
         servers,
         security_schemes: HashMap::new(), // We'll extract these directly too
         skipped_endpoints: vec![],        // No endpoints are skipped for agent manifest
+        server_variables: HashMap::new(), // We'll extract these later if needed
     };
 
     // Resolve base URL using the same priority hierarchy as executor
@@ -760,6 +761,7 @@ mod tests {
             servers: vec!["https://test-api.example.com".to_string()],
             security_schemes,
             skipped_endpoints: vec![],
+            server_variables: HashMap::new(),
         };
 
         let manifest_json = generate_capability_manifest(&spec, None).unwrap();

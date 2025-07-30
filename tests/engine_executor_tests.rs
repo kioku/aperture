@@ -65,6 +65,7 @@ fn create_test_spec() -> CachedSpec {
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     }
 }
 
@@ -133,6 +134,7 @@ async fn test_execute_request_with_query_params() {
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     Mock::given(method("GET"))
@@ -188,6 +190,7 @@ async fn test_build_url_with_server_template_variables() {
         servers: vec!["https://{region}.sentry.io".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     let command = Command::new("api").subcommand(
@@ -307,6 +310,7 @@ async fn test_execute_request_with_global_config_base_url() {
         servers: vec![],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     // Create global config with API override
@@ -370,6 +374,7 @@ async fn test_url_with_json_query_params_not_detected_as_template() {
         servers: vec![r#"https://api.example.com?filter={"type":"user"}"#.to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     // Mock the endpoint
@@ -415,6 +420,7 @@ async fn test_url_with_path_braces_detected_as_template() {
         servers: vec!["https://api.example.com/{version}".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     let command =
@@ -460,6 +466,7 @@ async fn test_url_with_multiple_templates_detected() {
         servers: vec!["https://{region}-{env}.api.example.com".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     let command =
@@ -505,6 +512,7 @@ async fn test_url_with_empty_braces_not_detected() {
         servers: vec!["https://api.example.com/path{}".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     let command =
