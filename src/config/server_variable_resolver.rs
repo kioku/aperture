@@ -86,6 +86,7 @@ impl<'a> ServerVariableResolver<'a> {
     /// # Errors
     /// Returns errors for:
     /// - Unresolved template variables not found in the provided variables map
+    /// - Invalid template variable names (malformed or too long)
     pub fn substitute_url(
         &self,
         url_template: &str,
@@ -100,6 +101,9 @@ impl<'a> ServerVariableResolver<'a> {
             if let Some(close) = result[open_pos..].find('}') {
                 let close_pos = open_pos + close;
                 let var_name = &result[open_pos + 1..close_pos];
+
+                // Validate template variable name format
+                Self::validate_template_variable_name(var_name)?;
 
                 if let Some(value) = variables.get(var_name) {
                     result.replace_range(open_pos..=close_pos, value);
@@ -160,6 +164,49 @@ impl<'a> ServerVariableResolver<'a> {
                 allowed_values: var_def.enum_values.clone(),
             });
         }
+        Ok(())
+    }
+
+    /// Validates a template variable name according to `OpenAPI` identifier rules
+    fn validate_template_variable_name(name: &str) -> Result<(), Error> {
+        if name.is_empty() {
+            return Err(Error::InvalidServerVarFormat {
+                arg: "{}".to_string(),
+                reason: "Empty template variable name".to_string(),
+            });
+        }
+
+        if name.len() > 64 {
+            return Err(Error::InvalidServerVarFormat {
+                arg: format!("{{{name}}}"),
+                reason: "Template variable name too long (max 64 chars)".to_string(),
+            });
+        }
+
+        // OpenAPI identifier rules: must start with letter or underscore,
+        // followed by letters, digits, or underscores
+        let mut chars = name.chars();
+        if let Some(first_char) = chars.next() {
+            if !first_char.is_ascii_alphabetic() && first_char != '_' {
+                return Err(Error::InvalidServerVarFormat {
+                    arg: format!("{{{name}}}"),
+                    reason: "Template variable names must start with a letter or underscore"
+                        .to_string(),
+                });
+            }
+        }
+
+        for char in chars {
+            if !char.is_ascii_alphanumeric() && char != '_' {
+                return Err(Error::InvalidServerVarFormat {
+                    arg: format!("{{{name}}}"),
+                    reason:
+                        "Template variable names must contain only letters, digits, or underscores"
+                            .to_string(),
+                });
+            }
+        }
+
         Ok(())
     }
 }
@@ -340,6 +387,89 @@ mod tests {
                 assert_eq!(name, "env");
             }
             _ => panic!("Expected UnresolvedTemplateVariable error"),
+        }
+    }
+
+    #[test]
+    fn test_template_variable_name_validation_empty() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let variables = HashMap::new();
+        let result = resolver.substitute_url("https://{}.api.example.com", &variables);
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::InvalidServerVarFormat { arg, reason } => {
+                assert_eq!(arg, "{}");
+                assert!(reason.contains("Empty template variable name"));
+            }
+            _ => panic!("Expected InvalidServerVarFormat error"),
+        }
+    }
+
+    #[test]
+    fn test_template_variable_name_validation_invalid_chars() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let variables = HashMap::new();
+        let result = resolver.substitute_url("https://{invalid-name}.api.example.com", &variables);
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::InvalidServerVarFormat { arg, reason } => {
+                assert_eq!(arg, "{invalid-name}");
+                assert!(reason.contains("letters, digits, or underscores"));
+            }
+            _ => panic!("Expected InvalidServerVarFormat error"),
+        }
+    }
+
+    #[test]
+    fn test_template_variable_name_validation_too_long() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let long_name = "a".repeat(65); // Longer than 64 chars
+        let variables = HashMap::new();
+        let result = resolver.substitute_url(
+            &format!("https://{{{long_name}}}.api.example.com"),
+            &variables,
+        );
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::InvalidServerVarFormat { reason, .. } => {
+                assert!(reason.contains("too long"));
+            }
+            _ => panic!("Expected InvalidServerVarFormat error"),
+        }
+    }
+
+    #[test]
+    fn test_template_variable_name_validation_valid_names() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let mut variables = HashMap::new();
+        variables.insert("valid_name".to_string(), "test".to_string());
+        variables.insert("_underscore".to_string(), "test".to_string());
+        variables.insert("name123".to_string(), "test".to_string());
+
+        // These should all pass validation (though they'll fail with UnresolvedTemplateVariable)
+        let test_cases = vec![
+            "https://{valid_name}.api.com",
+            "https://{_underscore}.api.com",
+            "https://{name123}.api.com",
+        ];
+
+        for test_case in test_cases {
+            let result = resolver.substitute_url(test_case, &variables);
+            // Should not fail with InvalidServerVarFormat
+            if let Err(Error::InvalidServerVarFormat { .. }) = result {
+                panic!("Template variable name validation failed for: {test_case}");
+            }
         }
     }
 }
