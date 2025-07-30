@@ -133,6 +133,18 @@ pub enum Error {
     #[error("Transient network error - request can be retried: {reason}")]
     TransientNetworkError { reason: String, retryable: bool },
 
+    // Server variable resolution errors
+    #[error("Missing required server variable '{name}' with no default value")]
+    MissingServerVariable { name: String },
+    #[error("Unknown server variable '{name}'. Available variables: {available:?}")]
+    UnknownServerVariable { name: String, available: Vec<String> },
+    #[error("Invalid server variable format '{arg}': {reason}")]
+    InvalidServerVarFormat { arg: String, reason: String },
+    #[error("Invalid value '{value}' for server variable '{name}'. Allowed values: {allowed_values:?}")]
+    InvalidServerVarValue { name: String, value: String, allowed_values: Vec<String> },
+    #[error("Unresolved template variable '{name}' in URL '{url}'")]
+    UnresolvedTemplateVariable { name: String, url: String },
+
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
 }
@@ -508,6 +520,36 @@ impl Error {
                 if *retryable { Some("This error is retryable. The request will be automatically retried.".to_string()) }
                 else { Some("This error is not retryable. Check your network connection and API configuration.".to_string()) },
                 Some(json!({ "reason": reason, "retryable": retryable })),
+            ),
+            Self::MissingServerVariable { name } => (
+                "MissingServerVariable",
+                format!("Missing required server variable '{name}' with no default value"),
+                Some("Provide the missing server variable using --server-var name=value".to_string()),
+                Some(json!({ "variable_name": name })),
+            ),
+            Self::UnknownServerVariable { name, available } => (
+                "UnknownServerVariable",
+                format!("Unknown server variable '{name}'. Available variables: {available:?}"),
+                Some(format!("Use one of the available variables: {}", available.join(", "))),
+                Some(json!({ "variable_name": name, "available_variables": available })),
+            ),
+            Self::InvalidServerVarFormat { arg, reason } => (
+                "InvalidServerVarFormat",
+                format!("Invalid server variable format '{arg}': {reason}"),
+                Some("Use the format --server-var key=value".to_string()),
+                Some(json!({ "argument": arg, "reason": reason })),
+            ),
+            Self::InvalidServerVarValue { name, value, allowed_values } => (
+                "InvalidServerVarValue",
+                format!("Invalid value '{value}' for server variable '{name}'. Allowed values: {allowed_values:?}"),
+                Some(format!("Use one of the allowed values: {}", allowed_values.join(", "))),
+                Some(json!({ "variable_name": name, "provided_value": value, "allowed_values": allowed_values })),
+            ),
+            Self::UnresolvedTemplateVariable { name, url } => (
+                "UnresolvedTemplateVariable",
+                format!("Unresolved template variable '{name}' in URL '{url}'"),
+                Some("Ensure all template variables are provided with --server-var".to_string()),
+                Some(json!({ "variable_name": name, "template_url": url })),
             ),
             Self::Anyhow(err) => (
                 "Unexpected",
