@@ -103,8 +103,12 @@ impl<'a> ServerVariableResolver<'a> {
 
             let value = Self::get_variable_value(var_name, variables, url_template)?;
 
-            result.replace_range(open_pos..=close_pos, value);
-            start = open_pos + value.len();
+            // Perform minimal URL encoding to preserve URL structure while escaping dangerous characters
+            // We don't encode forward slashes as server variables often contain path segments
+            let encoded_value = Self::encode_server_variable(value);
+
+            result.replace_range(open_pos..=close_pos, &encoded_value);
+            start = open_pos + encoded_value.len();
         }
 
         Ok(result)
@@ -212,6 +216,45 @@ impl<'a> ServerVariableResolver<'a> {
         }
 
         Ok(())
+    }
+
+    /// Encodes a server variable value for safe inclusion in URLs
+    /// This performs selective encoding to preserve URL structure while escaping problematic characters
+    fn encode_server_variable(value: &str) -> String {
+        // Characters that should be encoded in server variable values
+        // We preserve forward slashes as they're often used in path segments
+        // but encode other special characters that could break URL parsing
+        value
+            .chars()
+            .map(|c| match c {
+                // Preserve forward slashes and common URL-safe characters
+                '/' | '-' | '_' | '.' | '~' => c.to_string(),
+                // Encode spaces and other special characters
+                ' ' => "%20".to_string(),
+                '?' => "%3F".to_string(),
+                '#' => "%23".to_string(),
+                '[' => "%5B".to_string(),
+                ']' => "%5D".to_string(),
+                '@' => "%40".to_string(),
+                '!' => "%21".to_string(),
+                '$' => "%24".to_string(),
+                '&' => "%26".to_string(),
+                '\'' => "%27".to_string(),
+                '(' => "%28".to_string(),
+                ')' => "%29".to_string(),
+                '*' => "%2A".to_string(),
+                '+' => "%2B".to_string(),
+                ',' => "%2C".to_string(),
+                ';' => "%3B".to_string(),
+                '=' => "%3D".to_string(),
+                '{' => "%7B".to_string(),
+                '}' => "%7D".to_string(),
+                // Keep alphanumeric and other unreserved characters as-is
+                c if c.is_ascii_alphanumeric() => c.to_string(),
+                // Encode any other characters
+                c => urlencoding::encode(&c.to_string()).to_string(),
+            })
+            .collect()
     }
 }
 
@@ -524,6 +567,66 @@ mod tests {
             .substitute_url("https://{prefix}api.example.com", &result)
             .unwrap();
         assert_eq!(url, "https://staging-api.example.com");
+    }
+
+    #[test]
+    fn test_url_encoding_in_substitution() {
+        let mut server_variables = HashMap::new();
+        server_variables.insert(
+            "path".to_string(),
+            ServerVariable {
+                default: Some("api/v1".to_string()),
+                enum_values: vec![],
+                description: Some("API path".to_string()),
+            },
+        );
+
+        let spec = CachedSpec {
+            cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
+            name: "test-api".to_string(),
+            version: "1.0.0".to_string(),
+            commands: vec![],
+            base_url: Some("https://example.com/{path}".to_string()),
+            servers: vec!["https://example.com/{path}".to_string()],
+            security_schemes: HashMap::new(),
+            skipped_endpoints: vec![],
+            server_variables,
+        };
+
+        let resolver = ServerVariableResolver::new(&spec);
+
+        // Test with value containing special characters
+        let args = vec!["path=api/v2/test&debug=true".to_string()];
+        let result = resolver.resolve_variables(&args).unwrap();
+
+        let url = resolver
+            .substitute_url("https://example.com/{path}", &result)
+            .unwrap();
+
+        // The ampersand and equals sign should be URL-encoded, but forward slashes preserved
+        assert_eq!(url, "https://example.com/api/v2/test%26debug%3Dtrue");
+
+        // Test with spaces
+        let args = vec!["path=api/test endpoint".to_string()];
+        let result = resolver.resolve_variables(&args).unwrap();
+
+        let url = resolver
+            .substitute_url("https://example.com/{path}", &result)
+            .unwrap();
+
+        // Spaces should be encoded as %20, but forward slashes preserved
+        assert_eq!(url, "https://example.com/api/test%20endpoint");
+
+        // Test with various special characters
+        let args = vec!["path=test?query=1#anchor".to_string()];
+        let result = resolver.resolve_variables(&args).unwrap();
+
+        let url = resolver
+            .substitute_url("https://example.com/{path}", &result)
+            .unwrap();
+
+        // Query and anchor characters should be encoded
+        assert_eq!(url, "https://example.com/test%3Fquery%3D1%23anchor");
     }
 }
 
