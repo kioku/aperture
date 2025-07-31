@@ -45,20 +45,21 @@ impl<'a> BaseUrlResolver<'a> {
     /// 3. Environment variable: `APERTURE_BASE_URL`
     /// 4. Cached spec default
     /// 5. Fallback: <https://api.example.com>
-    ///
-    /// # Panics
-    /// Panics if server variable validation fails (invalid format or enum values).
-    /// This indicates a user error that should be fixed.
     #[must_use]
     pub fn resolve(&self, explicit_url: Option<&str>) -> String {
         self.resolve_with_variables(explicit_url, &[])
             .unwrap_or_else(|err| {
                 match err {
-                    // Fallback for template resolution issues or missing required variables
-                    Error::UnresolvedTemplateVariable { .. }
-                    | Error::MissingServerVariable { .. } => self.resolve_basic(explicit_url),
-                    // Let format and enum validation errors bubble up - these indicate user mistakes
-                    _ => panic!("Server variable error: {err}"),
+                    // For validation errors, log and fallback to basic resolution
+                    // This maintains backward compatibility while providing visibility
+                    Error::InvalidServerVarFormat { .. }
+                    | Error::InvalidServerVarValue { .. }
+                    | Error::UnknownServerVariable { .. } => {
+                        eprintln!("Warning: Server variable error: {err}");
+                        self.resolve_basic(explicit_url)
+                    }
+                    // Fallback for all other errors (template resolution, missing variables, etc.)
+                    _ => self.resolve_basic(explicit_url),
                 }
             })
     }
