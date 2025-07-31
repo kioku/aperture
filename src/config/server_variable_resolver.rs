@@ -50,6 +50,8 @@ impl<'a> ServerVariableResolver<'a> {
                 Self::validate_enum_constraint(var_name, provided_value, var_def)?;
                 final_vars.insert(var_name.clone(), provided_value.clone());
             } else if let Some(default_value) = &var_def.default {
+                // Validate default value against enum constraints
+                Self::validate_enum_constraint(var_name, default_value, var_def)?;
                 // Use default value
                 final_vars.insert(var_name.clone(), default_value.clone());
             } else {
@@ -473,6 +475,55 @@ mod tests {
                 panic!("Template variable name validation failed for: {test_case}");
             }
         }
+    }
+
+    #[test]
+    fn test_empty_default_value() {
+        let mut server_variables = HashMap::new();
+
+        // Variable with empty string default
+        server_variables.insert(
+            "prefix".to_string(),
+            ServerVariable {
+                default: Some("".to_string()),
+                enum_values: vec![],
+                description: Some("Optional prefix".to_string()),
+            },
+        );
+
+        let spec = CachedSpec {
+            cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
+            name: "test-api".to_string(),
+            version: "1.0.0".to_string(),
+            commands: vec![],
+            base_url: Some("https://{prefix}api.example.com".to_string()),
+            servers: vec!["https://{prefix}api.example.com".to_string()],
+            security_schemes: HashMap::new(),
+            skipped_endpoints: vec![],
+            server_variables,
+        };
+
+        let resolver = ServerVariableResolver::new(&spec);
+
+        // Test with no args - should use empty string default
+        let result = resolver.resolve_variables(&[]).unwrap();
+        assert_eq!(result.get("prefix"), Some(&"".to_string()));
+
+        // Test substitution with empty string default
+        let url = resolver
+            .substitute_url("https://{prefix}api.example.com", &result)
+            .unwrap();
+        assert_eq!(url, "https://api.example.com");
+
+        // Test with explicit override
+        let args = vec!["prefix=staging-".to_string()];
+        let result = resolver.resolve_variables(&args).unwrap();
+        assert_eq!(result.get("prefix"), Some(&"staging-".to_string()));
+
+        let url = resolver
+            .substitute_url("https://{prefix}api.example.com", &result)
+            .unwrap();
+        assert_eq!(url, "https://staging-api.example.com");
     }
 }
 

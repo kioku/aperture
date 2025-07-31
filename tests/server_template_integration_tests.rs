@@ -27,10 +27,11 @@ default_output_format = "json"
 }
 
 #[test]
-fn test_server_url_template_missing_required_variable() {
+fn test_server_url_template_invalid_default_enum_value() {
     let (_temp_dir, home_dir) = setup_test_env();
 
-    // Create an API spec with server URL template that has a required variable (no default)
+    // Create an API spec where the default value is not in the enum
+    // This tests that enum validation is applied even to default values
     let api_spec = r#"
 openapi: 3.0.0
 info:
@@ -40,9 +41,9 @@ servers:
   - url: https://{region}.api.example.com
     variables:
       region:
-        default: ""
+        default: "invalid-region"
         enum: [us, eu]
-        description: The regional instance (no default)
+        description: The regional instance
 paths:
   /test:
     get:
@@ -65,7 +66,7 @@ paths:
         .assert()
         .success();
 
-    // Try to execute without providing required server variable - should fail
+    // Try to execute without providing server variable - should fail with invalid enum value
     Command::cargo_bin("aperture")
         .unwrap()
         .env("HOME", home_dir.path())
@@ -73,9 +74,9 @@ paths:
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "Required server variable 'region' with no default value",
+            "Invalid value 'invalid-region' for server variable 'region'",
         ))
-        .stderr(predicate::str::contains("--server-var region=value"));
+        .stderr(predicate::str::contains("Allowed values: us, eu"));
 }
 
 #[test]

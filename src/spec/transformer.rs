@@ -152,11 +152,7 @@ impl SpecTransformer {
                         (
                             name.clone(),
                             crate::cache::models::ServerVariable {
-                                default: if variable.default.is_empty() {
-                                    None
-                                } else {
-                                    Some(variable.default.clone())
-                                },
+                                default: Some(variable.default.clone()),
                                 enum_values: variable.enumeration.clone(),
                                 description: variable.description.clone(),
                             },
@@ -742,6 +738,45 @@ mod tests {
             cached.base_url,
             Some("https://{region}.api.example.com".to_string())
         );
+    }
+
+    #[test]
+    fn test_transform_spec_with_empty_default_server_variable() {
+        let mut variables = indexmap::IndexMap::new();
+        variables.insert(
+            "prefix".to_string(),
+            openapiv3::ServerVariable {
+                default: "".to_string(), // Empty string default should be preserved
+                description: Some("Optional prefix".to_string()),
+                enumeration: vec![],
+                extensions: indexmap::IndexMap::new(),
+            },
+        );
+
+        let spec = OpenAPI {
+            openapi: "3.0.0".to_string(),
+            info: Info {
+                title: "Test API".to_string(),
+                version: "1.0.0".to_string(),
+                ..Default::default()
+            },
+            servers: vec![openapiv3::Server {
+                url: "https://{prefix}api.example.com".to_string(),
+                description: Some("Server with empty default".to_string()),
+                variables: Some(variables),
+                extensions: indexmap::IndexMap::new(),
+            }],
+            ..Default::default()
+        };
+
+        let transformer = SpecTransformer::new();
+        let cached = transformer.transform("test", &spec).unwrap();
+
+        // Verify empty string default is preserved
+        assert!(cached.server_variables.contains_key("prefix"));
+        let prefix_var = &cached.server_variables["prefix"];
+        assert_eq!(prefix_var.default, Some("".to_string()));
+        assert_eq!(prefix_var.description, Some("Optional prefix".to_string()));
     }
 
     #[test]
