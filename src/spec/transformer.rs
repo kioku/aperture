@@ -145,29 +145,26 @@ impl SpecTransformer {
         let server_variables: HashMap<String, crate::cache::models::ServerVariable> = spec
             .servers
             .first()
-            .map_or_else(HashMap::new, |first_server| {
-                first_server
-                    .variables
-                    .as_ref()
-                    .map_or_else(HashMap::new, |vars| {
-                        vars.iter()
-                            .map(|(name, variable)| {
-                                (
-                                    name.clone(),
-                                    crate::cache::models::ServerVariable {
-                                        default: if variable.default.is_empty() {
-                                            None
-                                        } else {
-                                            Some(variable.default.clone())
-                                        },
-                                        enum_values: variable.enumeration.clone(),
-                                        description: variable.description.clone(),
-                                    },
-                                )
-                            })
-                            .collect()
+            .and_then(|server| server.variables.as_ref())
+            .map(|vars| {
+                vars.iter()
+                    .map(|(name, variable)| {
+                        (
+                            name.clone(),
+                            crate::cache::models::ServerVariable {
+                                default: if variable.default.is_empty() {
+                                    None
+                                } else {
+                                    Some(variable.default.clone())
+                                },
+                                enum_values: variable.enumeration.clone(),
+                                description: variable.description.clone(),
+                            },
+                        )
                     })
-            });
+                    .collect()
+            })
+            .unwrap_or_default();
 
         // Extract global security requirements
         let global_security_requirements: Vec<String> = spec

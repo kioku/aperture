@@ -95,26 +95,11 @@ impl<'a> BaseUrlResolver<'a> {
         // this indicates a backward compatibility issue - the spec has template
         // URLs but no server variable definitions
         if self.spec.server_variables.is_empty() {
-            // Extract template variable names for error reporting
-            let mut template_vars = Vec::new();
-            let mut start = 0;
-            while let Some(open) = base_url[start..].find('{') {
-                let open_pos = start + open;
-                if let Some(close) = base_url[open_pos..].find('}') {
-                    let close_pos = open_pos + close;
-                    let var_name = &base_url[open_pos + 1..close_pos];
-                    if !var_name.is_empty() {
-                        template_vars.push(var_name.to_string());
-                    }
-                    start = close_pos + 1;
-                } else {
-                    break;
-                }
-            }
+            let template_vars = extract_template_variables(&base_url);
 
-            if !template_vars.is_empty() {
+            if let Some(first_var) = template_vars.first() {
                 return Err(Error::UnresolvedTemplateVariable {
-                    name: template_vars[0].clone(),
+                    name: first_var.clone(),
                     url: base_url,
                 });
             }
@@ -177,6 +162,28 @@ impl<'a> BaseUrlResolver<'a> {
         self.global_config
             .and_then(|config| config.api_configs.get(&self.spec.name))
     }
+}
+
+/// Extracts template variable names from a URL string
+fn extract_template_variables(url: &str) -> Vec<String> {
+    let mut template_vars = Vec::new();
+    let mut start = 0;
+
+    while let Some(open) = url[start..].find('{') {
+        let open_pos = start + open;
+        if let Some(close) = url[open_pos..].find('}') {
+            let close_pos = open_pos + close;
+            let var_name = &url[open_pos + 1..close_pos];
+            if !var_name.is_empty() {
+                template_vars.push(var_name.to_string());
+            }
+            start = close_pos + 1;
+        } else {
+            break;
+        }
+    }
+
+    template_vars
 }
 
 #[cfg(test)]

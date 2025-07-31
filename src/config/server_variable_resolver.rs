@@ -93,62 +93,62 @@ impl<'a> ServerVariableResolver<'a> {
         variables: &HashMap<String, String>,
     ) -> Result<String, Error> {
         let mut result = url_template.to_string();
-
-        // Find and replace all {variable} patterns
         let mut start = 0;
-        while let Some(open) = result[start..].find('{') {
-            let open_pos = start + open;
-            if let Some(close) = result[open_pos..].find('}') {
-                let close_pos = open_pos + close;
-                let var_name = &result[open_pos + 1..close_pos];
 
-                // Validate template variable name format
-                Self::validate_template_variable_name(var_name)?;
+        while let Some((open_pos, close_pos)) = find_next_template(&result, start) {
+            let var_name = &result[open_pos + 1..close_pos];
+            Self::validate_template_variable_name(var_name)?;
 
-                if let Some(value) = variables.get(var_name) {
-                    result.replace_range(open_pos..=close_pos, value);
-                    start = open_pos + value.len();
-                } else {
-                    return Err(Error::UnresolvedTemplateVariable {
-                        name: var_name.to_string(),
-                        url: url_template.to_string(),
-                    });
-                }
-            } else {
-                break;
-            }
+            let value = Self::get_variable_value(var_name, variables, url_template)?;
+
+            result.replace_range(open_pos..=close_pos, value);
+            start = open_pos + value.len();
         }
 
         Ok(result)
     }
 
+    /// Gets the value for a template variable, returning an error if not found
+    fn get_variable_value<'b>(
+        var_name: &str,
+        variables: &'b HashMap<String, String>,
+        url_template: &str,
+    ) -> Result<&'b String, Error> {
+        variables
+            .get(var_name)
+            .ok_or_else(|| Error::UnresolvedTemplateVariable {
+                name: var_name.to_string(),
+                url: url_template.to_string(),
+            })
+    }
+
     /// Parses a key=value string from CLI arguments
     fn parse_key_value(arg: &str) -> Result<(String, String), Error> {
-        if let Some(eq_pos) = arg.find('=') {
-            let key = arg[..eq_pos].trim();
-            let value = arg[eq_pos + 1..].trim();
-
-            if key.is_empty() {
-                return Err(Error::InvalidServerVarFormat {
-                    arg: arg.to_string(),
-                    reason: "Empty variable name".to_string(),
-                });
-            }
-
-            if value.is_empty() {
-                return Err(Error::InvalidServerVarFormat {
-                    arg: arg.to_string(),
-                    reason: "Empty variable value".to_string(),
-                });
-            }
-
-            Ok((key.to_string(), value.to_string()))
-        } else {
-            Err(Error::InvalidServerVarFormat {
+        let Some(eq_pos) = arg.find('=') else {
+            return Err(Error::InvalidServerVarFormat {
                 arg: arg.to_string(),
                 reason: "Expected format: key=value".to_string(),
-            })
+            });
+        };
+
+        let key = arg[..eq_pos].trim();
+        let value = arg[eq_pos + 1..].trim();
+
+        if key.is_empty() {
+            return Err(Error::InvalidServerVarFormat {
+                arg: arg.to_string(),
+                reason: "Empty variable name".to_string(),
+            });
         }
+
+        if value.is_empty() {
+            return Err(Error::InvalidServerVarFormat {
+                arg: arg.to_string(),
+                reason: "Empty variable value".to_string(),
+            });
+        }
+
+        Ok((key.to_string(), value.to_string()))
     }
 
     /// Validates a value against enum constraints if defined
@@ -186,14 +186,16 @@ impl<'a> ServerVariableResolver<'a> {
         // OpenAPI identifier rules: must start with letter or underscore,
         // followed by letters, digits, or underscores
         let mut chars = name.chars();
-        if let Some(first_char) = chars.next() {
-            if !first_char.is_ascii_alphabetic() && first_char != '_' {
-                return Err(Error::InvalidServerVarFormat {
-                    arg: format!("{{{name}}}"),
-                    reason: "Template variable names must start with a letter or underscore"
-                        .to_string(),
-                });
-            }
+        let Some(first_char) = chars.next() else {
+            return Ok(()); // Already checked for empty above
+        };
+
+        if !first_char.is_ascii_alphabetic() && first_char != '_' {
+            return Err(Error::InvalidServerVarFormat {
+                arg: format!("{{{name}}}"),
+                reason: "Template variable names must start with a letter or underscore"
+                    .to_string(),
+            });
         }
 
         for char in chars {
@@ -472,4 +474,11 @@ mod tests {
             }
         }
     }
+}
+
+/// Finds the next template variable boundaries (opening and closing braces)
+fn find_next_template(s: &str, start: usize) -> Option<(usize, usize)> {
+    let open_pos = s[start..].find('{').map(|pos| start + pos)?;
+    let close_pos = s[open_pos..].find('}').map(|pos| open_pos + pos)?;
+    Some((open_pos, close_pos))
 }
