@@ -239,15 +239,17 @@ Beyond the original plan, the following major features have been successfully im
 
 ---
 
-## **Project Status: Production Ready** 🚀
+## **Project Status: Experimental** 🧪
 
-**All planned phases completed successfully.** Aperture CLI v0.1.0 is ready for open source release with:
+**All planned phases completed successfully.** Aperture CLI has been released as an experimental tool and continues to evolve with:
 
 - ✅ **Full Feature Set**: Dynamic CLI generation, authentication, base URL management, agent features
-- ✅ **Production Quality**: Comprehensive testing, error handling, documentation
+- ✅ **Comprehensive Testing**: Unit and integration tests, error handling, documentation
 - ✅ **Agent-First Design**: JSON output modes, capability manifests, structured errors
 - ✅ **Security Model**: Environment variable-based authentication with strict separation
-- ✅ **Release Readiness**: Automated publishing, quality gates, comprehensive changelog
+- ✅ **Release Pipeline**: Automated publishing, quality gates, comprehensive changelog
+
+**Note**: This is experimental software. While core features are implemented and tested, APIs and behavior may change as we gather feedback and iterate on the design.
 
 **Installation**: `cargo install aperture-cli`  
 **Usage**: `aperture config add api spec.yaml && aperture api command`

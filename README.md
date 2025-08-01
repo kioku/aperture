@@ -21,6 +21,7 @@ Aperture is a command-line interface (CLI) that dynamically generates commands f
 - [Getting Started](#getting-started)
   - [Basic Usage](#basic-usage)
   - [Base URL Management](#base-url-management)
+  - [Server URL Template Variables](#server-url-template-variables)
   - [Agent-Friendly Features](#agent-friendly-features)
   - [Advanced Output Formatting](#advanced-output-formatting)
   - [Batch Operations & Automation](#batch-operations--automation)
@@ -42,6 +43,7 @@ Aperture is a command-line interface (CLI) that dynamically generates commands f
 - **Secure & Robust:** Enforces strict separation of configuration from secrets using environment variables
 - **Spec Validation:** Validates OpenAPI specs during registration with clear error messages for unsupported features
 - **Parameter References:** Full support for OpenAPI parameter references (`$ref`) for DRY specifications
+- **Server Variables:** Support for OpenAPI server URL templates with validation and defaults
 - **Batch Processing:** Execute multiple operations concurrently with rate limiting and error handling
 - **Response Caching:** Intelligent caching with TTL support for improved performance
 - **Advanced Output:** Multiple output formats (JSON, YAML, table) with JQ-based filtering
@@ -314,6 +316,42 @@ APERTURE_ENV=staging aperture api my-api users list
 4. OpenAPI spec server URL (default)
 5. Fallback URL (`https://api.example.com`)
 
+### Server URL Template Variables
+
+Starting from v0.1.4, Aperture supports OpenAPI server URL templates with variables:
+
+```bash
+# For APIs with templated server URLs like https://{region}.api.example.com/{version}
+# Provide template variables using --server-var
+aperture api my-api users list --server-var region=us --server-var version=v2
+
+# Variables with enum constraints are validated
+aperture api my-api users list --server-var region=invalid  # Error if 'invalid' not in enum
+
+# Variables with defaults can be overridden
+aperture api my-api users list --server-var env=staging  # Overrides default 'production'
+```
+
+**OpenAPI Specification Example:**
+```yaml
+servers:
+  - url: https://{region}.api.example.com/{version}
+    variables:
+      region:
+        default: us
+        enum: [us, eu, asia]
+        description: API region
+      version:
+        default: v1
+        description: API version
+```
+
+**Features:**
+- **Validation:** Enum values are validated, invalid values are rejected
+- **Defaults:** Variables with defaults are optional, others are required
+- **URL Encoding:** Variable values are automatically URL-encoded
+- **Error Messages:** Clear guidance when variables are missing or invalid
+
 ### Agent-Friendly Features
 
 ```bash
@@ -500,7 +538,7 @@ cargo test --test executor_tests
 
 ## Project Status
 
-This project is currently in active development. See [docs/plan.md](docs/plan.md) for detailed implementation progress and [docs/architecture.md](docs/architecture.md) for the complete software design specification.
+**Experimental**: This project is in an experimental phase. While core functionality is implemented and tested, the API and features may change as we iterate based on usage and feedback. See [docs/architecture.md](docs/architecture.md) for the complete software design specification.
 
 ## License
 

@@ -4,6 +4,8 @@ Of course. Based on our comprehensive review, here is a formal document outlinin
 
 ## **Aperture CLI: Code Review & Strategic Path Forward**
 
+> **Historical Note**: This code review was written on July 4, 2025. Several of the issues identified, particularly regarding the agent capability manifest, were addressed immediately after this review. Sections marked with ~~strikethrough~~ and **[COMPLETED]** or **[RESOLVED]** indicate issues that have since been fixed.
+
 *   **Document Version:** 1.0
 *   **Author:** Expert Coding Agent (Functional Architect Persona)
 *   **Date:** October 26, 2023
@@ -18,7 +20,7 @@ The core execution path for human-driven CLI use is production-ready.
 This review identifies two primary areas for focused effort:
 
 1.  **Targeted Refactoring:** A few key modules, such as `ConfigManager` and the `Error` enum, have accumulated responsibilities that could be refined to improve modularity and precision.
-2.  **Completion of Agent-Facing Features:** The "agent-first" promise is not yet fully realized. The agent capability manifest (`--describe-json`) is currently a placeholder built on a lossy data model, providing an incomplete and unstable contract for programmatic consumers.
+2.  ~~**Completion of Agent-Facing Features:** The "agent-first" promise is not yet fully realized. The agent capability manifest (`--describe-json`) is currently a placeholder built on a lossy data model, providing an incomplete and unstable contract for programmatic consumers.~~ **[RESOLVED]** - The agent manifest has been redesigned and now loads from the original OpenAPI spec files, providing a complete and stable contract.
 
 This document provides concrete, actionable steps to address these points and outlines a strategic roadmap for future enhancements.
 
@@ -35,7 +37,7 @@ This document provides concrete, actionable steps to address these points and ou
 
 *   **Overloaded Components:** `ConfigManager` currently handles I/O, validation, and transformation, violating the Single Responsibility Principle.
 *   **Imprecise Error Contracts:** The `Error::Config(String)` variant is a catch-all that obscures specific failure modes, hindering programmatic error handling.
-*   **Incomplete Agent Contract:** The agent-facing manifest is lossy and does not yet provide a stable, reliable contract for automation.
+*   ~~**Incomplete Agent Contract:** The agent-facing manifest is lossy and does not yet provide a stable, reliable contract for automation.~~ **[RESOLVED]** - Implemented in commits 0712efc and 55e0a88.
 
 ### **3. Actionable Recommendations (Codebase Improvements)**
 
@@ -76,13 +78,15 @@ The following are targeted recommendations to refactor and improve the existing,
     3.  Refactor the codebase (e.g., in `main.rs`, `config/manager.rs`, `engine/executor.rs`) to return these specific error variants instead of `Error::Config(...)`.
 *   **Benefit:** Enables robust programmatic error handling, enriches the `--json-errors` output with structured data, and makes the application logic clearer.
 
-### **4. Implementation Plan (Completing Agent-Facing Features)**
+### **4. ~~Implementation Plan (Completing Agent-Facing Features)~~ [COMPLETED]**
 
-This plan addresses the incomplete agent contract, making the `--describe-json` feature production-ready.
+**Update**: This implementation plan was executed immediately after this review was written. The agent capability manifest has been successfully redesigned and implemented as of July 4, 2025. The feature now loads from original OpenAPI spec files, providing a complete and stable contract for automation.
 
-#### **Phase 1: Correct the Data Model**
+~~This plan addresses the incomplete agent contract, making the `--describe-json` feature production-ready.~~
 
-The root cause of the incomplete agent manifest is the lossy `CachedSpec` model.
+#### **Phase 1: ~~Correct the Data Model~~ [COMPLETED]**
+
+~~The root cause of the incomplete agent manifest is the lossy `CachedSpec` model.~~
 
 *   **Task 1.1: Enrich `CachedSpec` and Supporting Models:**
     *   **File:** `src/cache/models.rs`

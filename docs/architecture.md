@@ -1,8 +1,8 @@
 # **Software Design Document: Aperture CLI**
 
 - **Document Version:** 3.0 (Definitive Specification)
-- **Product Version:** 0.1.2
-- **Status:** Production Ready - Fully Implemented
+- **Product Version:** 0.1.4
+- **Status:** Experimental - Core Features Implemented
 - **Author:** Claudiu Ivan with Gemini 2.5 Pro
 
 ### **Revision History**
@@ -111,7 +111,7 @@ Aperture's v1.0 implementation will support a well-defined subset of the OpenAPI
 
 | OpenAPI Keyword              | Support Status          | Details                                                                                                                   |
 | :--------------------------- | :---------------------- | :------------------------------------------------------------------------------------------------------------------------ |
-| `openapi`, `info`, `servers` | **Supported**           | `servers[0].url` is used as the `baseUrl`.                                                                                |
+| `openapi`, `info`, `servers` | **Supported**           | `servers[0].url` is used as the `baseUrl`. Server URL template variables are supported via `--server-var` flag.           |
 | `paths`, `operations`        | **Supported**           | The core structure for command generation.                                                                                |
 | `tags`                       | **Supported**           | Used as the primary mechanism for command namespacing.                                                                    |
 | `operationId`                | **Supported**           | Used as the primary source for subcommand names.                                                                          |
@@ -243,7 +243,7 @@ Aperture is **strict by default**. If an API returns a successful (2xx) status c
 
 This SDD describes Product v1.0. Future development will focus on:
 
-- **v1.1:** Introduce a generic pagination helper (`--auto-paginate`). Add support for non-interactive OAuth2 grants (`client_credentials`). ~~Custom HTTP scheme support~~ (COMPLETED in v0.1.4).
+- **v1.1:** Introduce a generic pagination helper (`--auto-paginate`). ~~Custom HTTP scheme support~~ (COMPLETED in v0.1.4).
 - **v1.2:** Add a `aperture config set <key> <value>` command for managing `config.toml`. Expand command validation and error reporting capabilities.
 - **v2.0:** Introduce keychain integration as an additional `SecretSource`. Expand OpenAPI support to include more complex features.
 
