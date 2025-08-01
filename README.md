@@ -2,6 +2,38 @@
 
 Aperture is a command-line interface (CLI) that dynamically generates commands from OpenAPI 3.x specifications. It's designed to provide a secure, reliable, and introspectable "tool-use" endpoint for autonomous AI agents and automated systems.
 
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+  - [Configuration Structure](#configuration-structure)
+  - [Security Model](#security-model)
+    - [Supported Authentication Schemes](#supported-authentication-schemes)
+    - [Unsupported Authentication](#unsupported-authentication)
+    - [Partial API Support](#partial-api-support)
+    - [Dynamic Secret Configuration](#dynamic-secret-configuration)
+  - [Parameter References](#parameter-references)
+- [Installation](#installation)
+  - [Using Cargo (Recommended)](#using-cargo-recommended)
+  - [Build from Source](#build-from-source)
+  - [Optional Features](#optional-features)
+    - [JQ Support (Pure Rust Implementation)](#jq-support-pure-rust-implementation)
+- [Getting Started](#getting-started)
+  - [Basic Usage](#basic-usage)
+  - [Base URL Management](#base-url-management)
+  - [Agent-Friendly Features](#agent-friendly-features)
+  - [Advanced Output Formatting](#advanced-output-formatting)
+  - [Batch Operations & Automation](#batch-operations--automation)
+  - [Response Caching](#response-caching)
+  - [Command Syntax](#command-syntax)
+  - [Exit Codes](#exit-codes)
+- [Development](#development)
+  - [Prerequisites](#prerequisites)
+  - [Development Commands](#development-commands)
+  - [Testing](#testing)
+- [Project Status](#project-status)
+- [License](#license)
+
 ## Features
 
 - **OpenAPI-Native:** Directly consumes standard OpenAPI 3.x documents as the single source of truth
