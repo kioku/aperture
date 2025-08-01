@@ -2,6 +2,96 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2025-08-01
+
+### 🎨 Styling
+
+- Remove emojis from interactive configuration output
+- Remove all emojis from source code
+
+### 🐛 Bug Fixes
+
+- Include auth-related warnings when building skip_endpoints list
+- Add base64 encoding for basic auth credentials
+- Prevent header injection in custom headers
+- Include auth scheme names in skip messages
+- Update test assertion for enhanced error message format
+- Replace unwrap() with expect() in interactive config loop
+- Improve kebab-case conversion for operation names
+- Convert tag names to lowercase for CLI consistency
+- Improve Unicode handling and simplify kebab-case conversion
+- Ensure JSON manifest tag consistency and improve kebab-case conversion
+- Handle server URL templates without panicking
+- Resolve formatting and linting issues for server variable feature
+- Improve backward compatibility error handling for template URLs
+- Improve server variable error handling in URL resolution
+- Replace panic with graceful error handling in URL resolver
+- Preserve empty string defaults for server variables
+- Add URL encoding for server variable values
+
+### 📚 Documentation
+
+- Update documentation for custom HTTP authentication support
+- Update documentation for partial API support with unsupported auth
+- Clarify basic auth environment variable format
+- Update documentation for interactive secret configuration
+- Improve thread safety documentation in interactive timeout handling
+- Update version references to v0.1.4
+- Add table of contents to README
+- Update documentation and reorganize historical files
+
+### 🚀 Features
+
+- Add support for custom HTTP authentication schemes
+- Update validator to handle unsupported auth schemes in non-strict mode
+- Update display logic to show auth-related skip reasons
+- Add debug logging for auth header construction
+- Add secrets field to ApiConfig for dynamic authentication
+- Add set-secret and list-secrets CLI commands
+- Implement secret management methods in ConfigManager
+- Update authentication resolution to prioritize config secrets
+- Add interactive input utilities for user prompts
+- Add interactive secret configuration to ConfigManager
+- Integrate interactive mode into set-secret CLI command
+- Add input length limits and sanitization to interactive prompts
+- Add graceful exit mechanisms for interrupted sessions
+- Add comprehensive interactive testing infrastructure
+- Add timeout mechanisms for user input sessions
+- Add functional tests for authentication priority system
+- Add secret removal commands and fix test race conditions
+- Enhance error handling and validation with retry mechanisms
+- Add server variable data models
+- Implement server variable extraction in SpecTransformer
+- Add --server-var CLI flag support
+- Add server variable resolver with comprehensive validation
+- Integrate server variable resolution into BaseUrlResolver
+- Integrate server variable resolution into request execution
+- Add template variable name validation
+
+### 🚜 Refactor
+
+- Introduce AuthScheme enum and improve code organization
+- Improve code organization
+- Convert interactive.rs to module structure
+- Decompose large methods in ConfigManager
+- Flatten nested if statements in add_authentication_header
+- Extract to_kebab_case into shared utils module
+- Replace duplicated to_kebab_case with shared implementation
+- Flatten nested conditionals in contains_template_variables
+- Improve code readability based on PR review feedback
+
+### 🧪 Testing
+
+- Add comprehensive tests for custom HTTP authentication schemes
+- Add header injection validation tests
+- Add missing test coverage for edge cases
+- Verify auth scheme consistency
+- Add comprehensive integration tests for secret configuration
+- Add comprehensive tests for interactive secret configuration
+- Enhance to_kebab_case unit tests with comprehensive edge cases
+- Add integration tests for tag lowercase conversion
+- Add comprehensive tests for server URL template detection
+
 ## [0.1.3] - 2025-07-22
 
 ### ⚡ Performance
