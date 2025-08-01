@@ -27,88 +27,63 @@ default_output_format = "json"
 }
 
 #[test]
-fn test_server_url_template_error_message() {
+fn test_server_url_template_invalid_default_enum_value() {
     let (_temp_dir, home_dir) = setup_test_env();
 
-    // Create a Sentry-like OpenAPI spec with server URL template
-    let sentry_spec = r#"
+    // Create an API spec where the default value is not in the enum
+    // This tests that enum validation is applied even to default values
+    let api_spec = r#"
 openapi: 3.0.0
 info:
-  title: Sentry API
+  title: Test API
   version: 1.0.0
 servers:
-  - url: https://{region}.sentry.io
+  - url: https://{region}.api.example.com
     variables:
       region:
-        default: us
+        default: "invalid-region"
         enum: [us, eu]
-        description: The regional instance of Sentry
+        description: The regional instance
 paths:
-  /api/0/projects/{organization}/{project}/events/:
+  /test:
     get:
-      operationId: listEvents
-      tags: [events]
-      summary: List project events
-      parameters:
-        - name: organization
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: project
-          in: path
-          required: true
-          schema:
-            type: string
+      operationId: test
+      tags: [test]
+      summary: Test endpoint
       responses:
         '200':
           description: Success
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
 "#;
 
-    let spec_file = home_dir.path().join("sentry.yaml");
-    fs::write(&spec_file, sentry_spec).unwrap();
+    let spec_file = home_dir.path().join("test-api.yaml");
+    fs::write(&spec_file, api_spec).unwrap();
 
     // Add the spec
     Command::cargo_bin("aperture")
         .unwrap()
         .env("HOME", home_dir.path())
-        .args(&["config", "add", "sentry", spec_file.to_str().unwrap()])
+        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
-    // Try to execute a command - should fail with template error
+    // Try to execute without providing server variable - should fail with invalid enum value
     Command::cargo_bin("aperture")
         .unwrap()
         .env("HOME", home_dir.path())
-        .args(&[
-            "api",
-            "sentry",
-            "events",
-            "list-events",
-            "--organization",
-            "my-org",
-            "--project",
-            "my-project",
-        ])
+        .args(&["api", "test-api", "test", "test"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "Server URL contains template variable(s): https://{region}.sentry.io",
+            "Invalid value 'invalid-region' for server variable 'region'",
         ))
-        .stderr(predicate::str::contains("aperture config set-url sentry"));
+        .stderr(predicate::str::contains("Allowed values: us, eu"));
 }
 
 #[test]
-fn test_server_url_template_with_override() {
+fn test_server_url_template_with_defaults_and_override() {
     let (_temp_dir, home_dir) = setup_test_env();
 
-    // Create a spec with server URL template
+    // Create a spec with server URL template with default values
     let spec_content = r#"
 openapi: 3.0.0
 info:
@@ -142,31 +117,7 @@ paths:
         .assert()
         .success();
 
-    // First attempt should fail
-    Command::cargo_bin("aperture")
-        .unwrap()
-        .env("HOME", home_dir.path())
-        .args(&["api", "regional", "health", "get-status"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "Server URL contains template variable(s)",
-        ));
-
-    // Set a base URL override
-    Command::cargo_bin("aperture")
-        .unwrap()
-        .env("HOME", home_dir.path())
-        .args(&[
-            "config",
-            "set-url",
-            "regional",
-            "https://prod.api.example.com",
-        ])
-        .assert()
-        .success();
-
-    // Now it should work (would fail at network level, but not template error)
+    // Should work with default values using dry-run to avoid network calls
     Command::cargo_bin("aperture")
         .unwrap()
         .env("HOME", home_dir.path())
@@ -176,10 +127,53 @@ paths:
         .stdout(predicate::str::contains(
             "https://prod.api.example.com/status",
         ));
+
+    // Should work with explicit server variable
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("HOME", home_dir.path())
+        .args(&[
+            "--dry-run",
+            "api",
+            "regional",
+            "health",
+            "get-status",
+            "--server-var",
+            "env=staging",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "https://staging.api.example.com/status",
+        ));
+
+    // Test with config override
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("HOME", home_dir.path())
+        .args(&[
+            "config",
+            "set-url",
+            "regional",
+            "https://override.api.example.com",
+        ])
+        .assert()
+        .success();
+
+    // Config override should take precedence (non-template URL)
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("HOME", home_dir.path())
+        .args(&["--dry-run", "api", "regional", "health", "get-status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "https://override.api.example.com/status",
+        ));
 }
 
 #[test]
-fn test_multiple_server_url_templates() {
+fn test_multiple_server_url_template_variables() {
     let (_temp_dir, home_dir) = setup_test_env();
 
     // Create a spec with multiple template variables
@@ -219,15 +213,54 @@ paths:
         .assert()
         .success();
 
-    // Should fail with error mentioning the templated URL
+    // Should work with default values
     Command::cargo_bin("aperture")
         .unwrap()
         .env("HOME", home_dir.path())
-        .args(&["api", "multi", "health", "ping"])
+        .args(&["--dry-run", "api", "multi", "health", "ping"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "https://us-prod.api.example.com/ping",
+        ));
+
+    // Should work with explicit server variables
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("HOME", home_dir.path())
+        .args(&[
+            "--dry-run",
+            "api",
+            "multi",
+            "health",
+            "ping",
+            "--server-var",
+            "region=eu",
+            "--server-var",
+            "env=dev",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "https://eu-dev.api.example.com/ping",
+        ));
+
+    // Should fail with invalid enum value
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("HOME", home_dir.path())
+        .args(&[
+            "api",
+            "multi",
+            "health",
+            "ping",
+            "--server-var",
+            "region=invalid",
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "https://{region}-{env}.api.example.com",
+            "Invalid value 'invalid' for server variable 'region'",
         ))
-        .stderr(predicate::str::contains("aperture config set-url multi"));
+        .stderr(predicate::str::contains("Allowed values: us, eu, ap"));
 }

@@ -990,6 +990,27 @@ fn print_error(error: &Error) {
                 eprintln!("Network Error\n{reason}\n\nHint: This error is not retryable. Check your network connection and API configuration.");
             }
         }
+        Error::MissingServerVariable { name } => {
+            eprintln!("Missing Server Variable\nRequired server variable '{name}' with no default value\n\nHint: Provide the missing server variable using --server-var {name}=value");
+        }
+        Error::UnknownServerVariable { name, available } => {
+            let available_list = available.join(", ");
+            eprintln!("Unknown Server Variable\nUnknown server variable '{name}'\nAvailable variables: {available_list}\n\nHint: Use one of the available variables listed above.");
+        }
+        Error::InvalidServerVarFormat { arg, reason } => {
+            eprintln!("Invalid Server Variable Format\nInvalid format '{arg}': {reason}\n\nHint: Use the format --server-var key=value");
+        }
+        Error::InvalidServerVarValue {
+            name,
+            value,
+            allowed_values,
+        } => {
+            let allowed_list = allowed_values.join(", ");
+            eprintln!("Invalid Server Variable Value\nInvalid value '{value}' for server variable '{name}'\nAllowed values: {allowed_list}\n\nHint: Use one of the allowed values listed above.");
+        }
+        Error::UnresolvedTemplateVariable { name, url } => {
+            eprintln!("Unresolved Template Variable\nUnresolved template variable '{name}' in URL '{url}'\n\nHint: Ensure all template variables are provided with --server-var");
+        }
         Error::Anyhow(err) => {
             eprintln!("Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
         }

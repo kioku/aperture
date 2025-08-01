@@ -65,6 +65,7 @@ fn create_test_spec() -> CachedSpec {
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     }
 }
 
@@ -133,6 +134,7 @@ async fn test_execute_request_with_query_params() {
         servers: vec!["https://api.example.com".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     Mock::given(method("GET"))
@@ -188,6 +190,7 @@ async fn test_build_url_with_server_template_variables() {
         servers: vec!["https://{region}.sentry.io".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     let command = Command::new("api").subcommand(
@@ -201,7 +204,8 @@ async fn test_build_url_with_server_template_variables() {
     let matches =
         command.get_matches_from(vec!["api", "events", "list-events", "my-org", "my-project"]);
 
-    // Execute the request - should fail with InvalidConfig error
+    // Execute the request - should fail with UnresolvedTemplateVariable error
+    // because {region} in base URL cannot be resolved when no server variables are defined
     let result = execute_request(
         &spec,
         &matches,
@@ -219,12 +223,10 @@ async fn test_build_url_with_server_template_variables() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            aperture_cli::error::Error::InvalidConfig { reason } => {
-                assert!(reason.contains("Server URL contains template variable(s)"));
-                assert!(reason.contains("https://{region}.sentry.io"));
-                assert!(reason.contains("aperture config set-url sentry-api"));
+            aperture_cli::error::Error::UnresolvedTemplateVariable { name, url: _ } => {
+                assert_eq!(name, "region");
             }
-            _ => panic!("Expected InvalidConfig error, got: {:?}", e),
+            _ => panic!("Expected UnresolvedTemplateVariable error, got: {:?}", e),
         }
     }
 }
@@ -307,6 +309,7 @@ async fn test_execute_request_with_global_config_base_url() {
         servers: vec![],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     // Create global config with API override
@@ -370,6 +373,7 @@ async fn test_url_with_json_query_params_not_detected_as_template() {
         servers: vec![r#"https://api.example.com?filter={"type":"user"}"#.to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     // Mock the endpoint
@@ -405,7 +409,7 @@ async fn test_url_with_json_query_params_not_detected_as_template() {
 
 #[tokio::test]
 async fn test_url_with_path_braces_detected_as_template() {
-    // Path parameters in base URL should still be detected as templates
+    // Template variables in base URL should be detected and fail with UnresolvedTemplateVariable error
     let spec = CachedSpec {
         cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "path-api".to_string(),
@@ -415,6 +419,7 @@ async fn test_url_with_path_braces_detected_as_template() {
         servers: vec!["https://api.example.com/{version}".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     let command =
@@ -439,18 +444,17 @@ async fn test_url_with_path_braces_detected_as_template() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            aperture_cli::error::Error::InvalidConfig { reason } => {
-                assert!(reason.contains("Server URL contains template variable(s)"));
-                assert!(reason.contains("{version}"));
+            aperture_cli::error::Error::UnresolvedTemplateVariable { name, url: _ } => {
+                assert_eq!(name, "version");
             }
-            _ => panic!("Expected InvalidConfig error, got: {:?}", e),
+            _ => panic!("Expected UnresolvedTemplateVariable error, got: {:?}", e),
         }
     }
 }
 
 #[tokio::test]
 async fn test_url_with_multiple_templates_detected() {
-    // Multiple template variables should be detected
+    // Multiple template variables should be detected and fail with UnresolvedTemplateVariable error
     let spec = CachedSpec {
         cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
         name: "multi-template-api".to_string(),
@@ -460,6 +464,7 @@ async fn test_url_with_multiple_templates_detected() {
         servers: vec!["https://{region}-{env}.api.example.com".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     let command =
@@ -484,11 +489,11 @@ async fn test_url_with_multiple_templates_detected() {
     assert!(result.is_err());
     if let Err(e) = result {
         match e {
-            aperture_cli::error::Error::InvalidConfig { reason } => {
-                assert!(reason.contains("Server URL contains template variable(s)"));
-                assert!(reason.contains("{region}-{env}"));
+            aperture_cli::error::Error::UnresolvedTemplateVariable { name, url: _ } => {
+                // Should fail on the first template variable encountered
+                assert_eq!(name, "region");
             }
-            _ => panic!("Expected InvalidConfig error, got: {:?}", e),
+            _ => panic!("Expected UnresolvedTemplateVariable error, got: {:?}", e),
         }
     }
 }
@@ -505,6 +510,7 @@ async fn test_url_with_empty_braces_not_detected() {
         servers: vec!["https://api.example.com/path{}".to_string()],
         security_schemes: HashMap::new(),
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     };
 
     let command =

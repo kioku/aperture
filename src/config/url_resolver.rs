@@ -1,5 +1,7 @@
 use crate::cache::models::CachedSpec;
 use crate::config::models::{ApiConfig, GlobalConfig};
+use crate::config::server_variable_resolver::ServerVariableResolver;
+use crate::error::Error;
 
 /// Resolves the base URL for an API based on a priority hierarchy
 pub struct BaseUrlResolver<'a> {
@@ -45,6 +47,75 @@ impl<'a> BaseUrlResolver<'a> {
     /// 5. Fallback: <https://api.example.com>
     #[must_use]
     pub fn resolve(&self, explicit_url: Option<&str>) -> String {
+        self.resolve_with_variables(explicit_url, &[])
+            .unwrap_or_else(|err| {
+                match err {
+                    // For validation errors, log and fallback to basic resolution
+                    // This maintains backward compatibility while providing visibility
+                    Error::InvalidServerVarFormat { .. }
+                    | Error::InvalidServerVarValue { .. }
+                    | Error::UnknownServerVariable { .. } => {
+                        eprintln!("Warning: Server variable error: {err}");
+                        self.resolve_basic(explicit_url)
+                    }
+                    // Fallback for all other errors (template resolution, missing variables, etc.)
+                    _ => self.resolve_basic(explicit_url),
+                }
+            })
+    }
+
+    /// Resolves the base URL with server variable substitution support
+    ///
+    /// # Arguments
+    /// * `explicit_url` - Explicit URL override (for testing)
+    /// * `server_var_args` - Server variable arguments from CLI (e.g., `["region=us", "env=prod"]`)
+    ///
+    /// # Returns
+    /// * `Ok(String)` - Resolved URL with variables substituted
+    /// * `Err(Error)` - Server variable validation or substitution errors
+    ///
+    /// # Errors
+    /// Returns errors for:
+    /// - Invalid server variable format or values
+    /// - Missing required server variables
+    /// - URL template substitution failures
+    pub fn resolve_with_variables(
+        &self,
+        explicit_url: Option<&str>,
+        server_var_args: &[String],
+    ) -> Result<String, Error> {
+        // First resolve the base URL using the standard priority hierarchy
+        let base_url = self.resolve_basic(explicit_url);
+
+        // If the URL doesn't contain template variables, return as-is
+        if !base_url.contains('{') {
+            return Ok(base_url);
+        }
+
+        // If no server variables are defined in the spec but URL has templates,
+        // this indicates a backward compatibility issue - the spec has template
+        // URLs but no server variable definitions
+        if self.spec.server_variables.is_empty() {
+            let template_vars = extract_template_variables(&base_url);
+
+            if let Some(first_var) = template_vars.first() {
+                return Err(Error::UnresolvedTemplateVariable {
+                    name: first_var.clone(),
+                    url: base_url,
+                });
+            }
+
+            return Ok(base_url);
+        }
+
+        // Resolve server variables and apply template substitution
+        let resolver = ServerVariableResolver::new(self.spec);
+        let resolved_variables = resolver.resolve_variables(server_var_args)?;
+        resolver.substitute_url(&base_url, &resolved_variables)
+    }
+
+    /// Basic URL resolution without server variable processing (internal helper)
+    fn resolve_basic(&self, explicit_url: Option<&str>) -> String {
         // Priority 1: Explicit parameter (for testing)
         if let Some(url) = explicit_url {
             return url.to_string();
@@ -94,10 +165,32 @@ impl<'a> BaseUrlResolver<'a> {
     }
 }
 
+/// Extracts template variable names from a URL string
+fn extract_template_variables(url: &str) -> Vec<String> {
+    let mut template_vars = Vec::new();
+    let mut start = 0;
+
+    while let Some(open) = url[start..].find('{') {
+        let open_pos = start + open;
+        if let Some(close) = url[open_pos..].find('}') {
+            let close_pos = open_pos + close;
+            let var_name = &url[open_pos + 1..close_pos];
+            if !var_name.is_empty() {
+                template_vars.push(var_name.to_string());
+            }
+            start = close_pos + 1;
+        } else {
+            break;
+        }
+    }
+
+    template_vars
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::models::CachedSpec;
+    use crate::cache::models::{CachedSpec, ServerVariable};
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -114,6 +207,42 @@ mod tests {
             servers: base_url.map(|s| vec![s.to_string()]).unwrap_or_default(),
             security_schemes: HashMap::new(),
             skipped_endpoints: vec![],
+            server_variables: HashMap::new(),
+        }
+    }
+
+    fn create_test_spec_with_variables(name: &str, base_url: Option<&str>) -> CachedSpec {
+        let mut server_variables = HashMap::new();
+
+        // Add test server variables
+        server_variables.insert(
+            "region".to_string(),
+            ServerVariable {
+                default: Some("us".to_string()),
+                enum_values: vec!["us".to_string(), "eu".to_string(), "ap".to_string()],
+                description: Some("API region".to_string()),
+            },
+        );
+
+        server_variables.insert(
+            "env".to_string(),
+            ServerVariable {
+                default: None,
+                enum_values: vec!["dev".to_string(), "staging".to_string(), "prod".to_string()],
+                description: Some("Environment".to_string()),
+            },
+        );
+
+        CachedSpec {
+            cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            commands: vec![],
+            base_url: base_url.map(|s| s.to_string()),
+            servers: base_url.map(|s| vec![s.to_string()]).unwrap_or_default(),
+            security_schemes: HashMap::new(),
+            skipped_endpoints: vec![],
+            server_variables,
         }
     }
 
@@ -290,6 +419,184 @@ mod tests {
             let resolver = BaseUrlResolver::new(&spec);
 
             assert_eq!(resolver.resolve(None), "https://api.example.com");
+        });
+    }
+
+    #[test]
+    fn test_server_variable_resolution_with_all_provided() {
+        test_with_env_isolation(|| {
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
+            let resolver = BaseUrlResolver::new(&spec);
+
+            let server_vars = vec!["region=eu".to_string(), "env=staging".to_string()];
+            let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
+
+            assert_eq!(result, "https://eu-staging.api.example.com");
+        });
+    }
+
+    #[test]
+    fn test_server_variable_resolution_with_defaults() {
+        test_with_env_isolation(|| {
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
+            let resolver = BaseUrlResolver::new(&spec);
+
+            // Only provide required variable, let region use default
+            let server_vars = vec!["env=prod".to_string()];
+            let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
+
+            assert_eq!(result, "https://us-prod.api.example.com");
+        });
+    }
+
+    #[test]
+    fn test_server_variable_resolution_missing_required() {
+        test_with_env_isolation(|| {
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
+            let resolver = BaseUrlResolver::new(&spec);
+
+            // Missing required 'env' variable
+            let server_vars = vec!["region=us".to_string()];
+            let result = resolver.resolve_with_variables(None, &server_vars);
+
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_server_variable_resolution_invalid_enum() {
+        test_with_env_isolation(|| {
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
+            let resolver = BaseUrlResolver::new(&spec);
+
+            let server_vars = vec!["region=invalid".to_string(), "env=prod".to_string()];
+            let result = resolver.resolve_with_variables(None, &server_vars);
+
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_non_template_url_with_server_variables() {
+        test_with_env_isolation(|| {
+            let spec = create_test_spec_with_variables("test-api", Some("https://api.example.com"));
+            let resolver = BaseUrlResolver::new(&spec);
+
+            // Non-template URL should be returned as-is even with server variables defined
+            let server_vars = vec!["region=eu".to_string(), "env=prod".to_string()];
+            let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
+
+            assert_eq!(result, "https://api.example.com");
+        });
+    }
+
+    #[test]
+    fn test_no_server_variables_defined() {
+        test_with_env_isolation(|| {
+            let spec = create_test_spec("test-api", Some("https://{region}.api.example.com"));
+            let resolver = BaseUrlResolver::new(&spec);
+
+            // Template URL but no server variables defined in spec should error
+            let server_vars = vec!["region=eu".to_string()];
+            let result = resolver.resolve_with_variables(None, &server_vars);
+
+            // Should fail with UnresolvedTemplateVariable error
+            assert!(result.is_err());
+            match result.unwrap_err() {
+                Error::UnresolvedTemplateVariable { name, url } => {
+                    assert_eq!(name, "region");
+                    assert_eq!(url, "https://{region}.api.example.com");
+                }
+                _ => panic!("Expected UnresolvedTemplateVariable error"),
+            }
+        });
+    }
+
+    #[test]
+    fn test_server_variable_fallback_compatibility() {
+        test_with_env_isolation(|| {
+            let spec = create_test_spec_with_variables(
+                "test-api",
+                Some("https://{region}-{env}.api.example.com"),
+            );
+            let resolver = BaseUrlResolver::new(&spec);
+
+            // resolve() method should gracefully fallback when server variables fail
+            // This tests backward compatibility - when server variables are missing
+            // required values, it should fallback to basic resolution
+            let result = resolver.resolve(None);
+
+            // Should return the basic URL resolution (original template URL)
+            assert_eq!(result, "https://{region}-{env}.api.example.com");
+        });
+    }
+
+    #[test]
+    fn test_server_variable_with_config_override() {
+        test_with_env_isolation(|| {
+            let spec =
+                create_test_spec_with_variables("test-api", Some("https://{region}.original.com"));
+
+            let mut api_configs = HashMap::new();
+            api_configs.insert(
+                "test-api".to_string(),
+                ApiConfig {
+                    base_url_override: Some("https://{region}-override.example.com".to_string()),
+                    environment_urls: HashMap::new(),
+                    strict_mode: false,
+                    secrets: HashMap::new(),
+                },
+            );
+
+            let global_config = GlobalConfig {
+                api_configs,
+                ..Default::default()
+            };
+
+            let resolver = BaseUrlResolver::new(&spec).with_global_config(&global_config);
+
+            let server_vars = vec!["env=prod".to_string()]; // region should use default 'us'
+            let result = resolver.resolve_with_variables(None, &server_vars).unwrap();
+
+            // Should use config override as base, then apply server variable substitution
+            assert_eq!(result, "https://us-override.example.com");
+        });
+    }
+
+    #[test]
+    fn test_malformed_templates_pass_through() {
+        test_with_env_isolation(|| {
+            // Test URLs with empty braces or malformed templates
+            let spec = create_test_spec("test-api", Some("https://api.example.com/path{}"));
+            let resolver = BaseUrlResolver::new(&spec);
+
+            let result = resolver.resolve_with_variables(None, &[]).unwrap();
+            // Empty braces should pass through as they're not valid template variables
+            assert_eq!(result, "https://api.example.com/path{}");
+        });
+    }
+
+    #[test]
+    fn test_backward_compatibility_no_server_vars_non_template() {
+        test_with_env_isolation(|| {
+            // Non-template URL with no server variables should work normally
+            let spec = create_test_spec("test-api", Some("https://api.example.com"));
+            let resolver = BaseUrlResolver::new(&spec);
+
+            let result = resolver.resolve_with_variables(None, &[]).unwrap();
+            assert_eq!(result, "https://api.example.com");
         });
     }
 }

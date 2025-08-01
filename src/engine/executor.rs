@@ -82,17 +82,26 @@ pub async fn execute_request(
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
 
-    // Resolve base URL using the new priority hierarchy
+    // Extract server variable arguments from CLI matches
+    // Note: server-var is a global flag, so it may not be present in test scenarios
+    let server_var_args: Vec<String> = matches
+        .try_get_many::<String>("server-var")
+        .ok()
+        .flatten()
+        .map(|values| values.cloned().collect())
+        .unwrap_or_default();
+
+    // Resolve base URL using the new priority hierarchy with server variable support
     let resolver = BaseUrlResolver::new(spec);
     let resolver = if let Some(config) = global_config {
         resolver.with_global_config(config)
     } else {
         resolver
     };
-    let base_url = resolver.resolve(base_url);
+    let base_url = resolver.resolve_with_variables(base_url, &server_var_args)?;
 
     // Build the full URL with path parameters
-    let url = build_url(&base_url, &operation.path, operation, matches, &spec.name)?;
+    let url = build_url(&base_url, &operation.path, operation, matches)?;
 
     // Create HTTP client with timeout
     let client = reqwest::Client::builder()
@@ -328,61 +337,16 @@ fn find_operation<'a>(
     Err(Error::OperationNotFound)
 }
 
-/// Checks if a URL contains `OpenAPI` server template variables
-fn contains_template_variables(url: &str) -> bool {
-    let mut chars = url.chars();
-    while let Some(ch) = chars.next() {
-        if ch != '{' {
-            continue;
-        }
-
-        // Found opening brace, check if it forms a valid template variable
-        let mut var_name = String::new();
-        let mut found_closing = false;
-
-        for next_ch in chars.by_ref() {
-            if next_ch == '}' {
-                found_closing = true;
-                break;
-            }
-
-            if next_ch.is_alphanumeric() || next_ch == '_' || next_ch == '-' {
-                var_name.push(next_ch);
-            } else {
-                // Invalid character in template variable name
-                break;
-            }
-        }
-
-        // Valid template variable must have:
-        // 1. A closing brace
-        // 2. A non-empty variable name
-        // 3. Only alphanumeric, underscore, or hyphen characters
-        if found_closing && !var_name.is_empty() {
-            return true;
-        }
-    }
-    false
-}
-
 /// Builds the full URL with path parameters substituted
+///
+/// Note: Server variable substitution is now handled by `BaseUrlResolver.resolve_with_variables()`
+/// before calling this function, so `base_url` should already have server variables resolved.
 fn build_url(
     base_url: &str,
     path_template: &str,
     operation: &CachedCommand,
     matches: &ArgMatches,
-    api_name: &str,
 ) -> Result<String, Error> {
-    // Check if base_url contains template variables
-    if contains_template_variables(base_url) {
-        return Err(Error::InvalidConfig {
-            reason: format!(
-                "Server URL contains template variable(s): {base_url}. \
-                Please use 'aperture config set-url {api_name} <concrete-url>' to set a specific base URL."
-            ),
-        });
-    }
-
     let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
 
     // Get to the deepest subcommand matches
@@ -400,7 +364,11 @@ fn build_url(
             let close_pos = open_pos + close;
             let param_name = &url[open_pos + 1..close_pos];
 
-            if let Some(value) = current_matches.get_one::<String>(param_name) {
+            if let Some(value) = current_matches
+                .try_get_one::<String>(param_name)
+                .ok()
+                .flatten()
+            {
                 url.replace_range(open_pos..=close_pos, value);
                 start = open_pos + value.len();
             } else {

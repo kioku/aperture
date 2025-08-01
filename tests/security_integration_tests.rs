@@ -131,6 +131,7 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
         servers: vec!["https://api.example.com".to_string()],
         security_schemes,
         skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
     }
 }
 
