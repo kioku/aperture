@@ -138,9 +138,11 @@ The project follows a structured development approach:
 ### `jq` Feature
 Enables advanced JSON filtering using JQ syntax with a pure Rust implementation:
 - **Build:** `cargo build --features jq`
-- **Test:** `cargo test --features jq`
+- **Test:** `cargo test --features jq` (Note: 5 tests currently fail due to issue #25)
 - **Without feature:** Only basic field access works (`.field`, `.nested.field`)
-- **With feature:** Full JQ syntax support (arrays, filters, transformations)
+- **With feature:** Should provide full JQ syntax support, but currently broken (see issue #25)
+
+**Known Issue:** The jaq library integration is broken. When enabled, all JQ filters return the complete JSON document instead of filtered results. This affects describe-json, batch operations, and regular API calls. Use the default build without this feature for production.
 
 ## Code Style
 
