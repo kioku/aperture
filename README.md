@@ -17,7 +17,7 @@ Aperture is a command-line interface (CLI) that dynamically generates commands f
   - [Using Cargo (Recommended)](#using-cargo-recommended)
   - [Build from Source](#build-from-source)
   - [Optional Features](#optional-features)
-    - [JQ Support (Pure Rust Implementation)](#jq-support-pure-rust-implementation)
+    - [JQ Support](#jq-support)
 - [Getting Started](#getting-started)
   - [Basic Usage](#basic-usage)
   - [Base URL Management](#base-url-management)
