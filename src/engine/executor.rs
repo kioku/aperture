@@ -198,7 +198,15 @@ pub async fn execute_request(
             "dry_run": true,
             "method": operation.method,
             "url": url,
-            "headers": headers_clone.iter().map(|(k, v)| (k.as_str(), v.to_str().unwrap_or("<binary>"))).collect::<std::collections::HashMap<_, _>>(),
+            "headers": headers_clone.iter().map(|(k, v)| {
+                let key = k.as_str();
+                let value = if is_sensitive_header(key) {
+                    "<REDACTED>"
+                } else {
+                    v.to_str().unwrap_or("<binary>")
+                };
+                (key, value)
+            }).collect::<std::collections::HashMap<_, _>>(),
             "operation_id": operation.operation_id
         });
         let dry_run_output =
@@ -513,6 +521,15 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
     validate_header_value(name, &expanded_value)?;
 
     Ok((name.to_string(), expanded_value))
+}
+
+/// Checks if a header name contains sensitive authentication information
+fn is_sensitive_header(header_name: &str) -> bool {
+    let name_lower = header_name.to_lowercase();
+    matches!(
+        name_lower.as_str(),
+        "authorization" | "proxy-authorization" | "x-api-key" | "x-api-token" | "x-auth-token"
+    )
 }
 
 /// Adds an authentication header based on a security scheme

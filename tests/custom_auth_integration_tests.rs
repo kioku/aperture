@@ -286,11 +286,12 @@ paths:
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "\"authorization\": \"Token my-token-value\"",
+            "\"authorization\": \"<REDACTED>\"",
         ))
         .stdout(predicate::str::contains(
             "\"url\": \"https://api.example.com/users\"",
-        ));
+        ))
+        .stdout(predicate::str::contains("my-token-value").not());
 }
 
 #[tokio::test]
@@ -553,4 +554,160 @@ paths:
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid control characters"));
+}
+
+#[tokio::test]
+async fn test_dry_run_redacts_bearer_auth_header() {
+    let (temp_dir, config_dir) = setup_test_env();
+
+    // Create a spec with Bearer authentication
+    let spec_content = r#"
+openapi: 3.0.3
+info:
+  title: Bearer Auth API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      x-aperture-secret:
+        source: env
+        name: BEARER_TOKEN
+paths:
+  /protected:
+    get:
+      operationId: getProtected
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_file = temp_dir.path().join("bearer-api.yaml");
+    fs::write(&spec_file, spec_content).unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .args(&["config", "add", "bearer-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Run with --dry-run and verify Bearer token is redacted
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .env("BEARER_TOKEN", "super-secret-bearer-token")
+        .args(&["api", "--dry-run", "bearer-api", "default", "get-protected"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"authorization\": \"<REDACTED>\"",
+        ))
+        .stdout(predicate::str::contains("super-secret-bearer-token").not());
+}
+
+#[tokio::test]
+async fn test_dry_run_redacts_api_key_headers() {
+    let (temp_dir, config_dir) = setup_test_env();
+
+    // Create a spec with API Key authentication in header
+    let spec_content = r#"
+openapi: 3.0.3
+info:
+  title: API Key Auth API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      x-aperture-secret:
+        source: env
+        name: API_KEY
+paths:
+  /data:
+    get:
+      operationId: getData
+      security:
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_file = temp_dir.path().join("api-key-api.yaml");
+    fs::write(&spec_file, spec_content).unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .args(&["config", "add", "api-key-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Run with --dry-run and verify API key is redacted
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .env("API_KEY", "my-secret-api-key-12345")
+        .args(&["api", "--dry-run", "api-key-api", "default", "get-data"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"x-api-key\": \"<REDACTED>\""))
+        .stdout(predicate::str::contains("my-secret-api-key-12345").not());
+}
+
+#[tokio::test]
+async fn test_dry_run_shows_non_sensitive_headers() {
+    let (temp_dir, config_dir) = setup_test_env();
+
+    // Create a simple spec without auth to test non-sensitive headers
+    let spec_content = r#"
+openapi: 3.0.3
+info:
+  title: Simple API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /users:
+    get:
+      operationId: getUsers
+      responses:
+        '200':
+          description: Success
+"#;
+
+    let spec_file = temp_dir.path().join("simple-api.yaml");
+    fs::write(&spec_file, spec_content).unwrap();
+
+    // Add the spec
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .args(&["config", "add", "simple-api", spec_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Run with --dry-run and verify non-sensitive headers are shown
+    Command::cargo_bin("aperture")
+        .unwrap()
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .args(&["api", "--dry-run", "simple-api", "default", "get-users"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"user-agent\": \"aperture/0.1.0\"",
+        ))
+        .stdout(predicate::str::contains("\"accept\": \"application/json\""));
 }
