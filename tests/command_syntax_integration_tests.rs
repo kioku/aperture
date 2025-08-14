@@ -148,7 +148,7 @@ async fn test_flag_based_syntax_with_caching() {
             "get-user-by-id",
             "--id",
             "123",
-            "--include_profile",
+            "--include-profile",
             "true",
             "--x-request-id",
             "req-123",
@@ -230,7 +230,7 @@ async fn test_legacy_positional_syntax_with_caching() {
             "users",
             "get-user-by-id",
             "456",
-            "--include_profile",
+            "--include-profile",
             "false",
         ])
         .unwrap();
@@ -313,7 +313,7 @@ async fn test_different_parameter_combinations_cache_separately() {
             "get-user-by-id",
             "--id",
             "123",
-            "--include_profile",
+            "--include-profile",
             "true",
         ])
         .unwrap();
@@ -342,7 +342,7 @@ async fn test_different_parameter_combinations_cache_separately() {
             "get-user-by-id",
             "--id",
             "123",
-            "--include_profile",
+            "--include-profile",
             "false",
         ])
         .unwrap();
@@ -463,7 +463,7 @@ async fn test_dry_run_with_flag_based_syntax() {
             "get-user-by-id",
             "--id",
             "123",
-            "--include_profile",
+            "--include-profile",
             "true",
         ])
         .unwrap();

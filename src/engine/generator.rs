@@ -157,7 +157,7 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
                     .action(ArgAction::Set);
             } else {
                 // Default mode: path parameters become flags too
-                let long_name = to_static_str(param.name.clone());
+                let long_name = to_static_str(to_kebab_case(&param.name));
                 let value_name = to_static_str(param.name.to_uppercase());
                 arg = arg
                     .long(long_name)
@@ -169,7 +169,7 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
         }
         "query" | "header" => {
             // Query and header parameters are flags
-            let long_name = to_static_str(param.name.clone());
+            let long_name = to_static_str(to_kebab_case(&param.name));
             let value_name = to_static_str(param.name.to_uppercase());
             arg = arg
                 .long(long_name)
@@ -184,7 +184,7 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
         }
         _ => {
             // Unknown location, treat as flag
-            let long_name = to_static_str(param.name.clone());
+            let long_name = to_static_str(to_kebab_case(&param.name));
             let value_name = to_static_str(param.name.to_uppercase());
             arg = arg
                 .long(long_name)
