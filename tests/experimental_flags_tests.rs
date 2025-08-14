@@ -91,7 +91,7 @@ fn test_default_flag_based_command_generation() {
         .expect("include_profile argument should exist");
     assert_eq!(
         include_profile_arg.get_long(),
-        Some("include_profile"),
+        Some("include-profile"),
         "Query parameter should have long flag"
     );
 }
@@ -131,7 +131,7 @@ fn test_legacy_positional_command_generation() {
         .expect("include_profile argument should exist");
     assert_eq!(
         include_profile_arg.get_long(),
-        Some("include_profile"),
+        Some("include-profile"),
         "Query parameter should still have long flag"
     );
 }

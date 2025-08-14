@@ -432,7 +432,7 @@ paths:
             "test",
             "--limit",
             "10",
-            "--X-API-Key",
+            "--x-api-key",
             "secret123",
         ])
         .assert()

@@ -423,8 +423,8 @@ paths:
 
     // Check that parameter was resolved correctly
     assert!(
-        stdout.contains("--petId") || stderr.contains("--petId"),
-        "Output should contain --petId parameter. stdout: {}, stderr: {}",
+        stdout.contains("--pet-id") || stderr.contains("--pet-id"),
+        "Output should contain --pet-id parameter. stdout: {}, stderr: {}",
         stdout,
         stderr
     );
@@ -550,7 +550,7 @@ paths:
     let combined = format!("{}{}", stdout, stderr);
 
     assert!(
-        combined.contains("--user-id") && combined.contains("--include.fields"),
+        combined.contains("--user-id") && combined.contains("--include-fields"),
         "Help should show both special character parameters"
     );
 
@@ -566,7 +566,7 @@ paths:
             "get-user",
             "--user-id",
             "123",
-            "--include.fields",
+            "--include-fields",
             "name,email",
         ])
         .output()
