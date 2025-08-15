@@ -3,9 +3,11 @@
 //! This module separates the concerns of validating and transforming `OpenAPI` specifications
 //! into distinct, testable components following the Single Responsibility Principle.
 
+pub mod parser;
 pub mod transformer;
 pub mod validator;
 
+pub use parser::parse_openapi;
 pub use transformer::SpecTransformer;
 pub use validator::SpecValidator;
 

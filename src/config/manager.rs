@@ -218,7 +218,7 @@ impl<F: FileSystem> ConfigManager<F> {
         self.check_spec_exists(name, force)?;
 
         let content = self.fs.read_to_string(file_path)?;
-        let openapi_spec: OpenAPI = serde_yaml::from_str(&content)?;
+        let openapi_spec = crate::spec::parse_openapi(&content)?;
 
         // Validate against Aperture's supported feature set using SpecValidator
         let validator = SpecValidator::new();
@@ -271,7 +271,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Fetch content from URL
         let content = fetch_spec_from_url(url).await?;
-        let openapi_spec: OpenAPI = serde_yaml::from_str(&content)?;
+        let openapi_spec = crate::spec::parse_openapi(&content)?;
 
         // Validate against Aperture's supported feature set using SpecValidator
         let validator = SpecValidator::new();
@@ -621,7 +621,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Fetch content from URL with custom timeout
         let content = fetch_spec_from_url_with_timeout(url, timeout).await?;
-        let openapi_spec: OpenAPI = serde_yaml::from_str(&content)?;
+        let openapi_spec = crate::spec::parse_openapi(&content)?;
 
         // Validate against Aperture's supported feature set using SpecValidator
         let validator = SpecValidator::new();
