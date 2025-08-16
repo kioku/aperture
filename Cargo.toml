@@ -27,6 +27,7 @@ jaq-parse = { version = "1.0.3", optional = true }
 jaq-std = { version = "1.6.0", optional = true }
 oas3 = { version = "0.17", features = ["yaml-spec"], optional = true }
 openapiv3 = "2.2.0"
+regex = "1"
 reqwest = { version = "0.12.21", features = ["json"] }
 serde = "1.0.219"
 serde_json = "1.0.140"
