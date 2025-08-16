@@ -147,8 +147,8 @@ pub fn parse_openapi(content: &str) -> Result<OpenAPI, Error> {
         // (some 3.1 specs like OpenProject have malformed indentation)
         preprocessed = fix_component_indentation(&preprocessed);
 
-        // Try oas3 first for 3.1 specs
-        match parse_with_oas3_direct(&preprocessed) {
+        // Try oas3 first for 3.1 specs - pass original content for security scheme extraction
+        match parse_with_oas3_direct_with_original(&preprocessed, content) {
             Ok(spec) => return Ok(spec),
             #[cfg(not(feature = "openapi31"))]
             Err(e) => return Err(e), // Return the "not enabled" error immediately
@@ -203,16 +203,22 @@ fn parse_yaml_with_fallback(content: &str) -> Result<OpenAPI, Error> {
     }
 }
 
-/// Direct parsing with oas3 for known 3.1 specs (already preprocessed)
+/// Direct parsing with oas3 for known 3.1 specs with original content for security scheme extraction
 #[cfg(feature = "openapi31")]
-fn parse_with_oas3_direct(content: &str) -> Result<OpenAPI, Error> {
-    // Try parsing with oas3 (supports OpenAPI 3.1.x)
+fn parse_with_oas3_direct_with_original(
+    preprocessed: &str,
+    original: &str,
+) -> Result<OpenAPI, Error> {
+    // First, extract security schemes from the original content before any conversions
+    let security_schemes_from_yaml = extract_security_schemes_from_yaml(original);
+
+    // Try parsing with oas3 (supports OpenAPI 3.1.x) using preprocessed content
     // First try as YAML, then as JSON if YAML fails
-    let oas3_spec = match oas3::from_yaml(content) {
+    let oas3_spec = match oas3::from_yaml(preprocessed) {
         Ok(spec) => spec,
         Err(_yaml_err) => {
             // Try parsing as JSON
-            oas3::from_json(content).map_err(|e| Error::SerializationError {
+            oas3::from_json(preprocessed).map_err(|e| Error::SerializationError {
                 reason: format!("Failed to parse OpenAPI 3.1 spec as YAML or JSON: {e}"),
             })?
         }
@@ -228,17 +234,82 @@ fn parse_with_oas3_direct(content: &str) -> Result<OpenAPI, Error> {
 
     // Parse the JSON as OpenAPI 3.0.x
     // This may fail if there are incompatible 3.1 features
-    serde_json::from_str::<OpenAPI>(&json).map_err(|e| {
+    let mut spec = serde_json::from_str::<OpenAPI>(&json).map_err(|e| {
         Error::Validation(format!(
             "OpenAPI 3.1 spec contains features incompatible with 3.0: {e}. \
             Consider converting the spec to OpenAPI 3.0 format."
         ))
-    })
+    })?;
+
+    // WORKAROUND: The oas3 conversion loses security schemes, so restore them
+    // from the original content that we extracted earlier
+    restore_security_schemes(&mut spec, security_schemes_from_yaml);
+
+    Ok(spec)
+}
+
+/// Restore security schemes to the OpenAPI spec if they were lost during conversion
+#[cfg(feature = "openapi31")]
+fn restore_security_schemes(
+    spec: &mut OpenAPI,
+    security_schemes: Option<
+        indexmap::IndexMap<String, openapiv3::ReferenceOr<openapiv3::SecurityScheme>>,
+    >,
+) {
+    if let Some(schemes) = security_schemes {
+        // Ensure components exists and add the security schemes
+        match spec.components {
+            Some(ref mut components) => {
+                components.security_schemes = schemes;
+            }
+            None => {
+                let mut components = openapiv3::Components::default();
+                components.security_schemes = schemes;
+                spec.components = Some(components);
+            }
+        }
+    }
+}
+
+/// Extract security schemes from YAML/JSON content before any processing
+///
+/// This function is needed because the oas3 library's conversion from OpenAPI 3.1 to 3.0
+/// sometimes loses security scheme definitions. We extract them from the original content
+/// to restore them after conversion.
+#[cfg(feature = "openapi31")]
+fn extract_security_schemes_from_yaml(
+    content: &str,
+) -> Option<indexmap::IndexMap<String, openapiv3::ReferenceOr<openapiv3::SecurityScheme>>> {
+    // Parse content as either YAML or JSON
+    let value = parse_content_as_value(content)?;
+
+    // Navigate to components.securitySchemes
+    let security_schemes = value.get("components")?.get("securitySchemes")?;
+
+    // Convert to the expected type
+    serde_yaml::from_value(security_schemes.clone()).ok()
+}
+
+/// Parse content as either YAML or JSON into a generic Value type
+#[cfg(feature = "openapi31")]
+fn parse_content_as_value(content: &str) -> Option<serde_yaml::Value> {
+    // Try YAML first (more common for OpenAPI specs)
+    if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(content) {
+        return Some(value);
+    }
+
+    // Fallback to JSON
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()
+        .and_then(|json| serde_yaml::to_value(json).ok())
 }
 
 /// Fallback for when `OpenAPI` 3.1 support is not compiled in
 #[cfg(not(feature = "openapi31"))]
-fn parse_with_oas3_direct(_content: &str) -> Result<OpenAPI, Error> {
+fn parse_with_oas3_direct_with_original(
+    _preprocessed: &str,
+    _original: &str,
+) -> Result<OpenAPI, Error> {
     Err(Error::Validation(
         "OpenAPI 3.1 support is not enabled. Rebuild with --features openapi31 to enable 3.1 support.".to_string()
     ))
