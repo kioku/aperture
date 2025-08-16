@@ -144,6 +144,15 @@ Enables advanced JSON filtering using JQ syntax with a pure Rust implementation:
 
 **Known Issue:** The jaq library integration is broken. When enabled, all JQ filters return the complete JSON document instead of filtered results. This affects describe-json, batch operations, and regular API calls. Use the default build without this feature for production.
 
+### `openapi31` Feature
+Enables support for OpenAPI 3.1 specifications:
+- **Build:** `cargo build --features openapi31`
+- **Test:** `cargo test --features openapi31`
+- **Without feature:** Only OpenAPI 3.0.x specs are supported. Attempting to add a 3.1 spec will result in an error with instructions to enable the feature.
+- **With feature:** Both OpenAPI 3.0.x and 3.1.x specs are supported. The oas3 crate is used to parse 3.1 specs and convert them to the 3.0 format internally.
+
+**Note:** This feature adds the oas3 dependency which increases binary size. Only enable if you need OpenAPI 3.1 support.
+
 ## Code Style
 
 The project enforces strict code quality through:

@@ -432,7 +432,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         }
 
         let spec_content = fs::read_to_string(&spec_path)?;
-        let openapi_spec: openapiv3::OpenAPI = serde_yaml::from_str(&spec_content)
+        let openapi_spec = aperture_cli::spec::parse_openapi(&spec_content)
             .map_err(|e| Error::Config(format!("Failed to parse OpenAPI spec: {e}")))?;
 
         // Generate manifest from the original spec with all metadata
