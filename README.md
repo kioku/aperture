@@ -253,6 +253,18 @@ aperture api my-api get-data --jq '.results.items'
 aperture api my-api get-user --id 123 --jq '.address.city'
 ```
 
+### Optional Features
+
+**OpenAPI 3.1 Support**
+The `openapi31` feature enables parsing of OpenAPI 3.1 specifications:
+
+```bash
+# Build with OpenAPI 3.1 support
+cargo build --release --features openapi31
+```
+
+Without this feature, only OpenAPI 3.0.x specifications are supported. When a 3.1 spec is detected without the feature enabled, a helpful error message will guide you to rebuild with the feature.
+
 **Advanced Filtering (Experimental)**
 The `jq` feature flag enables advanced JSON filtering using a pure Rust JQ implementation:
 

@@ -27,17 +27,16 @@ fn preprocess_for_compatibility(content: &str) -> String {
         result = result.replace(&format!("{property}: 1"), &format!("{property}: true"));
     }
 
-
     // Note: We don't change exclusiveMinimum/Maximum here because in 3.1 they're meant to be numbers
 
     result
 }
 
 /// Fixes common indentation issues in components section for malformed specs
-/// This is only applied to OpenAPI 3.1 specs where we've seen such issues
+/// This is only applied to `OpenAPI` 3.1 specs where we've seen such issues
 fn fix_component_indentation(content: &str) -> String {
     let mut result = content.to_string();
-    
+
     // Some 3.1 specs (like OpenProject) have component subsections at 2 spaces instead of 4
     // Only fix these specific sections when they appear at the wrong indentation level
     let component_sections = [
@@ -45,18 +44,18 @@ fn fix_component_indentation(content: &str) -> String {
         "responses",
         "examples",
         "parameters",
-        "requestBodies", 
+        "requestBodies",
         "headers",
         "securitySchemes",
         "links",
         "callbacks",
     ];
-    
+
     for section in &component_sections {
         // Only replace if it's at 2-space indentation (wrong for components subsections)
         result = result.replace(&format!("\n  {section}:"), &format!("\n    {section}:"));
     }
-    
+
     result
 }
 
@@ -100,12 +99,15 @@ pub fn parse_openapi(content: &str) -> Result<OpenAPI, Error> {
         // For OpenAPI 3.1 specs, also fix potential indentation issues
         // (some 3.1 specs like OpenProject have malformed indentation)
         preprocessed = fix_component_indentation(&preprocessed);
-        
+
         // Try oas3 first for 3.1 specs
-        if let Ok(spec) = parse_with_oas3_direct(&preprocessed) {
-            return Ok(spec);
+        match parse_with_oas3_direct(&preprocessed) {
+            Ok(spec) => return Ok(spec),
+            #[cfg(not(feature = "openapi31"))]
+            Err(e) => return Err(e), // Return the "not enabled" error immediately
+            #[cfg(feature = "openapi31")]
+            Err(_) => {} // Fall through to try regular parsing
         }
-        // Fall through to try regular parsing anyway
     }
 
     // Try parsing as OpenAPI 3.0.x (most common case)
@@ -120,6 +122,7 @@ pub fn parse_openapi(content: &str) -> Result<OpenAPI, Error> {
 }
 
 /// Direct parsing with oas3 for known 3.1 specs (already preprocessed)
+#[cfg(feature = "openapi31")]
 fn parse_with_oas3_direct(content: &str) -> Result<OpenAPI, Error> {
     // Try parsing with oas3 (supports OpenAPI 3.1.x)
     let oas3_spec = oas3::from_yaml(content).map_err(Error::Yaml)?;
@@ -142,6 +145,13 @@ fn parse_with_oas3_direct(content: &str) -> Result<OpenAPI, Error> {
     })
 }
 
+/// Fallback for when `OpenAPI` 3.1 support is not compiled in
+#[cfg(not(feature = "openapi31"))]
+fn parse_with_oas3_direct(_content: &str) -> Result<OpenAPI, Error> {
+    Err(Error::Validation(
+        "OpenAPI 3.1 support is not enabled. Rebuild with --features openapi31 to enable 3.1 support.".to_string()
+    ))
+}
 
 #[cfg(test)]
 mod tests {
@@ -173,12 +183,26 @@ info:
 paths: {}
 "#;
 
-        // This test may pass or fail depending on whether the 3.1 features are compatible
         let result = parse_openapi(spec_31);
-        if result.is_ok() {
-            let spec = result.unwrap();
-            // The version might be converted during the round-trip
-            assert!(spec.openapi.starts_with("3."));
+
+        #[cfg(feature = "openapi31")]
+        {
+            // With the feature, it should parse successfully
+            assert!(result.is_ok());
+            if let Ok(spec) = result {
+                assert!(spec.openapi.starts_with("3."));
+            }
+        }
+
+        #[cfg(not(feature = "openapi31"))]
+        {
+            // Without the feature, it should return an error about missing support
+            assert!(result.is_err());
+            if let Err(Error::Validation(msg)) = result {
+                assert!(msg.contains("OpenAPI 3.1 support is not enabled"));
+            } else {
+                panic!("Expected validation error about missing 3.1 support");
+            }
         }
     }
 
