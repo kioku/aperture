@@ -1,6 +1,7 @@
 use aperture_cli::batch::{BatchConfig, BatchFile, BatchMetadata, BatchOperation, BatchProcessor};
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use aperture_cli::cli::OutputFormat;
+use aperture_cli::constants;
 use std::collections::HashMap;
 use std::io::Write;
 use tempfile::NamedTempFile;
@@ -16,7 +17,7 @@ fn create_test_spec() -> CachedSpec {
                 description: Some("Get user by ID".to_string()),
                 summary: None,
                 operation_id: "getUserById".to_string(),
-                method: "GET".to_string(),
+                method: constants::HTTP_METHOD_GET.to_string(),
                 path: "/users/{id}".to_string(),
                 parameters: vec![CachedParameter {
                     name: "id".to_string(),
@@ -42,13 +43,13 @@ fn create_test_spec() -> CachedSpec {
                 description: Some("Create a new user".to_string()),
                 summary: None,
                 operation_id: "createUser".to_string(),
-                method: "POST".to_string(),
+                method: constants::HTTP_METHOD_POST.to_string(),
                 path: "/users".to_string(),
                 parameters: vec![],
                 request_body: Some(aperture_cli::cache::models::CachedRequestBody {
                     description: Some("User data".to_string()),
                     required: true,
-                    content_type: "application/json".to_string(),
+                    content_type: constants::CONTENT_TYPE_JSON.to_string(),
                     schema: r#"{"type": "object"}"#.to_string(),
                     example: Some(
                         r#"{"name": "John Doe", "email": "john@example.com"}"#.to_string(),
@@ -377,7 +378,7 @@ async fn test_batch_real_execution_with_mock_server() {
                             "name": "John Doe",
                             "email": "john@example.com"
                         }))
-                        .insert_header("content-type", "application/json"),
+                        .insert_header("content-type", constants::CONTENT_TYPE_JSON),
                 ),
         )
         .await;
@@ -393,7 +394,7 @@ async fn test_batch_real_execution_with_mock_server() {
                             "name": "Jane Smith",
                             "email": "jane@example.com"
                         }))
-                        .insert_header("content-type", "application/json"),
+                        .insert_header("content-type", constants::CONTENT_TYPE_JSON),
                 ),
         )
         .await;
@@ -482,7 +483,7 @@ async fn test_batch_execution_with_error_handling() {
                             "name": "John Doe",
                             "email": "john@example.com"
                         }))
-                        .insert_header("content-type", "application/json"),
+                        .insert_header("content-type", constants::CONTENT_TYPE_JSON),
                 ),
         )
         .await;

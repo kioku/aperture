@@ -313,22 +313,25 @@ impl BatchProcessor {
 
         // Parse the operation args into ArgMatches
         let matches = command
-            .try_get_matches_from(std::iter::once("api".to_string()).chain(operation.args.clone()))
+            .try_get_matches_from(
+                std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
+                    .chain(operation.args.clone()),
+            )
             .map_err(|e| Error::InvalidCommand {
-                context: "batch".to_string(),
+                context: crate::constants::CONTEXT_BATCH.to_string(),
                 reason: e.to_string(),
             })?;
 
         // Create cache configuration - for batch operations, we use the operation's use_cache setting
         let cache_config = if operation.use_cache.unwrap_or(false) {
             Some(crate::response_cache::CacheConfig {
-                cache_dir: std::env::var("APERTURE_CONFIG_DIR")
+                cache_dir: std::env::var(crate::constants::ENV_APERTURE_CONFIG_DIR)
                     .map_or_else(
                         |_| std::path::PathBuf::from("~/.config/aperture"),
                         std::path::PathBuf::from,
                     )
-                    .join(".cache")
-                    .join("responses"),
+                    .join(crate::constants::DIR_CACHE)
+                    .join(crate::constants::DIR_RESPONSES),
                 default_ttl: std::time::Duration::from_secs(300),
                 max_entries: 1000,
                 enabled: true,
@@ -398,7 +401,10 @@ impl BatchProcessor {
                 // Return success message
                 Ok(format!(
                     "Successfully executed operation: {}",
-                    operation.id.as_deref().unwrap_or("unnamed")
+                    operation
+                        .id
+                        .as_deref()
+                        .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME)
                 ))
             }
         }

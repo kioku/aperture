@@ -4,6 +4,7 @@ use aperture_cli::cache::models::{
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
+use aperture_cli::constants;
 use aperture_cli::engine::executor::execute_request;
 use clap::{Arg, Command};
 use serde_json::json;
@@ -43,9 +44,9 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
         CachedSecurityScheme {
             name: "bearerAuth".to_string(),
             scheme_type: "http".to_string(),
-            scheme: Some("bearer".to_string()),
+            scheme: Some(constants::AUTH_SCHEME_BEARER.to_string()),
             location: Some("header".to_string()),
-            parameter_name: Some("Authorization".to_string()),
+            parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
             description: None,
             bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {

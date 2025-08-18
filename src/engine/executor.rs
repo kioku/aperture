@@ -2,6 +2,7 @@ use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
 use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
+use crate::constants;
 use crate::error::Error;
 use crate::response_cache::{CacheConfig, CacheKey, CachedRequestInfo, ResponseCache};
 use crate::utils::to_kebab_case;
@@ -26,11 +27,11 @@ pub enum AuthScheme {
 impl From<&str> for AuthScheme {
     fn from(s: &str) -> Self {
         match s.to_lowercase().as_str() {
-            "bearer" => Self::Bearer,
-            "basic" => Self::Basic,
+            constants::AUTH_SCHEME_BEARER => Self::Bearer,
+            constants::AUTH_SCHEME_BASIC => Self::Basic,
             "token" => Self::Token,
             "dsn" => Self::DSN,
-            "apikey" => Self::ApiKey,
+            constants::AUTH_SCHEME_APIKEY => Self::ApiKey,
             _ => Self::Custom(s.to_string()),
         }
     }
@@ -259,7 +260,7 @@ pub async fn execute_request(
         return Err(Error::HttpErrorWithContext {
             status: status.as_u16(),
             body: if response_text.is_empty() {
-                "(empty response)".to_string()
+                constants::EMPTY_RESPONSE.to_string()
             } else {
                 response_text
             },
@@ -425,7 +426,10 @@ fn build_headers(
 
     // Add default headers
     headers.insert("User-Agent", HeaderValue::from_static("aperture/0.1.0"));
-    headers.insert("Accept", HeaderValue::from_static("application/json"));
+    headers.insert(
+        constants::HEADER_ACCEPT,
+        HeaderValue::from_static(constants::CONTENT_TYPE_JSON),
+    );
 
     // Get to the deepest subcommand matches
     let mut current_matches = matches;
@@ -587,11 +591,11 @@ fn add_authentication_header(
     }
 
     // Validate the secret doesn't contain control characters
-    validate_header_value("Authorization", &secret_value)?;
+    validate_header_value(constants::HEADER_AUTHORIZATION, &secret_value)?;
 
     // Build the appropriate header based on scheme type
     match security_scheme.scheme_type.as_str() {
-        "apiKey" => {
+        constants::AUTH_SCHEME_APIKEY => {
             let (Some(location), Some(param_name)) =
                 (&security_scheme.location, &security_scheme.parameter_name)
             else {
@@ -642,10 +646,10 @@ fn add_authentication_header(
 
                 let header_value =
                     HeaderValue::from_str(&auth_value).map_err(|e| Error::InvalidHeaderValue {
-                        name: "Authorization".to_string(),
+                        name: constants::HEADER_AUTHORIZATION.to_string(),
                         reason: e.to_string(),
                     })?;
-                headers.insert("Authorization", header_value);
+                headers.insert(constants::HEADER_AUTHORIZATION, header_value);
 
                 // Debug logging
                 if std::env::var("RUST_LOG").is_ok() {
@@ -761,9 +765,9 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
         Value::Array(items) => {
             if items.is_empty() {
                 if capture_output {
-                    return Ok(Some("(empty array)".to_string()));
+                    return Ok(Some(constants::EMPTY_ARRAY.to_string()));
                 }
-                println!("(empty array)");
+                println!("{}", constants::EMPTY_ARRAY);
                 return Ok(None);
             }
 
@@ -889,7 +893,7 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
 /// Formats a JSON value for display in a table cell
 fn format_value_for_table(value: &Value) -> String {
     match value {
-        Value::Null => "null".to_string(),
+        Value::Null => constants::NULL_VALUE.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
         Value::String(s) => s.clone(),
@@ -968,7 +972,7 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
         match results {
             Ok(vals) => {
                 if vals.is_empty() {
-                    Ok("null".to_string())
+                    Ok(constants::NULL_VALUE.to_string())
                 } else if vals.len() == 1 {
                     // Single result - convert back to JSON
                     let json_val = jaq_val_to_serde_json(&vals[0]);
@@ -1011,7 +1015,10 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
         || filter.contains("length");
 
     if uses_advanced_features {
-        eprintln!("Warning: Advanced JQ features require building with --features jq");
+        eprintln!(
+            "{} Advanced JQ features require building with --features jq",
+            crate::constants::MSG_WARNING_PREFIX
+        );
         eprintln!("         Currently only basic field access is supported (e.g., '.field', '.nested.field')");
         eprintln!("         To enable full JQ support: cargo install aperture-cli --features jq");
     }

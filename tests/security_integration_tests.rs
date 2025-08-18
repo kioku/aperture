@@ -2,6 +2,7 @@ use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
 };
 use aperture_cli::cli::OutputFormat;
+use aperture_cli::constants;
 use aperture_cli::engine::executor::execute_request;
 use clap::{Arg, Command};
 use std::collections::HashMap;
@@ -55,9 +56,9 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
         CachedSecurityScheme {
             name: "bearerAuth".to_string(),
             scheme_type: "http".to_string(),
-            scheme: Some("bearer".to_string()),
+            scheme: Some(constants::AUTH_SCHEME_BEARER.to_string()),
             location: Some("header".to_string()),
-            parameter_name: Some("Authorization".to_string()),
+            parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
             description: None,
             bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {

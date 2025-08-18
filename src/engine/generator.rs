@@ -1,4 +1,5 @@
 use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use crate::constants;
 use crate::utils::to_kebab_case;
 use clap::{Arg, ArgAction, Command};
 use std::collections::HashMap;
@@ -14,7 +15,7 @@ fn to_static_str(s: String) -> &'static str {
 /// Generates a dynamic clap command tree from a cached `OpenAPI` specification.
 ///
 /// This function creates a hierarchical command structure based on the `OpenAPI` spec:
-/// - Root command: "api"
+/// - Root command: "api" (`CLI_ROOT_COMMAND`)
 /// - Tag groups: Operations are grouped by their tags (e.g., "users", "posts")
 /// - Operations: Individual API operations as subcommands under their tag group
 ///
@@ -39,7 +40,7 @@ pub fn generate_command_tree(spec: &CachedSpec) -> Command {
 /// Generates a dynamic clap command tree with optional legacy positional parameter syntax.
 #[must_use]
 pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: bool) -> Command {
-    let mut root_command = Command::new("api")
+    let mut root_command = Command::new(constants::CLI_ROOT_COMMAND)
         .version(to_static_str(spec.version.clone()))
         .about(format!("CLI for {} API", spec.name))
         // Add global flags that should be available to all operations
@@ -76,7 +77,7 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
     for command in &spec.commands {
         // Use the command name (first tag) or "default" as fallback
         let group_name = if command.name.is_empty() {
-            "default".to_string()
+            constants::DEFAULT_GROUP.to_string()
         } else {
             command.name.clone()
         };

@@ -1,6 +1,7 @@
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec,
 };
+use aperture_cli::constants;
 use aperture_cli::engine::generator::generate_command_tree;
 use std::collections::HashMap;
 
@@ -41,7 +42,7 @@ macro_rules! cached_response {
         CachedResponse {
             status_code: $status.to_string(),
             description: None,
-            content_type: Some("application/json".to_string()),
+            content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
             schema: Some(r#"{"type": "object"}"#.to_string()),
         }
     };
@@ -50,7 +51,7 @@ macro_rules! cached_response {
 macro_rules! cached_request_body {
     () => {
         CachedRequestBody {
-            content_type: "application/json".to_string(),
+            content_type: constants::CONTENT_TYPE_JSON.to_string(),
             schema: r#"{"type": "object"}"#.to_string(),
             required: true,
             description: None,
@@ -59,7 +60,7 @@ macro_rules! cached_request_body {
     };
     ($required:expr) => {
         CachedRequestBody {
-            content_type: "application/json".to_string(),
+            content_type: constants::CONTENT_TYPE_JSON.to_string(),
             schema: r#"{"type": "object"}"#.to_string(),
             required: $required,
             description: None,

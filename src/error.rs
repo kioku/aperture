@@ -1,3 +1,4 @@
+use crate::constants;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use thiserror::Error;
@@ -223,10 +224,10 @@ impl Error {
             Self::Io(io_err) => {
                 let context = match io_err.kind() {
                     std::io::ErrorKind::NotFound => {
-                        Some(Cow::Borrowed("Check that the file path is correct and the file exists."))
+                        Some(Cow::Borrowed(constants::ERR_FILE_NOT_FOUND))
                     }
                     std::io::ErrorKind::PermissionDenied => {
-                        Some(Cow::Borrowed("Check file permissions or run with appropriate privileges."))
+                        Some(Cow::Borrowed(constants::ERR_PERMISSION))
                     }
                     _ => None,
                 };
@@ -239,22 +240,16 @@ impl Error {
             }
             Self::Network(req_err) => {
                 let context = if req_err.is_connect() {
-                    Some(Cow::Borrowed("Check that the API server is running and accessible."))
+                    Some(Cow::Borrowed(constants::ERR_CONNECTION))
                 } else if req_err.is_timeout() {
-                    Some(Cow::Borrowed("The API server may be slow or unresponsive. Try again later."))
+                    Some(Cow::Borrowed(constants::ERR_TIMEOUT))
                 } else if req_err.is_status() {
                     req_err.status().and_then(|status| match status.as_u16() {
-                        401 => Some(Cow::Borrowed("Check your API credentials and authentication configuration.")),
-                        403 => Some(Cow::Borrowed(
-                            "Your credentials may be valid but lack permission for this operation.",
-                        )),
-                        404 => Some(Cow::Borrowed("Check that the API endpoint and parameters are correct.")),
-                        429 => {
-                            Some(Cow::Borrowed("You're making requests too quickly. Wait before trying again."))
-                        }
-                        500..=599 => {
-                            Some(Cow::Borrowed("The API server is experiencing issues. Try again later."))
-                        }
+                        401 => Some(Cow::Borrowed(constants::ERR_API_CREDENTIALS)),
+                        403 => Some(Cow::Borrowed(constants::ERR_PERMISSION_DENIED)),
+                        404 => Some(Cow::Borrowed(constants::ERR_ENDPOINT_NOT_FOUND)),
+                        429 => Some(Cow::Borrowed(constants::ERR_RATE_LIMITED)),
+                        500..=599 => Some(Cow::Borrowed(constants::ERR_SERVER_ERROR)),
                         _ => None,
                     })
                 } else {
@@ -265,33 +260,31 @@ impl Error {
             Self::Yaml(yaml_err) => (
                 "YAMLParsing",
                 yaml_err.to_string(),
-                Some(Cow::Borrowed("Check that your OpenAPI specification is valid YAML syntax.")),
+                Some(Cow::Borrowed(constants::ERR_YAML_SYNTAX)),
                 None,
             ),
             Self::Json(json_err) => (
                 "JSONParsing",
                 json_err.to_string(),
-                Some(Cow::Borrowed("Check that your request body or response contains valid JSON.")),
+                Some(Cow::Borrowed(constants::ERR_JSON_SYNTAX)),
                 None,
             ),
             Self::Validation(msg) => (
                 "Validation",
                 msg.clone(),
-                Some(Cow::Borrowed(
-                    "Check that your OpenAPI specification follows the required format."
-                )),
+                Some(Cow::Borrowed(constants::ERR_OPENAPI_FORMAT)),
                 None,
             ),
             Self::Toml(toml_err) => (
                 "TOMLParsing",
                 toml_err.to_string(),
-                Some(Cow::Borrowed("Check that your configuration file is valid TOML syntax.")),
+                Some(Cow::Borrowed(constants::ERR_TOML_SYNTAX)),
                 None,
             ),
             Self::SpecNotFound { name } => (
                 "SpecNotFound",
                 format!("API specification '{name}' not found"),
-                Some(Cow::Borrowed("Use 'aperture config list' to see available specifications.")),
+                Some(Cow::Borrowed(constants::MSG_USE_CONFIG_LIST)),
                 Some(json!({ "spec_name": name })),
             ),
             Self::SpecAlreadyExists { name } => (
@@ -399,7 +392,7 @@ impl Error {
             Self::InvalidJsonBody { reason } => (
                 "InvalidJsonBody",
                 format!("Invalid JSON body: {reason}"),
-                Some(Cow::Borrowed("Check your JSON syntax and ensure all quotes are properly escaped.")),
+                Some(Cow::Borrowed(constants::ERR_JSON_SYNTAX)),
                 Some(json!({ "reason": reason })),
             ),
             Self::RequestFailed { reason } => (
@@ -418,7 +411,7 @@ impl Error {
                 let context_hint = match status {
                     401 => {
                         if security_schemes.is_empty() {
-                            Some(Cow::Borrowed("Check your API credentials and authentication configuration."))
+                            Some(Cow::Borrowed(constants::ERR_API_CREDENTIALS))
                         } else {
                             let env_vars: Vec<String> = security_schemes.iter()
                                 .map(|scheme| format!("Check environment variable for '{scheme}' authentication"))
@@ -426,10 +419,10 @@ impl Error {
                             Some(Cow::Owned(env_vars.join("; ")))
                         }
                     },
-                    403 => Some(Cow::Borrowed("Your credentials may be valid but lack permission for this operation.")),
-                    404 => Some(Cow::Borrowed("Check that the API endpoint and parameters are correct.")),
-                    429 => Some(Cow::Borrowed("You're making requests too quickly. Wait before trying again.")),
-                    500..=599 => Some(Cow::Borrowed("The API server is experiencing issues. Try again later.")),
+                    403 => Some(Cow::Borrowed(constants::ERR_PERMISSION_DENIED)),
+                    404 => Some(Cow::Borrowed(constants::ERR_ENDPOINT_NOT_FOUND)),
+                    429 => Some(Cow::Borrowed(constants::ERR_RATE_LIMITED)),
+                    500..=599 => Some(Cow::Borrowed(constants::ERR_SERVER_ERROR)),
                     _ => None,
                 };
                 (
@@ -448,7 +441,7 @@ impl Error {
             Self::InvalidCommand { context, reason } => (
                 "InvalidCommand",
                 format!("Invalid command for API '{context}': {reason}"),
-                Some(Cow::Borrowed("Use --help to see available commands.")),
+                Some(Cow::Borrowed(constants::MSG_USE_HELP)),
                 Some(json!({ "context": context, "reason": reason })),
             ),
             Self::OperationNotFound => (

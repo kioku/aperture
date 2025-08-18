@@ -1,9 +1,8 @@
 use crate::cache::models::{GlobalCacheMetadata, SpecMetadata, CACHE_FORMAT_VERSION};
+use crate::constants;
 use crate::error::Error;
 use crate::fs::FileSystem;
 use std::path::Path;
-
-const CACHE_METADATA_FILE: &str = "cache_metadata.json";
 
 /// Manages cache metadata for optimized version checking
 pub struct CacheMetadataManager<'a, F: FileSystem> {
@@ -23,7 +22,7 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         &self,
         cache_dir: P,
     ) -> Result<GlobalCacheMetadata, Error> {
-        let metadata_path = cache_dir.as_ref().join(CACHE_METADATA_FILE);
+        let metadata_path = cache_dir.as_ref().join(constants::CACHE_METADATA_FILENAME);
 
         if !self.fs.exists(&metadata_path) {
             // Create default metadata file
@@ -47,7 +46,7 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         cache_dir: P,
         metadata: &GlobalCacheMetadata,
     ) -> Result<(), Error> {
-        let metadata_path = cache_dir.as_ref().join(CACHE_METADATA_FILE);
+        let metadata_path = cache_dir.as_ref().join(constants::CACHE_METADATA_FILENAME);
 
         // Ensure cache directory exists
         self.fs.create_dir_all(cache_dir.as_ref())?;

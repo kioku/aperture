@@ -3,6 +3,7 @@ use crate::cache::models::{
 };
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
+use crate::constants;
 use crate::error::Error;
 use crate::spec::resolve_parameter_reference;
 use crate::utils::to_kebab_case;
@@ -215,7 +216,7 @@ pub fn generate_capability_manifest_from_openapi(
                         .tags
                         .first()
                         .cloned()
-                        .unwrap_or_else(|| "default".to_string())
+                        .unwrap_or_else(|| constants::DEFAULT_GROUP.to_string())
                         .to_lowercase();
 
                     command_groups
@@ -270,7 +271,7 @@ pub fn generate_capability_manifest(
     // Group commands by their tag (namespace) and convert to CommandInfo
     for cached_command in &spec.commands {
         let group_name = if cached_command.name.is_empty() {
-            "default".to_string()
+            constants::DEFAULT_GROUP.to_string()
         } else {
             cached_command.name.to_lowercase()
         };
@@ -351,7 +352,7 @@ fn convert_cached_parameter_to_info(cached_param: &CachedParameter) -> Parameter
         param_type: cached_param
             .schema_type
             .clone()
-            .unwrap_or_else(|| "string".to_string()),
+            .unwrap_or_else(|| constants::SCHEMA_TYPE_STRING.to_string()),
         description: cached_param.description.clone(),
         format: cached_param.format.clone(),
         default_value: cached_param.default_value.clone(),
@@ -376,16 +377,16 @@ fn extract_security_schemes(spec: &CachedSpec) -> HashMap<String, SecurityScheme
 
     for (name, scheme) in &spec.security_schemes {
         let details = match scheme.scheme_type.as_str() {
-            "http" => {
+            constants::SECURITY_TYPE_HTTP => {
                 scheme.scheme.as_ref().map_or(
                     SecuritySchemeDetails::HttpBearer {
                         bearer_format: None,
                     },
                     |http_scheme| match http_scheme.as_str() {
-                        "bearer" => SecuritySchemeDetails::HttpBearer {
+                        constants::AUTH_SCHEME_BEARER => SecuritySchemeDetails::HttpBearer {
                             bearer_format: scheme.bearer_format.clone(),
                         },
-                        "basic" => SecuritySchemeDetails::HttpBasic,
+                        constants::AUTH_SCHEME_BASIC => SecuritySchemeDetails::HttpBasic,
                         _ => {
                             // For other HTTP schemes, default to bearer
                             SecuritySchemeDetails::HttpBearer {
@@ -395,15 +396,15 @@ fn extract_security_schemes(spec: &CachedSpec) -> HashMap<String, SecurityScheme
                     },
                 )
             }
-            "apiKey" => SecuritySchemeDetails::ApiKey {
+            constants::AUTH_SCHEME_APIKEY => SecuritySchemeDetails::ApiKey {
                 location: scheme
                     .location
                     .clone()
-                    .unwrap_or_else(|| "header".to_string()),
+                    .unwrap_or_else(|| constants::LOCATION_HEADER.to_string()),
                 name: scheme
                     .parameter_name
                     .clone()
-                    .unwrap_or_else(|| "Authorization".to_string()),
+                    .unwrap_or_else(|| constants::HEADER_AUTHORIZATION.to_string()),
             },
             _ => {
                 // Default to bearer for unknown types
@@ -455,8 +456,8 @@ fn convert_openapi_operation_to_info(
     let request_body = operation.request_body.as_ref().and_then(|rb_ref| {
         if let ReferenceOr::Item(body) = rb_ref {
             // Prefer JSON content if available
-            let content_type = if body.content.contains_key("application/json") {
-                "application/json"
+            let content_type = if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
+                constants::CONTENT_TYPE_JSON
             } else {
                 body.content.keys().next().map(String::as_str)?
             };
@@ -515,10 +516,18 @@ fn convert_openapi_operation_to_info(
 /// Converts an `OpenAPI` parameter to `ParameterInfo` with full metadata
 fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo {
     let (param_data, location_str) = match param {
-        OpenApiParameter::Query { parameter_data, .. } => (parameter_data, "query"),
-        OpenApiParameter::Header { parameter_data, .. } => (parameter_data, "header"),
-        OpenApiParameter::Path { parameter_data, .. } => (parameter_data, "path"),
-        OpenApiParameter::Cookie { parameter_data, .. } => (parameter_data, "cookie"),
+        OpenApiParameter::Query { parameter_data, .. } => {
+            (parameter_data, constants::PARAM_LOCATION_QUERY)
+        }
+        OpenApiParameter::Header { parameter_data, .. } => {
+            (parameter_data, constants::PARAM_LOCATION_HEADER)
+        }
+        OpenApiParameter::Path { parameter_data, .. } => {
+            (parameter_data, constants::PARAM_LOCATION_PATH)
+        }
+        OpenApiParameter::Cookie { parameter_data, .. } => {
+            (parameter_data, constants::PARAM_LOCATION_COOKIE)
+        }
     };
 
     // Extract schema information
@@ -537,15 +546,25 @@ fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo 
                                         serde_json::to_string(v).unwrap_or_else(|_| v.to_string())
                                     })
                                     .collect();
-                                ("string".to_string(), None, enum_values)
+                                (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
                             }
-                            openapiv3::Type::Number(_) => ("number".to_string(), None, vec![]),
-                            openapiv3::Type::Integer(_) => ("integer".to_string(), None, vec![]),
-                            openapiv3::Type::Boolean(_) => ("boolean".to_string(), None, vec![]),
-                            openapiv3::Type::Array(_) => ("array".to_string(), None, vec![]),
-                            openapiv3::Type::Object(_) => ("object".to_string(), None, vec![]),
+                            openapiv3::Type::Number(_) => {
+                                (constants::SCHEMA_TYPE_NUMBER.to_string(), None, vec![])
+                            }
+                            openapiv3::Type::Integer(_) => {
+                                (constants::SCHEMA_TYPE_INTEGER.to_string(), None, vec![])
+                            }
+                            openapiv3::Type::Boolean(_) => {
+                                (constants::SCHEMA_TYPE_BOOLEAN.to_string(), None, vec![])
+                            }
+                            openapiv3::Type::Array(_) => {
+                                (constants::SCHEMA_TYPE_ARRAY.to_string(), None, vec![])
+                            }
+                            openapiv3::Type::Object(_) => {
+                                (constants::SCHEMA_TYPE_OBJECT.to_string(), None, vec![])
+                            }
                         },
-                        _ => ("string".to_string(), None, vec![]),
+                        _ => (constants::SCHEMA_TYPE_STRING.to_string(), None, vec![]),
                     };
 
                     let default_value = schema
@@ -556,12 +575,22 @@ fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo 
 
                     (Some(schema_type), format, default_value, enums, None)
                 }
-                ReferenceOr::Reference { .. } => {
-                    (Some("string".to_string()), None, None, vec![], None)
-                }
+                ReferenceOr::Reference { .. } => (
+                    Some(constants::SCHEMA_TYPE_STRING.to_string()),
+                    None,
+                    None,
+                    vec![],
+                    None,
+                ),
             }
         } else {
-            (Some("string".to_string()), None, None, vec![], None)
+            (
+                Some(constants::SCHEMA_TYPE_STRING.to_string()),
+                None,
+                None,
+                vec![],
+                None,
+            )
         };
 
     // Extract example from parameter data
@@ -575,7 +604,7 @@ fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo 
         name: param_data.name.clone(),
         location: location_str.to_string(),
         required: param_data.required,
-        param_type: schema_type.unwrap_or_else(|| "string".to_string()),
+        param_type: schema_type.unwrap_or_else(|| constants::SCHEMA_TYPE_STRING.to_string()),
         description: param_data.description.clone(),
         format,
         default_value,
@@ -614,15 +643,15 @@ fn convert_openapi_security_scheme(
             ..
         } => {
             let location_str = match location {
-                openapiv3::APIKeyLocation::Query => "query",
-                openapiv3::APIKeyLocation::Header => "header",
-                openapiv3::APIKeyLocation::Cookie => "cookie",
+                openapiv3::APIKeyLocation::Query => constants::PARAM_LOCATION_QUERY,
+                openapiv3::APIKeyLocation::Header => constants::PARAM_LOCATION_HEADER,
+                openapiv3::APIKeyLocation::Cookie => constants::PARAM_LOCATION_COOKIE,
             };
 
             let aperture_secret = extract_aperture_secret_from_extensions(scheme);
 
             Some(SecuritySchemeInfo {
-                scheme_type: "apiKey".to_string(),
+                scheme_type: constants::AUTH_SCHEME_APIKEY.to_string(),
                 description: description.clone(),
                 details: SecuritySchemeDetails::ApiKey {
                     location: location_str.to_string(),
@@ -638,10 +667,10 @@ fn convert_openapi_security_scheme(
             ..
         } => {
             let details = match http_scheme.as_str() {
-                "bearer" => SecuritySchemeDetails::HttpBearer {
+                constants::AUTH_SCHEME_BEARER => SecuritySchemeDetails::HttpBearer {
                     bearer_format: bearer_format.clone(),
                 },
-                "basic" => SecuritySchemeDetails::HttpBasic,
+                constants::AUTH_SCHEME_BASIC => SecuritySchemeDetails::HttpBasic,
                 _ => SecuritySchemeDetails::HttpBearer {
                     bearer_format: None,
                 },
@@ -650,7 +679,7 @@ fn convert_openapi_security_scheme(
             let aperture_secret = extract_aperture_secret_from_extensions(scheme);
 
             Some(SecuritySchemeInfo {
-                scheme_type: "http".to_string(),
+                scheme_type: constants::SECURITY_TYPE_HTTP.to_string(),
                 description: description.clone(),
                 details,
                 aperture_secret,
@@ -671,20 +700,22 @@ fn extract_aperture_secret_from_extensions(
         SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => return None,
     };
 
-    extensions.get("x-aperture-secret").and_then(|value| {
-        if let Some(obj) = value.as_object() {
-            let source = obj.get("source")?.as_str()?;
-            let name = obj.get("name")?.as_str()?;
+    extensions
+        .get(constants::EXT_APERTURE_SECRET)
+        .and_then(|value| {
+            if let Some(obj) = value.as_object() {
+                let source = obj.get(constants::EXT_KEY_SOURCE)?.as_str()?;
+                let name = obj.get(constants::EXT_KEY_NAME)?.as_str()?;
 
-            if source == "env" {
-                return Some(CachedApertureSecret {
-                    source: source.to_string(),
-                    name: name.to_string(),
-                });
+                if source == constants::SOURCE_ENV {
+                    return Some(CachedApertureSecret {
+                        source: source.to_string(),
+                        name: name.to_string(),
+                    });
+                }
             }
-        }
-        None
-    })
+            None
+        })
 }
 
 #[cfg(test)]
@@ -714,14 +745,14 @@ mod tests {
             "bearerAuth".to_string(),
             CachedSecurityScheme {
                 name: "bearerAuth".to_string(),
-                scheme_type: "http".to_string(),
-                scheme: Some("bearer".to_string()),
-                location: Some("header".to_string()),
-                parameter_name: Some("Authorization".to_string()),
+                scheme_type: constants::SECURITY_TYPE_HTTP.to_string(),
+                scheme: Some(constants::AUTH_SCHEME_BEARER.to_string()),
+                location: Some(constants::LOCATION_HEADER.to_string()),
+                parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
                 description: None,
                 bearer_format: None,
                 aperture_secret: Some(CachedApertureSecret {
-                    source: "env".to_string(),
+                    source: constants::SOURCE_ENV.to_string(),
                     name: "API_TOKEN".to_string(),
                 }),
             },
@@ -736,15 +767,15 @@ mod tests {
                 description: Some("Get user by ID".to_string()),
                 summary: None,
                 operation_id: "getUserById".to_string(),
-                method: "GET".to_string(),
+                method: constants::HTTP_METHOD_GET.to_string(),
                 path: "/users/{id}".to_string(),
                 parameters: vec![CachedParameter {
                     name: "id".to_string(),
-                    location: "path".to_string(),
+                    location: constants::PARAM_LOCATION_PATH.to_string(),
                     required: true,
                     description: None,
-                    schema: Some("string".to_string()),
-                    schema_type: Some("string".to_string()),
+                    schema: Some(constants::SCHEMA_TYPE_STRING.to_string()),
+                    schema_type: Some(constants::SCHEMA_TYPE_STRING.to_string()),
                     format: None,
                     default_value: None,
                     enum_values: vec![],
@@ -774,7 +805,7 @@ mod tests {
         let users_commands = &manifest.commands["users"];
         assert_eq!(users_commands.len(), 1);
         assert_eq!(users_commands[0].name, "get-user-by-id");
-        assert_eq!(users_commands[0].method, "GET");
+        assert_eq!(users_commands[0].method, constants::HTTP_METHOD_GET);
         assert_eq!(users_commands[0].parameters.len(), 1);
         assert_eq!(users_commands[0].parameters[0].name, "id");
 
@@ -782,7 +813,7 @@ mod tests {
         assert!(!manifest.security_schemes.is_empty());
         assert!(manifest.security_schemes.contains_key("bearerAuth"));
         let bearer_auth = &manifest.security_schemes["bearerAuth"];
-        assert_eq!(bearer_auth.scheme_type, "http");
+        assert_eq!(bearer_auth.scheme_type, constants::SECURITY_TYPE_HTTP);
         assert!(matches!(
             &bearer_auth.details,
             SecuritySchemeDetails::HttpBearer { .. }
@@ -790,6 +821,6 @@ mod tests {
         assert!(bearer_auth.aperture_secret.is_some());
         let aperture_secret = bearer_auth.aperture_secret.as_ref().unwrap();
         assert_eq!(aperture_secret.name, "API_TOKEN");
-        assert_eq!(aperture_secret.source, "env");
+        assert_eq!(aperture_secret.source, constants::SOURCE_ENV);
     }
 }

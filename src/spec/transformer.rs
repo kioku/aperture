@@ -2,6 +2,7 @@ use crate::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
     CachedSecurityScheme, CachedSpec, SkippedEndpoint, CACHE_FORMAT_VERSION,
 };
+use crate::constants;
 use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 use serde_json;
@@ -269,7 +270,7 @@ impl SpecTransformer {
             .tags
             .first()
             .cloned()
-            .unwrap_or_else(|| "default".to_string());
+            .unwrap_or_else(|| constants::DEFAULT_GROUP.to_string());
 
         // Transform parameters
         let mut parameters = Vec::new();
@@ -374,10 +375,18 @@ impl SpecTransformer {
     #[allow(clippy::too_many_lines)]
     fn transform_parameter(param: &Parameter) -> CachedParameter {
         let (param_data, location_str) = match param {
-            Parameter::Query { parameter_data, .. } => (parameter_data, "query"),
-            Parameter::Header { parameter_data, .. } => (parameter_data, "header"),
-            Parameter::Path { parameter_data, .. } => (parameter_data, "path"),
-            Parameter::Cookie { parameter_data, .. } => (parameter_data, "cookie"),
+            Parameter::Query { parameter_data, .. } => {
+                (parameter_data, constants::PARAM_LOCATION_QUERY)
+            }
+            Parameter::Header { parameter_data, .. } => {
+                (parameter_data, constants::PARAM_LOCATION_HEADER)
+            }
+            Parameter::Path { parameter_data, .. } => {
+                (parameter_data, constants::PARAM_LOCATION_PATH)
+            }
+            Parameter::Cookie { parameter_data, .. } => {
+                (parameter_data, constants::PARAM_LOCATION_COOKIE)
+            }
         };
 
         // Extract schema information from parameter
@@ -406,7 +415,12 @@ impl SpecTransformer {
                                         }
                                         _ => None,
                                     };
-                                    ("string".to_string(), format, None, enum_values)
+                                    (
+                                        constants::SCHEMA_TYPE_STRING.to_string(),
+                                        format,
+                                        None,
+                                        enum_values,
+                                    )
                                 }
                                 openapiv3::Type::Number(number_type) => {
                                     let format = match &number_type.format {
@@ -424,19 +438,35 @@ impl SpecTransformer {
                                         }
                                         _ => None,
                                     };
-                                    ("integer".to_string(), format, None, vec![])
+                                    (
+                                        constants::SCHEMA_TYPE_INTEGER.to_string(),
+                                        format,
+                                        None,
+                                        vec![],
+                                    )
                                 }
-                                openapiv3::Type::Boolean(_) => {
-                                    ("boolean".to_string(), None, None, vec![])
-                                }
+                                openapiv3::Type::Boolean(_) => (
+                                    constants::SCHEMA_TYPE_BOOLEAN.to_string(),
+                                    None,
+                                    None,
+                                    vec![],
+                                ),
                                 openapiv3::Type::Array(_) => {
-                                    ("array".to_string(), None, None, vec![])
+                                    (constants::SCHEMA_TYPE_ARRAY.to_string(), None, None, vec![])
                                 }
-                                openapiv3::Type::Object(_) => {
-                                    ("object".to_string(), None, None, vec![])
-                                }
+                                openapiv3::Type::Object(_) => (
+                                    constants::SCHEMA_TYPE_OBJECT.to_string(),
+                                    None,
+                                    None,
+                                    vec![],
+                                ),
                             },
-                            _ => ("string".to_string(), None, None, vec![]),
+                            _ => (
+                                constants::SCHEMA_TYPE_STRING.to_string(),
+                                None,
+                                None,
+                                vec![],
+                            ),
                         };
 
                         // Extract default value if present
@@ -457,7 +487,7 @@ impl SpecTransformer {
                         // For references, use basic defaults
                         (
                             Some(r#"{"type": "string"}"#.to_string()),
-                            Some("string".to_string()),
+                            Some(constants::SCHEMA_TYPE_STRING.to_string()),
                             None,
                             None,
                             vec![],
@@ -468,7 +498,7 @@ impl SpecTransformer {
                 // No schema provided, use defaults
                 (
                     Some(r#"{"type": "string"}"#.to_string()),
-                    Some("string".to_string()),
+                    Some(constants::SCHEMA_TYPE_STRING.to_string()),
                     None,
                     None,
                     vec![],
@@ -502,8 +532,8 @@ impl SpecTransformer {
         match request_body {
             ReferenceOr::Item(body) => {
                 // Prefer JSON content if available
-                let content_type = if body.content.contains_key("application/json") {
-                    "application/json"
+                let content_type = if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
+                    constants::CONTENT_TYPE_JSON
                 } else {
                     body.content.keys().next()?
                 };
@@ -567,14 +597,14 @@ impl SpecTransformer {
             } => {
                 let aperture_secret = Self::extract_aperture_secret(scheme);
                 let location_str = match location {
-                    openapiv3::APIKeyLocation::Query => "query",
-                    openapiv3::APIKeyLocation::Header => "header",
-                    openapiv3::APIKeyLocation::Cookie => "cookie",
+                    openapiv3::APIKeyLocation::Query => constants::PARAM_LOCATION_QUERY,
+                    openapiv3::APIKeyLocation::Header => constants::PARAM_LOCATION_HEADER,
+                    openapiv3::APIKeyLocation::Cookie => constants::PARAM_LOCATION_COOKIE,
                 };
 
                 Some(CachedSecurityScheme {
                     name: name.to_string(),
-                    scheme_type: "apiKey".to_string(),
+                    scheme_type: constants::AUTH_SCHEME_APIKEY.to_string(),
                     scheme: None,
                     location: Some(location_str.to_string()),
                     parameter_name: Some(param_name.clone()),
@@ -592,10 +622,10 @@ impl SpecTransformer {
                 let aperture_secret = Self::extract_aperture_secret(scheme);
                 Some(CachedSecurityScheme {
                     name: name.to_string(),
-                    scheme_type: "http".to_string(),
+                    scheme_type: constants::SECURITY_TYPE_HTTP.to_string(),
                     scheme: Some(http_scheme.clone()),
-                    location: Some("header".to_string()),
-                    parameter_name: Some("Authorization".to_string()),
+                    location: Some(constants::LOCATION_HEADER.to_string()),
+                    parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
                     description: description.clone(),
                     bearer_format: bearer_format.clone(),
                     aperture_secret,
@@ -617,22 +647,24 @@ impl SpecTransformer {
         };
 
         // Parse the x-aperture-secret extension
-        extensions.get("x-aperture-secret").and_then(|value| {
-            // The extension should be an object with "source" and "name" fields
-            if let Some(obj) = value.as_object() {
-                let source = obj.get("source")?.as_str()?;
-                let name = obj.get("name")?.as_str()?;
+        extensions
+            .get(crate::constants::EXT_APERTURE_SECRET)
+            .and_then(|value| {
+                // The extension should be an object with "source" and "name" fields
+                if let Some(obj) = value.as_object() {
+                    let source = obj.get(crate::constants::EXT_KEY_SOURCE)?.as_str()?;
+                    let name = obj.get(crate::constants::EXT_KEY_NAME)?.as_str()?;
 
-                // Currently only "env" source is supported
-                if source == "env" {
-                    return Some(CachedApertureSecret {
-                        source: source.to_string(),
-                        name: name.to_string(),
-                    });
+                    // Currently only "env" source is supported
+                    if source == constants::SOURCE_ENV {
+                        return Some(CachedApertureSecret {
+                            source: source.to_string(),
+                            name: name.to_string(),
+                        });
+                    }
                 }
-            }
-            None
-        })
+                None
+            })
     }
 
     /// Resolves a parameter reference to its actual parameter definition
@@ -807,7 +839,7 @@ mod tests {
         let command = &cached.commands[0];
         assert_eq!(command.name, "users");
         assert_eq!(command.operation_id, "getUsers");
-        assert_eq!(command.method, "GET");
+        assert_eq!(command.method, constants::HTTP_METHOD_GET);
         assert_eq!(command.path, "/users");
         assert_eq!(command.description, Some("Get all users".to_string()));
     }
@@ -872,7 +904,7 @@ mod tests {
         assert_eq!(command.parameters.len(), 1);
         let param = &command.parameters[0];
         assert_eq!(param.name, "userId");
-        assert_eq!(param.location, "path");
+        assert_eq!(param.location, constants::PARAM_LOCATION_PATH);
         assert!(param.required);
         assert_eq!(
             param.description,

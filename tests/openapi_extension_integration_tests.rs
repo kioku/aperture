@@ -1,6 +1,7 @@
 use aperture_cli::cache::models::CachedApertureSecret;
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::config::manager::ConfigManager;
+use aperture_cli::constants;
 use aperture_cli::engine::executor::execute_request;
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::fs::OsFileSystem;
@@ -35,11 +36,14 @@ async fn test_bearer_auth_extension_parsing_from_yaml() {
     let bearer_scheme = &cached_spec.security_schemes["bearerAuth"];
 
     assert_eq!(bearer_scheme.scheme_type, "http");
-    assert_eq!(bearer_scheme.scheme, Some("bearer".to_string()));
+    assert_eq!(
+        bearer_scheme.scheme,
+        Some(constants::AUTH_SCHEME_BEARER.to_string())
+    );
     assert_eq!(bearer_scheme.location, Some("header".to_string()));
     assert_eq!(
         bearer_scheme.parameter_name,
-        Some("Authorization".to_string())
+        Some(constants::HEADER_AUTHORIZATION.to_string())
     );
 
     // Most importantly, verify the x-aperture-secret extension was parsed
@@ -115,7 +119,10 @@ async fn test_multiple_schemes_extension_parsing_from_json() {
     // Check Bearer auth
     let bearer_scheme = &cached_spec.security_schemes["bearerAuth"];
     assert_eq!(bearer_scheme.scheme_type, "http");
-    assert_eq!(bearer_scheme.scheme, Some("bearer".to_string()));
+    assert_eq!(
+        bearer_scheme.scheme,
+        Some(constants::AUTH_SCHEME_BEARER.to_string())
+    );
     let bearer_secret = bearer_scheme.aperture_secret.as_ref().unwrap();
     assert_eq!(bearer_secret.name, "MULTI_BEARER_TOKEN");
 
@@ -257,7 +264,10 @@ servers:
 
     // Verify scheme details are correct
     assert_eq!(bearer_scheme.scheme_type, "http");
-    assert_eq!(bearer_scheme.scheme, Some("bearer".to_string()));
+    assert_eq!(
+        bearer_scheme.scheme,
+        Some(constants::AUTH_SCHEME_BEARER.to_string())
+    );
 
     // Verify no extension was parsed (graceful handling)
     assert!(bearer_scheme.aperture_secret.is_none());

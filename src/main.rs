@@ -4,6 +4,7 @@ use aperture_cli::cache::models::CachedSpec;
 use aperture_cli::cli::{Cli, Commands, ConfigCommands};
 use aperture_cli::config::manager::{get_config_dir, ConfigManager};
 use aperture_cli::config::models::{GlobalConfig, SecretSource};
+use aperture_cli::constants;
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
@@ -19,7 +20,7 @@ async fn main() {
     let cli = Cli::parse();
     let json_errors = cli.json_errors;
 
-    let manager = std::env::var("APERTURE_CONFIG_DIR").map_or_else(
+    let manager = std::env::var(constants::ENV_APERTURE_CONFIG_DIR).map_or_else(
         |_| match ConfigManager::new() {
             Ok(manager) => manager,
             Err(e) => {
@@ -95,7 +96,7 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
 
                 println!("\nResolved URL (current): {resolved}");
 
-                if let Ok(current_env) = std::env::var("APERTURE_ENV") {
+                if let Ok(current_env) = std::env::var(constants::ENV_APERTURE_ENV) {
                     println!("(Using APERTURE_ENV={current_env})");
                 }
             }
@@ -222,12 +223,12 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
 
 fn list_commands(context: &str) -> Result<(), Error> {
     // Get the cache directory - respecting APERTURE_CONFIG_DIR if set
-    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+    let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
     } else {
         get_config_dir()?
     };
-    let cache_dir = config_dir.join(".cache");
+    let cache_dir = config_dir.join(constants::DIR_CACHE);
 
     // Load the cached spec for the context
     let spec = loader::load_cached_spec(&cache_dir, context).map_err(|e| match e {
@@ -244,10 +245,10 @@ fn list_commands(context: &str) -> Result<(), Error> {
     > = std::collections::BTreeMap::new();
 
     for command in &spec.commands {
-        let primary_tag = command
-            .tags
-            .first()
-            .map_or_else(|| "default".to_string(), std::clone::Clone::clone);
+        let primary_tag = command.tags.first().map_or_else(
+            || constants::DEFAULT_GROUP.to_string(),
+            std::clone::Clone::clone,
+        );
         tag_groups.entry(primary_tag).or_default().push(command);
     }
 
@@ -298,14 +299,14 @@ fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result
     }
 
     // Get the config directory
-    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+    let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
     } else {
         get_config_dir()?
     };
 
     // Get the original spec file path
-    let specs_dir = config_dir.join("specs");
+    let specs_dir = config_dir.join(constants::DIR_SPECS);
     let spec_path = specs_dir.join(format!("{spec_name}.yaml"));
 
     // Get the original strict mode preference (default to false if not set)
@@ -348,7 +349,7 @@ fn list_specs_with_details(
     specs: Vec<String>,
     verbose: bool,
 ) {
-    let cache_dir = manager.config_dir().join(".cache");
+    let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
 
     for spec_name in specs {
         println!("- {spec_name}");
@@ -400,12 +401,12 @@ fn display_skipped_endpoints_info(cached_spec: &aperture_cli::cache::models::Cac
 #[allow(clippy::too_many_lines)]
 async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
     // Get the cache directory - respecting APERTURE_CONFIG_DIR if set
-    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+    let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
     } else {
         get_config_dir()?
     };
-    let cache_dir = config_dir.join(".cache");
+    let cache_dir = config_dir.join(constants::DIR_CACHE);
 
     // Create config manager and load global config
     let manager = ConfigManager::with_fs(OsFileSystem, config_dir.clone());
@@ -422,7 +423,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     // Handle --describe-json flag - output capability manifest and exit
     if cli.describe_json {
         // Load the original spec file for complete metadata
-        let specs_dir = config_dir.join("specs");
+        let specs_dir = config_dir.join(constants::DIR_SPECS);
         let spec_path = specs_dir.join(format!("{context}.yaml"));
 
         if !spec_path.exists() {
@@ -470,7 +471,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
 
     // Parse the arguments against the dynamic command
     let matches = command
-        .try_get_matches_from(std::iter::once("api".to_string()).chain(args))
+        .try_get_matches_from(std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args))
         .map_err(|e| Error::InvalidCommand {
             context: context.to_string(),
             reason: e.to_string(),
@@ -509,7 +510,9 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         None
     } else {
         Some(CacheConfig {
-            cache_dir: config_dir.join(".cache").join("responses"),
+            cache_dir: config_dir
+                .join(constants::DIR_CACHE)
+                .join(constants::DIR_RESPONSES),
             default_ttl: Duration::from_secs(cli.cache_ttl.unwrap_or(300)),
             max_entries: 1000,
             enabled: cli.cache || cli.cache_ttl.is_some(),
@@ -663,14 +666,16 @@ async fn clear_response_cache(
     api_name: Option<&str>,
     all: bool,
 ) -> Result<(), Error> {
-    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+    let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
     } else {
         get_config_dir()?
     };
 
     let cache_config = CacheConfig {
-        cache_dir: config_dir.join(".cache").join("responses"),
+        cache_dir: config_dir
+            .join(constants::DIR_CACHE)
+            .join(constants::DIR_RESPONSES),
         ..Default::default()
     };
 
@@ -699,14 +704,16 @@ async fn show_cache_stats(
     _manager: &ConfigManager<OsFileSystem>,
     api_name: Option<&str>,
 ) -> Result<(), Error> {
-    let config_dir = if let Ok(dir) = std::env::var("APERTURE_CONFIG_DIR") {
+    let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
     } else {
         get_config_dir()?
     };
 
     let cache_config = CacheConfig {
-        cache_dir: config_dir.join(".cache").join("responses"),
+        cache_dir: config_dir
+            .join(constants::DIR_CACHE)
+            .join(constants::DIR_RESPONSES),
         ..Default::default()
     };
 
@@ -744,10 +751,16 @@ fn print_error(error: &Error) {
         }
         Error::Io(io_err) => match io_err.kind() {
             std::io::ErrorKind::NotFound => {
-                eprintln!("File Not Found\n{io_err}\n\nHint: Check that the file path is correct and the file exists.");
+                eprintln!(
+                    "File Not Found\n{io_err}\n\nHint: {}",
+                    constants::ERR_FILE_NOT_FOUND
+                );
             }
             std::io::ErrorKind::PermissionDenied => {
-                eprintln!("Permission Denied\n{io_err}\n\nHint: Check file permissions or run with appropriate privileges.");
+                eprintln!(
+                    "Permission Denied\n{io_err}\n\nHint: {}",
+                    constants::ERR_PERMISSION
+                );
             }
             _ => {
                 eprintln!("File System Error\n{io_err}");

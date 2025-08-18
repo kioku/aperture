@@ -12,7 +12,7 @@ use std::path::Path;
 ///
 /// # Arguments
 /// * `cache_dir` - The directory containing cached spec files
-/// * `spec_name` - The name of the spec to load (without .bin extension)
+/// * `spec_name` - The name of the spec to load (without binary extension)
 ///
 /// # Returns
 /// * `Ok(CachedSpec)` - The loaded and deserialized specification
@@ -50,7 +50,9 @@ fn load_cached_spec_without_version_check<P: AsRef<Path>>(
     cache_dir: P,
     spec_name: &str,
 ) -> Result<CachedSpec, Error> {
-    let cache_path = cache_dir.as_ref().join(format!("{spec_name}.bin"));
+    let cache_path = cache_dir
+        .as_ref()
+        .join(format!("{spec_name}{}", crate::constants::FILE_EXT_BIN));
 
     if !cache_path.exists() {
         return Err(Error::CachedSpecNotFound {
@@ -70,7 +72,9 @@ fn load_cached_spec_with_version_check<P: AsRef<Path>>(
     cache_dir: P,
     spec_name: &str,
 ) -> Result<CachedSpec, Error> {
-    let cache_path = cache_dir.as_ref().join(format!("{spec_name}.bin"));
+    let cache_path = cache_dir
+        .as_ref()
+        .join(format!("{spec_name}{}", crate::constants::FILE_EXT_BIN));
 
     if !cache_path.exists() {
         return Err(Error::CachedSpecNotFound {

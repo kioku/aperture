@@ -55,7 +55,10 @@ impl<'a> BaseUrlResolver<'a> {
                     Error::InvalidServerVarFormat { .. }
                     | Error::InvalidServerVarValue { .. }
                     | Error::UnknownServerVariable { .. } => {
-                        eprintln!("Warning: Server variable error: {err}");
+                        eprintln!(
+                            "{} Server variable error: {err}",
+                            crate::constants::MSG_WARNING_PREFIX
+                        );
                         self.resolve_basic(explicit_url)
                     }
                     // Fallback for all other errors (template resolution, missing variables, etc.)
@@ -126,7 +129,7 @@ impl<'a> BaseUrlResolver<'a> {
             if let Some(api_config) = config.api_configs.get(&self.spec.name) {
                 // Check environment-specific URL first
                 let env_to_check = self.environment_override.as_ref().map_or_else(
-                    || std::env::var("APERTURE_ENV").unwrap_or_default(),
+                    || std::env::var(crate::constants::ENV_APERTURE_ENV).unwrap_or_default(),
                     std::clone::Clone::clone,
                 );
 
@@ -144,7 +147,7 @@ impl<'a> BaseUrlResolver<'a> {
         }
 
         // Priority 3: Environment variable
-        if let Ok(url) = std::env::var("APERTURE_BASE_URL") {
+        if let Ok(url) = std::env::var(crate::constants::ENV_APERTURE_BASE_URL) {
             return url;
         }
 
@@ -255,19 +258,19 @@ mod tests {
         let _guard = ENV_TEST_MUTEX.lock().unwrap();
 
         // Store original value
-        let original_value = std::env::var("APERTURE_BASE_URL").ok();
+        let original_value = std::env::var(crate::constants::ENV_APERTURE_BASE_URL).ok();
 
         // Clean up first
-        std::env::remove_var("APERTURE_BASE_URL");
+        std::env::remove_var(crate::constants::ENV_APERTURE_BASE_URL);
 
         // Run the test with panic protection
         let result = std::panic::catch_unwind(test_fn);
 
         // Always restore original state, even if test panicked
         if let Some(original) = original_value {
-            std::env::set_var("APERTURE_BASE_URL", original);
+            std::env::set_var(crate::constants::ENV_APERTURE_BASE_URL, original);
         } else {
-            std::env::remove_var("APERTURE_BASE_URL");
+            std::env::remove_var(crate::constants::ENV_APERTURE_BASE_URL);
         }
 
         // Drop the guard before re-panicking to release the mutex
@@ -362,7 +365,10 @@ mod tests {
             let spec = create_test_spec("test-api", Some("https://spec.example.com"));
 
             // Set env var
-            std::env::set_var("APERTURE_BASE_URL", "https://env.example.com");
+            std::env::set_var(
+                crate::constants::ENV_APERTURE_BASE_URL,
+                "https://env.example.com",
+            );
 
             let mut api_configs = HashMap::new();
             api_configs.insert(
@@ -394,7 +400,10 @@ mod tests {
             let spec = create_test_spec("test-api", Some("https://spec.example.com"));
 
             // Set env var
-            std::env::set_var("APERTURE_BASE_URL", "https://env.example.com");
+            std::env::set_var(
+                crate::constants::ENV_APERTURE_BASE_URL,
+                "https://env.example.com",
+            );
 
             let resolver = BaseUrlResolver::new(&spec);
 

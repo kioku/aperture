@@ -1,3 +1,4 @@
+use crate::constants;
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -127,8 +128,12 @@ impl CacheKey {
         };
 
         format!(
-            "{}_{}_{}_{}.json",
-            self.api_name, self.operation_id, hash_prefix, "cache"
+            "{}_{}_{}_{}{}",
+            self.api_name,
+            self.operation_id,
+            hash_prefix,
+            constants::CACHE_SUFFIX,
+            constants::FILE_EXT_JSON
         )
     }
 }
@@ -265,7 +270,7 @@ impl ResponseCache {
             let filename_str = filename.to_string_lossy();
 
             if filename_str.starts_with(&format!("{api_name}_"))
-                && filename_str.ends_with("_cache.json")
+                && filename_str.ends_with(constants::CACHE_FILE_SUFFIX)
             {
                 tokio::fs::remove_file(entry.path())
                     .await
@@ -292,7 +297,7 @@ impl ResponseCache {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
-            if filename_str.ends_with("_cache.json") {
+            if filename_str.ends_with(constants::CACHE_FILE_SUFFIX) {
                 tokio::fs::remove_file(entry.path())
                     .await
                     .map_err(Error::Io)?;
@@ -318,7 +323,7 @@ impl ResponseCache {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
-            if !filename_str.ends_with("_cache.json") {
+            if !filename_str.ends_with(constants::CACHE_FILE_SUFFIX) {
                 continue;
             }
 
@@ -370,7 +375,7 @@ impl ResponseCache {
             let filename_str = filename.to_string_lossy();
 
             if filename_str.starts_with(&format!("{api_name}_"))
-                && filename_str.ends_with("_cache.json")
+                && filename_str.ends_with(constants::CACHE_FILE_SUFFIX)
             {
                 if let Ok(metadata) = entry.metadata().await {
                     if let Ok(modified) = metadata.modified() {
@@ -409,12 +414,13 @@ pub struct CacheStats {
 
 /// Check if a header is an authentication header that should be excluded from caching
 fn is_auth_header(header_name: &str) -> bool {
-    let lower_name = header_name.to_lowercase();
-    matches!(
-        lower_name.as_str(),
-        "authorization" | "x-api-key" | "api-key" | "token" | "bearer" | "cookie"
-    ) || lower_name.starts_with("x-auth-")
-        || lower_name.starts_with("x-api-")
+    constants::is_auth_header(header_name)
+        || header_name
+            .to_lowercase()
+            .starts_with(constants::HEADER_PREFIX_X_AUTH)
+        || header_name
+            .to_lowercase()
+            .starts_with(constants::HEADER_PREFIX_X_API)
 }
 
 #[cfg(test)]
@@ -436,13 +442,19 @@ mod tests {
     #[test]
     fn test_cache_key_generation() {
         let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "application/json".to_string());
-        headers.insert("authorization".to_string(), "Bearer secret".to_string()); // Should be excluded
+        headers.insert(
+            constants::HEADER_CONTENT_TYPE_LC.to_string(),
+            constants::CONTENT_TYPE_JSON.to_string(),
+        );
+        headers.insert(
+            constants::HEADER_AUTHORIZATION_LC.to_string(),
+            "Bearer secret".to_string(),
+        ); // Should be excluded
 
         let key = CacheKey::from_request(
             "test_api",
             "getUser",
-            "GET",
+            constants::HTTP_METHOD_GET,
             "https://api.example.com/users/123",
             &headers,
             None,
@@ -455,15 +467,15 @@ mod tests {
 
         let filename = key.to_filename();
         assert!(filename.starts_with("test_api_getUser_"));
-        assert!(filename.ends_with("_cache.json"));
+        assert!(filename.ends_with(constants::CACHE_FILE_SUFFIX));
     }
 
     #[test]
     fn test_is_auth_header() {
-        assert!(is_auth_header("Authorization"));
+        assert!(is_auth_header(constants::HEADER_AUTHORIZATION));
         assert!(is_auth_header("X-API-Key"));
         assert!(is_auth_header("x-auth-token"));
-        assert!(!is_auth_header("Content-Type"));
+        assert!(!is_auth_header(constants::HEADER_CONTENT_TYPE));
         assert!(!is_auth_header("User-Agent"));
     }
 
@@ -479,10 +491,13 @@ mod tests {
         };
 
         let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert(
+            constants::HEADER_CONTENT_TYPE_LC.to_string(),
+            constants::CONTENT_TYPE_JSON.to_string(),
+        );
 
         let request_info = CachedRequestInfo {
-            method: "GET".to_string(),
+            method: constants::HTTP_METHOD_GET.to_string(),
             url: "https://api.example.com/users/123".to_string(),
             headers: headers.clone(),
             body_hash: None,
@@ -523,7 +538,7 @@ mod tests {
 
         let headers = HashMap::new();
         let request_info = CachedRequestInfo {
-            method: "GET".to_string(),
+            method: constants::HTTP_METHOD_GET.to_string(),
             url: "https://api.example.com/users/123".to_string(),
             headers: headers.clone(),
             body_hash: None,
