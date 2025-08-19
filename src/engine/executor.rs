@@ -2,8 +2,11 @@ use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
 use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
+use crate::constants;
 use crate::error::Error;
-use crate::response_cache::{CacheConfig, CacheKey, CachedRequestInfo, ResponseCache};
+use crate::response_cache::{
+    CacheConfig, CacheKey, CachedRequestInfo, CachedResponse, ResponseCache,
+};
 use crate::utils::to_kebab_case;
 use clap::ArgMatches;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -26,11 +29,11 @@ pub enum AuthScheme {
 impl From<&str> for AuthScheme {
     fn from(s: &str) -> Self {
         match s.to_lowercase().as_str() {
-            "bearer" => Self::Bearer,
-            "basic" => Self::Basic,
+            constants::AUTH_SCHEME_BEARER => Self::Bearer,
+            constants::AUTH_SCHEME_BASIC => Self::Basic,
             "token" => Self::Token,
             "dsn" => Self::DSN,
-            "apikey" => Self::ApiKey,
+            constants::AUTH_SCHEME_APIKEY => Self::ApiKey,
             _ => Self::Custom(s.to_string()),
         }
     }
@@ -38,6 +41,257 @@ impl From<&str> for AuthScheme {
 
 /// Maximum number of rows to display in table format to prevent memory exhaustion
 const MAX_TABLE_ROWS: usize = 1000;
+
+// Helper functions
+
+/// Extract server variable arguments from CLI matches
+fn extract_server_var_args(matches: &ArgMatches) -> Vec<String> {
+    matches
+        .try_get_many::<String>("server-var")
+        .ok()
+        .flatten()
+        .map(|values| values.cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Build HTTP client with default timeout
+fn build_http_client() -> Result<reqwest::Client, Error> {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| Error::RequestFailed {
+            reason: format!("Failed to create HTTP client: {e}"),
+        })
+}
+
+/// Extract request body from matches
+fn extract_request_body(
+    operation: &CachedCommand,
+    matches: &ArgMatches,
+) -> Result<Option<String>, Error> {
+    if operation.request_body.is_none() {
+        return Ok(None);
+    }
+
+    // Get to the deepest subcommand matches
+    let mut current_matches = matches;
+    while let Some((_name, sub_matches)) = current_matches.subcommand() {
+        current_matches = sub_matches;
+    }
+
+    if let Some(body_value) = current_matches.get_one::<String>("body") {
+        // Validate JSON
+        let _json_body: Value =
+            serde_json::from_str(body_value).map_err(|e| Error::InvalidJsonBody {
+                reason: e.to_string(),
+            })?;
+        Ok(Some(body_value.clone()))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Handle dry-run mode
+fn handle_dry_run(
+    dry_run: bool,
+    method: &reqwest::Method,
+    url: &str,
+    headers: &reqwest::header::HeaderMap,
+    body: Option<&str>,
+    operation: &CachedCommand,
+    capture_output: bool,
+) -> Result<Option<String>, Error> {
+    if !dry_run {
+        return Ok(None);
+    }
+
+    let headers_map: HashMap<String, String> = headers
+        .iter()
+        .map(|(k, v)| {
+            let value = if is_sensitive_header(k.as_str()) {
+                "<REDACTED>".to_string()
+            } else {
+                v.to_str().unwrap_or("<binary>").to_string()
+            };
+            (k.as_str().to_string(), value)
+        })
+        .collect();
+
+    let dry_run_info = serde_json::json!({
+        "dry_run": true,
+        "method": method.to_string(),
+        "url": url,
+        "headers": headers_map,
+        "body": body,
+        "operation_id": operation.operation_id
+    });
+
+    let output = serde_json::to_string_pretty(&dry_run_info).map_err(Error::Json)?;
+
+    if capture_output {
+        Ok(Some(output))
+    } else {
+        println!("{output}");
+        Ok(None)
+    }
+}
+
+/// Send HTTP request and get response
+async fn send_request(
+    request: reqwest::RequestBuilder,
+) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+    let response = request.send().await.map_err(|e| Error::RequestFailed {
+        reason: e.to_string(),
+    })?;
+
+    let status = response.status();
+    let response_headers: HashMap<String, String> = response
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| Error::ResponseReadError {
+            reason: e.to_string(),
+        })?;
+
+    Ok((status, response_headers, response_text))
+}
+
+/// Handle HTTP error responses
+fn handle_http_error(
+    status: reqwest::StatusCode,
+    response_text: String,
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+) -> Error {
+    let api_name = spec.name.clone();
+    let operation_id = Some(operation.operation_id.clone());
+
+    let security_schemes: Vec<String> = operation
+        .security_requirements
+        .iter()
+        .filter_map(|scheme_name| {
+            spec.security_schemes
+                .get(scheme_name)
+                .and_then(|scheme| scheme.aperture_secret.as_ref())
+                .map(|aperture_secret| aperture_secret.name.clone())
+        })
+        .collect();
+
+    Error::HttpErrorWithContext {
+        status: status.as_u16(),
+        body: if response_text.is_empty() {
+            constants::EMPTY_RESPONSE.to_string()
+        } else {
+            response_text
+        },
+        api_name,
+        operation_id,
+        security_schemes,
+    }
+}
+
+/// Prepare cache context if caching is enabled
+fn prepare_cache_context(
+    cache_config: Option<&CacheConfig>,
+    spec_name: &str,
+    operation_id: &str,
+    method: &reqwest::Method,
+    url: &str,
+    headers: &reqwest::header::HeaderMap,
+    body: Option<&str>,
+) -> Result<Option<(CacheKey, ResponseCache)>, Error> {
+    if let Some(cache_cfg) = cache_config {
+        if cache_cfg.enabled {
+            let header_map: HashMap<String, String> = headers
+                .iter()
+                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+
+            let cache_key = CacheKey::from_request(
+                spec_name,
+                operation_id,
+                method.as_ref(),
+                url,
+                &header_map,
+                body,
+            )?;
+
+            let response_cache = ResponseCache::new(cache_cfg.clone())?;
+            Ok(Some((cache_key, response_cache)))
+        } else {
+            Ok(None)
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+/// Check cache for existing response
+async fn check_cache(
+    cache_context: Option<&(CacheKey, ResponseCache)>,
+) -> Result<Option<CachedResponse>, Error> {
+    if let Some((cache_key, response_cache)) = cache_context {
+        response_cache.get(cache_key).await
+    } else {
+        Ok(None)
+    }
+}
+
+/// Store response in cache
+#[allow(clippy::too_many_arguments)]
+async fn store_in_cache(
+    cache_context: Option<(CacheKey, ResponseCache)>,
+    response_text: &str,
+    status: reqwest::StatusCode,
+    response_headers: &HashMap<String, String>,
+    method: reqwest::Method,
+    url: String,
+    headers: &reqwest::header::HeaderMap,
+    body: Option<&str>,
+    cache_config: Option<&CacheConfig>,
+) -> Result<(), Error> {
+    if let Some((cache_key, response_cache)) = cache_context {
+        let cached_request_info = CachedRequestInfo {
+            method: method.to_string(),
+            url,
+            headers: headers
+                .iter()
+                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect(),
+            body_hash: body.map(|b| {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(b.as_bytes());
+                format!("{:x}", hasher.finalize())
+            }),
+        };
+
+        let cache_ttl = cache_config.and_then(|cfg| {
+            if cfg.default_ttl.as_secs() > 0 {
+                Some(cfg.default_ttl)
+            } else {
+                None
+            }
+        });
+
+        response_cache
+            .store(
+                &cache_key,
+                response_text,
+                status.as_u16(),
+                response_headers,
+                cached_request_info,
+                cache_ttl,
+            )
+            .await?;
+    }
+    Ok(())
+}
 
 /// Executes HTTP requests based on parsed CLI arguments and cached spec data.
 ///
@@ -67,6 +321,8 @@ const MAX_TABLE_ROWS: usize = 1000;
 /// Panics if JSON serialization of dry-run information fails (extremely unlikely)
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::missing_panics_doc)]
+#[allow(clippy::missing_errors_doc)]
 pub async fn execute_request(
     spec: &CachedSpec,
     matches: &ArgMatches,
@@ -82,14 +338,8 @@ pub async fn execute_request(
     // Find the operation from the command hierarchy
     let operation = find_operation(spec, matches)?;
 
-    // Extract server variable arguments from CLI matches
-    // Note: server-var is a global flag, so it may not be present in test scenarios
-    let server_var_args: Vec<String> = matches
-        .try_get_many::<String>("server-var")
-        .ok()
-        .flatten()
-        .map(|values| values.cloned().collect())
-        .unwrap_or_default();
+    // Extract server variable arguments
+    let server_var_args = extract_server_var_args(matches);
 
     // Resolve base URL using the new priority hierarchy with server variable support
     let resolver = BaseUrlResolver::new(spec);
@@ -103,13 +353,8 @@ pub async fn execute_request(
     // Build the full URL with path parameters
     let url = build_url(&base_url, &operation.path, operation, matches)?;
 
-    // Create HTTP client with timeout
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| Error::RequestFailed {
-            reason: format!("Failed to create HTTP client: {e}"),
-        })?;
+    // Create HTTP client
+    let client = build_http_client()?;
 
     // Build headers including authentication and idempotency
     let mut headers = build_headers(spec, operation, matches, &spec.name, global_config)?;
@@ -130,183 +375,72 @@ pub async fn execute_request(
     let headers_clone = headers.clone(); // For dry-run output
     let mut request = client.request(method.clone(), &url).headers(headers);
 
-    // Add request body if present
-    // Get to the deepest subcommand matches
-    let mut current_matches = matches;
-    while let Some((_name, sub_matches)) = current_matches.subcommand() {
-        current_matches = sub_matches;
+    // Extract request body
+    let request_body = extract_request_body(operation, matches)?;
+    if let Some(ref body) = request_body {
+        let json_body: Value = serde_json::from_str(body).unwrap(); // Already validated
+        request = request.json(&json_body);
     }
 
-    let request_body = if operation.request_body.is_some() {
-        if let Some(body_value) = current_matches.get_one::<String>("body") {
-            let json_body: Value =
-                serde_json::from_str(body_value).map_err(|e| Error::InvalidJsonBody {
-                    reason: e.to_string(),
-                })?;
-            request = request.json(&json_body);
-            Some(body_value.clone())
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    // Prepare cache context
+    let cache_context = prepare_cache_context(
+        cache_config,
+        &spec.name,
+        &operation.operation_id,
+        &method,
+        &url,
+        &headers_clone,
+        request_body.as_deref(),
+    )?;
 
-    // Check cache for response if caching is enabled
-    let cache_key = if let Some(cache_cfg) = cache_config {
-        if cache_cfg.enabled {
-            // Create cache key from request details
-            let header_map: HashMap<String, String> = headers_clone
-                .iter()
-                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-                .collect();
+    // Check cache for existing response
+    if let Some(cached_response) = check_cache(cache_context.as_ref()).await? {
+        let output = print_formatted_response(
+            &cached_response.body,
+            output_format,
+            jq_filter,
+            capture_output,
+        )?;
+        return Ok(output);
+    }
 
-            let cache_key = CacheKey::from_request(
-                &spec.name,
-                &operation.operation_id,
-                method.as_ref(),
-                &url,
-                &header_map,
-                request_body.as_deref(),
-            )?;
-
-            let response_cache = ResponseCache::new(cache_cfg.clone())?;
-
-            // Try to get cached response
-            if let Some(cached_response) = response_cache.get(&cache_key).await? {
-                // Use cached response
-                let output = print_formatted_response(
-                    &cached_response.body,
-                    output_format,
-                    jq_filter,
-                    capture_output,
-                )?;
-                return Ok(output);
-            }
-
-            Some((cache_key, response_cache))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Handle dry-run mode - show request details without executing
+    // Handle dry-run mode
+    if let Some(output) = handle_dry_run(
+        dry_run,
+        &method,
+        &url,
+        &headers_clone,
+        request_body.as_deref(),
+        operation,
+        capture_output,
+    )? {
+        return Ok(Some(output));
+    }
     if dry_run {
-        let dry_run_info = serde_json::json!({
-            "dry_run": true,
-            "method": operation.method,
-            "url": url,
-            "headers": headers_clone.iter().map(|(k, v)| {
-                let key = k.as_str();
-                let value = if is_sensitive_header(key) {
-                    "<REDACTED>"
-                } else {
-                    v.to_str().unwrap_or("<binary>")
-                };
-                (key, value)
-            }).collect::<std::collections::HashMap<_, _>>(),
-            "operation_id": operation.operation_id
-        });
-        let dry_run_output =
-            serde_json::to_string_pretty(&dry_run_info).map_err(|e| Error::SerializationError {
-                reason: format!("Failed to serialize dry-run info: {e}"),
-            })?;
-
-        if capture_output {
-            return Ok(Some(dry_run_output));
-        }
-        println!("{dry_run_output}");
         return Ok(None);
     }
 
-    // Execute request
-    let response = request.send().await.map_err(|e| Error::RequestFailed {
-        reason: e.to_string(),
-    })?;
-
-    let status = response.status();
-    let response_headers: HashMap<String, String> = response
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-        .collect();
-
-    let response_text = response
-        .text()
-        .await
-        .map_err(|e| Error::ResponseReadError {
-            reason: e.to_string(),
-        })?;
+    // Send request and get response
+    let (status, response_headers, response_text) = send_request(request).await?;
 
     // Check if request was successful
     if !status.is_success() {
-        // Gather context for enhanced error reporting
-        let api_name = spec.name.clone();
-        let operation_id = Some(operation.operation_id.clone());
-        let security_schemes: Vec<String> = operation
-            .security_requirements
-            .iter()
-            .filter_map(|scheme_name| {
-                spec.security_schemes
-                    .get(scheme_name)
-                    .and_then(|scheme| scheme.aperture_secret.as_ref())
-                    .map(|aperture_secret| aperture_secret.name.clone())
-            })
-            .collect();
-
-        return Err(Error::HttpErrorWithContext {
-            status: status.as_u16(),
-            body: if response_text.is_empty() {
-                "(empty response)".to_string()
-            } else {
-                response_text
-            },
-            api_name,
-            operation_id,
-            security_schemes,
-        });
+        return Err(handle_http_error(status, response_text, spec, operation));
     }
 
-    // Store response in cache if caching is enabled
-    if let Some((cache_key, response_cache)) = cache_key {
-        // Create cached request info
-        let cached_request_info = CachedRequestInfo {
-            method: method.to_string(),
-            url: url.clone(),
-            headers: headers_clone
-                .iter()
-                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-                .collect(),
-            body_hash: request_body.as_ref().map(|body| {
-                use sha2::{Digest, Sha256};
-                let mut hasher = Sha256::new();
-                hasher.update(body.as_bytes());
-                format!("{:x}", hasher.finalize())
-            }),
-        };
-
-        // Store in cache with custom TTL if specified
-        let cache_ttl = cache_config.and_then(|cfg| {
-            if cfg.default_ttl.as_secs() > 0 {
-                Some(cfg.default_ttl)
-            } else {
-                None
-            }
-        });
-
-        let _ = response_cache
-            .store(
-                &cache_key,
-                &response_text,
-                status.as_u16(),
-                &response_headers,
-                cached_request_info,
-                cache_ttl,
-            )
-            .await;
-    }
+    // Store response in cache
+    store_in_cache(
+        cache_context,
+        &response_text,
+        status,
+        &response_headers,
+        method,
+        url,
+        &headers_clone,
+        request_body.as_deref(),
+        cache_config,
+    )
+    .await?;
 
     // Print response in the requested format
     if response_text.is_empty() {
@@ -425,7 +559,10 @@ fn build_headers(
 
     // Add default headers
     headers.insert("User-Agent", HeaderValue::from_static("aperture/0.1.0"));
-    headers.insert("Accept", HeaderValue::from_static("application/json"));
+    headers.insert(
+        constants::HEADER_ACCEPT,
+        HeaderValue::from_static(constants::CONTENT_TYPE_JSON),
+    );
 
     // Get to the deepest subcommand matches
     let mut current_matches = matches;
@@ -587,11 +724,11 @@ fn add_authentication_header(
     }
 
     // Validate the secret doesn't contain control characters
-    validate_header_value("Authorization", &secret_value)?;
+    validate_header_value(constants::HEADER_AUTHORIZATION, &secret_value)?;
 
     // Build the appropriate header based on scheme type
     match security_scheme.scheme_type.as_str() {
-        "apiKey" => {
+        constants::AUTH_SCHEME_APIKEY => {
             let (Some(location), Some(param_name)) =
                 (&security_scheme.location, &security_scheme.parameter_name)
             else {
@@ -642,10 +779,10 @@ fn add_authentication_header(
 
                 let header_value =
                     HeaderValue::from_str(&auth_value).map_err(|e| Error::InvalidHeaderValue {
-                        name: "Authorization".to_string(),
+                        name: constants::HEADER_AUTHORIZATION.to_string(),
                         reason: e.to_string(),
                     })?;
-                headers.insert("Authorization", header_value);
+                headers.insert(constants::HEADER_AUTHORIZATION, header_value);
 
                 // Debug logging
                 if std::env::var("RUST_LOG").is_ok() {
@@ -761,9 +898,9 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
         Value::Array(items) => {
             if items.is_empty() {
                 if capture_output {
-                    return Ok(Some("(empty array)".to_string()));
+                    return Ok(Some(constants::EMPTY_ARRAY.to_string()));
                 }
-                println!("(empty array)");
+                println!("{}", constants::EMPTY_ARRAY);
                 return Ok(None);
             }
 
@@ -889,7 +1026,7 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
 /// Formats a JSON value for display in a table cell
 fn format_value_for_table(value: &Value) -> String {
     match value {
-        Value::Null => "null".to_string(),
+        Value::Null => constants::NULL_VALUE.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
         Value::String(s) => s.clone(),
@@ -968,7 +1105,7 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
         match results {
             Ok(vals) => {
                 if vals.is_empty() {
-                    Ok("null".to_string())
+                    Ok(constants::NULL_VALUE.to_string())
                 } else if vals.len() == 1 {
                     // Single result - convert back to JSON
                     let json_val = jaq_val_to_serde_json(&vals[0]);
@@ -1011,7 +1148,10 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
         || filter.contains("length");
 
     if uses_advanced_features {
-        eprintln!("Warning: Advanced JQ features require building with --features jq");
+        eprintln!(
+            "{} Advanced JQ features require building with --features jq",
+            crate::constants::MSG_WARNING_PREFIX
+        );
         eprintln!("         Currently only basic field access is supported (e.g., '.field', '.nested.field')");
         eprintln!("         To enable full JQ support: cargo install aperture-cli --features jq");
     }

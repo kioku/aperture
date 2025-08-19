@@ -1,4 +1,5 @@
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture_cli::constants;
 use aperture_cli::engine::generator::{generate_command_tree, generate_command_tree_with_flags};
 use std::collections::HashMap;
 
@@ -12,16 +13,16 @@ fn create_test_spec() -> CachedSpec {
             description: Some("Get user by ID".to_string()),
             summary: None,
             operation_id: "getUserById".to_string(),
-            method: "GET".to_string(),
+            method: constants::HTTP_METHOD_GET.to_string(),
             path: "/users/{id}".to_string(),
             parameters: vec![
                 CachedParameter {
                     name: "id".to_string(),
-                    location: "path".to_string(),
+                    location: constants::PARAM_LOCATION_PATH.to_string(),
                     required: true,
                     description: Some("User ID".to_string()),
                     schema: Some(r#"{"type": "string"}"#.to_string()),
-                    schema_type: Some("string".to_string()),
+                    schema_type: Some(constants::SCHEMA_TYPE_STRING.to_string()),
                     format: None,
                     default_value: None,
                     enum_values: vec![],
@@ -29,11 +30,11 @@ fn create_test_spec() -> CachedSpec {
                 },
                 CachedParameter {
                     name: "include_profile".to_string(),
-                    location: "query".to_string(),
+                    location: constants::PARAM_LOCATION_QUERY.to_string(),
                     required: false,
                     description: Some("Include profile information".to_string()),
                     schema: Some(r#"{"type": "boolean"}"#.to_string()),
-                    schema_type: Some("boolean".to_string()),
+                    schema_type: Some(constants::SCHEMA_TYPE_BOOLEAN.to_string()),
                     format: None,
                     default_value: None,
                     enum_values: vec![],

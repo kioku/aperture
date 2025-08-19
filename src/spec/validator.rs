@@ -1,3 +1,4 @@
+use crate::constants;
 use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 use std::collections::HashMap;
@@ -100,20 +101,24 @@ impl SpecValidator {
     fn get_unsupported_content_type_reason(content_type: &str) -> &'static str {
         match content_type {
             // Binary file types
-            "multipart/form-data" => "file uploads are not supported",
-            "application/octet-stream" => "binary data uploads are not supported",
-            ct if ct.starts_with("image/") => "image uploads are not supported",
-            "application/pdf" => "PDF uploads are not supported",
+            constants::CONTENT_TYPE_MULTIPART => "file uploads are not supported",
+            constants::CONTENT_TYPE_OCTET_STREAM => "binary data uploads are not supported",
+            ct if ct.starts_with(constants::CONTENT_TYPE_PREFIX_IMAGE) => {
+                "image uploads are not supported"
+            }
+            constants::CONTENT_TYPE_PDF => "PDF uploads are not supported",
 
             // Alternative text formats
-            "application/xml" | "text/xml" => "XML content is not supported",
-            "application/x-www-form-urlencoded" => "form-encoded data is not supported",
-            "text/plain" => "plain text content is not supported",
-            "text/csv" => "CSV content is not supported",
+            constants::CONTENT_TYPE_XML | constants::CONTENT_TYPE_TEXT_XML => {
+                "XML content is not supported"
+            }
+            constants::CONTENT_TYPE_FORM => "form-encoded data is not supported",
+            constants::CONTENT_TYPE_TEXT => "plain text content is not supported",
+            constants::CONTENT_TYPE_CSV => "CSV content is not supported",
 
             // JSON-compatible formats
-            "application/x-ndjson" => "newline-delimited JSON is not supported",
-            "application/graphql" => "GraphQL content is not supported",
+            constants::CONTENT_TYPE_NDJSON => "newline-delimited JSON is not supported",
+            constants::CONTENT_TYPE_GRAPHQL => "GraphQL content is not supported",
 
             // Generic fallback
             _ => "is not supported",
@@ -244,7 +249,7 @@ impl SpecValidator {
             return Ok(None);
         };
 
-        if let Some(aperture_secret) = extensions.get("x-aperture-secret") {
+        if let Some(aperture_secret) = extensions.get(crate::constants::EXT_APERTURE_SECRET) {
             // Validate that it's an object
             let secret_obj = aperture_secret.as_object().ok_or_else(|| {
                 Error::Validation(format!(
@@ -254,7 +259,7 @@ impl SpecValidator {
 
             // Validate required 'source' field
             let source = secret_obj
-                .get("source")
+                .get(crate::constants::EXT_KEY_SOURCE)
                 .ok_or_else(|| {
                     Error::Validation(format!(
                         "Missing 'source' field in x-aperture-secret for security scheme '{name}'"
@@ -268,7 +273,7 @@ impl SpecValidator {
                 })?;
 
             // Currently only 'env' source is supported
-            if source != "env" {
+            if source != crate::constants::SOURCE_ENV {
                 return Err(Error::Validation(format!(
                     "Unsupported source '{source}' in x-aperture-secret for security scheme '{name}'. Only 'env' is supported."
                 )));
@@ -276,7 +281,7 @@ impl SpecValidator {
 
             // Validate required 'name' field
             let env_name = secret_obj
-                .get("name")
+                .get(crate::constants::EXT_KEY_NAME)
                 .ok_or_else(|| {
                     Error::Validation(format!(
                         "Missing 'name' field in x-aperture-secret for security scheme '{name}'"
@@ -520,7 +525,7 @@ impl SpecValidator {
             .trim();
 
         // Support standard JSON and all JSON variants (e.g., application/vnd.api+json, application/ld+json)
-        base_type.eq_ignore_ascii_case("application/json")
+        base_type.eq_ignore_ascii_case(constants::CONTENT_TYPE_JSON)
             || base_type.to_lowercase().ends_with("+json")
     }
 
@@ -701,7 +706,7 @@ mod tests {
 
         // Add API key scheme
         components.security_schemes.insert(
-            "apiKey".to_string(),
+            constants::AUTH_SCHEME_APIKEY.to_string(),
             ReferenceOr::Item(SecurityScheme::APIKey {
                 location: openapiv3::APIKeyLocation::Header,
                 name: "X-API-Key".to_string(),
@@ -712,9 +717,9 @@ mod tests {
 
         // Add HTTP bearer scheme
         components.security_schemes.insert(
-            "bearer".to_string(),
+            constants::AUTH_SCHEME_BEARER.to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
-                scheme: "bearer".to_string(),
+                scheme: constants::AUTH_SCHEME_BEARER.to_string(),
                 bearer_format: Some("JWT".to_string()),
                 description: None,
                 extensions: Default::default(),
@@ -723,9 +728,9 @@ mod tests {
 
         // Add HTTP basic scheme (now supported)
         components.security_schemes.insert(
-            "basic".to_string(),
+            constants::AUTH_SCHEME_BASIC.to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
-                scheme: "basic".to_string(),
+                scheme: constants::AUTH_SCHEME_BASIC.to_string(),
                 bearer_format: None,
                 description: None,
                 extensions: Default::default(),
@@ -754,9 +759,10 @@ mod tests {
         request_body
             .content
             .insert("multipart/form-data".to_string(), MediaType::default());
-        request_body
-            .content
-            .insert("application/json".to_string(), MediaType::default());
+        request_body.content.insert(
+            constants::CONTENT_TYPE_JSON.to_string(),
+            MediaType::default(),
+        );
         request_body.required = true;
 
         let mut path_item = PathItem::default();
@@ -785,7 +791,7 @@ mod tests {
         // Check the warning details
         let warning = &result.warnings[0];
         assert_eq!(warning.endpoint.path, "/upload");
-        assert_eq!(warning.endpoint.method, "POST");
+        assert_eq!(warning.endpoint.method, constants::HTTP_METHOD_POST);
         assert!(warning
             .endpoint
             .content_type
@@ -832,7 +838,7 @@ mod tests {
 
         let warning = &result.warnings[0];
         assert_eq!(warning.endpoint.path, "/upload");
-        assert_eq!(warning.endpoint.method, "POST");
+        assert_eq!(warning.endpoint.method, constants::HTTP_METHOD_POST);
         assert!(warning
             .endpoint
             .content_type
@@ -895,9 +901,10 @@ mod tests {
         // Add multiple endpoints with different content types
         let mut path_item1 = PathItem::default();
         let mut request_body1 = RequestBody::default();
-        request_body1
-            .content
-            .insert("application/xml".to_string(), MediaType::default());
+        request_body1.content.insert(
+            constants::CONTENT_TYPE_XML.to_string(),
+            MediaType::default(),
+        );
         path_item1.post = Some(Operation {
             operation_id: Some("postXml".to_string()),
             tags: vec!["data".to_string()],
@@ -911,9 +918,10 @@ mod tests {
 
         let mut path_item2 = PathItem::default();
         let mut request_body2 = RequestBody::default();
-        request_body2
-            .content
-            .insert("text/plain".to_string(), MediaType::default());
+        request_body2.content.insert(
+            constants::CONTENT_TYPE_TEXT.to_string(),
+            MediaType::default(),
+        );
         path_item2.put = Some(Operation {
             operation_id: Some("putText".to_string()),
             tags: vec!["data".to_string()],
@@ -953,12 +961,14 @@ mod tests {
         request_body
             .content
             .insert("multipart/form-data".to_string(), MediaType::default());
-        request_body
-            .content
-            .insert("application/xml".to_string(), MediaType::default());
-        request_body
-            .content
-            .insert("text/plain".to_string(), MediaType::default());
+        request_body.content.insert(
+            constants::CONTENT_TYPE_XML.to_string(),
+            MediaType::default(),
+        );
+        request_body.content.insert(
+            constants::CONTENT_TYPE_TEXT.to_string(),
+            MediaType::default(),
+        );
         request_body.required = true;
 
         let mut path_item = PathItem::default();
@@ -982,14 +992,20 @@ mod tests {
 
         let warning = &result.warnings[0];
         assert_eq!(warning.endpoint.path, "/data");
-        assert_eq!(warning.endpoint.method, "POST");
+        assert_eq!(warning.endpoint.method, constants::HTTP_METHOD_POST);
         // Check that all content types are mentioned
         assert!(warning
             .endpoint
             .content_type
             .contains("multipart/form-data"));
-        assert!(warning.endpoint.content_type.contains("application/xml"));
-        assert!(warning.endpoint.content_type.contains("text/plain"));
+        assert!(warning
+            .endpoint
+            .content_type
+            .contains(constants::CONTENT_TYPE_XML));
+        assert!(warning
+            .endpoint
+            .content_type
+            .contains(constants::CONTENT_TYPE_TEXT));
         assert!(warning.reason.contains("no supported content types"));
     }
 
@@ -1085,9 +1101,10 @@ mod tests {
         let mut spec = create_test_spec();
 
         let mut request_body = RequestBody::default();
-        request_body
-            .content
-            .insert("application/xml".to_string(), MediaType::default());
+        request_body.content.insert(
+            constants::CONTENT_TYPE_XML.to_string(),
+            MediaType::default(),
+        );
         request_body.required = true;
 
         let mut path_item = PathItem::default();
@@ -1120,7 +1137,7 @@ mod tests {
         // Create a bearer auth scheme with valid x-aperture-secret
         let mut extensions = serde_json::Map::new();
         extensions.insert(
-            "x-aperture-secret".to_string(),
+            crate::constants::EXT_APERTURE_SECRET.to_string(),
             serde_json::json!({
                 "source": "env",
                 "name": "API_TOKEN"
@@ -1130,7 +1147,7 @@ mod tests {
         components.security_schemes.insert(
             "bearerAuth".to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
-                scheme: "bearer".to_string(),
+                scheme: constants::AUTH_SCHEME_BEARER.to_string(),
                 bearer_format: None,
                 description: None,
                 extensions: extensions.into_iter().collect(),
@@ -1153,7 +1170,7 @@ mod tests {
         // Create a bearer auth scheme with invalid x-aperture-secret (missing source)
         let mut extensions = serde_json::Map::new();
         extensions.insert(
-            "x-aperture-secret".to_string(),
+            crate::constants::EXT_APERTURE_SECRET.to_string(),
             serde_json::json!({
                 "name": "API_TOKEN"
             }),
@@ -1162,7 +1179,7 @@ mod tests {
         components.security_schemes.insert(
             "bearerAuth".to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
-                scheme: "bearer".to_string(),
+                scheme: constants::AUTH_SCHEME_BEARER.to_string(),
                 bearer_format: None,
                 description: None,
                 extensions: extensions.into_iter().collect(),
@@ -1189,7 +1206,7 @@ mod tests {
         // Create a bearer auth scheme with invalid x-aperture-secret (missing name)
         let mut extensions = serde_json::Map::new();
         extensions.insert(
-            "x-aperture-secret".to_string(),
+            crate::constants::EXT_APERTURE_SECRET.to_string(),
             serde_json::json!({
                 "source": "env"
             }),
@@ -1198,7 +1215,7 @@ mod tests {
         components.security_schemes.insert(
             "bearerAuth".to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
-                scheme: "bearer".to_string(),
+                scheme: constants::AUTH_SCHEME_BEARER.to_string(),
                 bearer_format: None,
                 description: None,
                 extensions: extensions.into_iter().collect(),
@@ -1225,7 +1242,7 @@ mod tests {
         // Create a bearer auth scheme with invalid environment variable name
         let mut extensions = serde_json::Map::new();
         extensions.insert(
-            "x-aperture-secret".to_string(),
+            crate::constants::EXT_APERTURE_SECRET.to_string(),
             serde_json::json!({
                 "source": "env",
                 "name": "123_INVALID"  // Starts with digit
@@ -1235,7 +1252,7 @@ mod tests {
         components.security_schemes.insert(
             "bearerAuth".to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
-                scheme: "bearer".to_string(),
+                scheme: constants::AUTH_SCHEME_BEARER.to_string(),
                 bearer_format: None,
                 description: None,
                 extensions: extensions.into_iter().collect(),
@@ -1262,7 +1279,7 @@ mod tests {
         // Create a bearer auth scheme with unsupported source
         let mut extensions = serde_json::Map::new();
         extensions.insert(
-            "x-aperture-secret".to_string(),
+            crate::constants::EXT_APERTURE_SECRET.to_string(),
             serde_json::json!({
                 "source": "file",  // Not supported
                 "name": "API_TOKEN"
@@ -1272,7 +1289,7 @@ mod tests {
         components.security_schemes.insert(
             "bearerAuth".to_string(),
             ReferenceOr::Item(SecurityScheme::HTTP {
-                scheme: "bearer".to_string(),
+                scheme: constants::AUTH_SCHEME_BEARER.to_string(),
                 bearer_format: None,
                 description: None,
                 extensions: extensions.into_iter().collect(),

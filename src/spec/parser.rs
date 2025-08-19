@@ -1,3 +1,4 @@
+use crate::constants;
 use crate::error::Error;
 use openapiv3::OpenAPI;
 use regex::Regex;
@@ -12,17 +13,17 @@ fn preprocess_for_compatibility(content: &str) -> String {
     // Properties that should be boolean in OpenAPI 3.0 but sometimes use 0/1
     // Note: exclusiveMinimum/Maximum are boolean in 3.0 but numeric in 3.1
     const BOOLEAN_PROPERTIES: &[&str] = &[
-        "deprecated",
-        "required",
-        "readOnly",
-        "writeOnly",
-        "nullable",
-        "uniqueItems",
-        "allowEmptyValue",
-        "explode",
-        "allowReserved",
-        "exclusiveMinimum",
-        "exclusiveMaximum",
+        constants::FIELD_DEPRECATED,
+        constants::FIELD_REQUIRED,
+        constants::FIELD_READ_ONLY,
+        constants::FIELD_WRITE_ONLY,
+        constants::FIELD_NULLABLE,
+        constants::FIELD_UNIQUE_ITEMS,
+        constants::FIELD_ALLOW_EMPTY_VALUE,
+        constants::FIELD_EXPLODE,
+        constants::FIELD_ALLOW_RESERVED,
+        constants::FIELD_EXCLUSIVE_MINIMUM,
+        constants::FIELD_EXCLUSIVE_MAXIMUM,
     ];
 
     // Detect format to optimize processing
@@ -85,15 +86,15 @@ fn fix_component_indentation(content: &str) -> String {
     // Some 3.1 specs (like OpenProject) have component subsections at 2 spaces instead of 4
     // Only fix these specific sections when they appear at the wrong indentation level
     let component_sections = [
-        "schemas",
-        "responses",
-        "examples",
-        "parameters",
-        "requestBodies",
-        "headers",
-        "securitySchemes",
-        "links",
-        "callbacks",
+        constants::COMPONENT_SCHEMAS,
+        constants::COMPONENT_RESPONSES,
+        constants::COMPONENT_EXAMPLES,
+        constants::COMPONENT_PARAMETERS,
+        constants::COMPONENT_REQUEST_BODIES,
+        constants::COMPONENT_HEADERS,
+        constants::COMPONENT_SECURITY_SCHEMES,
+        constants::COMPONENT_LINKS,
+        constants::COMPONENT_CALLBACKS,
     ];
 
     for section in &component_sections {
@@ -224,7 +225,10 @@ fn parse_with_oas3_direct_with_original(
         }
     };
 
-    eprintln!("Warning: OpenAPI 3.1 specification detected. Using compatibility mode.");
+    eprintln!(
+        "{} OpenAPI 3.1 specification detected. Using compatibility mode.",
+        crate::constants::MSG_WARNING_PREFIX
+    );
     eprintln!("         Some 3.1-specific features may not be available.");
 
     // Convert oas3 spec to JSON, then attempt to parse as openapiv3

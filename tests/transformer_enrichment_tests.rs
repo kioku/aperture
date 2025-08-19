@@ -1,3 +1,4 @@
+use aperture_cli::constants;
 use aperture_cli::spec::transformer::SpecTransformer;
 use openapiv3::{
     ExternalDocumentation, Info, MediaType, OpenAPI, Operation, Parameter, ParameterData,
@@ -58,7 +59,7 @@ fn test_enriched_metadata_preservation() {
                 extensions: Default::default(),
             };
             response.content.insert(
-                "application/json".to_string(),
+                constants::CONTENT_TYPE_JSON.to_string(),
                 MediaType {
                     schema: Some(ReferenceOr::Item(Schema {
                         schema_data: Default::default(),
@@ -149,6 +150,9 @@ fn test_enriched_metadata_preservation() {
         response.description,
         Some("Successful response with user data".to_string())
     );
-    assert_eq!(response.content_type, Some("application/json".to_string()));
+    assert_eq!(
+        response.content_type,
+        Some(constants::CONTENT_TYPE_JSON.to_string())
+    );
     assert!(response.schema.is_some());
 }

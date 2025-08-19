@@ -1,5 +1,6 @@
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use aperture_cli::cli::OutputFormat;
+use aperture_cli::constants;
 use aperture_cli::engine::executor::execute_request;
 use aperture_cli::engine::generator::{generate_command_tree, generate_command_tree_with_flags};
 use aperture_cli::response_cache::{CacheConfig, ResponseCache};
@@ -78,7 +79,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 request_body: Some(aperture_cli::cache::models::CachedRequestBody {
                     description: Some("Post data".to_string()),
                     required: true,
-                    content_type: "application/json".to_string(),
+                    content_type: constants::CONTENT_TYPE_JSON.to_string(),
                     schema: r#"{"type": "object"}"#.to_string(),
                     example: Some(
                         r#"{"title": "Test Post", "content": "This is a test post"}"#.to_string(),

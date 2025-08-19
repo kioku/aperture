@@ -1,4 +1,5 @@
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedResponse, CachedSpec};
+use aperture_cli::constants;
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::error::Error;
 use std::collections::HashMap;
@@ -33,7 +34,7 @@ fn create_test_cached_spec() -> CachedSpec {
             responses: vec![CachedResponse {
                 status_code: "200".to_string(),
                 description: None,
-                content_type: Some("application/json".to_string()),
+                content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
                 schema: Some(r#"{"type": "array"}"#.to_string()),
             }],
             security_requirements: vec![],

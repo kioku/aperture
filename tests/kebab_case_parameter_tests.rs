@@ -1,5 +1,6 @@
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use aperture_cli::cli::OutputFormat;
+use aperture_cli::constants;
 use aperture_cli::engine::executor::execute_request;
 use aperture_cli::engine::generator::generate_command_tree;
 use std::collections::HashMap;
@@ -17,16 +18,16 @@ fn create_snake_case_spec() -> CachedSpec {
             description: Some("Organization operations".to_string()),
             summary: None,
             operation_id: "getOrganizationDetails".to_string(),
-            method: "GET".to_string(),
+            method: constants::HTTP_METHOD_GET.to_string(),
             path: "/orgs/{organization_id_or_slug}/details".to_string(),
             parameters: vec![
                 CachedParameter {
                     name: "organization_id_or_slug".to_string(),
-                    location: "path".to_string(),
+                    location: constants::PARAM_LOCATION_PATH.to_string(),
                     required: true,
                     description: Some("Organization ID or slug".to_string()),
                     schema: Some(r#"{"type": "string"}"#.to_string()),
-                    schema_type: Some("string".to_string()),
+                    schema_type: Some(constants::SCHEMA_TYPE_STRING.to_string()),
                     format: None,
                     default_value: None,
                     enum_values: vec![],
@@ -34,11 +35,11 @@ fn create_snake_case_spec() -> CachedSpec {
                 },
                 CachedParameter {
                     name: "include_members".to_string(),
-                    location: "query".to_string(),
+                    location: constants::PARAM_LOCATION_QUERY.to_string(),
                     required: false,
                     description: Some("Include member information".to_string()),
                     schema: Some(r#"{"type": "boolean"}"#.to_string()),
-                    schema_type: Some("boolean".to_string()),
+                    schema_type: Some(constants::SCHEMA_TYPE_BOOLEAN.to_string()),
                     format: None,
                     default_value: Some("false".to_string()),
                     enum_values: vec![],
@@ -46,11 +47,11 @@ fn create_snake_case_spec() -> CachedSpec {
                 },
                 CachedParameter {
                     name: "X_Custom_Header".to_string(),
-                    location: "header".to_string(),
+                    location: constants::PARAM_LOCATION_HEADER.to_string(),
                     required: false,
                     description: Some("Custom header value".to_string()),
                     schema: Some(r#"{"type": "string"}"#.to_string()),
-                    schema_type: Some("string".to_string()),
+                    schema_type: Some(constants::SCHEMA_TYPE_STRING.to_string()),
                     format: None,
                     default_value: None,
                     enum_values: vec![],
@@ -195,16 +196,16 @@ fn test_mixed_case_parameters_normalization() {
             description: Some("Data operations".to_string()),
             summary: None,
             operation_id: "getData".to_string(),
-            method: "GET".to_string(),
+            method: constants::HTTP_METHOD_GET.to_string(),
             path: "/data/{DataID}".to_string(),
             parameters: vec![
                 CachedParameter {
                     name: "DataID".to_string(),
-                    location: "path".to_string(),
+                    location: constants::PARAM_LOCATION_PATH.to_string(),
                     required: true,
                     description: Some("Data identifier".to_string()),
                     schema: Some(r#"{"type": "string"}"#.to_string()),
-                    schema_type: Some("string".to_string()),
+                    schema_type: Some(constants::SCHEMA_TYPE_STRING.to_string()),
                     format: None,
                     default_value: None,
                     enum_values: vec![],
@@ -212,11 +213,11 @@ fn test_mixed_case_parameters_normalization() {
                 },
                 CachedParameter {
                     name: "IncludeMetaData".to_string(),
-                    location: "query".to_string(),
+                    location: constants::PARAM_LOCATION_QUERY.to_string(),
                     required: false,
                     description: Some("Include metadata".to_string()),
                     schema: Some(r#"{"type": "boolean"}"#.to_string()),
-                    schema_type: Some("boolean".to_string()),
+                    schema_type: Some(constants::SCHEMA_TYPE_BOOLEAN.to_string()),
                     format: None,
                     default_value: None,
                     enum_values: vec![],

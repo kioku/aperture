@@ -411,19 +411,23 @@ mod tests {
 
     #[test]
     fn test_select_from_options_structure() {
+        use crate::constants;
         let options = vec![
             (
                 "bearerAuth".to_string(),
                 "Bearer token authentication".to_string(),
             ),
-            ("apiKey".to_string(), "API key authentication".to_string()),
+            (
+                constants::AUTH_SCHEME_APIKEY.to_string(),
+                "API key authentication".to_string(),
+            ),
         ];
 
         // Test that the function accepts the correct input structure
         // We can't test actual user input without mocking stdin
         assert_eq!(options.len(), 2);
         assert_eq!(options[0].0, "bearerAuth");
-        assert_eq!(options[1].0, "apiKey");
+        assert_eq!(options[1].0, constants::AUTH_SCHEME_APIKEY);
     }
 
     #[test]

@@ -6,6 +6,7 @@ use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
     CachedSecurityScheme, CachedSpec,
 };
+use aperture_cli::constants;
 use std::collections::HashMap;
 
 /// Creates a comprehensive test spec with various security schemes and operations
@@ -18,9 +19,9 @@ fn create_comprehensive_test_spec() -> CachedSpec {
         CachedSecurityScheme {
             name: "bearerAuth".to_string(),
             scheme_type: "http".to_string(),
-            scheme: Some("bearer".to_string()),
+            scheme: Some(constants::AUTH_SCHEME_BEARER.to_string()),
             location: Some("header".to_string()),
-            parameter_name: Some("Authorization".to_string()),
+            parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
             description: None,
             bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
@@ -54,9 +55,9 @@ fn create_comprehensive_test_spec() -> CachedSpec {
         CachedSecurityScheme {
             name: "basicAuth".to_string(),
             scheme_type: "http".to_string(),
-            scheme: Some("basic".to_string()),
+            scheme: Some(constants::AUTH_SCHEME_BASIC.to_string()),
             location: Some("header".to_string()),
-            parameter_name: Some("Authorization".to_string()),
+            parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
             description: None,
             bearer_format: None,
             aperture_secret: None, // No x-aperture-secret defined
@@ -103,7 +104,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 CachedResponse {
                     status_code: "200".to_string(),
                     description: Some("Successful response with user data".to_string()),
-                    content_type: Some("application/json".to_string()),
+                    content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
                     schema: Some(r#"{"type": "object", "properties": {"id": {"type": "integer"}, "name": {"type": "string"}}}"#.to_string()),
                 },
                 CachedResponse {
@@ -128,7 +129,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             path: "/users".to_string(),
             parameters: vec![],
             request_body: Some(CachedRequestBody {
-                content_type: "application/json".to_string(),
+                content_type: constants::CONTENT_TYPE_JSON.to_string(),
                 schema: r#"{"type": "object", "required": ["name", "email"], "properties": {"name": {"type": "string"}, "email": {"type": "string", "format": "email"}}}"#.to_string(),
                 required: true,
                 description: Some("User data for creation".to_string()),
@@ -137,7 +138,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             responses: vec![CachedResponse {
                 status_code: "201".to_string(),
                 description: Some("User created successfully".to_string()),
-                content_type: Some("application/json".to_string()),
+                content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
                 schema: None,
             }],
             security_requirements: vec!["apiKeyAuth".to_string()],
@@ -158,7 +159,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             responses: vec![CachedResponse {
                 status_code: "200".to_string(),
                 description: Some("API is healthy".to_string()),
-                content_type: Some("application/json".to_string()),
+                content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
                 schema: Some(r#"{"type": "object", "properties": {"status": {"type": "string"}}}"#.to_string()),
             }],
             security_requirements: vec![],
@@ -284,7 +285,7 @@ fn test_comprehensive_manifest_generation() {
 
     let request_body = create_user.request_body.as_ref().unwrap();
     assert!(request_body.required);
-    assert_eq!(request_body.content_type, "application/json");
+    assert_eq!(request_body.content_type, constants::CONTENT_TYPE_JSON);
     assert_eq!(
         request_body.description,
         Some("User data for creation".to_string())
@@ -329,7 +330,7 @@ fn test_manifest_json_structure() {
     assert_eq!(bearer_auth["x-aperture-secret"]["source"], "env");
 
     // Verify security scheme details are flattened with "scheme" tag
-    assert_eq!(bearer_auth["scheme"], "bearer");
+    assert_eq!(bearer_auth["scheme"], constants::AUTH_SCHEME_BEARER);
     assert_eq!(bearer_auth["type"], "http");
 
     let api_key_auth = &json["security_schemes"]["apiKeyAuth"];
@@ -426,7 +427,7 @@ fn test_manifest_from_openapi() {
                 extensions: Default::default(),
             };
             body.content.insert(
-                "application/json".to_string(),
+                constants::CONTENT_TYPE_JSON.to_string(),
                 MediaType {
                     schema: None,
                     example: Some(serde_json::json!({"name": "John Doe"})),

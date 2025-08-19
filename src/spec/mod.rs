@@ -3,6 +3,8 @@
 //! This module separates the concerns of validating and transforming `OpenAPI` specifications
 //! into distinct, testable components following the Single Responsibility Principle.
 
+use crate::constants;
+
 pub mod parser;
 pub mod transformer;
 pub mod validator;
@@ -28,13 +30,13 @@ pub type HttpMethodsIter<'a> = [(&'static str, &'a Option<Operation>); 8];
 #[must_use]
 pub const fn http_methods_iter(item: &PathItem) -> HttpMethodsIter<'_> {
     [
-        ("GET", &item.get),
-        ("POST", &item.post),
-        ("PUT", &item.put),
-        ("DELETE", &item.delete),
-        ("PATCH", &item.patch),
-        ("HEAD", &item.head),
-        ("OPTIONS", &item.options),
+        (constants::HTTP_METHOD_GET, &item.get),
+        (constants::HTTP_METHOD_POST, &item.post),
+        (constants::HTTP_METHOD_PUT, &item.put),
+        (constants::HTTP_METHOD_DELETE, &item.delete),
+        (constants::HTTP_METHOD_PATCH, &item.patch),
+        (constants::HTTP_METHOD_HEAD, &item.head),
+        (constants::HTTP_METHOD_OPTIONS, &item.options),
         ("TRACE", &item.trace),
     ]
 }

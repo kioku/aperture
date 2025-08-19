@@ -1,6 +1,7 @@
 use crate::cache::metadata::CacheMetadataManager;
 use crate::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
 use crate::config::url_resolver::BaseUrlResolver;
+use crate::constants;
 use crate::engine::loader;
 use crate::error::Error;
 use crate::fs::{FileSystem, OsFileSystem};
@@ -186,7 +187,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 if line.is_empty() {
                     eprintln!();
                 } else if line.starts_with("Skipping") || line.starts_with("Endpoints") {
-                    eprintln!("Warning: {line}");
+                    eprintln!("{} {line}", crate::constants::MSG_WARNING_PREFIX);
                 } else {
                     eprintln!("{line}");
                 }
@@ -336,7 +337,7 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// Returns an error if the specs directory cannot be read.
     pub fn list_specs(&self) -> Result<Vec<String>, Error> {
-        let specs_dir = self.config_dir.join("specs");
+        let specs_dir = self.config_dir.join(crate::constants::DIR_SPECS);
         if !self.fs.exists(&specs_dir) {
             return Ok(Vec::new());
         }
@@ -349,7 +350,11 @@ impl<F: FileSystem> ConfigManager<F> {
                         .extension()
                         .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml"))
                     {
-                        specs.push(file_name.trim_end_matches(".yaml").to_string());
+                        specs.push(
+                            file_name
+                                .trim_end_matches(crate::constants::FILE_EXT_YAML)
+                                .to_string(),
+                        );
                     }
                 }
             }
@@ -363,8 +368,14 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// Returns an error if the spec does not exist or cannot be removed.
     pub fn remove_spec(&self, name: &str) -> Result<(), Error> {
-        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
-        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
+        let spec_path = self
+            .config_dir
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{name}{}", crate::constants::FILE_EXT_YAML));
+        let cache_path = self
+            .config_dir
+            .join(crate::constants::DIR_CACHE)
+            .join(format!("{name}{}", crate::constants::FILE_EXT_BIN));
 
         if !self.fs.exists(&spec_path) {
             return Err(Error::SpecNotFound {
@@ -378,7 +389,7 @@ impl<F: FileSystem> ConfigManager<F> {
         }
 
         // Remove from cache metadata
-        let cache_dir = self.config_dir.join(".cache");
+        let cache_dir = self.config_dir.join(crate::constants::DIR_CACHE);
         let metadata_manager = CacheMetadataManager::new(&self.fs);
         // Ignore errors if metadata removal fails - the important files are already removed
         let _ = metadata_manager.remove_spec_metadata(&cache_dir, name);
@@ -395,7 +406,10 @@ impl<F: FileSystem> ConfigManager<F> {
     /// - The `$EDITOR` environment variable is not set.
     /// - The editor command fails to execute.
     pub fn edit_spec(&self, name: &str) -> Result<(), Error> {
-        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
+        let spec_path = self
+            .config_dir
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{name}{}", crate::constants::FILE_EXT_YAML));
 
         if !self.fs.exists(&spec_path) {
             return Err(Error::SpecNotFound {
@@ -422,7 +436,7 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// Returns an error if the configuration file exists but cannot be read or parsed.
     pub fn load_global_config(&self) -> Result<GlobalConfig, Error> {
-        let config_path = self.config_dir.join("config.toml");
+        let config_path = self.config_dir.join(crate::constants::CONFIG_FILENAME);
         if self.fs.exists(&config_path) {
             let content = self.fs.read_to_string(&config_path)?;
             toml::from_str(&content).map_err(|e| Error::InvalidConfig {
@@ -439,7 +453,7 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// Returns an error if the configuration cannot be serialized or written.
     pub fn save_global_config(&self, config: &GlobalConfig) -> Result<(), Error> {
-        let config_path = self.config_dir.join("config.toml");
+        let config_path = self.config_dir.join(crate::constants::CONFIG_FILENAME);
 
         // Ensure config directory exists
         self.fs.create_dir_all(&self.config_dir)?;
@@ -471,8 +485,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Verify the spec exists
         let spec_path = self
             .config_dir
-            .join("specs")
-            .join(format!("{api_name}.yaml"));
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
             return Err(Error::SpecNotFound {
                 name: api_name.to_string(),
@@ -526,8 +540,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Verify the spec exists
         let spec_path = self
             .config_dir
-            .join("specs")
-            .join(format!("{api_name}.yaml"));
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
             return Err(Error::SpecNotFound {
                 name: api_name.to_string(),
@@ -535,7 +549,7 @@ impl<F: FileSystem> ConfigManager<F> {
         }
 
         // Load the cached spec to get its base URL
-        let cache_dir = self.config_dir.join(".cache");
+        let cache_dir = self.config_dir.join(crate::constants::DIR_CACHE);
         let cached_spec = loader::load_cached_spec(&cache_dir, api_name).ok();
 
         // Load global config
@@ -662,8 +676,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Verify the spec exists
         let spec_path = self
             .config_dir
-            .join("specs")
-            .join(format!("{api_name}.yaml"));
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
             return Err(Error::SpecNotFound {
                 name: api_name.to_string(),
@@ -713,8 +727,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Verify the spec exists
         let spec_path = self
             .config_dir
-            .join("specs")
-            .join(format!("{api_name}.yaml"));
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
             return Err(Error::SpecNotFound {
                 name: api_name.to_string(),
@@ -767,8 +781,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Verify the spec exists
         let spec_path = self
             .config_dir
-            .join("specs")
-            .join(format!("{api_name}.yaml"));
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
             return Err(Error::SpecNotFound {
                 name: api_name.to_string(),
@@ -826,8 +840,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Verify the spec exists
         let spec_path = self
             .config_dir
-            .join("specs")
-            .join(format!("{api_name}.yaml"));
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
             return Err(Error::SpecNotFound {
                 name: api_name.to_string(),
@@ -907,7 +921,10 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// Returns an error if the spec already exists and force is false
     fn check_spec_exists(&self, name: &str, force: bool) -> Result<(), Error> {
-        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
+        let spec_path = self
+            .config_dir
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{name}{}", crate::constants::FILE_EXT_YAML));
 
         if self.fs.exists(&spec_path) && !force {
             return Err(Error::SpecAlreadyExists {
@@ -951,8 +968,14 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// Returns an error if directory creation fails
     fn create_spec_directories(&self, name: &str) -> Result<(PathBuf, PathBuf), Error> {
-        let spec_path = self.config_dir.join("specs").join(format!("{name}.yaml"));
-        let cache_path = self.config_dir.join(".cache").join(format!("{name}.bin"));
+        let spec_path = self
+            .config_dir
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{name}{}", crate::constants::FILE_EXT_YAML));
+        let cache_path = self
+            .config_dir
+            .join(crate::constants::DIR_CACHE)
+            .join(format!("{name}{}", crate::constants::FILE_EXT_BIN));
 
         let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
             path: spec_path.display().to_string(),
@@ -993,7 +1016,7 @@ impl<F: FileSystem> ConfigManager<F> {
         self.fs.write_all(cache_path, &cached_data)?;
 
         // Update cache metadata for optimized version checking
-        let cache_dir = self.config_dir.join(".cache");
+        let cache_dir = self.config_dir.join(crate::constants::DIR_CACHE);
         let metadata_manager = CacheMetadataManager::new(&self.fs);
         metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
 
@@ -1046,8 +1069,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Verify the spec exists
         let spec_path = self
             .config_dir
-            .join("specs")
-            .join(format!("{api_name}.yaml"));
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
             return Err(Error::SpecNotFound {
                 name: api_name.to_string(),
@@ -1055,7 +1078,7 @@ impl<F: FileSystem> ConfigManager<F> {
         }
 
         // Load cached spec to get security schemes
-        let cache_dir = self.config_dir.join(".cache");
+        let cache_dir = self.config_dir.join(crate::constants::DIR_CACHE);
         let cached_spec = loader::load_cached_spec(&cache_dir, api_name)?;
 
         // Get current configuration
@@ -1086,7 +1109,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
                 // Add type-specific details
                 match scheme.scheme_type.as_str() {
-                    "apiKey" => {
+                    constants::AUTH_SCHEME_APIKEY => {
                         if let (Some(location), Some(param)) =
                             (&scheme.location, &scheme.parameter_name)
                         {

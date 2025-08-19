@@ -1,4 +1,6 @@
+use crate::constants;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -161,9 +163,9 @@ pub enum Error {
 /// JSON representation of an error for structured output
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonError {
-    pub error_type: String,
+    pub error_type: Cow<'static, str>,
     pub message: String,
-    pub context: Option<String>,
+    pub context: Option<Cow<'static, str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
 }
@@ -217,81 +219,72 @@ impl Error {
     pub fn to_json(&self) -> JsonError {
         use serde_json::json;
 
-        let (error_type, message, context, details) = match self {
+        let (error_type, message, context, details): (&str, String, Option<Cow<'static, str>>, Option<serde_json::Value>) = match self {
             Self::Config(msg) => ("Configuration", msg.clone(), None, None),
             Self::Io(io_err) => {
                 let context = match io_err.kind() {
                     std::io::ErrorKind::NotFound => {
-                        Some("Check that the file path is correct and the file exists.")
+                        Some(Cow::Borrowed(constants::ERR_FILE_NOT_FOUND))
                     }
                     std::io::ErrorKind::PermissionDenied => {
-                        Some("Check file permissions or run with appropriate privileges.")
+                        Some(Cow::Borrowed(constants::ERR_PERMISSION))
                     }
                     _ => None,
                 };
                 (
                     "FileSystem",
                     io_err.to_string(),
-                    context.map(str::to_string),
+                    context,
                     None,
                 )
             }
             Self::Network(req_err) => {
                 let context = if req_err.is_connect() {
-                    Some("Check that the API server is running and accessible.")
+                    Some(Cow::Borrowed(constants::ERR_CONNECTION))
                 } else if req_err.is_timeout() {
-                    Some("The API server may be slow or unresponsive. Try again later.")
+                    Some(Cow::Borrowed(constants::ERR_TIMEOUT))
                 } else if req_err.is_status() {
                     req_err.status().and_then(|status| match status.as_u16() {
-                        401 => Some("Check your API credentials and authentication configuration."),
-                        403 => Some(
-                            "Your credentials may be valid but lack permission for this operation.",
-                        ),
-                        404 => Some("Check that the API endpoint and parameters are correct."),
-                        429 => {
-                            Some("You're making requests too quickly. Wait before trying again.")
-                        }
-                        500..=599 => {
-                            Some("The API server is experiencing issues. Try again later.")
-                        }
+                        401 => Some(Cow::Borrowed(constants::ERR_API_CREDENTIALS)),
+                        403 => Some(Cow::Borrowed(constants::ERR_PERMISSION_DENIED)),
+                        404 => Some(Cow::Borrowed(constants::ERR_ENDPOINT_NOT_FOUND)),
+                        429 => Some(Cow::Borrowed(constants::ERR_RATE_LIMITED)),
+                        500..=599 => Some(Cow::Borrowed(constants::ERR_SERVER_ERROR)),
                         _ => None,
                     })
                 } else {
                     None
                 };
-                ("Network", req_err.to_string(), context.map(str::to_string), None)
+                ("Network", req_err.to_string(), context, None)
             }
             Self::Yaml(yaml_err) => (
                 "YAMLParsing",
                 yaml_err.to_string(),
-                Some("Check that your OpenAPI specification is valid YAML syntax.".to_string()),
+                Some(Cow::Borrowed(constants::ERR_YAML_SYNTAX)),
                 None,
             ),
             Self::Json(json_err) => (
                 "JSONParsing",
                 json_err.to_string(),
-                Some("Check that your request body or response contains valid JSON.".to_string()),
+                Some(Cow::Borrowed(constants::ERR_JSON_SYNTAX)),
                 None,
             ),
             Self::Validation(msg) => (
                 "Validation",
                 msg.clone(),
-                Some(
-                    "Check that your OpenAPI specification follows the required format."
-                        .to_string(),
-                ),
+                Some(Cow::Borrowed(constants::ERR_OPENAPI_FORMAT)),
                 None,
             ),
             Self::Toml(toml_err) => (
                 "TOMLParsing",
                 toml_err.to_string(),
-                Some("Check that your configuration file is valid TOML syntax.".to_string()),
+                Some(Cow::Borrowed(constants::ERR_TOML_SYNTAX)),
                 None,
             ),
             Self::SpecNotFound { name } => (
                 "SpecNotFound",
                 format!("API specification '{name}' not found"),
-                Some("Use 'aperture config list' to see available specifications.".to_string()),
+                Some(Cow::Borrowed(constants::MSG_USE_CONFIG_LIST)),
                 Some(json!({ "spec_name": name })),
             ),
             Self::SpecAlreadyExists { name } => (
@@ -309,19 +302,19 @@ impl Error {
             Self::CachedSpecCorrupted { name, reason } => (
                 "CachedSpecCorrupted",
                 format!("Failed to deserialize cached spec '{name}': {reason}. The cache may be corrupted"),
-                Some("Try removing and re-adding the specification.".to_string()),
+                Some(Cow::Borrowed("Try removing and re-adding the specification.")),
                 Some(json!({ "spec_name": name, "corruption_reason": reason })),
             ),
             Self::CacheVersionMismatch { name, found, expected } => (
                 "CacheVersionMismatch",
                 format!("Cache format version mismatch for '{name}': found v{found}, expected v{expected}"),
-                Some("Run 'aperture config reinit' to regenerate the cache.".to_string()),
+                Some(Cow::Borrowed("Run 'aperture config reinit' to regenerate the cache.")),
                 Some(json!({ "spec_name": name, "found_version": found, "expected_version": expected })),
             ),
             Self::SecretNotSet { scheme_name, env_var } => (
                 "SecretNotSet",
                 format!("Environment variable '{env_var}' required for authentication '{scheme_name}' is not set"),
-                Some(format!("Set the environment variable: export {env_var}=<your-secret>")),
+                Some(Cow::Owned(format!("Set the environment variable: export {env_var}=<your-secret>"))),
                 Some(json!({ "scheme_name": scheme_name, "env_var": env_var })),
             ),
             Self::InvalidHeaderFormat { header } => (
@@ -345,7 +338,7 @@ impl Error {
             Self::EditorNotSet => (
                 "EditorNotSet",
                 "EDITOR environment variable not set".to_string(),
-                Some("Set your preferred editor: export EDITOR=vim".to_string()),
+                Some(Cow::Borrowed("Set your preferred editor: export EDITOR=vim")),
                 None,
             ),
             Self::EditorFailed { name } => (
@@ -369,13 +362,13 @@ impl Error {
             Self::UnsupportedAuthScheme { scheme } => (
                 "UnsupportedAuthScheme",
                 format!("Unsupported HTTP authentication scheme: {scheme}"),
-                Some("Only 'bearer' and 'basic' schemes are supported.".to_string()),
+                Some(Cow::Borrowed("Only 'bearer' and 'basic' schemes are supported.")),
                 Some(json!({ "scheme": scheme })),
             ),
             Self::UnsupportedSecurityScheme { scheme_type } => (
                 "UnsupportedSecurityScheme",
                 format!("Unsupported security scheme type: {scheme_type}"),
-                Some("Only 'apiKey' and 'http' security schemes are supported.".to_string()),
+                Some(Cow::Borrowed("Only 'apiKey' and 'http' security schemes are supported.")),
                 Some(json!({ "scheme_type": scheme_type })),
             ),
             Self::SerializationError { reason } => (
@@ -387,19 +380,19 @@ impl Error {
             Self::InvalidConfig { reason } => (
                 "InvalidConfig",
                 format!("Invalid config.toml: {reason}"),
-                Some("Check the TOML syntax in your configuration file.".to_string()),
+                Some(Cow::Borrowed("Check the TOML syntax in your configuration file.")),
                 Some(json!({ "reason": reason })),
             ),
             Self::HomeDirectoryNotFound => (
                 "HomeDirectoryNotFound",
                 "Could not determine home directory".to_string(),
-                Some("Ensure HOME environment variable is set.".to_string()),
+                Some(Cow::Borrowed("Ensure HOME environment variable is set.")),
                 None,
             ),
             Self::InvalidJsonBody { reason } => (
                 "InvalidJsonBody",
                 format!("Invalid JSON body: {reason}"),
-                Some("Check your JSON syntax and ensure all quotes are properly escaped.".to_string()),
+                Some(Cow::Borrowed(constants::ERR_JSON_SYNTAX)),
                 Some(json!({ "reason": reason })),
             ),
             Self::RequestFailed { reason } => (
@@ -418,18 +411,18 @@ impl Error {
                 let context_hint = match status {
                     401 => {
                         if security_schemes.is_empty() {
-                            Some("Check your API credentials and authentication configuration.".to_string())
+                            Some(Cow::Borrowed(constants::ERR_API_CREDENTIALS))
                         } else {
                             let env_vars: Vec<String> = security_schemes.iter()
                                 .map(|scheme| format!("Check environment variable for '{scheme}' authentication"))
                                 .collect();
-                            Some(env_vars.join("; "))
+                            Some(Cow::Owned(env_vars.join("; ")))
                         }
                     },
-                    403 => Some("Your credentials may be valid but lack permission for this operation.".to_string()),
-                    404 => Some("Check that the API endpoint and parameters are correct.".to_string()),
-                    429 => Some("You're making requests too quickly. Wait before trying again.".to_string()),
-                    500..=599 => Some("The API server is experiencing issues. Try again later.".to_string()),
+                    403 => Some(Cow::Borrowed(constants::ERR_PERMISSION_DENIED)),
+                    404 => Some(Cow::Borrowed(constants::ERR_ENDPOINT_NOT_FOUND)),
+                    429 => Some(Cow::Borrowed(constants::ERR_RATE_LIMITED)),
+                    500..=599 => Some(Cow::Borrowed(constants::ERR_SERVER_ERROR)),
                     _ => None,
                 };
                 (
@@ -448,19 +441,19 @@ impl Error {
             Self::InvalidCommand { context, reason } => (
                 "InvalidCommand",
                 format!("Invalid command for API '{context}': {reason}"),
-                Some("Use --help to see available commands.".to_string()),
+                Some(Cow::Borrowed(constants::MSG_USE_HELP)),
                 Some(json!({ "context": context, "reason": reason })),
             ),
             Self::OperationNotFound => (
                 "OperationNotFound",
                 "Could not find operation from command path".to_string(),
-                Some("Check that the command matches an available operation.".to_string()),
+                Some(Cow::Borrowed("Check that the command matches an available operation.")),
                 None,
             ),
             Self::InvalidIdempotencyKey => (
                 "InvalidIdempotencyKey",
                 "Invalid idempotency key".to_string(),
-                Some("Idempotency key must be a valid header value.".to_string()),
+                Some(Cow::Borrowed("Idempotency key must be a valid header value.")),
                 None,
             ),
             Self::EmptyHeaderName => (
@@ -472,107 +465,106 @@ impl Error {
             Self::JqFilterError { reason } => (
                 "JqFilterError",
                 format!("JQ filter error: {reason}"),
-                Some("Check your JQ filter syntax. Common examples: '.name', '.[] | select(.active)'".to_string()),
+                Some(Cow::Borrowed("Check your JQ filter syntax. Common examples: '.name', '.[] | select(.active)'")),
                 Some(json!({ "reason": reason })),
             ),
             Self::InvalidPath { path, reason } => (
                 "InvalidPath",
                 format!("Invalid path '{path}': {reason}"),
-                Some("Check that the path is valid and properly formatted.".to_string()),
+                Some(Cow::Borrowed("Check that the path is valid and properly formatted.")),
                 Some(json!({ "path": path, "reason": reason })),
             ),
             Self::InteractiveInputTooLong { provided, max, suggestion } => (
                 "InteractiveInputTooLong",
                 format!("Input too long: {provided} characters (max: {max}). {suggestion}"),
-                Some("Consider shortening your input or breaking it into multiple parts.".to_string()),
+                Some(Cow::Borrowed("Consider shortening your input or breaking it into multiple parts.")),
                 Some(json!({ "provided_length": provided, "max_length": max, "suggestion": suggestion })),
             ),
             Self::InteractiveInvalidCharacters { invalid_chars, suggestion } => (
                 "InteractiveInvalidCharacters",
                 format!("Input contains invalid characters: {invalid_chars}. {suggestion}"),
-                Some("Use only alphanumeric characters, underscores, and hyphens.".to_string()),
+                Some(Cow::Borrowed("Use only alphanumeric characters, underscores, and hyphens.")),
                 Some(json!({ "invalid_characters": invalid_chars, "suggestion": suggestion })),
             ),
             Self::InteractiveTimeout { timeout_secs, suggestion } => (
                 "InteractiveTimeout",
                 format!("Interactive operation timed out after {timeout_secs} seconds. {suggestion}"),
-                Some("Try again with a faster response or increase the timeout.".to_string()),
+                Some(Cow::Borrowed("Try again with a faster response or increase the timeout.")),
                 Some(json!({ "timeout_seconds": timeout_secs, "suggestion": suggestion })),
             ),
             Self::InteractiveRetriesExhausted { max_attempts, last_error, suggestions } => (
                 "InteractiveRetriesExhausted",
                 format!("Maximum retry attempts ({max_attempts}) exceeded. Last error: {last_error}"),
-                Some(suggestions.join("; ")),
+                Some(Cow::Owned(suggestions.join("; "))),
                 Some(json!({ "max_attempts": max_attempts, "last_error": last_error, "suggestions": suggestions })),
             ),
             Self::InvalidEnvironmentVariableName { name, reason, suggestion } => (
                 "InvalidEnvironmentVariableName",
                 format!("Environment variable name '{name}' is invalid: {reason}. {suggestion}"),
-                Some("Use uppercase letters, numbers, and underscores only.".to_string()),
+                Some(Cow::Borrowed("Use uppercase letters, numbers, and underscores only.")),
                 Some(json!({ "variable_name": name, "reason": reason, "suggestion": suggestion })),
             ),
             Self::RequestTimeout { attempts, timeout_ms } => (
                 "RequestTimeout",
                 format!("Request timed out after {attempts} retries (max timeout: {timeout_ms}ms)"),
-                Some("The server may be slow or unresponsive. Try again later or increase timeout.".to_string()),
+                Some(Cow::Borrowed("The server may be slow or unresponsive. Try again later or increase timeout.")),
                 Some(json!({ "retry_attempts": attempts, "timeout_ms": timeout_ms })),
             ),
             Self::RetryLimitExceeded { attempts, duration_ms, last_error } => (
                 "RetryLimitExceeded",
                 format!("Retry limit exceeded: {attempts} attempts failed over {duration_ms}ms. Last error: {last_error}"),
-                Some("The service may be experiencing issues. Check API status or try again later.".to_string()),
+                Some(Cow::Borrowed("The service may be experiencing issues. Check API status or try again later.")),
                 Some(json!({ "retry_attempts": attempts, "duration_ms": duration_ms, "last_error": last_error })),
             ),
             Self::TransientNetworkError { reason, retryable } => (
                 "TransientNetworkError",
                 format!("Transient network error - request can be retried: {reason}"),
-                if *retryable { Some("This error is retryable. The request will be automatically retried.".to_string()) }
-                else { Some("This error is not retryable. Check your network connection and API configuration.".to_string()) },
+                if *retryable { Some(Cow::Borrowed("This error is retryable. The request will be automatically retried.")) }
+                else { Some(Cow::Borrowed("This error is not retryable. Check your network connection and API configuration.")) },
                 Some(json!({ "reason": reason, "retryable": retryable })),
             ),
             Self::MissingServerVariable { name } => (
                 "MissingServerVariable",
                 format!("Missing required server variable '{name}' with no default value"),
-                Some("Provide the missing server variable using --server-var name=value".to_string()),
+                Some(Cow::Borrowed("Provide the missing server variable using --server-var name=value")),
                 Some(json!({ "variable_name": name })),
             ),
             Self::UnknownServerVariable { name, available } => (
                 "UnknownServerVariable",
                 format!("Unknown server variable '{name}'. Available variables: {available:?}"),
-                Some(format!("Use one of the available variables: {}", available.join(", "))),
+                Some(Cow::Owned(format!("Use one of the available variables: {}", available.join(", ")))),
                 Some(json!({ "variable_name": name, "available_variables": available })),
             ),
             Self::InvalidServerVarFormat { arg, reason } => (
                 "InvalidServerVarFormat",
                 format!("Invalid server variable format '{arg}': {reason}"),
-                Some("Use the format --server-var key=value".to_string()),
+                Some(Cow::Borrowed("Use the format --server-var key=value")),
                 Some(json!({ "argument": arg, "reason": reason })),
             ),
             Self::InvalidServerVarValue { name, value, allowed_values } => (
                 "InvalidServerVarValue",
                 format!("Invalid value '{value}' for server variable '{name}'. Allowed values: {allowed_values:?}"),
-                Some(format!("Use one of the allowed values: {}", allowed_values.join(", "))),
+                Some(Cow::Owned(format!("Use one of the allowed values: {}", allowed_values.join(", ")))),
                 Some(json!({ "variable_name": name, "provided_value": value, "allowed_values": allowed_values })),
             ),
             Self::UnresolvedTemplateVariable { name, url } => (
                 "UnresolvedTemplateVariable",
                 format!("Unresolved template variable '{name}' in URL '{url}'"),
-                Some("Ensure all template variables are provided with --server-var".to_string()),
+                Some(Cow::Borrowed("Ensure all template variables are provided with --server-var")),
                 Some(json!({ "variable_name": name, "template_url": url })),
             ),
             Self::Anyhow(err) => (
                 "Unexpected",
                 err.to_string(),
-                Some(
+                Some(Cow::Borrowed(
                     "This may be a bug. Please report it with the command you were running."
-                        .to_string(),
-                ),
+                )),
                 None,
             ),
         };
 
         JsonError {
-            error_type: error_type.to_string(),
+            error_type: Cow::Borrowed(error_type),
             message,
             context,
             details,
