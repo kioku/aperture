@@ -226,7 +226,17 @@ async fn test_build_url_with_server_template_variables() {
             aperture_cli::error::Error::UnresolvedTemplateVariable { name, url: _ } => {
                 assert_eq!(name, "region");
             }
-            _ => panic!("Expected UnresolvedTemplateVariable error, got: {:?}", e),
+            aperture_cli::error::Error::Internal {
+                kind: aperture_cli::error::ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("region"));
+            }
+            _ => panic!(
+                "Expected UnresolvedTemplateVariable or Internal ServerVariable error, got: {:?}",
+                e
+            ),
         }
     }
 }
@@ -447,7 +457,17 @@ async fn test_url_with_path_braces_detected_as_template() {
             aperture_cli::error::Error::UnresolvedTemplateVariable { name, url: _ } => {
                 assert_eq!(name, "version");
             }
-            _ => panic!("Expected UnresolvedTemplateVariable error, got: {:?}", e),
+            aperture_cli::error::Error::Internal {
+                kind: aperture_cli::error::ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("version"));
+            }
+            _ => panic!(
+                "Expected UnresolvedTemplateVariable or Internal ServerVariable error, got: {:?}",
+                e
+            ),
         }
     }
 }
@@ -493,7 +513,17 @@ async fn test_url_with_multiple_templates_detected() {
                 // Should fail on the first template variable encountered
                 assert_eq!(name, "region");
             }
-            _ => panic!("Expected UnresolvedTemplateVariable error, got: {:?}", e),
+            aperture_cli::error::Error::Internal {
+                kind: aperture_cli::error::ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("region"));
+            }
+            _ => panic!(
+                "Expected UnresolvedTemplateVariable or Internal ServerVariable error, got: {:?}",
+                e
+            ),
         }
     }
 }

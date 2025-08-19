@@ -54,7 +54,11 @@ impl<'a> BaseUrlResolver<'a> {
                     // This maintains backward compatibility while providing visibility
                     Error::InvalidServerVarFormat { .. }
                     | Error::InvalidServerVarValue { .. }
-                    | Error::UnknownServerVariable { .. } => {
+                    | Error::UnknownServerVariable { .. }
+                    | Error::Internal {
+                        kind: crate::error::ErrorKind::ServerVariable,
+                        ..
+                    } => {
                         eprintln!(
                             "{} Server variable error: {err}",
                             crate::constants::MSG_WARNING_PREFIX
@@ -102,10 +106,7 @@ impl<'a> BaseUrlResolver<'a> {
             let template_vars = extract_template_variables(&base_url);
 
             if let Some(first_var) = template_vars.first() {
-                return Err(Error::UnresolvedTemplateVariable {
-                    name: first_var.clone(),
-                    url: base_url,
-                });
+                return Err(Error::unresolved_template_variable(first_var, &base_url));
             }
 
             return Ok(base_url);
@@ -194,6 +195,7 @@ fn extract_template_variables(url: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::cache::models::{CachedSpec, ServerVariable};
+    use crate::error::ErrorKind;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -528,7 +530,14 @@ mod tests {
                     assert_eq!(name, "region");
                     assert_eq!(url, "https://{region}.api.example.com");
                 }
-                _ => panic!("Expected UnresolvedTemplateVariable error"),
+                Error::Internal {
+                    kind: ErrorKind::ServerVariable,
+                    message,
+                    ..
+                } => {
+                    assert!(message.contains("region"));
+                }
+                _ => panic!("Expected UnresolvedTemplateVariable or Internal ServerVariable error"),
             }
         });
     }

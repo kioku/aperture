@@ -81,10 +81,8 @@ fn test_prompt_for_input_with_control_characters() {
 
     let result = prompt_for_input_with_io("Enter text: ", &mock);
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("invalid characters"));
+    let error_msg = result.unwrap_err().to_string();
+    assert!(error_msg.contains("Invalid characters") || error_msg.contains("invalid characters"));
 }
 
 #[test]

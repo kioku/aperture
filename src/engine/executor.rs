@@ -572,16 +572,10 @@ fn build_headers(
     for param in &operation.parameters {
         if param.location == "header" {
             if let Some(value) = current_matches.get_one::<String>(&param.name) {
-                let header_name =
-                    HeaderName::from_str(&param.name).map_err(|e| Error::InvalidHeaderName {
-                        name: param.name.clone(),
-                        reason: e.to_string(),
-                    })?;
-                let header_value =
-                    HeaderValue::from_str(value).map_err(|e| Error::InvalidHeaderValue {
-                        name: param.name.clone(),
-                        reason: e.to_string(),
-                    })?;
+                let header_name = HeaderName::from_str(&param.name)
+                    .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
+                let header_value = HeaderValue::from_str(value)
+                    .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))?;
                 headers.insert(header_name, header_value);
             }
         }

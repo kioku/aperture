@@ -410,9 +410,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(format!("{name}{}", crate::constants::FILE_EXT_YAML));
 
         if !self.fs.exists(&spec_path) {
-            return Err(Error::SpecNotFound {
-                name: name.to_string(),
-            });
+            return Err(Error::spec_not_found(name));
         }
 
         let editor = std::env::var("EDITOR").map_err(|_| Error::EditorNotSet)?;
@@ -454,9 +452,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Ensure config directory exists
         self.fs.create_dir_all(&self.config_dir)?;
 
-        let content = toml::to_string_pretty(config).map_err(|e| Error::SerializationError {
-            reason: format!("Failed to serialize config: {e}"),
-        })?;
+        let content = toml::to_string_pretty(config)
+            .map_err(|e| Error::serialization_error(format!("Failed to serialize config: {e}")))?;
 
         self.fs.write_all(&config_path, content.as_bytes())?;
         Ok(())
@@ -484,9 +481,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(crate::constants::DIR_SPECS)
             .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::SpecNotFound {
-                name: api_name.to_string(),
-            });
+            return Err(Error::spec_not_found(api_name));
         }
 
         // Load current config
@@ -539,9 +534,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(crate::constants::DIR_SPECS)
             .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::SpecNotFound {
-                name: api_name.to_string(),
-            });
+            return Err(Error::spec_not_found(api_name));
         }
 
         // Load the cached spec to get its base URL
@@ -675,9 +668,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(crate::constants::DIR_SPECS)
             .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::SpecNotFound {
-                name: api_name.to_string(),
-            });
+            return Err(Error::spec_not_found(api_name));
         }
 
         // Load current config
@@ -726,9 +717,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(crate::constants::DIR_SPECS)
             .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::SpecNotFound {
-                name: api_name.to_string(),
-            });
+            return Err(Error::spec_not_found(api_name));
         }
 
         // Load global config
@@ -780,9 +769,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(crate::constants::DIR_SPECS)
             .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::SpecNotFound {
-                name: api_name.to_string(),
-            });
+            return Err(Error::spec_not_found(api_name));
         }
 
         // Load global config
@@ -790,25 +777,23 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Check if the API has any configured secrets
         let Some(api_config) = config.api_configs.get_mut(api_name) else {
-            return Err(Error::InvalidConfig {
-                reason: format!("No secrets configured for API '{api_name}'"),
-            });
+            return Err(Error::invalid_config(format!(
+                "No secrets configured for API '{api_name}'"
+            )));
         };
 
         // Check if the API config exists but has no secrets
         if api_config.secrets.is_empty() {
-            return Err(Error::InvalidConfig {
-                reason: format!("No secrets configured for API '{api_name}'"),
-            });
+            return Err(Error::invalid_config(format!(
+                "No secrets configured for API '{api_name}'"
+            )));
         }
 
         // Check if the specific scheme exists
         if !api_config.secrets.contains_key(scheme_name) {
-            return Err(Error::InvalidConfig {
-                reason: format!(
-                    "Secret for scheme '{scheme_name}' is not configured for API '{api_name}'"
-                ),
-            });
+            return Err(Error::invalid_config(format!(
+                "Secret for scheme '{scheme_name}' is not configured for API '{api_name}'"
+            )));
         }
 
         // Remove the secret
@@ -839,9 +824,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(crate::constants::DIR_SPECS)
             .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::SpecNotFound {
-                name: api_name.to_string(),
-            });
+            return Err(Error::spec_not_found(api_name));
         }
 
         // Load global config
@@ -971,13 +954,17 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(crate::constants::DIR_CACHE)
             .join(format!("{name}{}", crate::constants::FILE_EXT_BIN));
 
-        let spec_parent = spec_path.parent().ok_or_else(|| Error::InvalidPath {
-            path: spec_path.display().to_string(),
-            reason: "Path has no parent directory".to_string(),
+        let spec_parent = spec_path.parent().ok_or_else(|| {
+            Error::invalid_path(
+                spec_path.display().to_string(),
+                "Path has no parent directory",
+            )
         })?;
-        let cache_parent = cache_path.parent().ok_or_else(|| Error::InvalidPath {
-            path: cache_path.display().to_string(),
-            reason: "Path has no parent directory".to_string(),
+        let cache_parent = cache_path.parent().ok_or_else(|| {
+            Error::invalid_path(
+                cache_path.display().to_string(),
+                "Path has no parent directory",
+            )
         })?;
 
         self.fs.create_dir_all(spec_parent)?;
@@ -1003,10 +990,8 @@ impl<F: FileSystem> ConfigManager<F> {
         self.fs.write_all(spec_path, content.as_bytes())?;
 
         // Serialize and write cached representation
-        let cached_data =
-            bincode::serialize(cached_spec).map_err(|e| Error::SerializationError {
-                reason: e.to_string(),
-            })?;
+        let cached_data = bincode::serialize(cached_spec)
+            .map_err(|e| Error::serialization_error(e.to_string()))?;
         self.fs.write_all(cache_path, &cached_data)?;
 
         // Update cache metadata for optimized version checking
@@ -1066,9 +1051,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(crate::constants::DIR_SPECS)
             .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::SpecNotFound {
-                name: api_name.to_string(),
-            });
+            return Err(Error::spec_not_found(api_name));
         }
 
         // Load cached spec to get security schemes
@@ -1394,7 +1377,7 @@ impl<F: FileSystem> ConfigManager<F> {
 ///
 /// Returns an error if the home directory cannot be determined.
 pub fn get_config_dir() -> Result<PathBuf, Error> {
-    let home_dir = dirs::home_dir().ok_or_else(|| Error::HomeDirectoryNotFound)?;
+    let home_dir = dirs::home_dir().ok_or_else(Error::home_directory_not_found)?;
     let config_dir = home_dir.join(".config").join("aperture");
     Ok(config_dir)
 }
@@ -1430,62 +1413,54 @@ async fn fetch_spec_from_url_with_timeout(
     let client = reqwest::Client::builder()
         .timeout(timeout)
         .build()
-        .map_err(|e| Error::RequestFailed {
-            reason: format!("Failed to create HTTP client: {e}"),
-        })?;
+        .map_err(|e| Error::network_request_failed(format!("Failed to create HTTP client: {e}")))?;
 
     // Make the request
     let response = client.get(url).send().await.map_err(|e| {
         if e.is_timeout() {
-            Error::RequestFailed {
-                reason: format!("Request timed out after {} seconds", timeout.as_secs()),
-            }
+            Error::network_request_failed(format!(
+                "Request timed out after {} seconds",
+                timeout.as_secs()
+            ))
         } else if e.is_connect() {
-            Error::RequestFailed {
-                reason: format!("Failed to connect to {url}: {e}"),
-            }
+            Error::network_request_failed(format!("Failed to connect to {url}: {e}"))
         } else {
-            Error::RequestFailed {
-                reason: format!("Network error: {e}"),
-            }
+            Error::network_request_failed(format!("Network error: {e}"))
         }
     })?;
 
     // Check response status
     if !response.status().is_success() {
-        return Err(Error::RequestFailed {
-            reason: format!("HTTP {} from {url}", response.status()),
-        });
+        return Err(Error::request_failed(
+            response.status(),
+            format!("HTTP {} from {url}", response.status()),
+        ));
     }
 
     // Check content length before downloading
     if let Some(content_length) = response.content_length() {
         if content_length > MAX_RESPONSE_SIZE {
-            return Err(Error::RequestFailed {
-                reason: format!(
-                    "Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE} bytes)"
-                ),
-            });
+            return Err(Error::network_request_failed(format!(
+                "Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE} bytes)"
+            )));
         }
     }
 
     // Read response body with size limit
-    let bytes = response.bytes().await.map_err(|e| Error::RequestFailed {
-        reason: format!("Failed to read response body: {e}"),
-    })?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| Error::network_request_failed(format!("Failed to read response body: {e}")))?;
 
     // Double-check size after download
     if bytes.len() > usize::try_from(MAX_RESPONSE_SIZE).unwrap_or(usize::MAX) {
-        return Err(Error::RequestFailed {
-            reason: format!(
-                "Response too large: {} bytes (max {MAX_RESPONSE_SIZE} bytes)",
-                bytes.len()
-            ),
-        });
+        return Err(Error::network_request_failed(format!(
+            "Response too large: {} bytes (max {MAX_RESPONSE_SIZE} bytes)",
+            bytes.len()
+        )));
     }
 
     // Convert to string
-    String::from_utf8(bytes.to_vec()).map_err(|e| Error::RequestFailed {
-        reason: format!("Invalid UTF-8 in response: {e}"),
-    })
+    String::from_utf8(bytes.to_vec())
+        .map_err(|e| Error::network_request_failed(format!("Invalid UTF-8 in response: {e}")))
 }

@@ -3,6 +3,56 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use thiserror::Error;
 
+/// Helper macro for creating error details with a single string field
+macro_rules! error_details_single {
+    ($field:literal, $value:expr) => {
+        serde_json::json!({ $field: $value })
+    };
+}
+
+/// Helper macro for creating error details with name and reason fields
+macro_rules! error_details_name_reason {
+    ($name_field:literal, $name:expr, $reason:expr) => {
+        serde_json::json!({ $name_field: $name, "reason": $reason })
+    };
+}
+
+/// Helper macro for creating error context with details and suggestion
+macro_rules! error_context {
+    ($details:expr, $suggestion:expr) => {
+        Some(ErrorContext::new(
+            Some($details),
+            Some(Cow::Owned($suggestion.into())),
+        ))
+    };
+    (details: $details:expr) => {
+        Some(ErrorContext::with_details($details))
+    };
+    (suggestion: $suggestion:expr) => {
+        Some(ErrorContext::with_suggestion(Cow::Owned(
+            $suggestion.into(),
+        )))
+    };
+}
+
+/// Helper macro for creating an Internal error with `ErrorKind` and standard patterns
+macro_rules! internal_error {
+    ($kind:expr, $message:expr) => {
+        Self::Internal {
+            kind: $kind,
+            message: Cow::Owned($message),
+            context: None,
+        }
+    };
+    ($kind:expr, $message:expr, $context:expr) => {
+        Self::Internal {
+            kind: $kind,
+            message: Cow::Owned($message),
+            context: $context,
+        }
+    };
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("I/O error: {0}")]
@@ -674,42 +724,35 @@ impl Error {
 impl Error {
     /// Create a specification not found error
     pub fn spec_not_found(name: impl Into<String>) -> Self {
-        use serde_json::json;
         let name = name.into();
-        Self::Internal {
-            kind: ErrorKind::Specification,
-            message: Cow::Owned(format!("API specification '{name}' not found")),
-            context: Some(ErrorContext::new(
-                Some(json!({ "spec_name": name })),
-                Some(Cow::Borrowed(constants::MSG_USE_CONFIG_LIST)),
-            )),
-        }
+        internal_error!(
+            ErrorKind::Specification,
+            format!("API specification '{name}' not found"),
+            error_context!(
+                error_details_single!("spec_name", &name),
+                constants::MSG_USE_CONFIG_LIST
+            )
+        )
     }
 
     /// Create a specification already exists error
     pub fn spec_already_exists(name: impl Into<String>) -> Self {
-        use serde_json::json;
         let name = name.into();
-        Self::Internal {
-            kind: ErrorKind::Specification,
-            message: Cow::Owned(format!(
-                "API specification '{name}' already exists. Use --force to overwrite"
-            )),
-            context: Some(ErrorContext::with_details(json!({ "spec_name": name }))),
-        }
+        internal_error!(
+            ErrorKind::Specification,
+            format!("API specification '{name}' already exists. Use --force to overwrite"),
+            error_context!(details: error_details_single!("spec_name", &name))
+        )
     }
 
     /// Create a cached spec not found error
     pub fn cached_spec_not_found(name: impl Into<String>) -> Self {
-        use serde_json::json;
         let name = name.into();
-        Self::Internal {
-            kind: ErrorKind::Specification,
-            message: Cow::Owned(format!(
-                "No cached spec found for '{name}'. Run 'aperture config add {name}' first"
-            )),
-            context: Some(ErrorContext::with_details(json!({ "spec_name": name }))),
-        }
+        internal_error!(
+            ErrorKind::Specification,
+            format!("No cached spec found for '{name}'. Run 'aperture config add {name}' first"),
+            error_context!(details: error_details_single!("spec_name", &name))
+        )
     }
 
     /// Create a cached spec corrupted error
@@ -812,18 +855,15 @@ impl Error {
 
     /// Create an invalid configuration error
     pub fn invalid_config(reason: impl Into<String>) -> Self {
-        use serde_json::json;
         let reason = reason.into();
-        Self::Internal {
-            kind: ErrorKind::Validation,
-            message: Cow::Owned(format!("Invalid configuration: {reason}")),
-            context: Some(ErrorContext::new(
-                Some(json!({ "reason": reason })),
-                Some(Cow::Borrowed(
-                    "Check the configuration file syntax and structure.",
-                )),
-            )),
-        }
+        internal_error!(
+            ErrorKind::Validation,
+            format!("Invalid configuration: {reason}"),
+            error_context!(
+                error_details_single!("reason", &reason),
+                "Check the configuration file syntax and structure."
+            )
+        )
     }
 
     /// Create an invalid JSON body error
@@ -903,5 +943,319 @@ impl Error {
                 )),
             )),
         }
+    }
+
+    // ---- Header Errors ----
+
+    /// Create an invalid header name error
+    pub fn invalid_header_name(name: impl Into<String>, reason: impl Into<String>) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::Headers,
+            message: Cow::Owned(format!("Invalid header name '{name}': {reason}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "header_name": name, "reason": reason })),
+                Some(Cow::Borrowed(
+                    "Header names must contain only valid HTTP header characters.",
+                )),
+            )),
+        }
+    }
+
+    /// Create an invalid header value error
+    pub fn invalid_header_value(name: impl Into<String>, reason: impl Into<String>) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::Headers,
+            message: Cow::Owned(format!("Invalid header value for '{name}': {reason}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "header_name": name, "reason": reason })),
+                Some(Cow::Borrowed(
+                    "Header values must contain only valid HTTP header characters.",
+                )),
+            )),
+        }
+    }
+
+    /// Create an invalid header format error
+    pub fn invalid_header_format(header: impl Into<String>) -> Self {
+        use serde_json::json;
+        let header = header.into();
+        Self::Internal {
+            kind: ErrorKind::Headers,
+            message: Cow::Owned(format!("Invalid header format: {header}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "header": header })),
+                Some(Cow::Borrowed("Headers must be in 'Name: Value' format.")),
+            )),
+        }
+    }
+
+    /// Create an empty header name error
+    #[must_use]
+    pub const fn empty_header_name() -> Self {
+        Self::Internal {
+            kind: ErrorKind::Headers,
+            message: Cow::Borrowed("Header name cannot be empty"),
+            context: Some(ErrorContext::with_suggestion(Cow::Borrowed(
+                "Provide a valid header name before the colon.",
+            ))),
+        }
+    }
+
+    // ---- Interactive Errors ----
+
+    /// Create an interactive input too long error
+    #[must_use]
+    pub fn interactive_input_too_long(max_length: usize) -> Self {
+        internal_error!(
+            ErrorKind::Interactive,
+            format!("Input too long (maximum {max_length} characters)"),
+            error_context!(
+                error_details_single!("max_length", max_length),
+                "Please provide a shorter input."
+            )
+        )
+    }
+
+    /// Create an interactive invalid characters error
+    pub fn interactive_invalid_characters(
+        invalid_chars: impl Into<String>,
+        suggestion: impl Into<String>,
+    ) -> Self {
+        use serde_json::json;
+        let invalid_chars = invalid_chars.into();
+        Self::Internal {
+            kind: ErrorKind::Interactive,
+            message: Cow::Owned(format!("Invalid characters found: {invalid_chars}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "invalid_characters": invalid_chars })),
+                Some(Cow::Owned(suggestion.into())),
+            )),
+        }
+    }
+
+    /// Create an interactive timeout error
+    #[must_use]
+    pub fn interactive_timeout() -> Self {
+        Self::Internal {
+            kind: ErrorKind::Interactive,
+            message: Cow::Borrowed("Input timeout - no response received"),
+            context: error_context!(suggestion: "Please respond within the timeout period."),
+        }
+    }
+
+    /// Create an interactive retries exhausted error
+    pub fn interactive_retries_exhausted(
+        max_retries: usize,
+        last_error: impl Into<String>,
+        suggestions: &[String],
+    ) -> Self {
+        use serde_json::json;
+        let last_error = last_error.into();
+        Self::Internal {
+            kind: ErrorKind::Interactive,
+            message: Cow::Owned(format!(
+                "Maximum retry attempts ({max_retries}) exceeded: {last_error}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(
+                    json!({ "max_attempts": max_retries, "last_error": last_error, "suggestions": suggestions }),
+                ),
+                Some(Cow::Owned(format!(
+                    "Suggestions: {}",
+                    suggestions.join("; ")
+                ))),
+            )),
+        }
+    }
+
+    // ---- Server Variable Errors ----
+
+    /// Create a missing server variable error
+    pub fn missing_server_variable(name: impl Into<String>) -> Self {
+        let name = name.into();
+        internal_error!(
+            ErrorKind::ServerVariable,
+            format!("Required server variable '{name}' is not provided"),
+            error_context!(
+                error_details_single!("variable_name", &name),
+                format!("Provide the variable with --server-var {name}=<value>")
+            )
+        )
+    }
+
+    /// Create an unknown server variable error
+    pub fn unknown_server_variable(name: impl Into<String>, available: &[String]) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        let available_list = available.join(", ");
+        Self::Internal {
+            kind: ErrorKind::ServerVariable,
+            message: Cow::Owned(format!(
+                "Unknown server variable '{name}'. Available variables: {available_list}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "variable_name": name, "available_variables": available })),
+                Some(Cow::Owned(format!("Use one of: {available_list}"))),
+            )),
+        }
+    }
+
+    /// Create an unresolved template variable error
+    pub fn unresolved_template_variable(name: impl Into<String>, url: impl Into<String>) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        let url = url.into();
+        Self::Internal {
+            kind: ErrorKind::ServerVariable,
+            message: Cow::Owned(format!(
+                "Unresolved template variable '{name}' in URL '{url}'"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "variable_name": name, "template_url": url })),
+                Some(Cow::Borrowed(
+                    "Ensure all template variables are provided with --server-var",
+                )),
+            )),
+        }
+    }
+
+    /// Create an invalid environment variable name error with suggestion
+    pub fn invalid_environment_variable_name(
+        name: impl Into<String>,
+        reason: impl Into<String>,
+        suggestion: impl Into<String>,
+    ) -> Self {
+        let name = name.into();
+        let reason = reason.into();
+        internal_error!(
+            ErrorKind::Interactive,
+            format!("Invalid environment variable name '{name}': {reason}"),
+            error_context!(
+                error_details_name_reason!("variable_name", &name, &reason),
+                suggestion
+            )
+        )
+    }
+
+    /// Create an invalid server variable format error
+    pub fn invalid_server_var_format(arg: impl Into<String>, reason: impl Into<String>) -> Self {
+        use serde_json::json;
+        let arg = arg.into();
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::ServerVariable,
+            message: Cow::Owned(format!(
+                "Invalid server variable format in '{arg}': {reason}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "argument": arg, "reason": reason })),
+                Some(Cow::Borrowed(
+                    "Server variables must be in 'key=value' format.",
+                )),
+            )),
+        }
+    }
+
+    /// Create an invalid server variable value error
+    pub fn invalid_server_var_value(
+        name: impl Into<String>,
+        value: impl Into<String>,
+        allowed_values: &[String],
+    ) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        let value = value.into();
+        Self::Internal {
+            kind: ErrorKind::ServerVariable,
+            message: Cow::Owned(format!(
+                "Invalid value '{value}' for server variable '{name}'"
+            )),
+            context: Some(ErrorContext::new(
+                Some(
+                    json!({ "variable_name": name, "provided_value": value, "allowed_values": allowed_values }),
+                ),
+                Some(Cow::Owned(format!(
+                    "Allowed values: {}",
+                    allowed_values.join(", ")
+                ))),
+            )),
+        }
+    }
+
+    // ---- Runtime Errors ----
+
+    /// Create an operation not found error
+    pub fn operation_not_found(operation: impl Into<String>) -> Self {
+        use serde_json::json;
+        let operation = operation.into();
+        Self::Internal {
+            kind: ErrorKind::Runtime,
+            message: Cow::Owned(format!("Operation '{operation}' not found")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "operation": operation })),
+                Some(Cow::Borrowed(
+                    "Check available operations with --help or --describe-json",
+                )),
+            )),
+        }
+    }
+
+    /// Create a network request failed error
+    pub fn network_request_failed(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        internal_error!(
+            ErrorKind::HttpRequest,
+            format!("Network request failed: {reason}"),
+            error_context!(
+                error_details_single!("reason", &reason),
+                "Check network connectivity and URL validity"
+            )
+        )
+    }
+
+    /// Create a serialization error
+    pub fn serialization_error(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        internal_error!(
+            ErrorKind::Validation,
+            format!("Serialization failed: {reason}"),
+            error_context!(
+                error_details_single!("reason", &reason),
+                "Check data structure validity"
+            )
+        )
+    }
+
+    /// Create a home directory not found error
+    #[must_use]
+    pub fn home_directory_not_found() -> Self {
+        Self::Internal {
+            kind: ErrorKind::Runtime,
+            message: Cow::Borrowed("Home directory not found"),
+            context: Some(ErrorContext::new(
+                Some(serde_json::json!({})),
+                Some(Cow::Borrowed("Ensure HOME environment variable is set")),
+            )),
+        }
+    }
+
+    /// Create an invalid command error
+    pub fn invalid_command(context: impl Into<String>, reason: impl Into<String>) -> Self {
+        let context = context.into();
+        let reason = reason.into();
+        internal_error!(
+            ErrorKind::Validation,
+            format!("Invalid command for '{context}': {reason}"),
+            error_context!(
+                error_details_name_reason!("context", &context, &reason),
+                "Check available commands with --help or --describe-json"
+            )
+        )
     }
 }

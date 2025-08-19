@@ -1112,13 +1112,21 @@ async fn test_remote_spec_fetching_timeout() {
         )
         .await;
     assert!(result.is_err());
-    if let Err(Error::RequestFailed { reason }) = result {
-        assert!(reason.contains("timed out"));
-    } else {
-        panic!(
+    match result {
+        Err(Error::RequestFailed { reason }) => {
+            assert!(reason.contains("timed out"));
+        }
+        Err(Error::Internal {
+            kind: ErrorKind::HttpRequest,
+            message,
+            ..
+        }) => {
+            assert!(message.contains("timed out"));
+        }
+        _ => panic!(
             "Expected RequestFailed error with timeout, got: {:?}",
             result
-        );
+        ),
     }
 }
 
@@ -1144,13 +1152,21 @@ async fn test_remote_spec_fetching_size_limit() {
         .add_spec_from_url("large-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
-    if let Err(Error::RequestFailed { reason }) = result {
-        assert!(reason.contains("too large"));
-    } else {
-        panic!(
+    match result {
+        Err(Error::RequestFailed { reason }) => {
+            assert!(reason.contains("too large"));
+        }
+        Err(Error::Internal {
+            kind: ErrorKind::HttpRequest,
+            message,
+            ..
+        }) => {
+            assert!(message.contains("too large"));
+        }
+        _ => panic!(
             "Expected RequestFailed error for size limit, got: {:?}",
             result
-        );
+        ),
     }
 }
 
@@ -1169,13 +1185,21 @@ async fn test_remote_spec_fetching_invalid_url() {
         )
         .await;
     assert!(result.is_err());
-    if let Err(Error::RequestFailed { reason }) = result {
-        assert!(reason.contains("Failed to connect") || reason.contains("Network error"));
-    } else {
-        panic!(
+    match result {
+        Err(Error::RequestFailed { reason }) => {
+            assert!(reason.contains("Failed to connect") || reason.contains("Network error"));
+        }
+        Err(Error::Internal {
+            kind: ErrorKind::HttpRequest,
+            message,
+            ..
+        }) => {
+            assert!(message.contains("Failed to connect") || message.contains("Network error"));
+        }
+        _ => panic!(
             "Expected RequestFailed error for invalid URL, got: {:?}",
             result
-        );
+        ),
     }
 }
 
@@ -1198,13 +1222,21 @@ async fn test_remote_spec_fetching_http_error() {
         .add_spec_from_url("not-found-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
-    if let Err(Error::RequestFailed { reason }) = result {
-        assert!(reason.contains("HTTP 404"));
-    } else {
-        panic!(
+    match result {
+        Err(Error::RequestFailed { reason }) => {
+            assert!(reason.contains("HTTP 404"));
+        }
+        Err(Error::Internal {
+            kind: ErrorKind::HttpRequest,
+            message,
+            ..
+        }) => {
+            assert!(message.contains("404"));
+        }
+        _ => panic!(
             "Expected RequestFailed error for HTTP 404, got: {:?}",
             result
-        );
+        ),
     }
 }
 

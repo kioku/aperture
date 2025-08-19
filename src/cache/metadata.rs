@@ -32,9 +32,8 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         }
 
         let content = self.fs.read_to_string(&metadata_path)?;
-        serde_json::from_str(&content).map_err(|e| Error::InvalidConfig {
-            reason: format!("Failed to parse cache metadata: {e}"),
-        })
+        serde_json::from_str(&content)
+            .map_err(|e| Error::invalid_config(format!("Failed to parse cache metadata: {e}")))
     }
 
     /// Save global cache metadata

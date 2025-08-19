@@ -103,9 +103,9 @@ impl InputOutput for RealInputOutput {
                     suggestion: "Try again with a faster response or increase timeout with APERTURE_INPUT_TIMEOUT".to_string(),
                 })
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::InvalidConfig {
-                reason: "Input channel disconnected".to_string(),
-            }),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(Error::invalid_config("Input channel disconnected"))
+            }
         }
     }
 }

@@ -149,10 +149,9 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                     manager.set_secret(&api_name, &scheme, &env_var)?;
                     println!("Set secret for scheme '{scheme}' in API '{api_name}' to use environment variable '{env_var}'");
                 } else {
-                    return Err(Error::InvalidConfig {
-                        reason: "Either provide --scheme and --env, or use --interactive"
-                            .to_string(),
-                    });
+                    return Err(Error::invalid_config(
+                        "Either provide --scheme and --env, or use --interactive",
+                    ));
                 }
             }
             ConfigCommands::ListSecrets { api_name } => {
@@ -232,9 +231,7 @@ fn list_commands(context: &str) -> Result<(), Error> {
 
     // Load the cached spec for the context
     let spec = loader::load_cached_spec(&cache_dir, context).map_err(|e| match e {
-        Error::Io(_) => Error::SpecNotFound {
-            name: context.to_string(),
-        },
+        Error::Io(_) => Error::spec_not_found(context),
         _ => e,
     })?;
 
@@ -293,9 +290,7 @@ fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result
     // Check if the spec exists
     let specs = manager.list_specs()?;
     if !specs.contains(&spec_name.to_string()) {
-        return Err(Error::SpecNotFound {
-            name: spec_name.to_string(),
-        });
+        return Err(Error::spec_not_found(spec_name));
     }
 
     // Get the config directory
@@ -414,9 +409,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
 
     // Load the cached spec for the context
     let spec = loader::load_cached_spec(&cache_dir, context).map_err(|e| match e {
-        Error::Io(_) => Error::SpecNotFound {
-            name: context.to_string(),
-        },
+        Error::Io(_) => Error::spec_not_found(context),
         _ => e,
     })?;
 
@@ -427,14 +420,12 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         let spec_path = specs_dir.join(format!("{context}.yaml"));
 
         if !spec_path.exists() {
-            return Err(Error::SpecNotFound {
-                name: context.to_string(),
-            });
+            return Err(Error::spec_not_found(context));
         }
 
         let spec_content = fs::read_to_string(&spec_path)?;
         let openapi_spec = aperture_cli::spec::parse_openapi(&spec_content)
-            .map_err(|e| Error::Config(format!("Failed to parse OpenAPI spec: {e}")))?;
+            .map_err(|e| Error::invalid_config(format!("Failed to parse OpenAPI spec: {e}")))?;
 
         // Generate manifest from the original spec with all metadata
         let manifest = agent::generate_capability_manifest_from_openapi(
@@ -472,10 +463,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
     // Parse the arguments against the dynamic command
     let matches = command
         .try_get_matches_from(std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args))
-        .map_err(|e| Error::InvalidCommand {
-            context: context.to_string(),
-            reason: e.to_string(),
-        })?;
+        .map_err(|e| Error::invalid_command(context, e.to_string()))?;
 
     // Extract JQ filter from dynamic matches (takes precedence) or CLI global flag
     let jq_filter = matches
