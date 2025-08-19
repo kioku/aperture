@@ -799,4 +799,61 @@ impl Error {
             )),
         }
     }
+
+    /// Create a generic validation error
+    pub fn validation_error(message: impl Into<String>) -> Self {
+        let message = message.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Validation error: {message}")),
+            context: None,
+        }
+    }
+
+    /// Create an invalid configuration error
+    pub fn invalid_config(reason: impl Into<String>) -> Self {
+        use serde_json::json;
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Invalid configuration: {reason}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "reason": reason })),
+                Some(Cow::Borrowed(
+                    "Check the configuration file syntax and structure.",
+                )),
+            )),
+        }
+    }
+
+    /// Create an invalid JSON body error
+    pub fn invalid_json_body(reason: impl Into<String>) -> Self {
+        use serde_json::json;
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Invalid JSON body: {reason}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "reason": reason })),
+                Some(Cow::Borrowed(
+                    "Check that the JSON body is properly formatted.",
+                )),
+            )),
+        }
+    }
+
+    /// Create an invalid path error
+    pub fn invalid_path(path: impl Into<String>, reason: impl Into<String>) -> Self {
+        use serde_json::json;
+        let path = path.into();
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Invalid path '{path}': {reason}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "path": path, "reason": reason })),
+                Some(Cow::Borrowed("Check the path format and ensure it exists.")),
+            )),
+        }
+    }
 }

@@ -437,9 +437,7 @@ impl<F: FileSystem> ConfigManager<F> {
         let config_path = self.config_dir.join(crate::constants::CONFIG_FILENAME);
         if self.fs.exists(&config_path) {
             let content = self.fs.read_to_string(&config_path)?;
-            toml::from_str(&content).map_err(|e| Error::InvalidConfig {
-                reason: e.to_string(),
-            })
+            toml::from_str(&content).map_err(|e| Error::invalid_config(e.to_string()))
         } else {
             Ok(GlobalConfig::default())
         }

@@ -239,7 +239,7 @@ fn parse_with_oas3_direct_with_original(
     // Parse the JSON as OpenAPI 3.0.x
     // This may fail if there are incompatible 3.1 features
     let mut spec = serde_json::from_str::<OpenAPI>(&json).map_err(|e| {
-        Error::Validation(format!(
+        Error::validation_error(format!(
             "OpenAPI 3.1 spec contains features incompatible with 3.0: {e}. \
             Consider converting the spec to OpenAPI 3.0 format."
         ))

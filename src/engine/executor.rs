@@ -81,10 +81,8 @@ fn extract_request_body(
 
     if let Some(body_value) = current_matches.get_one::<String>("body") {
         // Validate JSON
-        let _json_body: Value =
-            serde_json::from_str(body_value).map_err(|e| Error::InvalidJsonBody {
-                reason: e.to_string(),
-            })?;
+        let _json_body: Value = serde_json::from_str(body_value)
+            .map_err(|e| Error::invalid_json_body(e.to_string()))?;
         Ok(Some(body_value.clone()))
     } else {
         Ok(None)
