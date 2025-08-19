@@ -59,8 +59,11 @@ fn build_http_client() -> Result<reqwest::Client, Error> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| Error::RequestFailed {
-            reason: format!("Failed to create HTTP client: {e}"),
+        .map_err(|e| {
+            Error::request_failed(
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create HTTP client: {e}"),
+            )
         })
 }
 
@@ -152,9 +155,7 @@ async fn send_request(
     let response_text = response
         .text()
         .await
-        .map_err(|e| Error::ResponseReadError {
-            reason: e.to_string(),
-        })?;
+        .map_err(|e| Error::response_read_error(e.to_string()))?;
 
     Ok((status, response_headers, response_text))
 }
@@ -366,9 +367,8 @@ pub async fn execute_request(
     }
 
     // Build request
-    let method = Method::from_str(&operation.method).map_err(|_| Error::InvalidHttpMethod {
-        method: operation.method.clone(),
-    })?;
+    let method = Method::from_str(&operation.method)
+        .map_err(|_| Error::invalid_http_method(&operation.method))?;
 
     let headers_clone = headers.clone(); // For dry-run output
     let mut request = client.request(method.clone(), &url).headers(headers);

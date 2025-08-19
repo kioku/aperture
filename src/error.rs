@@ -856,4 +856,52 @@ impl Error {
             )),
         }
     }
+
+    /// Create a request failed error
+    pub fn request_failed(status: reqwest::StatusCode, reason: impl Into<String>) -> Self {
+        use serde_json::json;
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::HttpRequest,
+            message: Cow::Owned(format!("Request failed with status {status}: {reason}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "status_code": status.as_u16(), "reason": reason })),
+                Some(Cow::Borrowed(
+                    "Check the API endpoint, parameters, and authentication.",
+                )),
+            )),
+        }
+    }
+
+    /// Create a response read error
+    pub fn response_read_error(reason: impl Into<String>) -> Self {
+        use serde_json::json;
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::HttpRequest,
+            message: Cow::Owned(format!("Failed to read response: {reason}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "reason": reason })),
+                Some(Cow::Borrowed(
+                    "Check network connectivity and server status.",
+                )),
+            )),
+        }
+    }
+
+    /// Create an invalid HTTP method error
+    pub fn invalid_http_method(method: impl Into<String>) -> Self {
+        use serde_json::json;
+        let method = method.into();
+        Self::Internal {
+            kind: ErrorKind::HttpRequest,
+            message: Cow::Owned(format!("Invalid HTTP method: {method}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "method": method })),
+                Some(Cow::Borrowed(
+                    "Valid HTTP methods are: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS.",
+                )),
+            )),
+        }
+    }
 }
