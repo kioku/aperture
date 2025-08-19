@@ -160,6 +160,85 @@ pub enum Error {
     Anyhow(#[from] anyhow::Error),
 }
 
+/// Error categories for consolidated error handling
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// Specification-related errors (not found, already exists, cache issues)
+    Specification,
+    /// Authentication and authorization errors
+    Authentication,
+    /// Input validation and configuration errors
+    Validation,
+    /// HTTP request/response errors
+    HttpRequest,
+    /// Header processing errors
+    Headers,
+    /// Interactive input errors
+    Interactive,
+    /// Server variable resolution errors
+    ServerVariable,
+    /// Runtime operation errors
+    Runtime,
+}
+
+/// Additional context for consolidated errors
+#[derive(Debug, Clone)]
+pub struct ErrorContext {
+    /// Structured details for programmatic access
+    pub details: Option<serde_json::Value>,
+    /// Human-readable suggestion for resolving the error
+    pub suggestion: Option<Cow<'static, str>>,
+}
+
+impl ErrorContext {
+    /// Create a new error context with details and suggestion
+    #[must_use]
+    pub const fn new(
+        details: Option<serde_json::Value>,
+        suggestion: Option<Cow<'static, str>>,
+    ) -> Self {
+        Self {
+            details,
+            suggestion,
+        }
+    }
+
+    /// Create error context with only details
+    #[must_use]
+    pub const fn with_details(details: serde_json::Value) -> Self {
+        Self {
+            details: Some(details),
+            suggestion: None,
+        }
+    }
+
+    /// Create error context with only suggestion
+    #[must_use]
+    pub const fn with_suggestion(suggestion: Cow<'static, str>) -> Self {
+        Self {
+            details: None,
+            suggestion: Some(suggestion),
+        }
+    }
+}
+
+impl ErrorKind {
+    /// Get the string identifier for this error kind
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Specification => "Specification",
+            Self::Authentication => "Authentication",
+            Self::Validation => "Validation",
+            Self::HttpRequest => "HttpRequest",
+            Self::Headers => "Headers",
+            Self::Interactive => "Interactive",
+            Self::ServerVariable => "ServerVariable",
+            Self::Runtime => "Runtime",
+        }
+    }
+}
+
 /// JSON representation of an error for structured output
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonError {
