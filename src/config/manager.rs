@@ -378,9 +378,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(format!("{name}{}", crate::constants::FILE_EXT_BIN));
 
         if !self.fs.exists(&spec_path) {
-            return Err(Error::SpecNotFound {
-                name: name.to_string(),
-            });
+            return Err(Error::spec_not_found(name));
         }
 
         self.fs.remove_file(&spec_path)?;
@@ -927,9 +925,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(format!("{name}{}", crate::constants::FILE_EXT_YAML));
 
         if self.fs.exists(&spec_path) && !force {
-            return Err(Error::SpecAlreadyExists {
-                name: name.to_string(),
-            });
+            return Err(Error::spec_already_exists(name));
         }
 
         Ok(())

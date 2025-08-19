@@ -156,6 +156,14 @@ pub enum Error {
     #[error("Unresolved template variable '{name}' in URL '{url}'")]
     UnresolvedTemplateVariable { name: String, url: String },
 
+    // Consolidated error variant using new infrastructure
+    #[error("{kind}: {message}")]
+    Internal {
+        kind: ErrorKind,
+        message: Cow<'static, str>,
+        context: Option<ErrorContext>,
+    },
+
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
 }
@@ -236,6 +244,12 @@ impl ErrorKind {
             Self::ServerVariable => "ServerVariable",
             Self::Runtime => "Runtime",
         }
+    }
+}
+
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -632,6 +646,12 @@ impl Error {
                 Some(Cow::Borrowed("Ensure all template variables are provided with --server-var")),
                 Some(json!({ "variable_name": name, "template_url": url })),
             ),
+            Self::Internal { kind, message, context } => (
+                kind.as_str(),
+                message.to_string(),
+                context.as_ref().and_then(|ctx| ctx.suggestion.clone()),
+                context.as_ref().and_then(|ctx| ctx.details.clone()),
+            ),
             Self::Anyhow(err) => (
                 "Unexpected",
                 err.to_string(),
@@ -647,6 +667,87 @@ impl Error {
             message,
             context,
             details,
+        }
+    }
+}
+
+impl Error {
+    /// Create a specification not found error
+    pub fn spec_not_found(name: impl Into<String>) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        Self::Internal {
+            kind: ErrorKind::Specification,
+            message: Cow::Owned(format!("API specification '{name}' not found")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "spec_name": name })),
+                Some(Cow::Borrowed(constants::MSG_USE_CONFIG_LIST)),
+            )),
+        }
+    }
+
+    /// Create a specification already exists error
+    pub fn spec_already_exists(name: impl Into<String>) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        Self::Internal {
+            kind: ErrorKind::Specification,
+            message: Cow::Owned(format!(
+                "API specification '{name}' already exists. Use --force to overwrite"
+            )),
+            context: Some(ErrorContext::with_details(json!({ "spec_name": name }))),
+        }
+    }
+
+    /// Create a cached spec not found error
+    pub fn cached_spec_not_found(name: impl Into<String>) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        Self::Internal {
+            kind: ErrorKind::Specification,
+            message: Cow::Owned(format!(
+                "No cached spec found for '{name}'. Run 'aperture config add {name}' first"
+            )),
+            context: Some(ErrorContext::with_details(json!({ "spec_name": name }))),
+        }
+    }
+
+    /// Create a cached spec corrupted error
+    pub fn cached_spec_corrupted(name: impl Into<String>, reason: impl Into<String>) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::Specification,
+            message: Cow::Owned(format!(
+                "Failed to deserialize cached spec '{name}': {reason}. The cache may be corrupted"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "spec_name": name, "corruption_reason": reason })),
+                Some(Cow::Borrowed(
+                    "Try removing and re-adding the specification.",
+                )),
+            )),
+        }
+    }
+
+    /// Create a cache version mismatch error
+    pub fn cache_version_mismatch(name: impl Into<String>, found: u32, expected: u32) -> Self {
+        use serde_json::json;
+        let name = name.into();
+        Self::Internal {
+            kind: ErrorKind::Specification,
+            message: Cow::Owned(format!(
+                "Cache format version mismatch for '{name}': found v{found}, expected v{expected}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(
+                    json!({ "spec_name": name, "found_version": found, "expected_version": expected }),
+                ),
+                Some(Cow::Borrowed(
+                    "Run 'aperture config reinit' to regenerate the cache.",
+                )),
+            )),
         }
     }
 }

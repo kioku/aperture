@@ -1024,6 +1024,22 @@ fn print_error(error: &Error) {
         Error::UnresolvedTemplateVariable { name, url } => {
             eprintln!("Unresolved Template Variable\nUnresolved template variable '{name}' in URL '{url}'\n\nHint: Ensure all template variables are provided with --server-var");
         }
+        Error::Internal {
+            kind,
+            message,
+            context,
+        } => {
+            eprint!("{kind} Error\n{message}");
+            if let Some(ctx) = context {
+                if let Some(suggestion) = &ctx.suggestion {
+                    eprintln!("\n\nHint: {suggestion}");
+                } else {
+                    eprintln!();
+                }
+            } else {
+                eprintln!();
+            }
+        }
         Error::Anyhow(err) => {
             eprintln!("Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
         }

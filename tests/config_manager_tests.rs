@@ -1,8 +1,8 @@
 use aperture_cli::config::manager::{is_url, ConfigManager};
-use aperture_cli::error::Error;
+use aperture_cli::error::{Error, ErrorKind};
 use aperture_cli::fs::FileSystem;
 use std::collections::HashMap;
-use std::io::{self, ErrorKind};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -60,19 +60,25 @@ impl MockFileSystem {
 impl FileSystem for MockFileSystem {
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
         if *self.io_error_on_read.lock().unwrap() {
-            return Err(io::Error::new(ErrorKind::Other, "Mock I/O error on read"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Mock I/O error on read",
+            ));
         }
         self.files
             .lock()
             .unwrap()
             .get(path)
             .map(|v| String::from_utf8_lossy(v).to_string())
-            .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "File not found"))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "File not found"))
     }
 
     fn write_all(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         if *self.io_error_on_write.lock().unwrap() {
-            return Err(io::Error::new(ErrorKind::Other, "Mock I/O error on write"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Mock I/O error on write",
+            ));
         }
         self.files
             .lock()
@@ -88,14 +94,17 @@ impl FileSystem for MockFileSystem {
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         if *self.io_error_on_write.lock().unwrap() {
-            return Err(io::Error::new(ErrorKind::Other, "Mock I/O error on write"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Mock I/O error on write",
+            ));
         }
         self.files
             .lock()
             .unwrap()
             .remove(path)
             .map(|_| ())
-            .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "File not found"))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "File not found"))
     }
 
     fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
@@ -215,10 +224,25 @@ paths: {}
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::SpecAlreadyExists { name }) = result {
-        assert_eq!(name, spec_name);
-    } else {
-        panic!("Unexpected error type: {:?}", result);
+    match result {
+        Err(Error::SpecAlreadyExists { name }) => {
+            assert_eq!(name, spec_name);
+        }
+        Err(Error::Internal {
+            kind,
+            message,
+            context,
+        }) => {
+            assert_eq!(kind, ErrorKind::Specification);
+            assert!(message.contains("already exists"));
+            assert!(message.contains(spec_name));
+            if let Some(ctx) = context {
+                if let Some(details) = &ctx.details {
+                    assert_eq!(details["spec_name"], spec_name);
+                }
+            }
+        }
+        _ => panic!("Unexpected error type: {:?}", result),
     }
     // Ensure content was not overwritten
     assert_eq!(
@@ -379,10 +403,25 @@ fn test_remove_spec_not_found() {
 
     let result = manager.remove_spec(spec_name);
     assert!(result.is_err());
-    if let Err(Error::SpecNotFound { name }) = result {
-        assert_eq!(name, spec_name);
-    } else {
-        panic!("Unexpected error type: {:?}", result);
+    match result {
+        Err(Error::SpecNotFound { name }) => {
+            assert_eq!(name, spec_name);
+        }
+        Err(Error::Internal {
+            kind,
+            message,
+            context,
+        }) => {
+            assert_eq!(kind, ErrorKind::Specification);
+            assert!(message.contains("not found"));
+            assert!(message.contains(spec_name));
+            if let Some(ctx) = context {
+                if let Some(details) = &ctx.details {
+                    assert_eq!(details["spec_name"], spec_name);
+                }
+            }
+        }
+        _ => panic!("Unexpected error type: {:?}", result),
     }
 }
 

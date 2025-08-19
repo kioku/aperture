@@ -55,16 +55,12 @@ fn load_cached_spec_without_version_check<P: AsRef<Path>>(
         .join(format!("{spec_name}{}", crate::constants::FILE_EXT_BIN));
 
     if !cache_path.exists() {
-        return Err(Error::CachedSpecNotFound {
-            name: spec_name.to_string(),
-        });
+        return Err(Error::cached_spec_not_found(spec_name));
     }
 
     let cache_data = fs::read(&cache_path).map_err(Error::Io)?;
-    bincode::deserialize(&cache_data).map_err(|e| Error::CachedSpecCorrupted {
-        name: spec_name.to_string(),
-        reason: e.to_string(),
-    })
+    bincode::deserialize(&cache_data)
+        .map_err(|e| Error::cached_spec_corrupted(spec_name, e.to_string()))
 }
 
 /// Load cached spec with embedded version checking (legacy/fallback path)
@@ -77,25 +73,20 @@ fn load_cached_spec_with_version_check<P: AsRef<Path>>(
         .join(format!("{spec_name}{}", crate::constants::FILE_EXT_BIN));
 
     if !cache_path.exists() {
-        return Err(Error::CachedSpecNotFound {
-            name: spec_name.to_string(),
-        });
+        return Err(Error::cached_spec_not_found(spec_name));
     }
 
     let cache_data = fs::read(&cache_path).map_err(Error::Io)?;
-    let cached_spec: CachedSpec =
-        bincode::deserialize(&cache_data).map_err(|e| Error::CachedSpecCorrupted {
-            name: spec_name.to_string(),
-            reason: e.to_string(),
-        })?;
+    let cached_spec: CachedSpec = bincode::deserialize(&cache_data)
+        .map_err(|e| Error::cached_spec_corrupted(spec_name, e.to_string()))?;
 
     // Check cache format version
     if cached_spec.cache_format_version != CACHE_FORMAT_VERSION {
-        return Err(Error::CacheVersionMismatch {
-            name: spec_name.to_string(),
-            found: cached_spec.cache_format_version,
-            expected: CACHE_FORMAT_VERSION,
-        });
+        return Err(Error::cache_version_mismatch(
+            spec_name,
+            cached_spec.cache_format_version,
+            CACHE_FORMAT_VERSION,
+        ));
     }
 
     Ok(cached_spec)
