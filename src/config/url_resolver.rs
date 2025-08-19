@@ -52,10 +52,7 @@ impl<'a> BaseUrlResolver<'a> {
                 match err {
                     // For validation errors, log and fallback to basic resolution
                     // This maintains backward compatibility while providing visibility
-                    Error::InvalidServerVarFormat { .. }
-                    | Error::InvalidServerVarValue { .. }
-                    | Error::UnknownServerVariable { .. }
-                    | Error::Internal {
+                    Error::Internal {
                         kind: crate::error::ErrorKind::ServerVariable,
                         ..
                     } => {

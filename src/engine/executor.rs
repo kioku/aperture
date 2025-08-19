@@ -1179,8 +1179,8 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
         }
     };
 
-    serde_json::to_string_pretty(&result).map_err(|e| Error::JqFilterError {
-        reason: format!("Failed to serialize filtered result: {e}"),
+    serde_json::to_string_pretty(&result).map_err(|e| {
+        Error::serialization_error(format!("Failed to serialize filtered result: {e}"))
     })
 }
 

@@ -328,9 +328,13 @@ impl SpecValidator {
         }
 
         match error {
-            Error::Validation(ref msg) if msg.contains("unsupported authentication") => {
+            Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                ref message,
+                ..
+            } if message.contains("unsupported authentication") => {
                 // Track unsupported schemes for later operation validation
-                unsupported_schemes.insert(scheme_name.to_string(), msg.clone());
+                unsupported_schemes.insert(scheme_name.to_string(), message.to_string());
             }
             _ => {
                 // Other validation errors are still errors even in non-strict mode

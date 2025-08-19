@@ -734,8 +734,17 @@ async fn show_cache_stats(
 #[allow(clippy::too_many_lines)]
 fn print_error(error: &Error) {
     match error {
-        Error::Config(msg) => {
-            eprintln!("Configuration Error\n{msg}");
+        Error::Internal {
+            kind,
+            message,
+            context,
+        } => {
+            eprintln!("{kind}: {message}");
+            if let Some(ctx) = context {
+                if let Some(suggestion) = &ctx.suggestion {
+                    eprintln!("\nHint: {suggestion}");
+                }
+            }
         }
         Error::Io(io_err) => match io_err.kind() {
             std::io::ErrorKind::NotFound => {
@@ -756,280 +765,67 @@ fn print_error(error: &Error) {
         },
         Error::Network(req_err) => {
             if req_err.is_connect() {
-                eprintln!("Connection Error\n{req_err}\n\nHint: Check that the API server is running and accessible.");
+                eprintln!(
+                    "Connection Error\n{req_err}\n\nHint: {}",
+                    constants::ERR_CONNECTION
+                );
             } else if req_err.is_timeout() {
-                eprintln!("Request Timeout\n{req_err}\n\nHint: The API server may be slow or unresponsive. Try again later.");
+                eprintln!(
+                    "Timeout Error\n{req_err}\n\nHint: {}",
+                    constants::ERR_TIMEOUT
+                );
             } else if req_err.is_status() {
                 if let Some(status) = req_err.status() {
                     match status.as_u16() {
-                        401 => eprintln!("Authentication Error (401)\n{req_err}\n\nHint: Check your API credentials and authentication configuration."),
-                        403 => eprintln!("Authorization Error (403)\n{req_err}\n\nHint: Your credentials may be valid but lack permission for this operation."),
-                        404 => eprintln!("Resource Not Found (404)\n{req_err}\n\nHint: Check that the API endpoint and parameters are correct."),
-                        429 => eprintln!("Rate Limited (429)\n{req_err}\n\nHint: You're making requests too quickly. Wait before trying again."),
-                        500..=599 => eprintln!("Server Error ({})\n{req_err}\n\nHint: The API server is experiencing issues. Try again later.", status.as_u16()),
-                        _ => eprintln!("HTTP Error ({})\n{req_err}", status.as_u16()),
+                        401 => eprintln!(
+                            "Authentication Error\n{req_err}\n\nHint: {}",
+                            constants::ERR_API_CREDENTIALS
+                        ),
+                        403 => eprintln!(
+                            "Permission Error\n{req_err}\n\nHint: {}",
+                            constants::ERR_PERMISSION_DENIED
+                        ),
+                        404 => eprintln!(
+                            "Not Found Error\n{req_err}\n\nHint: {}",
+                            constants::ERR_ENDPOINT_NOT_FOUND
+                        ),
+                        429 => eprintln!(
+                            "Rate Limited\n{req_err}\n\nHint: {}",
+                            constants::ERR_RATE_LIMITED
+                        ),
+                        500..=599 => eprintln!(
+                            "Server Error\n{req_err}\n\nHint: {}",
+                            constants::ERR_SERVER_ERROR
+                        ),
+                        _ => eprintln!("HTTP Error\n{req_err}"),
                     }
                 } else {
-                    eprintln!("HTTP Error\n{req_err}");
+                    eprintln!("Network Error\n{req_err}");
                 }
             } else {
                 eprintln!("Network Error\n{req_err}");
             }
         }
         Error::Yaml(yaml_err) => {
-            eprintln!("YAML Parsing Error\n{yaml_err}\n\nHint: Check that your OpenAPI specification is valid YAML syntax.");
+            eprintln!(
+                "YAML Parsing Error\n{yaml_err}\n\nHint: {}",
+                constants::ERR_YAML_SYNTAX
+            );
         }
         Error::Json(json_err) => {
-            eprintln!("JSON Parsing Error\n{json_err}\n\nHint: Check that your request body or response contains valid JSON.");
-        }
-        Error::Validation(msg) => {
-            eprintln!("Validation Error\n{msg}\n\nHint: Check that your OpenAPI specification follows the required format.");
+            eprintln!(
+                "JSON Parsing Error\n{json_err}\n\nHint: {}",
+                constants::ERR_JSON_SYNTAX
+            );
         }
         Error::Toml(toml_err) => {
-            eprintln!("TOML Parsing Error\n{toml_err}\n\nHint: Check that your configuration file is valid TOML syntax.");
-        }
-        Error::SpecNotFound { name } => {
-            eprintln!("API Specification Not Found\n{error}\n\nHint: Use 'aperture config list' to see available specifications\n      or 'aperture config add {name} <file>' to add this specification.");
-        }
-        Error::SpecAlreadyExists { .. } => {
-            eprintln!("Specification Already Exists\n{error}");
-        }
-        Error::CachedSpecNotFound { .. } => {
-            eprintln!("Cached Specification Not Found\n{error}");
-        }
-        Error::CachedSpecCorrupted { .. } => {
-            eprintln!("Cached Specification Corrupted\n{error}\n\nHint: Try removing and re-adding the specification.");
-        }
-        Error::CacheVersionMismatch { name, .. } => {
-            eprintln!("Cache Version Mismatch\n{error}\n\nHint: Run 'aperture config reinit {name}' to regenerate the cache with the current format.");
-        }
-        Error::SecretNotSet { env_var, .. } => {
-            eprintln!("Authentication Secret Not Set\n{error}\n\nHint: Set the environment variable: export {env_var}=<your-secret>");
-        }
-        Error::InvalidHeaderFormat { .. }
-        | Error::InvalidHeaderName { .. }
-        | Error::InvalidHeaderValue { .. }
-        | Error::EmptyHeaderName => {
-            eprintln!("Invalid Header\n{error}");
-        }
-        Error::EditorNotSet => {
             eprintln!(
-                "Editor Not Set\n{error}\n\nHint: Set your preferred editor: export EDITOR=vim"
+                "TOML Parsing Error\n{toml_err}\n\nHint: {}",
+                constants::ERR_TOML_SYNTAX
             );
         }
-        Error::EditorFailed { .. } => {
-            eprintln!("Editor Failed\n{error}");
-        }
-        Error::InvalidHttpMethod { .. } => {
-            eprintln!("Invalid HTTP Method\n{error}");
-        }
-        Error::MissingPathParameter { .. } => {
-            eprintln!("Missing Path Parameter\n{error}");
-        }
-        Error::UnsupportedAuthScheme { .. } | Error::UnsupportedSecurityScheme { .. } => {
-            eprintln!("Unsupported Security Scheme\n{error}");
-        }
-        Error::SerializationError { .. } => {
-            eprintln!("Serialization Error\n{error}");
-        }
-        Error::InvalidConfig { .. } => {
-            eprintln!("Invalid Configuration\n{error}\n\nHint: Check the TOML syntax in your configuration file.");
-        }
-        Error::HomeDirectoryNotFound => {
-            eprintln!("Home Directory Not Found\n{error}\n\nHint: Ensure HOME environment variable is set.");
-        }
-        Error::InvalidJsonBody { .. } => {
-            eprintln!("Invalid JSON Body\n{error}\n\nHint: Check your JSON syntax and ensure all quotes are properly escaped.");
-        }
-        Error::RequestFailed { .. } | Error::ResponseReadError { .. } => {
-            eprintln!("Request Failed\n{error}");
-        }
-        Error::HttpErrorWithContext {
-            status,
-            body,
-            api_name,
-            operation_id,
-            security_schemes,
-        } => match status {
-            401 => {
-                eprintln!("Authentication Error (401) - API: {api_name}");
-                if let Some(op_id) = operation_id {
-                    eprintln!("Operation: {op_id}");
-                }
-                eprintln!("Response: {body}");
-                eprintln!();
-
-                if security_schemes.is_empty() {
-                    eprintln!("Hint: Check your API credentials and authentication configuration.");
-                } else {
-                    eprintln!("This operation requires authentication. Check these environment variables:");
-                    for scheme_name in security_schemes {
-                        eprintln!("  • Authentication scheme '{scheme_name}' - verify your environment variable is set");
-                    }
-                    eprintln!("\nExample: export YOUR_API_KEY=<your-secret>");
-                }
-            }
-            403 => {
-                eprintln!("Authorization Error (403) - API: {api_name}");
-                if let Some(op_id) = operation_id {
-                    eprintln!("Operation: {op_id}");
-                }
-                eprintln!("Response: {body}");
-                eprintln!();
-                eprintln!(
-                    "Hint: Your credentials may be valid but lack permission for this operation."
-                );
-            }
-            404 => {
-                eprintln!("Resource Not Found (404) - API: {api_name}");
-                if let Some(op_id) = operation_id {
-                    eprintln!("Operation: {op_id}");
-                }
-                eprintln!("Response: {body}");
-                eprintln!();
-                eprintln!("Hint: Check that the API endpoint and parameters are correct.");
-            }
-            429 => {
-                eprintln!("Rate Limited (429) - API: {api_name}");
-                if let Some(op_id) = operation_id {
-                    eprintln!("Operation: {op_id}");
-                }
-                eprintln!("Response: {body}");
-                eprintln!();
-                eprintln!("Hint: You're making requests too quickly. Wait before trying again.");
-            }
-            500..=599 => {
-                eprintln!("Server Error ({status}) - API: {api_name}");
-                if let Some(op_id) = operation_id {
-                    eprintln!("Operation: {op_id}");
-                }
-                eprintln!("Response: {body}");
-                eprintln!();
-                eprintln!("Hint: The API server is experiencing issues. Try again later.");
-            }
-            _ => {
-                eprintln!("HTTP Error ({status}) - API: {api_name}");
-                if let Some(op_id) = operation_id {
-                    eprintln!("Operation: {op_id}");
-                }
-                eprintln!("Response: {body}");
-            }
-        },
-        Error::InvalidCommand { context, .. } => {
-            eprintln!("Invalid Command\n{error}\n\nHint: Use 'aperture api {context} --help' to see available commands.");
-        }
-        Error::OperationNotFound => {
-            eprintln!("Operation Not Found\n{error}\n\nHint: Check that the command matches an available operation.");
-        }
-        Error::InvalidIdempotencyKey => {
-            eprintln!("Invalid Idempotency Key\n{error}\n\nHint: Idempotency key must be a valid header value.");
-        }
-        Error::JqFilterError { .. } => {
-            eprintln!("JQ Filter Error\n{error}\n\nHint: Check your JQ filter syntax. Common examples: '.name', '.[] | select(.active)'");
-        }
-        Error::InvalidPath { .. } => {
-            eprintln!("Invalid Path\n{error}\n\nHint: Check that the path is valid and properly formatted.");
-        }
-        Error::InteractiveInputTooLong {
-            provided,
-            max,
-            suggestion,
-        } => {
-            eprintln!("Input Too Long\nProvided {provided} characters (max: {max})\n{suggestion}");
-        }
-        Error::InteractiveInvalidCharacters {
-            invalid_chars,
-            suggestion,
-        } => {
-            eprintln!(
-                "Invalid Input Characters\nInvalid characters: {invalid_chars}\n{suggestion}"
-            );
-        }
-        Error::InteractiveTimeout {
-            timeout_secs,
-            suggestion,
-        } => {
-            eprintln!("Input Timeout\nTimed out after {timeout_secs} seconds\n{suggestion}");
-        }
-        Error::InteractiveRetriesExhausted {
-            max_attempts,
-            last_error,
-            suggestions,
-        } => {
-            eprintln!("Maximum Retries Exceeded\nFailed after {max_attempts} attempts. Last error: {last_error}");
-            if !suggestions.is_empty() {
-                eprintln!("\nSuggestions:");
-                for suggestion in suggestions {
-                    eprintln!("  • {suggestion}");
-                }
-            }
-        }
-        Error::InvalidEnvironmentVariableName {
-            name,
-            reason,
-            suggestion,
-        } => {
-            eprintln!("Invalid Environment Variable Name\nName '{name}' is invalid: {reason}\n{suggestion}");
-        }
-        Error::RequestTimeout {
-            attempts,
-            timeout_ms,
-        } => {
-            eprintln!("Request Timeout\nRequest timed out after {attempts} retries (max timeout: {timeout_ms}ms)\n\nHint: The server may be slow or unresponsive. Try again later or increase timeout.");
-        }
-        Error::RetryLimitExceeded {
-            attempts,
-            duration_ms,
-            last_error,
-        } => {
-            eprintln!("Retry Limit Exceeded\nFailed after {attempts} attempts over {duration_ms}ms\nLast error: {last_error}\n\nHint: The service may be experiencing issues. Check API status or try again later.");
-        }
-        Error::TransientNetworkError { reason, retryable } => {
-            if *retryable {
-                eprintln!("Transient Network Error\n{reason}\n\nHint: This error is retryable. The request will be automatically retried.");
-            } else {
-                eprintln!("Network Error\n{reason}\n\nHint: This error is not retryable. Check your network connection and API configuration.");
-            }
-        }
-        Error::MissingServerVariable { name } => {
-            eprintln!("Missing Server Variable\nRequired server variable '{name}' with no default value\n\nHint: Provide the missing server variable using --server-var {name}=value");
-        }
-        Error::UnknownServerVariable { name, available } => {
-            let available_list = available.join(", ");
-            eprintln!("Unknown Server Variable\nUnknown server variable '{name}'\nAvailable variables: {available_list}\n\nHint: Use one of the available variables listed above.");
-        }
-        Error::InvalidServerVarFormat { arg, reason } => {
-            eprintln!("Invalid Server Variable Format\nInvalid format '{arg}': {reason}\n\nHint: Use the format --server-var key=value");
-        }
-        Error::InvalidServerVarValue {
-            name,
-            value,
-            allowed_values,
-        } => {
-            let allowed_list = allowed_values.join(", ");
-            eprintln!("Invalid Server Variable Value\nInvalid value '{value}' for server variable '{name}'\nAllowed values: {allowed_list}\n\nHint: Use one of the allowed values listed above.");
-        }
-        Error::UnresolvedTemplateVariable { name, url } => {
-            eprintln!("Unresolved Template Variable\nUnresolved template variable '{name}' in URL '{url}'\n\nHint: Ensure all template variables are provided with --server-var");
-        }
-        Error::Internal {
-            kind,
-            message,
-            context,
-        } => {
-            eprint!("{kind} Error\n{message}");
-            if let Some(ctx) = context {
-                if let Some(suggestion) = &ctx.suggestion {
-                    eprintln!("\n\nHint: {suggestion}");
-                } else {
-                    eprintln!();
-                }
-            } else {
-                eprintln!();
-            }
-        }
-        Error::Anyhow(err) => {
-            eprintln!("Unexpected Error\n{err}\n\nHint: This may be a bug. Please report it with the command you were running.");
+        Error::Anyhow(anyhow_err) => {
+            eprintln!("Error\n{anyhow_err}");
         }
     }
 }
