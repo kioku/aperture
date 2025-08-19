@@ -98,10 +98,7 @@ impl InputOutput for RealInputOutput {
                 // 1. The user provides input (thread completes normally)
                 // 2. The process exits (OS cleans up all threads)
                 // This is the standard approach for stdin timeout handling in Rust.
-                Err(Error::InteractiveTimeout {
-                    timeout_secs: timeout.as_secs(),
-                    suggestion: "Try again with a faster response or increase timeout with APERTURE_INPUT_TIMEOUT".to_string(),
-                })
+                Err(Error::interactive_timeout())
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 Err(Error::invalid_config("Input channel disconnected"))

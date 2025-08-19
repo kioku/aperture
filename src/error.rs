@@ -288,7 +288,7 @@ impl ErrorKind {
             Self::Specification => "Specification",
             Self::Authentication => "Authentication",
             Self::Validation => "Validation",
-            Self::HttpRequest => "HttpRequest",
+            Self::HttpRequest => "HttpError",
             Self::Headers => "Headers",
             Self::Interactive => "Interactive",
             Self::ServerVariable => "ServerVariable",
@@ -987,7 +987,9 @@ impl Error {
         let header = header.into();
         Self::Internal {
             kind: ErrorKind::Headers,
-            message: Cow::Owned(format!("Invalid header format: {header}")),
+            message: Cow::Owned(format!(
+                "Invalid header format '{header}'. Expected 'Name: Value'"
+            )),
             context: Some(ErrorContext::new(
                 Some(json!({ "header": header })),
                 Some(Cow::Borrowed("Headers must be in 'Name: Value' format.")),
@@ -1255,6 +1257,122 @@ impl Error {
             error_context!(
                 error_details_name_reason!("context", &context, &reason),
                 "Check available commands with --help or --describe-json"
+            )
+        )
+    }
+
+    /// Create an HTTP error with context
+    pub fn http_error_with_context(
+        status: u16,
+        body: impl Into<String>,
+        api_name: impl Into<String>,
+        operation_id: Option<impl Into<String>>,
+        security_schemes: &[String],
+    ) -> Self {
+        use serde_json::json;
+        let body = body.into();
+        let api_name = api_name.into();
+        let operation_id = operation_id.map(std::convert::Into::into);
+
+        // Include important parts of response body in message for backward compatibility
+        let message = if body.len() <= 200 && !body.is_empty() {
+            format!("HTTP {status} error for '{api_name}': {body}")
+        } else {
+            format!("HTTP {status} error for '{api_name}'")
+        };
+
+        Self::Internal {
+            kind: ErrorKind::HttpRequest,
+            message: Cow::Owned(message),
+            context: Some(ErrorContext::new(
+                Some(json!({
+                    "status": status,
+                    "response_body": body,
+                    "api_name": api_name,
+                    "operation_id": operation_id,
+                    "security_schemes": security_schemes
+                })),
+                Some(Cow::Borrowed(
+                    "Check the API endpoint, parameters, and authentication.",
+                )),
+            )),
+        }
+    }
+
+    /// Create a JQ filter error
+    pub fn jq_filter_error(filter: impl Into<String>, reason: impl Into<String>) -> Self {
+        let filter = filter.into();
+        let reason = reason.into();
+        internal_error!(
+            ErrorKind::Validation,
+            format!("JQ filter error in '{filter}': {reason}"),
+            error_context!(
+                error_details_name_reason!("filter", &filter, &reason),
+                "Check JQ filter syntax and data structure compatibility"
+            )
+        )
+    }
+
+    /// Create a transient network error
+    pub fn transient_network_error(reason: impl Into<String>, retryable: bool) -> Self {
+        let reason = reason.into();
+        internal_error!(
+            ErrorKind::HttpRequest,
+            format!("Transient network error: {reason}"),
+            error_context!(
+                serde_json::json!({
+                    "reason": reason,
+                    "retryable": retryable
+                }),
+                if retryable {
+                    "This error may be temporary and could succeed on retry"
+                } else {
+                    "This error is not retryable"
+                }
+            )
+        )
+    }
+
+    /// Create a retry limit exceeded error
+    pub fn retry_limit_exceeded(max_attempts: u32, last_error: impl Into<String>) -> Self {
+        let last_error = last_error.into();
+        internal_error!(
+            ErrorKind::HttpRequest,
+            format!("Retry limit exceeded after {max_attempts} attempts: {last_error}"),
+            error_context!(
+                serde_json::json!({
+                    "max_attempts": max_attempts,
+                    "last_error": last_error
+                }),
+                "Consider checking network connectivity or increasing retry limits"
+            )
+        )
+    }
+
+    /// Create a request timeout error
+    #[must_use]
+    pub fn request_timeout(timeout_seconds: u64) -> Self {
+        internal_error!(
+            ErrorKind::HttpRequest,
+            format!("Request timed out after {timeout_seconds} seconds"),
+            error_context!(
+                serde_json::json!({
+                    "timeout_seconds": timeout_seconds
+                }),
+                "Consider increasing the timeout or checking network connectivity"
+            )
+        )
+    }
+
+    /// Create a missing path parameter error
+    pub fn missing_path_parameter(name: impl Into<String>) -> Self {
+        let name = name.into();
+        internal_error!(
+            ErrorKind::Validation,
+            format!("Missing required path parameter: {name}"),
+            error_context!(
+                error_details_single!("parameter_name", &name),
+                "Provide a value for this required path parameter"
             )
         )
     }

@@ -141,9 +141,10 @@ fn handle_dry_run(
 async fn send_request(
     request: reqwest::RequestBuilder,
 ) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
-    let response = request.send().await.map_err(|e| Error::RequestFailed {
-        reason: e.to_string(),
-    })?;
+    let response = request
+        .send()
+        .await
+        .map_err(|e| Error::network_request_failed(e.to_string()))?;
 
     let status = response.status();
     let response_headers: HashMap<String, String> = response
@@ -181,17 +182,17 @@ fn handle_http_error(
         })
         .collect();
 
-    Error::HttpErrorWithContext {
-        status: status.as_u16(),
-        body: if response_text.is_empty() {
+    Error::http_error_with_context(
+        status.as_u16(),
+        if response_text.is_empty() {
             constants::EMPTY_RESPONSE.to_string()
         } else {
             response_text
         },
         api_name,
         operation_id,
-        security_schemes,
-    }
+        &security_schemes,
+    )
 }
 
 /// Prepare cache context if caching is enabled
@@ -512,9 +513,7 @@ fn build_url(
                 url.replace_range(open_pos..=close_pos, value);
                 start = open_pos + value.len();
             } else {
-                return Err(Error::MissingPathParameter {
-                    name: param_name.to_string(),
-                });
+                return Err(Error::missing_path_parameter(param_name));
             }
         } else {
             break;
@@ -593,16 +592,10 @@ fn build_headers(
     if let Ok(Some(custom_headers)) = current_matches.try_get_many::<String>("header") {
         for header_str in custom_headers {
             let (name, value) = parse_custom_header(header_str)?;
-            let header_name =
-                HeaderName::from_str(&name).map_err(|e| Error::InvalidHeaderName {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
-            let header_value =
-                HeaderValue::from_str(&value).map_err(|e| Error::InvalidHeaderValue {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
+            let header_name = HeaderName::from_str(&name)
+                .map_err(|e| Error::invalid_header_name(&name, e.to_string()))?;
+            let header_value = HeaderValue::from_str(&value)
+                .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
             headers.insert(header_name, header_value);
         }
     }
@@ -613,10 +606,10 @@ fn build_headers(
 /// Validates that a header value doesn't contain control characters
 fn validate_header_value(name: &str, value: &str) -> Result<(), Error> {
     if value.chars().any(|c| c == '\r' || c == '\n' || c == '\0') {
-        return Err(Error::InvalidHeaderValue {
-            name: name.to_string(),
-            reason: "Header value contains invalid control characters (newline, carriage return, or null)".to_string(),
-        });
+        return Err(Error::invalid_header_value(
+            name,
+            "Header value contains invalid control characters (newline, carriage return, or null)",
+        ));
     }
     Ok(())
 }
@@ -626,9 +619,7 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
     // Find the colon separator
     let colon_pos = header_str
         .find(':')
-        .ok_or_else(|| Error::InvalidHeaderFormat {
-            header: header_str.to_string(),
-        })?;
+        .ok_or_else(|| Error::invalid_header_format(header_str))?;
 
     let name = header_str[..colon_pos].trim();
     let value = header_str[colon_pos + 1..].trim();
@@ -723,17 +714,10 @@ fn add_authentication_header(
             };
 
             if location == "header" {
-                let header_name =
-                    HeaderName::from_str(param_name).map_err(|e| Error::InvalidHeaderName {
-                        name: param_name.clone(),
-                        reason: e.to_string(),
-                    })?;
-                let header_value = HeaderValue::from_str(&secret_value).map_err(|e| {
-                    Error::InvalidHeaderValue {
-                        name: param_name.clone(),
-                        reason: e.to_string(),
-                    }
-                })?;
+                let header_name = HeaderName::from_str(param_name)
+                    .map_err(|e| Error::invalid_header_name(param_name, e.to_string()))?;
+                let header_value = HeaderValue::from_str(&secret_value)
+                    .map_err(|e| Error::invalid_header_value(param_name, e.to_string()))?;
                 headers.insert(header_name, header_value);
             }
             // Note: query and cookie locations are handled differently in request building
@@ -764,11 +748,9 @@ fn add_authentication_header(
                     }
                 };
 
-                let header_value =
-                    HeaderValue::from_str(&auth_value).map_err(|e| Error::InvalidHeaderValue {
-                        name: constants::HEADER_AUTHORIZATION.to_string(),
-                        reason: e.to_string(),
-                    })?;
+                let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
+                    Error::invalid_header_value(constants::HEADER_AUTHORIZATION, e.to_string())
+                })?;
                 headers.insert(constants::HEADER_AUTHORIZATION, header_value);
 
                 // Debug logging
@@ -1056,10 +1038,8 @@ fn format_value_for_table(value: &Value) -> String {
 /// - The filter execution fails
 pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
     // Parse the response as JSON
-    let json_value: Value =
-        serde_json::from_str(response_text).map_err(|e| Error::JqFilterError {
-            reason: format!("Response is not valid JSON: {e}"),
-        })?;
+    let json_value: Value = serde_json::from_str(response_text)
+        .map_err(|e| Error::jq_filter_error(filter, format!("Response is not valid JSON: {e}")))?;
 
     #[cfg(feature = "jq")]
     {
@@ -1071,9 +1051,10 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
         // Parse the filter expression
         let (expr, errs) = parse(filter, jaq_parse::main());
         if !errs.is_empty() {
-            return Err(Error::JqFilterError {
-                reason: format!("Parse error in jq expression: {}", errs[0]),
-            });
+            return Err(Error::jq_filter_error(
+                filter,
+                format!("Parse error in jq expression: {}", errs[0]),
+            ));
         }
 
         // Create parsing context and compile the filter
@@ -1108,9 +1089,10 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
                     })
                 }
             }
-            Err(e) => Err(Error::JqFilterError {
-                reason: format!("Filter execution error: {e}"),
-            }),
+            Err(e) => Err(Error::jq_filter_error(
+                filter,
+                format!("Filter execution error: {e}"),
+            )),
         }
     }
 
@@ -1188,9 +1170,7 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
             get_nested_field(json_value, field_path)
         }
         _ => {
-            return Err(Error::JqFilterError {
-                reason: format!("Unsupported JQ filter: '{filter}'. Only basic field access like '.name' or '.metadata.role' is supported without the full jq library."),
-            });
+            return Err(Error::jq_filter_error(filter, "Unsupported JQ filter. Only basic field access like '.name' or '.metadata.role' is supported without the full jq library."));
         }
     };
 

@@ -180,9 +180,9 @@ fn parse_json_with_fallback(content: &str) -> Result<OpenAPI, Error> {
             }
 
             // Return JSON error since content looked like JSON
-            Err(Error::SerializationError {
-                reason: format!("Failed to parse OpenAPI spec as JSON: {json_err}"),
-            })
+            Err(Error::serialization_error(format!(
+                "Failed to parse OpenAPI spec as JSON: {json_err}"
+            )))
         }
     }
 }
@@ -219,9 +219,11 @@ fn parse_with_oas3_direct_with_original(
         Ok(spec) => spec,
         Err(_yaml_err) => {
             // Try parsing as JSON
-            oas3::from_json(preprocessed).map_err(|e| Error::SerializationError {
-                reason: format!("Failed to parse OpenAPI 3.1 spec as YAML or JSON: {e}"),
-            })?
+            oas3::from_json(preprocessed).map_err(|e| {
+                Error::serialization_error(format!(
+                    "Failed to parse OpenAPI 3.1 spec as YAML or JSON: {e}"
+                ))
+            })?;
         }
     };
 
@@ -232,8 +234,8 @@ fn parse_with_oas3_direct_with_original(
     eprintln!("         Some 3.1-specific features may not be available.");
 
     // Convert oas3 spec to JSON, then attempt to parse as openapiv3
-    let json = oas3::to_json(&oas3_spec).map_err(|e| Error::SerializationError {
-        reason: format!("Failed to serialize OpenAPI 3.1 spec: {e}"),
+    let json = oas3::to_json(&oas3_spec).map_err(|e| {
+        Error::serialization_error(format!("Failed to serialize OpenAPI 3.1 spec: {e}"))
     })?;
 
     // Parse the JSON as OpenAPI 3.0.x

@@ -317,10 +317,7 @@ impl BatchProcessor {
                 std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
                     .chain(operation.args.clone()),
             )
-            .map_err(|e| Error::InvalidCommand {
-                context: crate::constants::CONTEXT_BATCH.to_string(),
-                reason: e.to_string(),
-            })?;
+            .map_err(|e| Error::invalid_command(crate::constants::CONTEXT_BATCH, e.to_string()))?;
 
         // Create cache configuration - for batch operations, we use the operation's use_cache setting
         let cache_config = if operation.use_cache.unwrap_or(false) {

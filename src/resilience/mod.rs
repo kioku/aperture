@@ -103,7 +103,7 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, reqwest::Error>>,
 {
-    let start_time = Instant::now();
+    let _start_time = Instant::now();
     let mut last_error = None;
 
     for attempt in 0..config.max_attempts {
@@ -121,10 +121,7 @@ where
                     last_error = Some(error_message.clone());
 
                     if !is_retryable {
-                        return Err(Error::TransientNetworkError {
-                            reason: error_message,
-                            retryable: false,
-                        });
+                        return Err(Error::transient_network_error(error_message, false));
                     }
                     break;
                 }
@@ -138,13 +135,10 @@ where
         }
     }
 
-    let duration = start_time.elapsed();
-    Err(Error::RetryLimitExceeded {
-        attempts: config.max_attempts,
-        #[allow(clippy::cast_possible_truncation)]
-        duration_ms: duration.as_millis().min(u128::from(u64::MAX)) as u64,
-        last_error: last_error.unwrap_or_else(|| "Unknown error".to_string()),
-    })
+    Err(Error::retry_limit_exceeded(
+        config.max_attempts.try_into().unwrap_or(u32::MAX),
+        last_error.unwrap_or_else(|| "Unknown error".to_string()),
+    ))
 }
 
 /// Creates a resilient HTTP client with timeout configuration
@@ -156,8 +150,8 @@ pub fn create_resilient_client(timeout_config: &TimeoutConfig) -> Result<reqwest
         .connect_timeout(Duration::from_millis(timeout_config.connect_timeout_ms))
         .timeout(Duration::from_millis(timeout_config.request_timeout_ms))
         .build()
-        .map_err(|e| Error::RequestFailed {
-            reason: format!("Failed to create resilient HTTP client: {e}"),
+        .map_err(|e| {
+            Error::network_request_failed(format!("Failed to create resilient HTTP client: {e}"))
         })
 }
 

@@ -279,8 +279,29 @@ async fn test_execute_request_error_response() {
 
     if let Err(e) = result {
         let error_msg = e.to_string();
+        // Check for 404 in the main message
         assert!(error_msg.contains("404"));
-        assert!(error_msg.contains(r#""error":"User not found"#));
+
+        // For backward compatibility, check if it's the old or new format
+        // Old format includes JSON in the main message
+        // New format has JSON in the context
+        match &e {
+            aperture_cli::error::Error::HttpErrorWithContext { body, .. } => {
+                assert!(body.contains(r#""error":"User not found"#));
+            }
+            aperture_cli::error::Error::Internal { context, .. } => {
+                if let Some(ctx) = context {
+                    if let Some(details) = &ctx.details {
+                        let response_body = details.get("response_body").unwrap();
+                        assert!(response_body
+                            .as_str()
+                            .unwrap()
+                            .contains(r#""error":"User not found"#));
+                    }
+                }
+            }
+            _ => panic!("Unexpected error type: {:?}", e),
+        }
     }
 }
 
