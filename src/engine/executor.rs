@@ -127,7 +127,9 @@ fn handle_dry_run(
         "operation_id": operation.operation_id
     });
 
-    let output = serde_json::to_string_pretty(&dry_run_info).map_err(Error::Json)?;
+    let output = serde_json::to_string_pretty(&dry_run_info).map_err(|e| {
+        Error::serialization_error(format!("Failed to serialize dry run info: {e}"))
+    })?;
 
     if capture_output {
         Ok(Some(output))
@@ -363,7 +365,7 @@ pub async fn execute_request(
     if let Some(key) = idempotency_key {
         headers.insert(
             HeaderName::from_static("idempotency-key"),
-            HeaderValue::from_str(key).map_err(|_| Error::InvalidIdempotencyKey)?,
+            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
         );
     }
 
@@ -475,7 +477,10 @@ fn find_operation<'a>(
         }
     }
 
-    Err(Error::OperationNotFound)
+    let operation_name = subcommand_path
+        .last()
+        .map_or("unknown".to_string(), ToString::to_string);
+    Err(Error::operation_not_found(operation_name))
 }
 
 /// Builds the full URL with path parameters substituted
@@ -625,7 +630,7 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
     let value = header_str[colon_pos + 1..].trim();
 
     if name.is_empty() {
-        return Err(Error::EmptyHeaderName);
+        return Err(Error::empty_header_name());
     }
 
     // Support environment variable expansion in header values

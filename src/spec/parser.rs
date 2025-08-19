@@ -316,8 +316,8 @@ fn parse_with_oas3_direct_with_original(
     _preprocessed: &str,
     _original: &str,
 ) -> Result<OpenAPI, Error> {
-    Err(Error::Validation(
-        "OpenAPI 3.1 support is not enabled. Rebuild with --features openapi31 to enable 3.1 support.".to_string()
+    Err(Error::validation_error(
+        "OpenAPI 3.1 support is not enabled. Rebuild with --features openapi31 to enable 3.1 support."
     ))
 }
 

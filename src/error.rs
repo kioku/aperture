@@ -1376,4 +1376,59 @@ impl Error {
             )
         )
     }
+
+    /// Create a general I/O error
+    pub fn io_error(message: impl Into<String>) -> Self {
+        let message = message.into();
+        Self::Internal {
+            kind: ErrorKind::Runtime,
+            message: Cow::Owned(message),
+            context: None,
+        }
+    }
+
+    /// Create an invalid idempotency key error
+    #[must_use]
+    pub const fn invalid_idempotency_key() -> Self {
+        Self::Internal {
+            kind: ErrorKind::Headers,
+            message: Cow::Borrowed("Invalid idempotency key format"),
+            context: Some(ErrorContext::new(
+                None,
+                Some(Cow::Borrowed(
+                    "Ensure the idempotency key contains only valid header characters",
+                )),
+            )),
+        }
+    }
+
+    /// Create an editor not set error
+    #[must_use]
+    pub const fn editor_not_set() -> Self {
+        Self::Internal {
+            kind: ErrorKind::Interactive,
+            message: Cow::Borrowed("EDITOR environment variable not set"),
+            context: Some(ErrorContext::new(
+                None,
+                Some(Cow::Borrowed(
+                    "Set your preferred editor: export EDITOR=vim",
+                )),
+            )),
+        }
+    }
+
+    /// Create an editor failed error
+    pub fn editor_failed(name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self::Internal {
+            kind: ErrorKind::Interactive,
+            message: Cow::Owned(format!("Editor '{name}' failed to complete")),
+            context: Some(ErrorContext::new(
+                Some(serde_json::json!({ "editor": name })),
+                Some(Cow::Borrowed(
+                    "Check if the editor is properly installed and configured",
+                )),
+            )),
+        }
+    }
 }

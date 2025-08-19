@@ -54,14 +54,19 @@ impl InputOutput for RealInputOutput {
 
     fn flush(&self) -> Result<(), Error> {
         use std::io::Write;
-        std::io::stdout().flush().map_err(Error::Io)
+        std::io::stdout()
+            .flush()
+            .map_err(|e| Error::io_error(format!("Failed to flush stdout: {e}")))
     }
 
     fn read_line(&self) -> Result<String, Error> {
         use std::io::BufRead;
         let stdin = std::io::stdin();
         let mut line = String::new();
-        stdin.lock().read_line(&mut line).map_err(Error::Io)?;
+        stdin
+            .lock()
+            .read_line(&mut line)
+            .map_err(|e| Error::io_error(format!("Failed to read from stdin: {e}")))?;
         Ok(line)
     }
 
@@ -80,7 +85,11 @@ impl InputOutput for RealInputOutput {
             let result = stdin.lock().read_line(&mut line);
             match result {
                 Ok(_) => tx.send(Ok(line)).unwrap_or(()),
-                Err(e) => tx.send(Err(Error::Io(e))).unwrap_or(()),
+                Err(e) => tx
+                    .send(Err(Error::io_error(format!(
+                        "Failed to read from stdin: {e}"
+                    ))))
+                    .unwrap_or(()),
             }
         });
 

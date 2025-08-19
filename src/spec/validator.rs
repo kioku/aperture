@@ -174,7 +174,7 @@ impl SpecValidator {
                         }
                     }
                     ReferenceOr::Reference { .. } => {
-                        result.add_error(Error::Validation(format!(
+                        result.add_error(Error::validation_error(format!(
                             "Security scheme references are not supported: '{name}'"
                         )));
                     }
@@ -237,7 +237,7 @@ impl SpecValidator {
 
         // If we found an unsupported scheme, return it as an error (to be converted to warning later)
         if let Some(reason) = unsupported_reason {
-            return Err(Error::Validation(format!(
+            return Err(Error::validation_error(format!(
                 "Security scheme '{name}' uses unsupported authentication: {reason}"
             )));
         }
@@ -252,7 +252,7 @@ impl SpecValidator {
         if let Some(aperture_secret) = extensions.get(crate::constants::EXT_APERTURE_SECRET) {
             // Validate that it's an object
             let secret_obj = aperture_secret.as_object().ok_or_else(|| {
-                Error::Validation(format!(
+                Error::validation_error(format!(
                     "Invalid x-aperture-secret in security scheme '{name}': must be an object"
                 ))
             })?;
@@ -261,20 +261,20 @@ impl SpecValidator {
             let source = secret_obj
                 .get(crate::constants::EXT_KEY_SOURCE)
                 .ok_or_else(|| {
-                    Error::Validation(format!(
+                    Error::validation_error(format!(
                         "Missing 'source' field in x-aperture-secret for security scheme '{name}'"
                     ))
                 })?
                 .as_str()
                 .ok_or_else(|| {
-                    Error::Validation(format!(
+                    Error::validation_error(format!(
                         "Invalid 'source' field in x-aperture-secret for security scheme '{name}': must be a string"
                     ))
                 })?;
 
             // Currently only 'env' source is supported
             if source != crate::constants::SOURCE_ENV {
-                return Err(Error::Validation(format!(
+                return Err(Error::validation_error(format!(
                     "Unsupported source '{source}' in x-aperture-secret for security scheme '{name}'. Only 'env' is supported."
                 )));
             }
@@ -283,20 +283,20 @@ impl SpecValidator {
             let env_name = secret_obj
                 .get(crate::constants::EXT_KEY_NAME)
                 .ok_or_else(|| {
-                    Error::Validation(format!(
+                    Error::validation_error(format!(
                         "Missing 'name' field in x-aperture-secret for security scheme '{name}'"
                     ))
                 })?
                 .as_str()
                 .ok_or_else(|| {
-                    Error::Validation(format!(
+                    Error::validation_error(format!(
                         "Invalid 'name' field in x-aperture-secret for security scheme '{name}': must be a string"
                     ))
                 })?;
 
             // Validate environment variable name format
             if env_name.is_empty() {
-                return Err(Error::Validation(format!(
+                return Err(Error::validation_error(format!(
                     "Empty 'name' field in x-aperture-secret for security scheme '{name}'"
                 )));
             }
@@ -305,7 +305,7 @@ impl SpecValidator {
             if !env_name.chars().all(|c| c.is_alphanumeric() || c == '_')
                 || env_name.chars().next().is_some_and(char::is_numeric)
             {
-                return Err(Error::Validation(format!(
+                return Err(Error::validation_error(format!(
                     "Invalid environment variable name '{env_name}' in x-aperture-secret for security scheme '{name}'. Must contain only alphanumeric characters and underscores, and not start with a digit."
                 )));
             }
@@ -487,7 +487,7 @@ impl SpecValidator {
                     Self::validate_request_body(path, method, request_body, result, strict);
                 }
                 ReferenceOr::Reference { .. } => {
-                    result.add_error(Error::Validation(format!(
+                    result.add_error(Error::validation_error(format!(
                         "Request body references are not supported in {method} {path}."
                     )));
                 }
@@ -507,7 +507,7 @@ impl SpecValidator {
         match &param_data.format {
             openapiv3::ParameterSchemaOrContent::Schema(_) => Ok(()),
             openapiv3::ParameterSchemaOrContent::Content(_) => {
-                Err(Error::Validation(format!(
+                Err(Error::validation_error(format!(
                     "Parameter '{}' in {method} {path} uses unsupported content-based serialization. Only schema-based parameters are supported.",
                     param_data.name
                 )))
@@ -574,7 +574,7 @@ impl SpecValidator {
         result: &mut ValidationResult,
     ) {
         for content_type in unsupported_types {
-            let error = Error::Validation(format!(
+            let error = Error::validation_error(format!(
                 "Unsupported request body content type '{content_type}' in {method} {path}. Only 'application/json' is supported in v1.0."
             ));
             result.add_error(error);
@@ -670,6 +670,14 @@ mod tests {
             Error::Validation(msg) => {
                 assert!(msg.contains("OAuth2"));
                 assert!(msg.contains("not supported"));
+            }
+            Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message,
+                ..
+            } => {
+                assert!(message.contains("OAuth2"));
+                assert!(message.contains("not supported"));
             }
             _ => panic!("Expected Validation error"),
         }

@@ -150,7 +150,9 @@ impl BatchProcessor {
     /// - The file is not valid JSON or YAML
     /// - The file structure doesn't match the expected `BatchFile` format
     pub async fn parse_batch_file(path: &Path) -> Result<BatchFile, Error> {
-        let content = tokio::fs::read_to_string(path).await.map_err(Error::Io)?;
+        let content = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|e| Error::io_error(format!("Failed to read batch file: {e}")))?;
 
         // Try to parse as JSON first, then YAML
         if let Ok(batch_file) = serde_json::from_str::<BatchFile>(&content) {
@@ -161,7 +163,7 @@ impl BatchProcessor {
             return Ok(batch_file);
         }
 
-        Err(Error::Validation(format!(
+        Err(Error::validation_error(format!(
             "Failed to parse batch file as JSON or YAML: {}",
             path.display()
         )))
@@ -269,7 +271,7 @@ impl BatchProcessor {
         for handle in handles {
             let result = handle
                 .await
-                .map_err(|e| Error::Config(format!("Task failed: {e}")))?;
+                .map_err(|e| Error::invalid_config(format!("Task failed: {e}")))?;
             results.push(result);
         }
 

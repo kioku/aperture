@@ -151,7 +151,8 @@ impl ResponseCache {
     /// Returns an error if the cache directory cannot be created
     pub fn new(config: CacheConfig) -> Result<Self, Error> {
         // Ensure cache directory exists
-        std::fs::create_dir_all(&config.cache_dir).map_err(Error::Io)?;
+        std::fs::create_dir_all(&config.cache_dir)
+            .map_err(|e| Error::io_error(format!("Failed to create cache directory: {e}")))?;
 
         Ok(Self { config })
     }
@@ -179,7 +180,7 @@ impl ResponseCache {
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| Error::Config(format!("System time error: {e}")))?
+            .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
             .as_secs();
 
         let ttl_seconds = ttl.unwrap_or(self.config.default_ttl).as_secs();
@@ -194,11 +195,13 @@ impl ResponseCache {
         };
 
         let cache_file = self.config.cache_dir.join(key.to_filename());
-        let json_content = serde_json::to_string_pretty(&cached_response).map_err(Error::Json)?;
+        let json_content = serde_json::to_string_pretty(&cached_response).map_err(|e| {
+            Error::serialization_error(format!("Failed to serialize cached response: {e}"))
+        })?;
 
         tokio::fs::write(&cache_file, json_content)
             .await
-            .map_err(Error::Io)?;
+            .map_err(|e| Error::io_error(format!("Failed to write cache file: {e}")))?;
 
         // Clean up old entries if we exceed max_entries
         self.cleanup_old_entries(&key.api_name).await?;
@@ -226,14 +229,15 @@ impl ResponseCache {
 
         let json_content = tokio::fs::read_to_string(&cache_file)
             .await
-            .map_err(Error::Io)?;
-        let cached_response: CachedResponse =
-            serde_json::from_str(&json_content).map_err(Error::Json)?;
+            .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
+        let cached_response: CachedResponse = serde_json::from_str(&json_content).map_err(|e| {
+            Error::serialization_error(format!("Failed to deserialize cached response: {e}"))
+        })?;
 
         // Check if the cache entry is still valid
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map_err(|e| Error::Config(format!("System time error: {e}")))?
+            .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
             .as_secs();
 
         if now > cached_response.cached_at + cached_response.ttl_seconds {
@@ -263,9 +267,13 @@ impl ResponseCache {
         let mut cleared_count = 0;
         let mut entries = tokio::fs::read_dir(&self.config.cache_dir)
             .await
-            .map_err(Error::Io)?;
+            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(Error::Io)? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?
+        {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
@@ -274,7 +282,7 @@ impl ResponseCache {
             {
                 tokio::fs::remove_file(entry.path())
                     .await
-                    .map_err(Error::Io)?;
+                    .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
                 cleared_count += 1;
             }
         }
@@ -291,16 +299,20 @@ impl ResponseCache {
         let mut cleared_count = 0;
         let mut entries = tokio::fs::read_dir(&self.config.cache_dir)
             .await
-            .map_err(Error::Io)?;
+            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(Error::Io)? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?
+        {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
             if filename_str.ends_with(constants::CACHE_FILE_SUFFIX) {
                 tokio::fs::remove_file(entry.path())
                     .await
-                    .map_err(Error::Io)?;
+                    .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
                 cleared_count += 1;
             }
         }
@@ -317,9 +329,13 @@ impl ResponseCache {
         let mut stats = CacheStats::default();
         let mut entries = tokio::fs::read_dir(&self.config.cache_dir)
             .await
-            .map_err(Error::Io)?;
+            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(Error::Io)? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?
+        {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
@@ -347,7 +363,7 @@ impl ResponseCache {
                     {
                         let now = SystemTime::now()
                             .duration_since(UNIX_EPOCH)
-                            .map_err(|e| Error::Config(format!("System time error: {e}")))?
+                            .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
                             .as_secs();
 
                         if now > cached_response.cached_at + cached_response.ttl_seconds {
@@ -368,9 +384,13 @@ impl ResponseCache {
         let mut entries = Vec::new();
         let mut dir_entries = tokio::fs::read_dir(&self.config.cache_dir)
             .await
-            .map_err(Error::Io)?;
+            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
 
-        while let Some(entry) = dir_entries.next_entry().await.map_err(Error::Io)? {
+        while let Some(entry) = dir_entries
+            .next_entry()
+            .await
+            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?
+        {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 

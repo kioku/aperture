@@ -58,7 +58,8 @@ fn load_cached_spec_without_version_check<P: AsRef<Path>>(
         return Err(Error::cached_spec_not_found(spec_name));
     }
 
-    let cache_data = fs::read(&cache_path).map_err(Error::Io)?;
+    let cache_data = fs::read(&cache_path)
+        .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
     bincode::deserialize(&cache_data)
         .map_err(|e| Error::cached_spec_corrupted(spec_name, e.to_string()))
 }
@@ -76,7 +77,8 @@ fn load_cached_spec_with_version_check<P: AsRef<Path>>(
         return Err(Error::cached_spec_not_found(spec_name));
     }
 
-    let cache_data = fs::read(&cache_path).map_err(Error::Io)?;
+    let cache_data = fs::read(&cache_path)
+        .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
     let cached_spec: CachedSpec = bincode::deserialize(&cache_data)
         .map_err(|e| Error::cached_spec_corrupted(spec_name, e.to_string()))?;
 

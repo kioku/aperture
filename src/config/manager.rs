@@ -413,17 +413,15 @@ impl<F: FileSystem> ConfigManager<F> {
             return Err(Error::spec_not_found(name));
         }
 
-        let editor = std::env::var("EDITOR").map_err(|_| Error::EditorNotSet)?;
+        let editor = std::env::var("EDITOR").map_err(|_| Error::editor_not_set())?;
 
         Command::new(editor)
             .arg(&spec_path)
             .status()
-            .map_err(Error::Io)?
+            .map_err(|e| Error::io_error(format!("Failed to get editor process status: {e}")))?
             .success()
             .then_some(()) // Convert bool to Option<()>
-            .ok_or_else(|| Error::EditorFailed {
-                name: name.to_string(),
-            })
+            .ok_or_else(|| Error::editor_failed(name))
     }
 
     /// Loads the global configuration from `config.toml`.
