@@ -692,18 +692,13 @@ fn add_authentication_header(
 
     let (secret_value, env_var_name) = if let Some(config_secret) = secret_config {
         // Use config-based secret
-        let secret_value = std::env::var(&config_secret.name).map_err(|_| Error::SecretNotSet {
-            scheme_name: security_scheme.name.clone(),
-            env_var: config_secret.name.clone(),
-        })?;
+        let secret_value = std::env::var(&config_secret.name)
+            .map_err(|_| Error::secret_not_set(&security_scheme.name, &config_secret.name))?;
         (secret_value, config_secret.name.clone())
     } else if let Some(aperture_secret) = &security_scheme.aperture_secret {
         // Priority 2: Fall back to x-aperture-secret extension
-        let secret_value =
-            std::env::var(&aperture_secret.name).map_err(|_| Error::SecretNotSet {
-                scheme_name: security_scheme.name.clone(),
-                env_var: aperture_secret.name.clone(),
-            })?;
+        let secret_value = std::env::var(&aperture_secret.name)
+            .map_err(|_| Error::secret_not_set(&security_scheme.name, &aperture_secret.name))?;
         (secret_value, aperture_secret.name.clone())
     } else {
         // No authentication configuration found - skip this scheme
@@ -803,9 +798,9 @@ fn add_authentication_header(
             }
         }
         _ => {
-            return Err(Error::UnsupportedSecurityScheme {
-                scheme_type: security_scheme.scheme_type.clone(),
-            });
+            return Err(Error::unsupported_security_scheme(
+                &security_scheme.scheme_type,
+            ));
         }
     }
 

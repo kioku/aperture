@@ -750,4 +750,53 @@ impl Error {
             )),
         }
     }
+
+    /// Create a secret not set error
+    pub fn secret_not_set(scheme_name: impl Into<String>, env_var: impl Into<String>) -> Self {
+        use serde_json::json;
+        let scheme_name = scheme_name.into();
+        let env_var = env_var.into();
+        Self::Internal {
+            kind: ErrorKind::Authentication,
+            message: Cow::Owned(format!(
+                "Environment variable '{env_var}' required for authentication '{scheme_name}' is not set"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "scheme_name": scheme_name, "env_var": env_var })),
+                Some(Cow::Owned(format!("Set the environment variable: export {env_var}=<your-secret>"))),
+            )),
+        }
+    }
+
+    /// Create an unsupported auth scheme error
+    pub fn unsupported_auth_scheme(scheme: impl Into<String>) -> Self {
+        use serde_json::json;
+        let scheme = scheme.into();
+        Self::Internal {
+            kind: ErrorKind::Authentication,
+            message: Cow::Owned(format!("Unsupported HTTP authentication scheme: {scheme}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "scheme": scheme })),
+                Some(Cow::Borrowed(
+                    "Only 'bearer' and 'basic' schemes are supported.",
+                )),
+            )),
+        }
+    }
+
+    /// Create an unsupported security scheme error
+    pub fn unsupported_security_scheme(scheme_type: impl Into<String>) -> Self {
+        use serde_json::json;
+        let scheme_type = scheme_type.into();
+        Self::Internal {
+            kind: ErrorKind::Authentication,
+            message: Cow::Owned(format!("Unsupported security scheme type: {scheme_type}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "scheme_type": scheme_type })),
+                Some(Cow::Borrowed(
+                    "Only 'apiKey' and 'http' security schemes are supported.",
+                )),
+            )),
+        }
+    }
 }
