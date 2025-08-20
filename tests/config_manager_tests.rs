@@ -225,9 +225,6 @@ paths: {}
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
     match result {
-        Err(Error::SpecAlreadyExists { name }) => {
-            assert_eq!(name, spec_name);
-        }
         Err(Error::Internal {
             kind,
             message,
@@ -404,9 +401,6 @@ fn test_remove_spec_not_found() {
     let result = manager.remove_spec(spec_name);
     assert!(result.is_err());
     match result {
-        Err(Error::SpecNotFound { name }) => {
-            assert_eq!(name, spec_name);
-        }
         Err(Error::Internal {
             kind,
             message,
@@ -560,7 +554,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         // The error message has changed due to our refactoring
         assert!(
             msg.contains("oauth2")
@@ -601,7 +600,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         // The error message has changed due to our refactoring
         assert!(
             msg.contains("OpenID Connect")
@@ -642,7 +646,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(msg.contains("HTTP scheme 'negotiate'"));
         assert!(msg.contains("requires complex authentication flows"));
     } else {
@@ -678,7 +687,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(msg.contains("Unsupported request body content type 'application/xml'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
@@ -714,7 +728,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(msg.contains("Unsupported request body content type 'text/plain'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
@@ -1113,9 +1132,6 @@ async fn test_remote_spec_fetching_timeout() {
         .await;
     assert!(result.is_err());
     match result {
-        Err(Error::RequestFailed { reason }) => {
-            assert!(reason.contains("timed out"));
-        }
         Err(Error::Internal {
             kind: ErrorKind::HttpRequest,
             message,
@@ -1153,9 +1169,6 @@ async fn test_remote_spec_fetching_size_limit() {
         .await;
     assert!(result.is_err());
     match result {
-        Err(Error::RequestFailed { reason }) => {
-            assert!(reason.contains("too large"));
-        }
         Err(Error::Internal {
             kind: ErrorKind::HttpRequest,
             message,
@@ -1186,9 +1199,6 @@ async fn test_remote_spec_fetching_invalid_url() {
         .await;
     assert!(result.is_err());
     match result {
-        Err(Error::RequestFailed { reason }) => {
-            assert!(reason.contains("Failed to connect") || reason.contains("Network error"));
-        }
         Err(Error::Internal {
             kind: ErrorKind::HttpRequest,
             message,
@@ -1223,9 +1233,6 @@ async fn test_remote_spec_fetching_http_error() {
         .await;
     assert!(result.is_err());
     match result {
-        Err(Error::RequestFailed { reason }) => {
-            assert!(reason.contains("HTTP 404"));
-        }
         Err(Error::Internal {
             kind: ErrorKind::HttpRequest,
             message,
@@ -1309,7 +1316,12 @@ paths:
         .add_spec_from_url("oauth2-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         // Check for any OAuth2-related validation error
         assert!(
             msg.contains("oauth2") || msg.contains("OAuth2"),

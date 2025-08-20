@@ -31,17 +31,20 @@ fn test_toml_error_display() {
 
 #[test]
 fn test_config_error_display() {
-    let err = Error::Config("Invalid configuration value".to_string());
+    let err = Error::invalid_config("Invalid configuration value");
     assert_eq!(
         format!("{}", err),
-        "Configuration error: Invalid configuration value"
+        "Validation: Invalid configuration: Invalid configuration value"
     );
 }
 
 #[test]
 fn test_validation_error_display() {
-    let err = Error::Validation("Schema mismatch".to_string());
-    assert_eq!(format!("{}", err), "Validation error: Schema mismatch");
+    let err = Error::validation_error("Schema mismatch");
+    assert_eq!(
+        format!("{}", err),
+        "Validation: Validation error: Schema mismatch"
+    );
 }
 
 #[test]

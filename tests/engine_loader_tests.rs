@@ -82,9 +82,6 @@ fn test_load_cached_spec_file_not_found() {
 
     assert!(result.is_err());
     match result {
-        Err(Error::CachedSpecNotFound { name }) => {
-            assert_eq!(name, "nonexistent-api");
-        }
         Err(Error::Internal {
             kind,
             message,
@@ -116,11 +113,6 @@ fn test_load_cached_spec_corrupted_data() {
 
     assert!(result.is_err());
     match result {
-        Err(Error::CachedSpecCorrupted { name, reason }) => {
-            assert_eq!(name, "corrupted-api");
-            // Bincode error messages vary, just ensure we got a deserialization error
-            assert!(!reason.is_empty());
-        }
         Err(Error::Internal {
             kind,
             message,
@@ -159,15 +151,6 @@ fn test_load_cached_spec_version_mismatch() {
     // Should fail with version mismatch error
     assert!(result.is_err());
     match result {
-        Err(Error::CacheVersionMismatch {
-            name,
-            found,
-            expected,
-        }) => {
-            assert_eq!(name, "old-version-api");
-            assert_eq!(found, 1);
-            assert_eq!(expected, aperture_cli::cache::models::CACHE_FORMAT_VERSION);
-        }
         Err(Error::Internal {
             kind,
             message,

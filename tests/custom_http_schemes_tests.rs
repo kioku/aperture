@@ -1,5 +1,5 @@
 use aperture_cli::config::manager::ConfigManager;
-use aperture_cli::error::Error;
+use aperture_cli::error::{Error, ErrorKind as ApertureErrorKind};
 use aperture_cli::fs::FileSystem;
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
@@ -396,7 +396,12 @@ paths:
     // Should fail - 'oauth' as HTTP scheme suggests complex flows
     let result = manager.add_spec("oauth-http", &spec_path, false, true); // Use strict mode
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ApertureErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(
             msg.contains("requires complex authentication flows"),
             "Expected complex auth flow error, got: {}",
@@ -440,7 +445,12 @@ paths:
     // Should fail - Negotiate requires complex Kerberos/NTLM flows
     let result = manager.add_spec("negotiate-api", &spec_path, false, true); // Use strict mode
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ApertureErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(
             msg.contains("requires complex authentication flows"),
             "Expected complex auth flow error, got: {}",
