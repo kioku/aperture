@@ -366,8 +366,13 @@ paths: {}
         {
             // Without the feature, it should return an error about missing support
             assert!(result.is_err());
-            if let Err(Error::Validation(msg)) = result {
-                assert!(msg.contains("OpenAPI 3.1 support is not enabled"));
+            if let Err(Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message,
+                ..
+            }) = result
+            {
+                assert!(message.contains("OpenAPI 3.1 support is not enabled"));
             } else {
                 panic!("Expected validation error about missing 3.1 support");
             }

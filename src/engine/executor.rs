@@ -1082,15 +1082,15 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
                 } else if vals.len() == 1 {
                     // Single result - convert back to JSON
                     let json_val = jaq_val_to_serde_json(&vals[0]);
-                    serde_json::to_string_pretty(&json_val).map_err(|e| Error::JqFilterError {
-                        reason: format!("Failed to serialize result: {e}"),
+                    serde_json::to_string_pretty(&json_val).map_err(|e| {
+                        Error::serialization_error(format!("Failed to serialize result: {e}"))
                     })
                 } else {
                     // Multiple results - return as JSON array
                     let json_vals: Vec<Value> = vals.iter().map(jaq_val_to_serde_json).collect();
                     let array = Value::Array(json_vals);
-                    serde_json::to_string_pretty(&array).map_err(|e| Error::JqFilterError {
-                        reason: format!("Failed to serialize results: {e}"),
+                    serde_json::to_string_pretty(&array).map_err(|e| {
+                        Error::serialization_error(format!("Failed to serialize results: {e}"))
                     })
                 }
             }
