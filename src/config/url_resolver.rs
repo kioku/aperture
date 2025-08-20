@@ -1,7 +1,8 @@
 use crate::cache::models::CachedSpec;
 use crate::config::models::{ApiConfig, GlobalConfig};
 use crate::config::server_variable_resolver::ServerVariableResolver;
-use crate::error::Error;
+#[allow(unused_imports)]
+use crate::error::{Error, ErrorKind};
 
 /// Resolves the base URL for an API based on a priority hierarchy
 pub struct BaseUrlResolver<'a> {
@@ -523,10 +524,6 @@ mod tests {
             // Should fail with UnresolvedTemplateVariable error
             assert!(result.is_err());
             match result.unwrap_err() {
-                Error::UnresolvedTemplateVariable { name, url } => {
-                    assert_eq!(name, "region");
-                    assert_eq!(url, "https://{region}.api.example.com");
-                }
                 Error::Internal {
                     kind: ErrorKind::ServerVariable,
                     message,
@@ -534,7 +531,7 @@ mod tests {
                 } => {
                     assert!(message.contains("region"));
                 }
-                _ => panic!("Expected UnresolvedTemplateVariable or Internal ServerVariable error"),
+                _ => panic!("Expected Internal ServerVariable error"),
             }
         });
     }

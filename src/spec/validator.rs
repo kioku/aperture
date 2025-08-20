@@ -1,5 +1,6 @@
 use crate::constants;
-use crate::error::Error;
+#[allow(unused_imports)]
+use crate::error::{Error, ErrorKind};
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 use std::collections::HashMap;
 
@@ -671,12 +672,8 @@ mod tests {
         let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::Validation(msg) => {
-                assert!(msg.contains("OAuth2"));
-                assert!(msg.contains("not supported"));
-            }
             Error::Internal {
-                kind: crate::error::ErrorKind::Validation,
+                kind: ErrorKind::Validation,
                 message,
                 ..
             } => {
@@ -703,7 +700,11 @@ mod tests {
         let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::Validation(msg) => {
+            Error::Internal {
+                kind: ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("references are not supported"));
             }
             _ => panic!("Expected Validation error"),
@@ -893,7 +894,11 @@ mod tests {
         assert_eq!(result.errors.len(), 1, "Should have one error");
 
         match &result.errors[0] {
-            Error::Validation(msg) => {
+            Error::Internal {
+                kind: ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("multipart/form-data"));
                 assert!(msg.contains("v1.0"));
             }
@@ -1043,7 +1048,11 @@ mod tests {
         let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::Validation(msg) => {
+            Error::Internal {
+                kind: ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("requires complex authentication flows"));
             }
             _ => panic!("Expected Validation error"),
@@ -1133,7 +1142,11 @@ mod tests {
         let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::Validation(msg) => {
+            Error::Internal {
+                kind: ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("Unsupported request body content type 'application/xml'"));
             }
             _ => panic!("Expected Validation error"),
@@ -1202,7 +1215,11 @@ mod tests {
         let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::Validation(msg) => {
+            Error::Internal {
+                kind: ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("Missing 'source' field"));
             }
             _ => panic!("Expected Validation error"),
@@ -1238,7 +1255,11 @@ mod tests {
         let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::Validation(msg) => {
+            Error::Internal {
+                kind: ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("Missing 'name' field"));
             }
             _ => panic!("Expected Validation error"),
@@ -1275,7 +1296,11 @@ mod tests {
         let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::Validation(msg) => {
+            Error::Internal {
+                kind: ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("Invalid environment variable name"));
             }
             _ => panic!("Expected Validation error"),
@@ -1312,7 +1337,11 @@ mod tests {
         let result = validator.validate_with_mode(&spec, true).into_result();
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::Validation(msg) => {
+            Error::Internal {
+                kind: ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("Unsupported source 'file'"));
             }
             _ => panic!("Expected Validation error"),

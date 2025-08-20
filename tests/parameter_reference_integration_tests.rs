@@ -472,7 +472,11 @@ paths:
     );
 
     match result.unwrap_err() {
-        aperture_cli::error::Error::Validation(msg) => {
+        aperture_cli::error::Error::Internal {
+            kind: aperture_cli::error::ErrorKind::Validation,
+            message: msg,
+            ..
+        } => {
             assert!(
                 msg.contains("not found in components") || msg.contains("no components section"),
                 "Error should mention missing parameter. Actual error: {}",

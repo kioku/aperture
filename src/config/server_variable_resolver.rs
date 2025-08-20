@@ -329,15 +329,6 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarValue {
-                name,
-                value,
-                allowed_values,
-            } => {
-                assert_eq!(name, "region");
-                assert_eq!(value, "invalid");
-                assert!(allowed_values.contains(&"us".to_string()));
-            }
             Error::Internal {
                 kind: ErrorKind::ServerVariable,
                 message,
@@ -345,7 +336,7 @@ mod tests {
             } => {
                 assert!(message.contains("region") && message.contains("invalid"));
             }
-            _ => panic!("Expected InvalidServerVarValue or Internal ServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -359,9 +350,6 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::MissingServerVariable { name } => {
-                assert_eq!(name, "env");
-            }
             Error::Internal {
                 kind: ErrorKind::ServerVariable,
                 message,
@@ -369,7 +357,7 @@ mod tests {
             } => {
                 assert!(message.contains("env"));
             }
-            _ => panic!("Expected MissingServerVariable or Internal ServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -387,9 +375,6 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::UnknownServerVariable { name, .. } => {
-                assert_eq!(name, "unknown");
-            }
             Error::Internal {
                 kind: ErrorKind::ServerVariable,
                 message,
@@ -397,7 +382,7 @@ mod tests {
             } => {
                 assert!(message.contains("unknown"));
             }
-            _ => panic!("Expected UnknownServerVariable or Internal ServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -411,16 +396,13 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarFormat { .. } => {
-                // Expected
-            }
             Error::Internal {
                 kind: ErrorKind::ServerVariable,
                 ..
             } => {
                 // Expected
             }
-            _ => panic!("Expected InvalidServerVarFormat or Internal ServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -452,9 +434,6 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::UnresolvedTemplateVariable { name, .. } => {
-                assert_eq!(name, "env");
-            }
             Error::Internal {
                 kind: ErrorKind::ServerVariable,
                 message,
@@ -462,7 +441,7 @@ mod tests {
             } => {
                 assert!(message.contains("env"));
             }
-            _ => panic!("Expected UnresolvedTemplateVariable or Internal ServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -476,10 +455,6 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarFormat { arg, reason } => {
-                assert_eq!(arg, "{}");
-                assert!(reason.contains("Empty template variable name"));
-            }
             Error::Internal {
                 kind: ErrorKind::ServerVariable,
                 message,
@@ -487,7 +462,7 @@ mod tests {
             } => {
                 assert!(message.contains("Empty template variable name") || message.contains("{}"));
             }
-            _ => panic!("Expected InvalidServerVarFormat or Internal ServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -501,10 +476,6 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarFormat { arg, reason } => {
-                assert_eq!(arg, "{invalid-name}");
-                assert!(reason.contains("letters, digits, or underscores"));
-            }
             Error::Internal {
                 kind: ErrorKind::ServerVariable,
                 message,
@@ -515,7 +486,7 @@ mod tests {
                         || message.contains("letters, digits, or underscores")
                 );
             }
-            _ => panic!("Expected InvalidServerVarFormat or Internal ServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -533,9 +504,6 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarFormat { reason, .. } => {
-                assert!(reason.contains("too long"));
-            }
             Error::Internal {
                 kind: ErrorKind::ServerVariable,
                 message,
@@ -543,7 +511,7 @@ mod tests {
             } => {
                 assert!(message.contains("too long"));
             }
-            _ => panic!("Expected InvalidServerVarFormat or Internal ServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -567,13 +535,10 @@ mod tests {
         for test_case in test_cases {
             let result = resolver.substitute_url(test_case, &variables);
             // Should not fail with InvalidServerVarFormat
-            if let Err(
-                Error::InvalidServerVarFormat { .. }
-                | Error::Internal {
-                    kind: ErrorKind::ServerVariable,
-                    ..
-                },
-            ) = result
+            if let Err(Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                ..
+            }) = result
             {
                 panic!("Template variable name validation failed for: {test_case}");
             }

@@ -305,7 +305,12 @@ paths:
     let result = manager.add_spec("mixed-auth-strict", &spec_path, false, true);
     assert!(result.is_err(), "Expected failure in strict mode");
 
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: aperture_cli::error::ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(
             msg.contains("OAuth2") || msg.contains("unsupported authentication"),
             "Expected OAuth2 error, got: {}",
@@ -445,7 +450,12 @@ paths:
         "Expected failure due to invalid env var name"
     );
 
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: aperture_cli::error::ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(
             msg.contains("Invalid environment variable name"),
             "Expected invalid env var error, got: {}",
