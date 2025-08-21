@@ -1,3 +1,13 @@
+//! Error handling module for Aperture CLI
+//!
+//! This module provides a consolidated error handling system that categorizes
+//! all application errors into 8 distinct kinds. The design follows these principles:
+//!
+//! 1. **Error Consolidation**: All errors are mapped to one of 8 `ErrorKind` categories
+//! 2. **Structured Context**: Each error can include structured JSON details and suggestions
+//! 3. **Builder Pattern**: `ErrorContext` provides fluent builder methods for error construction
+//! 4. **JSON Support**: All errors can be serialized to JSON for programmatic consumption
+
 use crate::constants;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -31,6 +41,10 @@ pub enum Error {
 }
 
 /// Error categories for consolidated error handling
+///
+/// This enum represents the 8 primary error categories used throughout
+/// the application. All internal errors are mapped to one of these categories
+/// to provide consistent error handling and reporting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
     /// Specification-related errors (not found, already exists, cache issues)
@@ -39,7 +53,7 @@ pub enum ErrorKind {
     Authentication,
     /// Input validation and configuration errors
     Validation,
-    /// Network connectivity and transport errors
+    /// Network connectivity and transport errors (connection, DNS, timeouts)
     Network,
     /// HTTP request/response errors (status codes, API errors)
     HttpRequest,
