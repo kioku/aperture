@@ -1133,16 +1133,13 @@ async fn test_remote_spec_fetching_timeout() {
     assert!(result.is_err());
     match result {
         Err(Error::Internal {
-            kind: ErrorKind::HttpRequest,
+            kind: ErrorKind::Network,
             message,
             ..
         }) => {
             assert!(message.contains("timed out"));
         }
-        _ => panic!(
-            "Expected RequestFailed error with timeout, got: {:?}",
-            result
-        ),
+        _ => panic!("Expected Network error with timeout, got: {:?}", result),
     }
 }
 
@@ -1170,16 +1167,13 @@ async fn test_remote_spec_fetching_size_limit() {
     assert!(result.is_err());
     match result {
         Err(Error::Internal {
-            kind: ErrorKind::HttpRequest,
+            kind: ErrorKind::Network,
             message,
             ..
         }) => {
             assert!(message.contains("too large"));
         }
-        _ => panic!(
-            "Expected RequestFailed error for size limit, got: {:?}",
-            result
-        ),
+        _ => panic!("Expected Network error for size limit, got: {:?}", result),
     }
 }
 
@@ -1200,16 +1194,13 @@ async fn test_remote_spec_fetching_invalid_url() {
     assert!(result.is_err());
     match result {
         Err(Error::Internal {
-            kind: ErrorKind::HttpRequest,
+            kind: ErrorKind::Network,
             message,
             ..
         }) => {
             assert!(message.contains("Failed to connect") || message.contains("Network error"));
         }
-        _ => panic!(
-            "Expected RequestFailed error for invalid URL, got: {:?}",
-            result
-        ),
+        _ => panic!("Expected Network error for invalid URL, got: {:?}", result),
     }
 }
 

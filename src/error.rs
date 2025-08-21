@@ -39,7 +39,9 @@ pub enum ErrorKind {
     Authentication,
     /// Input validation and configuration errors
     Validation,
-    /// HTTP request/response errors
+    /// Network connectivity and transport errors
+    Network,
+    /// HTTP request/response errors (status codes, API errors)
     HttpRequest,
     /// Header processing errors
     Headers,
@@ -125,6 +127,7 @@ impl ErrorKind {
             Self::Specification => "Specification",
             Self::Authentication => "Authentication",
             Self::Validation => "Validation",
+            Self::Network => "Network",
             Self::HttpRequest => "HttpError",
             Self::Headers => "Headers",
             Self::Interactive => "Interactive",
@@ -796,7 +799,7 @@ impl Error {
     pub fn network_request_failed(reason: impl Into<String>) -> Self {
         let reason = reason.into();
         Self::Internal {
-            kind: ErrorKind::HttpRequest,
+            kind: ErrorKind::Network,
             message: Cow::Owned(format!("Network request failed: {reason}")),
             context: Some(
                 ErrorContext::with_detail("reason", &reason)
@@ -901,7 +904,7 @@ impl Error {
     pub fn transient_network_error(reason: impl Into<String>, retryable: bool) -> Self {
         let reason = reason.into();
         Self::Internal {
-            kind: ErrorKind::HttpRequest,
+            kind: ErrorKind::Network,
             message: Cow::Owned(format!("Transient network error: {reason}")),
             context: Some(ErrorContext::new(
                 Some(serde_json::json!({
@@ -921,7 +924,7 @@ impl Error {
     pub fn retry_limit_exceeded(max_attempts: u32, last_error: impl Into<String>) -> Self {
         let last_error = last_error.into();
         Self::Internal {
-            kind: ErrorKind::HttpRequest,
+            kind: ErrorKind::Network,
             message: Cow::Owned(format!(
                 "Retry limit exceeded after {max_attempts} attempts: {last_error}"
             )),
@@ -941,7 +944,7 @@ impl Error {
     #[must_use]
     pub fn request_timeout(timeout_seconds: u64) -> Self {
         Self::Internal {
-            kind: ErrorKind::HttpRequest,
+            kind: ErrorKind::Network,
             message: Cow::Owned(format!("Request timed out after {timeout_seconds} seconds")),
             context: Some(ErrorContext::new(
                 Some(serde_json::json!({
