@@ -1,57 +1,8 @@
 use crate::constants;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::borrow::Cow;
 use thiserror::Error;
-
-/// Helper macro for creating error details with a single string field
-macro_rules! error_details_single {
-    ($field:literal, $value:expr) => {
-        serde_json::json!({ $field: $value })
-    };
-}
-
-/// Helper macro for creating error details with name and reason fields
-macro_rules! error_details_name_reason {
-    ($name_field:literal, $name:expr, $reason:expr) => {
-        serde_json::json!({ $name_field: $name, "reason": $reason })
-    };
-}
-
-/// Helper macro for creating error context with details and suggestion
-macro_rules! error_context {
-    ($details:expr, $suggestion:expr) => {
-        Some(ErrorContext::new(
-            Some($details),
-            Some(Cow::Owned($suggestion.into())),
-        ))
-    };
-    (details: $details:expr) => {
-        Some(ErrorContext::with_details($details))
-    };
-    (suggestion: $suggestion:expr) => {
-        Some(ErrorContext::with_suggestion(Cow::Owned(
-            $suggestion.into(),
-        )))
-    };
-}
-
-/// Helper macro for creating an Internal error with `ErrorKind` and standard patterns
-macro_rules! internal_error {
-    ($kind:expr, $message:expr) => {
-        Self::Internal {
-            kind: $kind,
-            message: Cow::Owned($message),
-            context: None,
-        }
-    };
-    ($kind:expr, $message:expr, $context:expr) => {
-        Self::Internal {
-            kind: $kind,
-            message: Cow::Owned($message),
-            context: $context,
-        }
-    };
-}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -138,6 +89,31 @@ impl ErrorContext {
             details: None,
             suggestion: Some(suggestion),
         }
+    }
+
+    /// Builder method to add a single detail field
+    #[must_use]
+    pub fn with_detail(key: &str, value: impl serde::Serialize) -> Self {
+        Self {
+            details: Some(json!({ key: value })),
+            suggestion: None,
+        }
+    }
+
+    /// Builder method to add name and reason details
+    #[must_use]
+    pub fn with_name_reason(name_field: &str, name: &str, reason: &str) -> Self {
+        Self {
+            details: Some(json!({ name_field: name, "reason": reason })),
+            suggestion: None,
+        }
+    }
+
+    /// Add suggestion to existing context
+    #[must_use]
+    pub fn and_suggestion(mut self, suggestion: impl Into<String>) -> Self {
+        self.suggestion = Some(Cow::Owned(suggestion.into()));
+        self
     }
 }
 
@@ -324,34 +300,38 @@ impl Error {
     /// Create a specification not found error
     pub fn spec_not_found(name: impl Into<String>) -> Self {
         let name = name.into();
-        internal_error!(
-            ErrorKind::Specification,
-            format!("API specification '{name}' not found"),
-            error_context!(
-                error_details_single!("spec_name", &name),
-                constants::MSG_USE_CONFIG_LIST
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::Specification,
+            message: Cow::Owned(format!("API specification '{name}' not found")),
+            context: Some(
+                ErrorContext::with_detail("spec_name", &name)
+                    .and_suggestion(constants::MSG_USE_CONFIG_LIST),
+            ),
+        }
     }
 
     /// Create a specification already exists error
     pub fn spec_already_exists(name: impl Into<String>) -> Self {
         let name = name.into();
-        internal_error!(
-            ErrorKind::Specification,
-            format!("API specification '{name}' already exists. Use --force to overwrite"),
-            error_context!(details: error_details_single!("spec_name", &name))
-        )
+        Self::Internal {
+            kind: ErrorKind::Specification,
+            message: Cow::Owned(format!(
+                "API specification '{name}' already exists. Use --force to overwrite"
+            )),
+            context: Some(ErrorContext::with_detail("spec_name", &name)),
+        }
     }
 
     /// Create a cached spec not found error
     pub fn cached_spec_not_found(name: impl Into<String>) -> Self {
         let name = name.into();
-        internal_error!(
-            ErrorKind::Specification,
-            format!("No cached spec found for '{name}'. Run 'aperture config add {name}' first"),
-            error_context!(details: error_details_single!("spec_name", &name))
-        )
+        Self::Internal {
+            kind: ErrorKind::Specification,
+            message: Cow::Owned(format!(
+                "No cached spec found for '{name}'. Run 'aperture config add {name}' first"
+            )),
+            context: Some(ErrorContext::with_detail("spec_name", &name)),
+        }
     }
 
     /// Create a cached spec corrupted error
@@ -455,14 +435,14 @@ impl Error {
     /// Create an invalid configuration error
     pub fn invalid_config(reason: impl Into<String>) -> Self {
         let reason = reason.into();
-        internal_error!(
-            ErrorKind::Validation,
-            format!("Invalid configuration: {reason}"),
-            error_context!(
-                error_details_single!("reason", &reason),
-                "Check the configuration file syntax and structure."
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Invalid configuration: {reason}")),
+            context: Some(
+                ErrorContext::with_detail("reason", &reason)
+                    .and_suggestion("Check the configuration file syntax and structure."),
+            ),
+        }
     }
 
     /// Create an invalid JSON body error
@@ -613,14 +593,14 @@ impl Error {
     /// Create an interactive input too long error
     #[must_use]
     pub fn interactive_input_too_long(max_length: usize) -> Self {
-        internal_error!(
-            ErrorKind::Interactive,
-            format!("Input too long (maximum {max_length} characters)"),
-            error_context!(
-                error_details_single!("max_length", max_length),
-                "Please provide a shorter input."
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::Interactive,
+            message: Cow::Owned(format!("Input too long (maximum {max_length} characters)")),
+            context: Some(
+                ErrorContext::with_detail("max_length", max_length)
+                    .and_suggestion("Please provide a shorter input."),
+            ),
+        }
     }
 
     /// Create an interactive invalid characters error
@@ -642,11 +622,13 @@ impl Error {
 
     /// Create an interactive timeout error
     #[must_use]
-    pub fn interactive_timeout() -> Self {
+    pub const fn interactive_timeout() -> Self {
         Self::Internal {
             kind: ErrorKind::Interactive,
             message: Cow::Borrowed("Input timeout - no response received"),
-            context: error_context!(suggestion: "Please respond within the timeout period."),
+            context: Some(ErrorContext::with_suggestion(Cow::Borrowed(
+                "Please respond within the timeout period.",
+            ))),
         }
     }
 
@@ -680,14 +662,15 @@ impl Error {
     /// Create a missing server variable error
     pub fn missing_server_variable(name: impl Into<String>) -> Self {
         let name = name.into();
-        internal_error!(
-            ErrorKind::ServerVariable,
-            format!("Required server variable '{name}' is not provided"),
-            error_context!(
-                error_details_single!("variable_name", &name),
-                format!("Provide the variable with --server-var {name}=<value>")
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::ServerVariable,
+            message: Cow::Owned(format!("Required server variable '{name}' is not provided")),
+            context: Some(
+                ErrorContext::with_detail("variable_name", &name).and_suggestion(format!(
+                    "Provide the variable with --server-var {name}=<value>"
+                )),
+            ),
+        }
     }
 
     /// Create an unknown server variable error
@@ -734,14 +717,16 @@ impl Error {
     ) -> Self {
         let name = name.into();
         let reason = reason.into();
-        internal_error!(
-            ErrorKind::Interactive,
-            format!("Invalid environment variable name '{name}': {reason}"),
-            error_context!(
-                error_details_name_reason!("variable_name", &name, &reason),
-                suggestion
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::Interactive,
+            message: Cow::Owned(format!(
+                "Invalid environment variable name '{name}': {reason}"
+            )),
+            context: Some(
+                ErrorContext::with_name_reason("variable_name", &name, &reason)
+                    .and_suggestion(suggestion),
+            ),
+        }
     }
 
     /// Create an invalid server variable format error
@@ -810,27 +795,27 @@ impl Error {
     /// Create a network request failed error
     pub fn network_request_failed(reason: impl Into<String>) -> Self {
         let reason = reason.into();
-        internal_error!(
-            ErrorKind::HttpRequest,
-            format!("Network request failed: {reason}"),
-            error_context!(
-                error_details_single!("reason", &reason),
-                "Check network connectivity and URL validity"
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::HttpRequest,
+            message: Cow::Owned(format!("Network request failed: {reason}")),
+            context: Some(
+                ErrorContext::with_detail("reason", &reason)
+                    .and_suggestion("Check network connectivity and URL validity"),
+            ),
+        }
     }
 
     /// Create a serialization error
     pub fn serialization_error(reason: impl Into<String>) -> Self {
         let reason = reason.into();
-        internal_error!(
-            ErrorKind::Validation,
-            format!("Serialization failed: {reason}"),
-            error_context!(
-                error_details_single!("reason", &reason),
-                "Check data structure validity"
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Serialization failed: {reason}")),
+            context: Some(
+                ErrorContext::with_detail("reason", &reason)
+                    .and_suggestion("Check data structure validity"),
+            ),
+        }
     }
 
     /// Create a home directory not found error
@@ -850,14 +835,14 @@ impl Error {
     pub fn invalid_command(context: impl Into<String>, reason: impl Into<String>) -> Self {
         let context = context.into();
         let reason = reason.into();
-        internal_error!(
-            ErrorKind::Validation,
-            format!("Invalid command for '{context}': {reason}"),
-            error_context!(
-                error_details_name_reason!("context", &context, &reason),
-                "Check available commands with --help or --describe-json"
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Invalid command for '{context}': {reason}")),
+            context: Some(
+                ErrorContext::with_name_reason("context", &context, &reason)
+                    .and_suggestion("Check available commands with --help or --describe-json"),
+            ),
+        }
     }
 
     /// Create an HTTP error with context
@@ -902,78 +887,84 @@ impl Error {
     pub fn jq_filter_error(filter: impl Into<String>, reason: impl Into<String>) -> Self {
         let filter = filter.into();
         let reason = reason.into();
-        internal_error!(
-            ErrorKind::Validation,
-            format!("JQ filter error in '{filter}': {reason}"),
-            error_context!(
-                error_details_name_reason!("filter", &filter, &reason),
-                "Check JQ filter syntax and data structure compatibility"
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("JQ filter error in '{filter}': {reason}")),
+            context: Some(
+                ErrorContext::with_name_reason("filter", &filter, &reason)
+                    .and_suggestion("Check JQ filter syntax and data structure compatibility"),
+            ),
+        }
     }
 
     /// Create a transient network error
     pub fn transient_network_error(reason: impl Into<String>, retryable: bool) -> Self {
         let reason = reason.into();
-        internal_error!(
-            ErrorKind::HttpRequest,
-            format!("Transient network error: {reason}"),
-            error_context!(
-                serde_json::json!({
+        Self::Internal {
+            kind: ErrorKind::HttpRequest,
+            message: Cow::Owned(format!("Transient network error: {reason}")),
+            context: Some(ErrorContext::new(
+                Some(serde_json::json!({
                     "reason": reason,
                     "retryable": retryable
-                }),
-                if retryable {
+                })),
+                Some(Cow::Borrowed(if retryable {
                     "This error may be temporary and could succeed on retry"
                 } else {
                     "This error is not retryable"
-                }
-            )
-        )
+                })),
+            )),
+        }
     }
 
     /// Create a retry limit exceeded error
     pub fn retry_limit_exceeded(max_attempts: u32, last_error: impl Into<String>) -> Self {
         let last_error = last_error.into();
-        internal_error!(
-            ErrorKind::HttpRequest,
-            format!("Retry limit exceeded after {max_attempts} attempts: {last_error}"),
-            error_context!(
-                serde_json::json!({
+        Self::Internal {
+            kind: ErrorKind::HttpRequest,
+            message: Cow::Owned(format!(
+                "Retry limit exceeded after {max_attempts} attempts: {last_error}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(serde_json::json!({
                     "max_attempts": max_attempts,
                     "last_error": last_error
-                }),
-                "Consider checking network connectivity or increasing retry limits"
-            )
-        )
+                })),
+                Some(Cow::Borrowed(
+                    "Consider checking network connectivity or increasing retry limits",
+                )),
+            )),
+        }
     }
 
     /// Create a request timeout error
     #[must_use]
     pub fn request_timeout(timeout_seconds: u64) -> Self {
-        internal_error!(
-            ErrorKind::HttpRequest,
-            format!("Request timed out after {timeout_seconds} seconds"),
-            error_context!(
-                serde_json::json!({
+        Self::Internal {
+            kind: ErrorKind::HttpRequest,
+            message: Cow::Owned(format!("Request timed out after {timeout_seconds} seconds")),
+            context: Some(ErrorContext::new(
+                Some(serde_json::json!({
                     "timeout_seconds": timeout_seconds
-                }),
-                "Consider increasing the timeout or checking network connectivity"
-            )
-        )
+                })),
+                Some(Cow::Borrowed(
+                    "Consider increasing the timeout or checking network connectivity",
+                )),
+            )),
+        }
     }
 
     /// Create a missing path parameter error
     pub fn missing_path_parameter(name: impl Into<String>) -> Self {
         let name = name.into();
-        internal_error!(
-            ErrorKind::Validation,
-            format!("Missing required path parameter: {name}"),
-            error_context!(
-                error_details_single!("parameter_name", &name),
-                "Provide a value for this required path parameter"
-            )
-        )
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Missing required path parameter: {name}")),
+            context: Some(
+                ErrorContext::with_detail("parameter_name", &name)
+                    .and_suggestion("Provide a value for this required path parameter"),
+            ),
+        }
     }
 
     /// Create a general I/O error
