@@ -1,9 +1,9 @@
 //! Error handling module for Aperture CLI
 //!
 //! This module provides a consolidated error handling system that categorizes
-//! all application errors into 8 distinct kinds. The design follows these principles:
+//! all application errors into 9 distinct kinds. The design follows these principles:
 //!
-//! 1. **Error Consolidation**: All errors are mapped to one of 8 `ErrorKind` categories
+//! 1. **Error Consolidation**: All errors are mapped to one of 9 `ErrorKind` categories
 //! 2. **Structured Context**: Each error can include structured JSON details and suggestions
 //! 3. **Builder Pattern**: `ErrorContext` provides fluent builder methods for error construction
 //! 4. **JSON Support**: All errors can be serialized to JSON for programmatic consumption

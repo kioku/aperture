@@ -379,7 +379,8 @@ pub async fn execute_request(
     // Extract request body
     let request_body = extract_request_body(operation, matches)?;
     if let Some(ref body) = request_body {
-        let json_body: Value = serde_json::from_str(body).unwrap(); // Already validated
+        let json_body: Value = serde_json::from_str(body)
+            .expect("JSON body was validated in extract_request_body, parsing should succeed");
         request = request.json(&json_body);
     }
 
@@ -1065,7 +1066,8 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
         // Create parsing context and compile the filter
         let mut ctx = ParseCtx::new(Vec::new());
         ctx.insert_defs(std());
-        let filter = ctx.compile(expr.unwrap());
+        let filter =
+            ctx.compile(expr.expect("JQ expression was already validated, should be Some"));
 
         // Convert serde_json::Value to jaq Val
         let jaq_value = serde_json_to_jaq_val(&json_value);

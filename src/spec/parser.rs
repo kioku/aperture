@@ -49,8 +49,10 @@ fn preprocess_for_compatibility(content: &str) -> String {
 /// Fix boolean values in YAML format
 fn fix_yaml_boolean_values(mut content: String, properties: &[&str]) -> String {
     for property in properties {
-        let pattern_0 = Regex::new(&format!(r"\b{property}: 0\b")).unwrap();
-        let pattern_1 = Regex::new(&format!(r"\b{property}: 1\b")).unwrap();
+        let pattern_0 = Regex::new(&format!(r"\b{property}: 0\b"))
+            .expect("Regex pattern is hardcoded and valid");
+        let pattern_1 = Regex::new(&format!(r"\b{property}: 1\b"))
+            .expect("Regex pattern is hardcoded and valid");
 
         content = pattern_0
             .replace_all(&content, &format!("{property}: false"))
