@@ -652,8 +652,12 @@ async fn test_json_errors_flag() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    // Extract JSON from stderr (might have debug output before it)
+    let json_start = stderr.find('{').expect("No JSON found in stderr");
+    let json_str = &stderr[json_start..];
+
     // Parse the JSON error output
-    let error: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+    let error: serde_json::Value = serde_json::from_str(json_str).unwrap();
     let error_type = error["error_type"].as_str().unwrap();
     // Accept both old and new error types during migration
     assert!(
@@ -1069,8 +1073,17 @@ paths:
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    // Extract JSON from stderr (might have debug output before it)
+    let json_start = stderr.find('{').expect("No JSON found in stderr");
+    let json_str = &stderr[json_start..];
+
     // Parse the JSON error output
-    let error: serde_json::Value = serde_json::from_str(&stderr).unwrap();
+    let error: serde_json::Value = serde_json::from_str(json_str).unwrap_or_else(|e| {
+        panic!(
+            "Failed to parse JSON from stderr: {}\nJSON str was: {}",
+            e, json_str
+        )
+    });
     assert_eq!(error["error_type"].as_str().unwrap(), "HttpError");
     assert_eq!(error["details"]["status"], 401);
     assert_eq!(error["details"]["api_name"], "test-api");
