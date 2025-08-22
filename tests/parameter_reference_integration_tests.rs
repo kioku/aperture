@@ -1,3 +1,5 @@
+#![cfg(feature = "integration")]
+
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::fs::FileSystem;
 use assert_cmd::Command;

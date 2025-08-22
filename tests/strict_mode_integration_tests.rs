@@ -1,3 +1,5 @@
+#![cfg(feature = "integration")]
+
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::fs::OsFileSystem;
