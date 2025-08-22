@@ -2,6 +2,7 @@
 
 mod common;
 
+use assert_cmd::Command;
 use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
