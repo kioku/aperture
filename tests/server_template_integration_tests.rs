@@ -1,6 +1,8 @@
 #![cfg(feature = "integration")]
 
-use assert_cmd::Command;
+mod common;
+
+use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -61,16 +63,14 @@ paths:
     fs::write(&spec_file, api_spec).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Try to execute without providing server variable - should fail with invalid enum value
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&["api", "test-api", "test", "test"])
         .assert()
@@ -112,16 +112,14 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&["config", "add", "regional", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Should work with default values using dry-run to avoid network calls
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&["--dry-run", "api", "regional", "health", "get-status"])
         .assert()
@@ -131,8 +129,7 @@ paths:
         ));
 
     // Should work with explicit server variable
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&[
             "--dry-run",
@@ -150,8 +147,7 @@ paths:
         ));
 
     // Test with config override
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&[
             "config",
@@ -163,8 +159,7 @@ paths:
         .success();
 
     // Config override should take precedence (non-template URL)
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&["--dry-run", "api", "regional", "health", "get-status"])
         .assert()
@@ -208,16 +203,14 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&["config", "add", "multi", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Should work with default values
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&["--dry-run", "api", "multi", "health", "ping"])
         .assert()
@@ -227,8 +220,7 @@ paths:
         ));
 
     // Should work with explicit server variables
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&[
             "--dry-run",
@@ -248,8 +240,7 @@ paths:
         ));
 
     // Should fail with invalid enum value
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("HOME", home_dir.path())
         .args(&[
             "api",

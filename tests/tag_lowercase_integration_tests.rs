@@ -1,6 +1,8 @@
 #![cfg(feature = "integration")]
 
-use assert_cmd::Command;
+mod common;
+
+use common::aperture_cmd;
 use predicates::prelude::*;
 use serde_json;
 use std::fs;
@@ -49,7 +51,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("config")
         .arg("add")
@@ -60,7 +62,7 @@ paths:
 
     // The describe-json output shows the raw tags, but the CLI accepts lowercase versions
     // Let's verify the CLI accepts lowercase tags by using dry-run
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
@@ -73,7 +75,7 @@ paths:
         .stdout(predicate::str::contains("/users"));
 
     // Test EVENTS tag as lowercase
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
@@ -86,7 +88,7 @@ paths:
         .stdout(predicate::str::contains("/events"));
 
     // Test MixedCaseTag as lowercase
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
@@ -140,7 +142,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("config")
         .arg("add")
@@ -150,7 +152,7 @@ paths:
         .success();
 
     // Test Unicode tags work with lowercase in CLI
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
@@ -163,7 +165,7 @@ paths:
         .stdout(predicate::str::contains("/cafe"));
 
     // Test Spanish characters
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
@@ -211,7 +213,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("config")
         .arg("add")
@@ -221,7 +223,7 @@ paths:
         .success();
 
     // Test tags work with lowercase and operations are kebab-cased
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
@@ -234,7 +236,7 @@ paths:
         .stdout(predicate::str::contains("/issues"));
 
     // Test projects tag
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
@@ -282,7 +284,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("config")
         .arg("add")
@@ -292,7 +294,7 @@ paths:
         .success();
 
     // Get the describe-json output
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     let output = cmd
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
@@ -328,7 +330,7 @@ paths:
 
     // Verify we can use the lowercase tags from the manifest to execute commands
     for tag_name in commands.keys() {
-        let mut cmd = Command::cargo_bin("aperture").unwrap();
+        let mut cmd = aperture_cmd();
         cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
             .arg("api")
             .arg("--dry-run")
@@ -379,7 +381,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("config")
         .arg("add")
@@ -389,7 +391,7 @@ paths:
         .success();
 
     // Test that CLI accepts lowercase versions of tags
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
@@ -399,7 +401,7 @@ paths:
         .assert()
         .success();
 
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")

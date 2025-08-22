@@ -1,13 +1,15 @@
 #![cfg(feature = "integration")]
 
-use assert_cmd::Command;
+mod common;
+
+use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
 #[test]
 fn test_interactive_mode_flag_exists() {
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.args(&["config", "set-secret", "--help"])
         .assert()
         .success()
@@ -20,7 +22,7 @@ fn test_interactive_mode_conflicts_with_direct_mode() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -43,7 +45,7 @@ fn test_interactive_mode_with_nonexistent_api() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "set-secret", "nonexistent-api", "--interactive"])
         .assert()
@@ -78,7 +80,7 @@ servers:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec first
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -90,7 +92,7 @@ servers:
         .success();
 
     // Try interactive mode - should handle gracefully and exit successfully
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "set-secret", "test-api", "--interactive"])
         .assert()
@@ -102,7 +104,7 @@ servers:
 
 #[test]
 fn test_help_text_describes_interactive_workflow() {
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.args(&["config", "set-secret", "--help"])
         .assert()
         .success()
@@ -118,7 +120,7 @@ fn test_validation_requires_either_direct_or_interactive_mode() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Test missing both modes
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "set-secret", "test-api", "bearerAuth"])
         .assert()
@@ -160,7 +162,7 @@ servers:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec first
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -172,7 +174,7 @@ servers:
         .success();
 
     // Test direct mode still works
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -189,7 +191,7 @@ servers:
         ));
 
     // Verify it was set
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "list-secrets", "test-api"])
         .assert()
@@ -201,7 +203,7 @@ servers:
 
 #[test]
 fn test_cli_help_shows_both_modes() {
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.args(&["config", "set-secret", "--help"])
         .assert()
         .success()

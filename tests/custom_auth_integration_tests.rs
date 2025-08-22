@@ -1,6 +1,8 @@
 #![cfg(feature = "integration")]
 
-use assert_cmd::Command;
+mod common;
+
+use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -56,8 +58,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&["config", "add", "token-api", spec_file.to_str().unwrap()])
         .assert()
@@ -76,8 +77,7 @@ paths:
         .await;
 
     // Execute the command with Token auth
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("TEST_TOKEN", "test-token-123")
         .args(&["api", "token-api", "default", "get-protected"])
@@ -131,8 +131,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&["config", "add", "dsn-api", spec_file.to_str().unwrap()])
         .assert()
@@ -151,8 +150,7 @@ paths:
         .await;
 
     // Execute the command with DSN auth
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("SENTRY_DSN", "https://key@sentry.io/123")
         .args(&[
@@ -207,8 +205,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&["config", "add", "custom-api", spec_file.to_str().unwrap()])
         .assert()
@@ -227,8 +224,7 @@ paths:
         .await;
 
     // Execute the command with custom auth
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("CUSTOM_AUTH_KEY", "secret-key-789")
         .args(&["api", "custom-api", "default", "get-data"])
@@ -272,16 +268,14 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&["config", "add", "dry-run-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Run with --dry-run to see the request details
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "my-token-value")
         .args(&["api", "--dry-run", "dry-run-api", "default", "get-users"])
@@ -335,8 +329,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&["config", "add", "basic-api", spec_file.to_str().unwrap()])
         .assert()
@@ -356,8 +349,7 @@ paths:
         .await;
 
     // Execute the command with Basic auth
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("BASIC_CREDS", "testuser:testpass")
         .args(&["api", "basic-api", "default", "get-secure"])
@@ -407,8 +399,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&[
             "config",
@@ -420,8 +411,7 @@ paths:
         .success();
 
     // Test 1: Newline in custom header value
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "valid-token")
         .args(&[
@@ -437,8 +427,7 @@ paths:
         .stderr(predicate::str::contains("invalid control characters"));
 
     // Test 2: Carriage return in custom header
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "valid-token")
         .args(&[
@@ -454,8 +443,7 @@ paths:
         .stderr(predicate::str::contains("invalid control characters"));
 
     // Test 3: Valid header should work
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "valid-token")
         .args(&[
@@ -472,8 +460,7 @@ paths:
         .stdout(predicate::str::contains("\"x-custom\": \"valid-value\""));
 
     // Test 4: Environment variable expansion with newline
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "valid-token")
         .env("MALICIOUS_VAR", "value\nX-Injected: bad")
@@ -525,8 +512,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&[
             "config",
@@ -538,8 +524,7 @@ paths:
         .success();
 
     // Test auth token with newline
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("BEARER_TOKEN", "token\nX-Injected: malicious")
         .args(&["api", "token-injection-api", "default", "get-protected"])
@@ -548,8 +533,7 @@ paths:
         .stderr(predicate::str::contains("invalid control characters"));
 
     // Test auth token with carriage return
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("BEARER_TOKEN", "token\rmalicious")
         .args(&["api", "token-injection-api", "default", "get-protected"])
@@ -593,16 +577,14 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&["config", "add", "bearer-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Run with --dry-run and verify Bearer token is redacted
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("BEARER_TOKEN", "super-secret-bearer-token")
         .args(&["api", "--dry-run", "bearer-api", "default", "get-protected"])
@@ -650,16 +632,14 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&["config", "add", "api-key-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Run with --dry-run and verify API key is redacted
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_KEY", "my-secret-api-key-12345")
         .args(&["api", "--dry-run", "api-key-api", "default", "get-data"])
@@ -694,16 +674,14 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&["config", "add", "simple-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Run with --dry-run and verify non-sensitive headers are shown
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .args(&["api", "--dry-run", "simple-api", "default", "get-users"])
         .assert()
