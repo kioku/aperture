@@ -226,7 +226,7 @@ async fn test_response_cache_expiration() {
     .await;
     assert!(result1.is_ok());
 
-    // Wait for cache to expire
+    // Wait for cache to expire (original timing preserved for test reliability)
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Second request should hit API again due to expiration
