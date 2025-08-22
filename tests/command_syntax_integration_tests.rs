@@ -495,7 +495,7 @@ async fn test_dry_run_with_flag_based_syntax() {
 async fn test_cache_with_custom_ttl() {
     let mock_server = MockServer::start().await;
     let (mut cache_config, _temp_dir) = create_test_cache_config();
-    cache_config.default_ttl = Duration::from_secs(2); // Short TTL for testing
+    cache_config.default_ttl = Duration::from_millis(500); // Short TTL for fast testing
     let spec = create_comprehensive_test_spec();
 
     // Configure mock to be called twice (initial + after expiration)
@@ -537,8 +537,8 @@ async fn test_cache_with_custom_ttl() {
     assert_eq!(stats.total_entries, 1);
     assert_eq!(stats.valid_entries, 1);
 
-    // Wait for TTL to expire
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Wait for TTL to expire (500ms TTL + buffer)
+    tokio::time::sleep(Duration::from_millis(600)).await;
 
     // Second request should hit API again due to expiration
     let result2 = execute_request(
