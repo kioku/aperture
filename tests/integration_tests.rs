@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{aperture_cmd, get_mock_server, return_mock_server};
+use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -77,7 +77,7 @@ paths:
     assert!(cache_file.exists());
 
     // Start mock server for API execution
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
         .and(path("/users/123"))
@@ -229,7 +229,7 @@ paths:
         .success();
 
     // Test with invalid JSON body
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
@@ -295,7 +295,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     // Mock 404 response
     Mock::given(method("GET"))
@@ -397,7 +397,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
         .and(path("/search"))
@@ -1049,7 +1049,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     // Mock 401 response
     Mock::given(method("GET"))
@@ -1143,7 +1143,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     // Mock successful response with JSON data
     Mock::given(method("GET"))
@@ -1220,7 +1220,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     // Mock successful response with JSON data
     Mock::given(method("GET"))
@@ -1306,7 +1306,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     // Mock successful response with JSON data suitable for table format
     Mock::given(method("GET"))
@@ -1405,7 +1405,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     // Mock response with nested objects
     Mock::given(method("GET"))
@@ -1554,7 +1554,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1627,7 +1627,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1695,7 +1695,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
@@ -1762,7 +1762,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1834,7 +1834,7 @@ paths:
         .assert()
         .success();
 
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/users/123"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1959,7 +1959,7 @@ paths:
     .unwrap();
 
     // Mock server setup
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     // Mock successful user requests
     Mock::given(method("GET"))
@@ -2195,7 +2195,7 @@ paths:
     .unwrap();
 
     // Mock server setup
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     // All requests return 404
     Mock::given(method("GET"))
@@ -2285,7 +2285,7 @@ paths:
     .unwrap();
 
     // Mock server setup
-    let mock_server = get_mock_server().await;
+    let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
         .and(path("/users/123"))
