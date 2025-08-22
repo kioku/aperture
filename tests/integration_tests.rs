@@ -1,6 +1,8 @@
 #![cfg(feature = "integration")]
 
-use assert_cmd::Command;
+mod common;
+
+use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -53,8 +55,7 @@ paths:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Test adding the spec
-    let add_output = Command::cargo_bin("aperture")
-        .unwrap()
+    let add_output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .output()
@@ -91,8 +92,7 @@ paths:
         .await;
 
     // Test executing a command against the API
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&["api", "test-api", "users", "get-user-by-id", "--id", "123"])
@@ -130,23 +130,20 @@ paths: {}
     .unwrap();
 
     // Add multiple specs
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "api-one", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "api-two", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test listing specs
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "list"])
         .assert()
@@ -155,8 +152,7 @@ paths: {}
         .stdout(predicate::str::contains("api-two"));
 
     // Test removing a spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "remove", "api-one"])
         .assert()
@@ -166,8 +162,7 @@ paths: {}
         ));
 
     // Verify only api-two remains
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "list"])
         .assert()
@@ -182,8 +177,7 @@ async fn test_api_error_handling() {
     let config_dir = temp_dir.path().to_path_buf();
 
     // Test executing without any specs
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["api", "nonexistent", "users", "list"])
         .assert()
@@ -228,8 +222,7 @@ paths:
     )
     .unwrap();
 
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -238,8 +231,7 @@ paths:
     // Test with invalid JSON body
     let mock_server = MockServer::start().await;
 
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -297,8 +289,7 @@ paths:
     )
     .unwrap();
 
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -316,8 +307,7 @@ paths:
         .await;
 
     // Test that 404 is handled
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&["api", "test-api", "users", "get-user-by-id", "--id", "999"])
@@ -330,8 +320,7 @@ paths:
 #[test]
 fn test_help_output() {
     // Test root help
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .arg("--help")
         .assert()
         .success()
@@ -340,8 +329,7 @@ fn test_help_output() {
         .stdout(predicate::str::contains("api"));
 
     // Test config help
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .args(&["config", "--help"])
         .assert()
         .success()
@@ -403,8 +391,7 @@ paths:
     )
     .unwrap();
 
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -421,8 +408,7 @@ paths:
         .mount(&mock_server)
         .await;
 
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -484,16 +470,14 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test --describe-json flag
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["api", "test-api", "--describe-json"])
         .output()
@@ -574,16 +558,14 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test --describe-json with --jq to get only the users commands
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "api",
@@ -608,8 +590,7 @@ paths:
     );
 
     // Test --jq to get security schemes
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "api",
@@ -628,8 +609,7 @@ paths:
     assert!(security_schemes["bearerAuth"].is_object());
 
     // Test --jq to get API version
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["api", "test-api", "--describe-json", "--jq", ".api.version"])
         .output()
@@ -642,8 +622,7 @@ paths:
     assert_eq!(version, serde_json::Value::String("1.0.0".to_string()));
 
     // Test invalid JQ filter error handling
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "api",
@@ -664,8 +643,7 @@ async fn test_json_errors_flag() {
     let config_dir = temp_dir.path().to_path_buf();
 
     // Test with --json-errors for nonexistent spec
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["--json-errors", "api", "nonexistent", "users", "list"])
         .output()
@@ -731,16 +709,14 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test --dry-run flag
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("TEST_KEY", "secret123")
         .args(&[
@@ -802,16 +778,14 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test --idempotency-key with --dry-run to see headers
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("TEST_KEY", "secret123")
         .args(&[
@@ -902,16 +876,14 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test list-commands
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["list-commands", "test-api"])
         .output()
@@ -972,16 +944,14 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test reinit for specific spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "reinit", "test-api"])
         .assert()
@@ -1009,16 +979,14 @@ paths:
     )
     .unwrap();
 
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api-2", spec_file2.to_str().unwrap()])
         .assert()
         .success();
 
     // Test reinit --all
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "reinit", "--all"])
         .assert()
@@ -1071,8 +1039,7 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1090,8 +1057,7 @@ paths:
         .await;
 
     // Test that 401 error shows environment variable names (set auth to get past SecretNotSet)
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .env("TEST_API_KEY", "test-key")
@@ -1158,8 +1124,7 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1178,8 +1143,7 @@ paths:
         .await;
 
     // Test --format json (default behavior should be preserved)
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&["api", "test-api", "--format", "json", "users", "list-users"])
@@ -1237,8 +1201,7 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1259,8 +1222,7 @@ paths:
         .await;
 
     // Test --format yaml
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&["api", "test-api", "--format", "yaml", "users", "list-users"])
@@ -1325,8 +1287,7 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1346,8 +1307,7 @@ paths:
         .await;
 
     // Test --format table
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -1426,8 +1386,7 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1446,8 +1405,7 @@ paths:
         .await;
 
     // Test --format table with nested objects (should flatten or stringify)
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -1504,16 +1462,14 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test invalid format
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "api",
@@ -1535,8 +1491,7 @@ paths:
 #[test]
 fn test_output_format_help_text() {
     // Test that --help shows the format option
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .args(&["api", "test", "--help"])
         .output()
         .unwrap();
@@ -1580,8 +1535,7 @@ paths:
                 type: object
 ";
     fs::write(&spec_file, spec_content).unwrap();
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1603,8 +1557,7 @@ paths:
         .await;
 
     // Test basic field extraction
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -1655,8 +1608,7 @@ paths:
                 type: object
 ";
     fs::write(&spec_file, spec_content).unwrap();
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1677,8 +1629,7 @@ paths:
         .await;
 
     // Test nested field extraction
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -1725,8 +1676,7 @@ paths:
                   type: object
 ";
     fs::write(&spec_file, spec_content).unwrap();
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1744,8 +1694,7 @@ paths:
         .await;
 
     // Test array filtering
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -1794,8 +1743,7 @@ paths:
                 type: object
 ";
     fs::write(&spec_file, spec_content).unwrap();
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1814,8 +1762,7 @@ paths:
         .await;
 
     // Test JQ with YAML output
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -1868,8 +1815,7 @@ paths:
                 type: object
 ";
     fs::write(&spec_file, spec_content).unwrap();
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -1886,8 +1832,7 @@ paths:
         .await;
 
     // Test invalid JQ expression
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -1912,8 +1857,7 @@ paths:
 #[test]
 fn test_jq_filter_help_text() {
     // Test that --help shows the jq option
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .args(&["api", "test", "--help"])
         .output()
         .unwrap();
@@ -1972,8 +1916,7 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -2032,8 +1975,7 @@ paths:
         .await;
 
     // Test JQ filter to get only failed operations
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -2061,8 +2003,7 @@ paths:
     assert_eq!(failed_count, 1);
 
     // Test JQ filter to get summary statistics only
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -2084,8 +2025,7 @@ paths:
     assert_eq!(total_count, 3);
 
     // Test JQ filter to get success count
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -2143,8 +2083,7 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -2161,8 +2100,7 @@ paths:
     .unwrap();
 
     // Test JQ filter on empty batch
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "api",
@@ -2218,8 +2156,7 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -2255,8 +2192,7 @@ paths:
         .await;
 
     // Test JQ filter when all operations fail
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
@@ -2314,8 +2250,7 @@ paths:
     .unwrap();
 
     // Add the spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
@@ -2349,8 +2284,7 @@ paths:
         .await;
 
     // Test JQ filter that returns empty/null
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_BASE_URL", &mock_server.uri())
         .args(&[
