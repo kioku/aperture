@@ -59,8 +59,11 @@ fn build_http_client() -> Result<reqwest::Client, Error> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| Error::RequestFailed {
-            reason: format!("Failed to create HTTP client: {e}"),
+        .map_err(|e| {
+            Error::request_failed(
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create HTTP client: {e}"),
+            )
         })
 }
 
@@ -81,10 +84,8 @@ fn extract_request_body(
 
     if let Some(body_value) = current_matches.get_one::<String>("body") {
         // Validate JSON
-        let _json_body: Value =
-            serde_json::from_str(body_value).map_err(|e| Error::InvalidJsonBody {
-                reason: e.to_string(),
-            })?;
+        let _json_body: Value = serde_json::from_str(body_value)
+            .map_err(|e| Error::invalid_json_body(e.to_string()))?;
         Ok(Some(body_value.clone()))
     } else {
         Ok(None)
@@ -126,7 +127,9 @@ fn handle_dry_run(
         "operation_id": operation.operation_id
     });
 
-    let output = serde_json::to_string_pretty(&dry_run_info).map_err(Error::Json)?;
+    let output = serde_json::to_string_pretty(&dry_run_info).map_err(|e| {
+        Error::serialization_error(format!("Failed to serialize dry run info: {e}"))
+    })?;
 
     if capture_output {
         Ok(Some(output))
@@ -140,9 +143,10 @@ fn handle_dry_run(
 async fn send_request(
     request: reqwest::RequestBuilder,
 ) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
-    let response = request.send().await.map_err(|e| Error::RequestFailed {
-        reason: e.to_string(),
-    })?;
+    let response = request
+        .send()
+        .await
+        .map_err(|e| Error::network_request_failed(e.to_string()))?;
 
     let status = response.status();
     let response_headers: HashMap<String, String> = response
@@ -154,9 +158,7 @@ async fn send_request(
     let response_text = response
         .text()
         .await
-        .map_err(|e| Error::ResponseReadError {
-            reason: e.to_string(),
-        })?;
+        .map_err(|e| Error::response_read_error(e.to_string()))?;
 
     Ok((status, response_headers, response_text))
 }
@@ -182,17 +184,17 @@ fn handle_http_error(
         })
         .collect();
 
-    Error::HttpErrorWithContext {
-        status: status.as_u16(),
-        body: if response_text.is_empty() {
+    Error::http_error_with_context(
+        status.as_u16(),
+        if response_text.is_empty() {
             constants::EMPTY_RESPONSE.to_string()
         } else {
             response_text
         },
         api_name,
         operation_id,
-        security_schemes,
-    }
+        &security_schemes,
+    )
 }
 
 /// Prepare cache context if caching is enabled
@@ -363,14 +365,13 @@ pub async fn execute_request(
     if let Some(key) = idempotency_key {
         headers.insert(
             HeaderName::from_static("idempotency-key"),
-            HeaderValue::from_str(key).map_err(|_| Error::InvalidIdempotencyKey)?,
+            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
         );
     }
 
     // Build request
-    let method = Method::from_str(&operation.method).map_err(|_| Error::InvalidHttpMethod {
-        method: operation.method.clone(),
-    })?;
+    let method = Method::from_str(&operation.method)
+        .map_err(|_| Error::invalid_http_method(&operation.method))?;
 
     let headers_clone = headers.clone(); // For dry-run output
     let mut request = client.request(method.clone(), &url).headers(headers);
@@ -378,7 +379,8 @@ pub async fn execute_request(
     // Extract request body
     let request_body = extract_request_body(operation, matches)?;
     if let Some(ref body) = request_body {
-        let json_body: Value = serde_json::from_str(body).unwrap(); // Already validated
+        let json_body: Value = serde_json::from_str(body)
+            .expect("JSON body was validated in extract_request_body, parsing should succeed");
         request = request.json(&json_body);
     }
 
@@ -476,7 +478,10 @@ fn find_operation<'a>(
         }
     }
 
-    Err(Error::OperationNotFound)
+    let operation_name = subcommand_path
+        .last()
+        .map_or("unknown".to_string(), ToString::to_string);
+    Err(Error::operation_not_found(operation_name))
 }
 
 /// Builds the full URL with path parameters substituted
@@ -514,9 +519,7 @@ fn build_url(
                 url.replace_range(open_pos..=close_pos, value);
                 start = open_pos + value.len();
             } else {
-                return Err(Error::MissingPathParameter {
-                    name: param_name.to_string(),
-                });
+                return Err(Error::missing_path_parameter(param_name));
             }
         } else {
             break;
@@ -574,16 +577,10 @@ fn build_headers(
     for param in &operation.parameters {
         if param.location == "header" {
             if let Some(value) = current_matches.get_one::<String>(&param.name) {
-                let header_name =
-                    HeaderName::from_str(&param.name).map_err(|e| Error::InvalidHeaderName {
-                        name: param.name.clone(),
-                        reason: e.to_string(),
-                    })?;
-                let header_value =
-                    HeaderValue::from_str(value).map_err(|e| Error::InvalidHeaderValue {
-                        name: param.name.clone(),
-                        reason: e.to_string(),
-                    })?;
+                let header_name = HeaderName::from_str(&param.name)
+                    .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
+                let header_value = HeaderValue::from_str(value)
+                    .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))?;
                 headers.insert(header_name, header_value);
             }
         }
@@ -601,16 +598,10 @@ fn build_headers(
     if let Ok(Some(custom_headers)) = current_matches.try_get_many::<String>("header") {
         for header_str in custom_headers {
             let (name, value) = parse_custom_header(header_str)?;
-            let header_name =
-                HeaderName::from_str(&name).map_err(|e| Error::InvalidHeaderName {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
-            let header_value =
-                HeaderValue::from_str(&value).map_err(|e| Error::InvalidHeaderValue {
-                    name: name.clone(),
-                    reason: e.to_string(),
-                })?;
+            let header_name = HeaderName::from_str(&name)
+                .map_err(|e| Error::invalid_header_name(&name, e.to_string()))?;
+            let header_value = HeaderValue::from_str(&value)
+                .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
             headers.insert(header_name, header_value);
         }
     }
@@ -621,10 +612,10 @@ fn build_headers(
 /// Validates that a header value doesn't contain control characters
 fn validate_header_value(name: &str, value: &str) -> Result<(), Error> {
     if value.chars().any(|c| c == '\r' || c == '\n' || c == '\0') {
-        return Err(Error::InvalidHeaderValue {
-            name: name.to_string(),
-            reason: "Header value contains invalid control characters (newline, carriage return, or null)".to_string(),
-        });
+        return Err(Error::invalid_header_value(
+            name,
+            "Header value contains invalid control characters (newline, carriage return, or null)",
+        ));
     }
     Ok(())
 }
@@ -634,15 +625,13 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
     // Find the colon separator
     let colon_pos = header_str
         .find(':')
-        .ok_or_else(|| Error::InvalidHeaderFormat {
-            header: header_str.to_string(),
-        })?;
+        .ok_or_else(|| Error::invalid_header_format(header_str))?;
 
     let name = header_str[..colon_pos].trim();
     let value = header_str[colon_pos + 1..].trim();
 
     if name.is_empty() {
-        return Err(Error::EmptyHeaderName);
+        return Err(Error::empty_header_name());
     }
 
     // Support environment variable expansion in header values
@@ -692,18 +681,13 @@ fn add_authentication_header(
 
     let (secret_value, env_var_name) = if let Some(config_secret) = secret_config {
         // Use config-based secret
-        let secret_value = std::env::var(&config_secret.name).map_err(|_| Error::SecretNotSet {
-            scheme_name: security_scheme.name.clone(),
-            env_var: config_secret.name.clone(),
-        })?;
+        let secret_value = std::env::var(&config_secret.name)
+            .map_err(|_| Error::secret_not_set(&security_scheme.name, &config_secret.name))?;
         (secret_value, config_secret.name.clone())
     } else if let Some(aperture_secret) = &security_scheme.aperture_secret {
         // Priority 2: Fall back to x-aperture-secret extension
-        let secret_value =
-            std::env::var(&aperture_secret.name).map_err(|_| Error::SecretNotSet {
-                scheme_name: security_scheme.name.clone(),
-                env_var: aperture_secret.name.clone(),
-            })?;
+        let secret_value = std::env::var(&aperture_secret.name)
+            .map_err(|_| Error::secret_not_set(&security_scheme.name, &aperture_secret.name))?;
         (secret_value, aperture_secret.name.clone())
     } else {
         // No authentication configuration found - skip this scheme
@@ -736,17 +720,10 @@ fn add_authentication_header(
             };
 
             if location == "header" {
-                let header_name =
-                    HeaderName::from_str(param_name).map_err(|e| Error::InvalidHeaderName {
-                        name: param_name.clone(),
-                        reason: e.to_string(),
-                    })?;
-                let header_value = HeaderValue::from_str(&secret_value).map_err(|e| {
-                    Error::InvalidHeaderValue {
-                        name: param_name.clone(),
-                        reason: e.to_string(),
-                    }
-                })?;
+                let header_name = HeaderName::from_str(param_name)
+                    .map_err(|e| Error::invalid_header_name(param_name, e.to_string()))?;
+                let header_value = HeaderValue::from_str(&secret_value)
+                    .map_err(|e| Error::invalid_header_value(param_name, e.to_string()))?;
                 headers.insert(header_name, header_value);
             }
             // Note: query and cookie locations are handled differently in request building
@@ -777,11 +754,9 @@ fn add_authentication_header(
                     }
                 };
 
-                let header_value =
-                    HeaderValue::from_str(&auth_value).map_err(|e| Error::InvalidHeaderValue {
-                        name: constants::HEADER_AUTHORIZATION.to_string(),
-                        reason: e.to_string(),
-                    })?;
+                let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
+                    Error::invalid_header_value(constants::HEADER_AUTHORIZATION, e.to_string())
+                })?;
                 headers.insert(constants::HEADER_AUTHORIZATION, header_value);
 
                 // Debug logging
@@ -803,9 +778,9 @@ fn add_authentication_header(
             }
         }
         _ => {
-            return Err(Error::UnsupportedSecurityScheme {
-                scheme_type: security_scheme.scheme_type.clone(),
-            });
+            return Err(Error::unsupported_security_scheme(
+                &security_scheme.scheme_type,
+            ));
         }
     }
 
@@ -1069,10 +1044,8 @@ fn format_value_for_table(value: &Value) -> String {
 /// - The filter execution fails
 pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
     // Parse the response as JSON
-    let json_value: Value =
-        serde_json::from_str(response_text).map_err(|e| Error::JqFilterError {
-            reason: format!("Response is not valid JSON: {e}"),
-        })?;
+    let json_value: Value = serde_json::from_str(response_text)
+        .map_err(|e| Error::jq_filter_error(filter, format!("Response is not valid JSON: {e}")))?;
 
     #[cfg(feature = "jq")]
     {
@@ -1084,15 +1057,17 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
         // Parse the filter expression
         let (expr, errs) = parse(filter, jaq_parse::main());
         if !errs.is_empty() {
-            return Err(Error::JqFilterError {
-                reason: format!("Parse error in jq expression: {}", errs[0]),
-            });
+            return Err(Error::jq_filter_error(
+                filter,
+                format!("Parse error in jq expression: {}", errs[0]),
+            ));
         }
 
         // Create parsing context and compile the filter
         let mut ctx = ParseCtx::new(Vec::new());
         ctx.insert_defs(std());
-        let filter = ctx.compile(expr.unwrap());
+        let filter =
+            ctx.compile(expr.expect("JQ expression was already validated, should be Some"));
 
         // Convert serde_json::Value to jaq Val
         let jaq_value = serde_json_to_jaq_val(&json_value);
@@ -1109,21 +1084,22 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
                 } else if vals.len() == 1 {
                     // Single result - convert back to JSON
                     let json_val = jaq_val_to_serde_json(&vals[0]);
-                    serde_json::to_string_pretty(&json_val).map_err(|e| Error::JqFilterError {
-                        reason: format!("Failed to serialize result: {e}"),
+                    serde_json::to_string_pretty(&json_val).map_err(|e| {
+                        Error::serialization_error(format!("Failed to serialize result: {e}"))
                     })
                 } else {
                     // Multiple results - return as JSON array
                     let json_vals: Vec<Value> = vals.iter().map(jaq_val_to_serde_json).collect();
                     let array = Value::Array(json_vals);
-                    serde_json::to_string_pretty(&array).map_err(|e| Error::JqFilterError {
-                        reason: format!("Failed to serialize results: {e}"),
+                    serde_json::to_string_pretty(&array).map_err(|e| {
+                        Error::serialization_error(format!("Failed to serialize results: {e}"))
                     })
                 }
             }
-            Err(e) => Err(Error::JqFilterError {
-                reason: format!("Filter execution error: {e}"),
-            }),
+            Err(e) => Err(Error::jq_filter_error(
+                filter,
+                format!("Filter execution error: {e}"),
+            )),
         }
     }
 
@@ -1201,14 +1177,12 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
             get_nested_field(json_value, field_path)
         }
         _ => {
-            return Err(Error::JqFilterError {
-                reason: format!("Unsupported JQ filter: '{filter}'. Only basic field access like '.name' or '.metadata.role' is supported without the full jq library."),
-            });
+            return Err(Error::jq_filter_error(filter, "Unsupported JQ filter. Only basic field access like '.name' or '.metadata.role' is supported without the full jq library."));
         }
     };
 
-    serde_json::to_string_pretty(&result).map_err(|e| Error::JqFilterError {
-        reason: format!("Failed to serialize filtered result: {e}"),
+    serde_json::to_string_pretty(&result).map_err(|e| {
+        Error::serialization_error(format!("Failed to serialize filtered result: {e}"))
     })
 }
 

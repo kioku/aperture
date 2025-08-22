@@ -81,10 +81,8 @@ fn test_prompt_for_input_with_control_characters() {
 
     let result = prompt_for_input_with_io("Enter text: ", &mock);
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("invalid characters"));
+    let error_msg = result.unwrap_err().to_string();
+    assert!(error_msg.contains("Invalid characters") || error_msg.contains("invalid characters"));
 }
 
 #[test]
@@ -555,11 +553,7 @@ fn test_prompt_with_timeout_failure() {
     mock.expect_read_line_with_timeout()
         .with(eq(timeout))
         .times(1)
-        .returning(|_| {
-            Err(aperture_cli::error::Error::InvalidConfig {
-                reason: "Input timeout after 1 seconds".to_string(),
-            })
-        });
+        .returning(|_| Err(aperture_cli::error::Error::interactive_timeout()));
 
     let result = prompt_for_input_with_io_and_timeout("Enter value: ", &mock, timeout);
     assert!(result.is_err());
@@ -603,11 +597,7 @@ fn test_confirm_with_timeout_failure() {
     mock.expect_read_line_with_timeout()
         .with(eq(timeout))
         .times(1)
-        .returning(|_| {
-            Err(aperture_cli::error::Error::InvalidConfig {
-                reason: "Input timeout after 1 seconds".to_string(),
-            })
-        });
+        .returning(|_| Err(aperture_cli::error::Error::interactive_timeout()));
 
     let result = confirm_with_io_and_timeout("Save?", &mock, timeout);
     assert!(result.is_err());

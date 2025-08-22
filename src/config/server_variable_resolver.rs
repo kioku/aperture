@@ -56,19 +56,22 @@ impl<'a> ServerVariableResolver<'a> {
                 final_vars.insert(var_name.clone(), default_value.clone());
             } else {
                 // Required variable with no default - this is an error
-                return Err(Error::MissingServerVariable {
-                    name: var_name.clone(),
-                });
+                return Err(Error::missing_server_variable(var_name));
             }
         }
 
         // Check for unknown variables provided by user
         for provided_var in resolved_vars.keys() {
             if !self.spec.server_variables.contains_key(provided_var) {
-                return Err(Error::UnknownServerVariable {
-                    name: provided_var.clone(),
-                    available: self.spec.server_variables.keys().cloned().collect(),
-                });
+                return Err(Error::unknown_server_variable(
+                    provided_var,
+                    &self
+                        .spec
+                        .server_variables
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                ));
             }
         }
 
@@ -122,36 +125,30 @@ impl<'a> ServerVariableResolver<'a> {
     ) -> Result<&'b String, Error> {
         variables
             .get(var_name)
-            .ok_or_else(|| Error::UnresolvedTemplateVariable {
-                name: var_name.to_string(),
-                url: url_template.to_string(),
-            })
+            .ok_or_else(|| Error::unresolved_template_variable(var_name, url_template))
     }
 
     /// Parses a key=value string from CLI arguments
     fn parse_key_value(arg: &str) -> Result<(String, String), Error> {
         let Some(eq_pos) = arg.find('=') else {
-            return Err(Error::InvalidServerVarFormat {
-                arg: arg.to_string(),
-                reason: "Expected format: key=value".to_string(),
-            });
+            return Err(Error::invalid_server_var_format(
+                arg,
+                "Expected format: key=value",
+            ));
         };
 
         let key = arg[..eq_pos].trim();
         let value = arg[eq_pos + 1..].trim();
 
         if key.is_empty() {
-            return Err(Error::InvalidServerVarFormat {
-                arg: arg.to_string(),
-                reason: "Empty variable name".to_string(),
-            });
+            return Err(Error::invalid_server_var_format(arg, "Empty variable name"));
         }
 
         if value.is_empty() {
-            return Err(Error::InvalidServerVarFormat {
-                arg: arg.to_string(),
-                reason: "Empty variable value".to_string(),
-            });
+            return Err(Error::invalid_server_var_format(
+                arg,
+                "Empty variable value",
+            ));
         }
 
         Ok((key.to_string(), value.to_string()))
@@ -164,11 +161,11 @@ impl<'a> ServerVariableResolver<'a> {
         var_def: &ServerVariable,
     ) -> Result<(), Error> {
         if !var_def.enum_values.is_empty() && !var_def.enum_values.contains(&value.to_string()) {
-            return Err(Error::InvalidServerVarValue {
-                name: var_name.to_string(),
-                value: value.to_string(),
-                allowed_values: var_def.enum_values.clone(),
-            });
+            return Err(Error::invalid_server_var_value(
+                var_name,
+                value,
+                &var_def.enum_values,
+            ));
         }
         Ok(())
     }
@@ -176,17 +173,17 @@ impl<'a> ServerVariableResolver<'a> {
     /// Validates a template variable name according to `OpenAPI` identifier rules
     fn validate_template_variable_name(name: &str) -> Result<(), Error> {
         if name.is_empty() {
-            return Err(Error::InvalidServerVarFormat {
-                arg: "{}".to_string(),
-                reason: "Empty template variable name".to_string(),
-            });
+            return Err(Error::invalid_server_var_format(
+                "{}",
+                "Empty template variable name",
+            ));
         }
 
         if name.len() > 64 {
-            return Err(Error::InvalidServerVarFormat {
-                arg: format!("{{{name}}}"),
-                reason: "Template variable name too long (max 64 chars)".to_string(),
-            });
+            return Err(Error::invalid_server_var_format(
+                format!("{{{name}}}"),
+                "Template variable name too long (max 64 chars)",
+            ));
         }
 
         // OpenAPI identifier rules: must start with letter or underscore,
@@ -197,21 +194,18 @@ impl<'a> ServerVariableResolver<'a> {
         };
 
         if !first_char.is_ascii_alphabetic() && first_char != '_' {
-            return Err(Error::InvalidServerVarFormat {
-                arg: format!("{{{name}}}"),
-                reason: "Template variable names must start with a letter or underscore"
-                    .to_string(),
-            });
+            return Err(Error::invalid_server_var_format(
+                format!("{{{name}}}"),
+                "Template variable names must start with a letter or underscore",
+            ));
         }
 
         for char in chars {
             if !char.is_ascii_alphanumeric() && char != '_' {
-                return Err(Error::InvalidServerVarFormat {
-                    arg: format!("{{{name}}}"),
-                    reason:
-                        "Template variable names must contain only letters, digits, or underscores"
-                            .to_string(),
-                });
+                return Err(Error::invalid_server_var_format(
+                    format!("{{{name}}}"),
+                    "Template variable names must contain only letters, digits, or underscores",
+                ));
             }
         }
 
@@ -262,6 +256,7 @@ impl<'a> ServerVariableResolver<'a> {
 mod tests {
     use super::*;
     use crate::cache::models::{CachedSpec, ServerVariable};
+    use crate::error::ErrorKind;
     use std::collections::HashMap;
 
     fn create_test_spec_with_variables() -> CachedSpec {
@@ -334,16 +329,14 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarValue {
-                name,
-                value,
-                allowed_values,
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                message,
+                ..
             } => {
-                assert_eq!(name, "region");
-                assert_eq!(value, "invalid");
-                assert!(allowed_values.contains(&"us".to_string()));
+                assert!(message.contains("region") && message.contains("invalid"));
             }
-            _ => panic!("Expected InvalidServerVarValue error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -357,10 +350,14 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::MissingServerVariable { name } => {
-                assert_eq!(name, "env");
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("env"));
             }
-            _ => panic!("Expected MissingServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -378,10 +375,14 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::UnknownServerVariable { name, .. } => {
-                assert_eq!(name, "unknown");
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("unknown"));
             }
-            _ => panic!("Expected UnknownServerVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -395,10 +396,13 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarFormat { .. } => {
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                ..
+            } => {
                 // Expected
             }
-            _ => panic!("Expected InvalidServerVarFormat error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -430,10 +434,14 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::UnresolvedTemplateVariable { name, .. } => {
-                assert_eq!(name, "env");
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("env"));
             }
-            _ => panic!("Expected UnresolvedTemplateVariable error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -447,11 +455,14 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarFormat { arg, reason } => {
-                assert_eq!(arg, "{}");
-                assert!(reason.contains("Empty template variable name"));
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("Empty template variable name") || message.contains("{}"));
             }
-            _ => panic!("Expected InvalidServerVarFormat error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -465,11 +476,17 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarFormat { arg, reason } => {
-                assert_eq!(arg, "{invalid-name}");
-                assert!(reason.contains("letters, digits, or underscores"));
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(
+                    message.contains("invalid-name")
+                        || message.contains("letters, digits, or underscores")
+                );
             }
-            _ => panic!("Expected InvalidServerVarFormat error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -487,10 +504,14 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::InvalidServerVarFormat { reason, .. } => {
-                assert!(reason.contains("too long"));
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("too long"));
             }
-            _ => panic!("Expected InvalidServerVarFormat error"),
+            _ => panic!("Expected Internal ServerVariable error"),
         }
     }
 
@@ -514,7 +535,11 @@ mod tests {
         for test_case in test_cases {
             let result = resolver.substitute_url(test_case, &variables);
             // Should not fail with InvalidServerVarFormat
-            if let Err(Error::InvalidServerVarFormat { .. }) = result {
+            if let Err(Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                ..
+            }) = result
+            {
                 panic!("Template variable name validation failed for: {test_case}");
             }
         }

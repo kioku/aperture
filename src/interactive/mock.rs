@@ -54,14 +54,19 @@ impl InputOutput for RealInputOutput {
 
     fn flush(&self) -> Result<(), Error> {
         use std::io::Write;
-        std::io::stdout().flush().map_err(Error::Io)
+        std::io::stdout()
+            .flush()
+            .map_err(|e| Error::io_error(format!("Failed to flush stdout: {e}")))
     }
 
     fn read_line(&self) -> Result<String, Error> {
         use std::io::BufRead;
         let stdin = std::io::stdin();
         let mut line = String::new();
-        stdin.lock().read_line(&mut line).map_err(Error::Io)?;
+        stdin
+            .lock()
+            .read_line(&mut line)
+            .map_err(|e| Error::io_error(format!("Failed to read from stdin: {e}")))?;
         Ok(line)
     }
 
@@ -80,7 +85,11 @@ impl InputOutput for RealInputOutput {
             let result = stdin.lock().read_line(&mut line);
             match result {
                 Ok(_) => tx.send(Ok(line)).unwrap_or(()),
-                Err(e) => tx.send(Err(Error::Io(e))).unwrap_or(()),
+                Err(e) => tx
+                    .send(Err(Error::io_error(format!(
+                        "Failed to read from stdin: {e}"
+                    ))))
+                    .unwrap_or(()),
             }
         });
 
@@ -98,14 +107,11 @@ impl InputOutput for RealInputOutput {
                 // 1. The user provides input (thread completes normally)
                 // 2. The process exits (OS cleans up all threads)
                 // This is the standard approach for stdin timeout handling in Rust.
-                Err(Error::InteractiveTimeout {
-                    timeout_secs: timeout.as_secs(),
-                    suggestion: "Try again with a faster response or increase timeout with APERTURE_INPUT_TIMEOUT".to_string(),
-                })
+                Err(Error::interactive_timeout())
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::InvalidConfig {
-                reason: "Input channel disconnected".to_string(),
-            }),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(Error::invalid_config("Input channel disconnected"))
+            }
         }
     }
 }

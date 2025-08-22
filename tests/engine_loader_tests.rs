@@ -1,7 +1,7 @@
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedResponse, CachedSpec};
 use aperture_cli::constants;
 use aperture_cli::engine::loader::load_cached_spec;
-use aperture_cli::error::Error;
+use aperture_cli::error::{Error, ErrorKind};
 use std::collections::HashMap;
 use std::fs;
 use tempfile::TempDir;
@@ -81,10 +81,22 @@ fn test_load_cached_spec_file_not_found() {
     let result = load_cached_spec(cache_dir, "nonexistent-api");
 
     assert!(result.is_err());
-    if let Err(Error::CachedSpecNotFound { name }) = result {
-        assert_eq!(name, "nonexistent-api");
-    } else {
-        panic!("Expected CachedSpecNotFound error, got: {:?}", result);
+    match result {
+        Err(Error::Internal {
+            kind,
+            message,
+            context,
+        }) => {
+            assert_eq!(kind, ErrorKind::Specification);
+            assert!(message.contains("No cached spec found"));
+            assert!(message.contains("nonexistent-api"));
+            if let Some(ctx) = context {
+                if let Some(details) = &ctx.details {
+                    assert_eq!(details["spec_name"], "nonexistent-api");
+                }
+            }
+        }
+        _ => panic!("Expected CachedSpecNotFound error, got: {:?}", result),
     }
 }
 
@@ -100,12 +112,23 @@ fn test_load_cached_spec_corrupted_data() {
     let result = load_cached_spec(cache_dir, "corrupted-api");
 
     assert!(result.is_err());
-    if let Err(Error::CachedSpecCorrupted { name, reason }) = result {
-        assert_eq!(name, "corrupted-api");
-        // Bincode error messages vary, just ensure we got a deserialization error
-        assert!(!reason.is_empty());
-    } else {
-        panic!("Expected CachedSpecCorrupted error, got: {:?}", result);
+    match result {
+        Err(Error::Internal {
+            kind,
+            message,
+            context,
+        }) => {
+            assert_eq!(kind, ErrorKind::Specification);
+            assert!(message.contains("Failed to deserialize cached spec"));
+            assert!(message.contains("corrupted-api"));
+            if let Some(ctx) = context {
+                if let Some(details) = &ctx.details {
+                    assert_eq!(details["spec_name"], "corrupted-api");
+                    assert!(details["corruption_reason"].is_string());
+                }
+            }
+        }
+        _ => panic!("Expected CachedSpecCorrupted error, got: {:?}", result),
     }
 }
 
@@ -127,16 +150,27 @@ fn test_load_cached_spec_version_mismatch() {
 
     // Should fail with version mismatch error
     assert!(result.is_err());
-    if let Err(Error::CacheVersionMismatch {
-        name,
-        found,
-        expected,
-    }) = result
-    {
-        assert_eq!(name, "old-version-api");
-        assert_eq!(found, 1);
-        assert_eq!(expected, aperture_cli::cache::models::CACHE_FORMAT_VERSION);
-    } else {
-        panic!("Expected CacheVersionMismatch error, got: {:?}", result);
+    match result {
+        Err(Error::Internal {
+            kind,
+            message,
+            context,
+        }) => {
+            assert_eq!(kind, ErrorKind::Specification);
+            assert!(message.contains("Cache format version mismatch"));
+            assert!(message.contains("old-version-api"));
+            assert!(message.contains("found v1"));
+            if let Some(ctx) = context {
+                if let Some(details) = &ctx.details {
+                    assert_eq!(details["spec_name"], "old-version-api");
+                    assert_eq!(details["found_version"], 1);
+                    assert_eq!(
+                        details["expected_version"],
+                        aperture_cli::cache::models::CACHE_FORMAT_VERSION
+                    );
+                }
+            }
+        }
+        _ => panic!("Expected CacheVersionMismatch error, got: {:?}", result),
     }
 }

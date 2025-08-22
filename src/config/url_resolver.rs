@@ -1,7 +1,8 @@
 use crate::cache::models::CachedSpec;
 use crate::config::models::{ApiConfig, GlobalConfig};
 use crate::config::server_variable_resolver::ServerVariableResolver;
-use crate::error::Error;
+#[allow(unused_imports)]
+use crate::error::{Error, ErrorKind};
 
 /// Resolves the base URL for an API based on a priority hierarchy
 pub struct BaseUrlResolver<'a> {
@@ -52,9 +53,10 @@ impl<'a> BaseUrlResolver<'a> {
                 match err {
                     // For validation errors, log and fallback to basic resolution
                     // This maintains backward compatibility while providing visibility
-                    Error::InvalidServerVarFormat { .. }
-                    | Error::InvalidServerVarValue { .. }
-                    | Error::UnknownServerVariable { .. } => {
+                    Error::Internal {
+                        kind: crate::error::ErrorKind::ServerVariable,
+                        ..
+                    } => {
                         eprintln!(
                             "{} Server variable error: {err}",
                             crate::constants::MSG_WARNING_PREFIX
@@ -102,10 +104,7 @@ impl<'a> BaseUrlResolver<'a> {
             let template_vars = extract_template_variables(&base_url);
 
             if let Some(first_var) = template_vars.first() {
-                return Err(Error::UnresolvedTemplateVariable {
-                    name: first_var.clone(),
-                    url: base_url,
-                });
+                return Err(Error::unresolved_template_variable(first_var, &base_url));
             }
 
             return Ok(base_url);
@@ -194,6 +193,7 @@ fn extract_template_variables(url: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::cache::models::{CachedSpec, ServerVariable};
+    use crate::error::ErrorKind;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -524,11 +524,14 @@ mod tests {
             // Should fail with UnresolvedTemplateVariable error
             assert!(result.is_err());
             match result.unwrap_err() {
-                Error::UnresolvedTemplateVariable { name, url } => {
-                    assert_eq!(name, "region");
-                    assert_eq!(url, "https://{region}.api.example.com");
+                Error::Internal {
+                    kind: ErrorKind::ServerVariable,
+                    message,
+                    ..
+                } => {
+                    assert!(message.contains("region"));
                 }
-                _ => panic!("Expected UnresolvedTemplateVariable error"),
+                _ => panic!("Expected Internal ServerVariable error"),
             }
         });
     }

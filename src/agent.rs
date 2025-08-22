@@ -244,7 +244,8 @@ pub fn generate_capability_manifest_from_openapi(
     };
 
     // Serialize to JSON
-    serde_json::to_string_pretty(&manifest).map_err(Error::Json)
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|e| Error::serialization_error(format!("Failed to serialize agent manifest: {e}")))
 }
 
 /// Generates a capability manifest from a cached API specification.
@@ -305,7 +306,8 @@ pub fn generate_capability_manifest(
     };
 
     // Serialize to JSON
-    serde_json::to_string_pretty(&manifest).map_err(Error::Json)
+    serde_json::to_string_pretty(&manifest)
+        .map_err(|e| Error::serialization_error(format!("Failed to serialize agent manifest: {e}")))
 }
 
 /// Converts a `CachedCommand` to `CommandInfo` for the manifest

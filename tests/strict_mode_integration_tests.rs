@@ -65,7 +65,11 @@ fn test_strict_mode_rejects_spec_with_multipart() {
     );
 
     match result.unwrap_err() {
-        aperture_cli::error::Error::Validation(msg) => {
+        aperture_cli::error::Error::Internal {
+            kind: aperture_cli::error::ErrorKind::Validation,
+            message: msg,
+            ..
+        } => {
             assert!(
                 msg.contains("multipart/form-data"),
                 "Error should mention multipart/form-data"

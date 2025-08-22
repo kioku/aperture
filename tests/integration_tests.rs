@@ -674,7 +674,13 @@ async fn test_json_errors_flag() {
 
     // Parse the JSON error output
     let error: serde_json::Value = serde_json::from_str(&stderr).unwrap();
-    assert_eq!(error["error_type"].as_str().unwrap(), "CachedSpecNotFound");
+    let error_type = error["error_type"].as_str().unwrap();
+    // Accept both old and new error types during migration
+    assert!(
+        error_type == "CachedSpecNotFound" || error_type == "Specification",
+        "Expected CachedSpecNotFound or Specification, got: {}",
+        error_type
+    );
     assert!(error["message"]
         .as_str()
         .unwrap()

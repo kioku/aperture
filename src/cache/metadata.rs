@@ -32,9 +32,8 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         }
 
         let content = self.fs.read_to_string(&metadata_path)?;
-        serde_json::from_str(&content).map_err(|e| Error::InvalidConfig {
-            reason: format!("Failed to parse cache metadata: {e}"),
-        })
+        serde_json::from_str(&content)
+            .map_err(|e| Error::invalid_config(format!("Failed to parse cache metadata: {e}")))
     }
 
     /// Save global cache metadata
@@ -51,10 +50,9 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         // Ensure cache directory exists
         self.fs.create_dir_all(cache_dir.as_ref())?;
 
-        let content =
-            serde_json::to_string_pretty(metadata).map_err(|e| Error::SerializationError {
-                reason: format!("Failed to serialize cache metadata: {e}"),
-            })?;
+        let content = serde_json::to_string_pretty(metadata).map_err(|e| {
+            Error::serialization_error(format!("Failed to serialize cache metadata: {e}"))
+        })?;
 
         self.fs.write_all(&metadata_path, content.as_bytes())?;
         Ok(())

@@ -936,7 +936,11 @@ mod tests {
         let result = transformer.transform("test", &spec);
         assert!(result.is_err());
         match result.unwrap_err() {
-            crate::error::Error::Validation(msg) => {
+            crate::error::Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("Invalid parameter reference format"));
             }
             _ => panic!("Expected Validation error"),
@@ -970,7 +974,11 @@ mod tests {
         let result = transformer.transform("test", &spec);
         assert!(result.is_err());
         match result.unwrap_err() {
-            crate::error::Error::Validation(msg) => {
+            crate::error::Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(msg.contains("Parameter 'nonExistent' not found in components"));
             }
             _ => panic!("Expected Validation error"),
@@ -1083,7 +1091,11 @@ mod tests {
         let result = transformer.transform("test", &spec);
         assert!(result.is_err());
         match result.unwrap_err() {
-            crate::error::Error::Validation(msg) => {
+            crate::error::Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(
                     msg.contains("Circular reference detected"),
                     "Error message should mention circular reference: {}",
@@ -1137,7 +1149,11 @@ mod tests {
         let result = transformer.transform("test", &spec);
         assert!(result.is_err());
         match result.unwrap_err() {
-            crate::error::Error::Validation(msg) => {
+            crate::error::Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(
                     msg.contains("Circular reference detected") || msg.contains("reference cycle"),
                     "Error message should mention circular reference: {}",
@@ -1198,7 +1214,11 @@ mod tests {
         let result = transformer.transform("test", &spec);
         assert!(result.is_err());
         match result.unwrap_err() {
-            crate::error::Error::Validation(msg) => {
+            crate::error::Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(
                     msg.contains("Circular reference detected") || msg.contains("reference cycle"),
                     "Error message should mention circular reference: {}",
@@ -1278,7 +1298,11 @@ mod tests {
         let result = transformer.transform("test", &spec);
         assert!(result.is_err());
         match result.unwrap_err() {
-            crate::error::Error::Validation(msg) => {
+            crate::error::Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message: msg,
+                ..
+            } => {
                 assert!(
                     msg.contains("Maximum reference depth") && msg.contains("10"),
                     "Error message should mention depth limit: {}",

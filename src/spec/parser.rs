@@ -49,8 +49,10 @@ fn preprocess_for_compatibility(content: &str) -> String {
 /// Fix boolean values in YAML format
 fn fix_yaml_boolean_values(mut content: String, properties: &[&str]) -> String {
     for property in properties {
-        let pattern_0 = Regex::new(&format!(r"\b{property}: 0\b")).unwrap();
-        let pattern_1 = Regex::new(&format!(r"\b{property}: 1\b")).unwrap();
+        let pattern_0 = Regex::new(&format!(r"\b{property}: 0\b"))
+            .expect("Regex pattern is hardcoded and valid");
+        let pattern_1 = Regex::new(&format!(r"\b{property}: 1\b"))
+            .expect("Regex pattern is hardcoded and valid");
 
         content = pattern_0
             .replace_all(&content, &format!("{property}: false"))
@@ -180,9 +182,9 @@ fn parse_json_with_fallback(content: &str) -> Result<OpenAPI, Error> {
             }
 
             // Return JSON error since content looked like JSON
-            Err(Error::SerializationError {
-                reason: format!("Failed to parse OpenAPI spec as JSON: {json_err}"),
-            })
+            Err(Error::serialization_error(format!(
+                "Failed to parse OpenAPI spec as JSON: {json_err}"
+            )))
         }
     }
 }
@@ -219,9 +221,11 @@ fn parse_with_oas3_direct_with_original(
         Ok(spec) => spec,
         Err(_yaml_err) => {
             // Try parsing as JSON
-            oas3::from_json(preprocessed).map_err(|e| Error::SerializationError {
-                reason: format!("Failed to parse OpenAPI 3.1 spec as YAML or JSON: {e}"),
-            })?
+            oas3::from_json(preprocessed).map_err(|e| {
+                Error::serialization_error(format!(
+                    "Failed to parse OpenAPI 3.1 spec as YAML or JSON: {e}"
+                ))
+            })?;
         }
     };
 
@@ -232,14 +236,14 @@ fn parse_with_oas3_direct_with_original(
     eprintln!("         Some 3.1-specific features may not be available.");
 
     // Convert oas3 spec to JSON, then attempt to parse as openapiv3
-    let json = oas3::to_json(&oas3_spec).map_err(|e| Error::SerializationError {
-        reason: format!("Failed to serialize OpenAPI 3.1 spec: {e}"),
+    let json = oas3::to_json(&oas3_spec).map_err(|e| {
+        Error::serialization_error(format!("Failed to serialize OpenAPI 3.1 spec: {e}"))
     })?;
 
     // Parse the JSON as OpenAPI 3.0.x
     // This may fail if there are incompatible 3.1 features
     let mut spec = serde_json::from_str::<OpenAPI>(&json).map_err(|e| {
-        Error::Validation(format!(
+        Error::validation_error(format!(
             "OpenAPI 3.1 spec contains features incompatible with 3.0: {e}. \
             Consider converting the spec to OpenAPI 3.0 format."
         ))
@@ -314,8 +318,8 @@ fn parse_with_oas3_direct_with_original(
     _preprocessed: &str,
     _original: &str,
 ) -> Result<OpenAPI, Error> {
-    Err(Error::Validation(
-        "OpenAPI 3.1 support is not enabled. Rebuild with --features openapi31 to enable 3.1 support.".to_string()
+    Err(Error::validation_error(
+        "OpenAPI 3.1 support is not enabled. Rebuild with --features openapi31 to enable 3.1 support."
     ))
 }
 
@@ -364,8 +368,13 @@ paths: {}
         {
             // Without the feature, it should return an error about missing support
             assert!(result.is_err());
-            if let Err(Error::Validation(msg)) = result {
-                assert!(msg.contains("OpenAPI 3.1 support is not enabled"));
+            if let Err(Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message,
+                ..
+            }) = result
+            {
+                assert!(message.contains("OpenAPI 3.1 support is not enabled"));
             } else {
                 panic!("Expected validation error about missing 3.1 support");
             }

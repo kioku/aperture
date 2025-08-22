@@ -1,8 +1,8 @@
 use aperture_cli::config::manager::{is_url, ConfigManager};
-use aperture_cli::error::Error;
+use aperture_cli::error::{Error, ErrorKind};
 use aperture_cli::fs::FileSystem;
 use std::collections::HashMap;
-use std::io::{self, ErrorKind};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -60,19 +60,25 @@ impl MockFileSystem {
 impl FileSystem for MockFileSystem {
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
         if *self.io_error_on_read.lock().unwrap() {
-            return Err(io::Error::new(ErrorKind::Other, "Mock I/O error on read"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Mock I/O error on read",
+            ));
         }
         self.files
             .lock()
             .unwrap()
             .get(path)
             .map(|v| String::from_utf8_lossy(v).to_string())
-            .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "File not found"))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "File not found"))
     }
 
     fn write_all(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         if *self.io_error_on_write.lock().unwrap() {
-            return Err(io::Error::new(ErrorKind::Other, "Mock I/O error on write"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Mock I/O error on write",
+            ));
         }
         self.files
             .lock()
@@ -88,14 +94,17 @@ impl FileSystem for MockFileSystem {
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         if *self.io_error_on_write.lock().unwrap() {
-            return Err(io::Error::new(ErrorKind::Other, "Mock I/O error on write"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Mock I/O error on write",
+            ));
         }
         self.files
             .lock()
             .unwrap()
             .remove(path)
             .map(|_| ())
-            .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "File not found"))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "File not found"))
     }
 
     fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
@@ -215,10 +224,22 @@ paths: {}
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::SpecAlreadyExists { name }) = result {
-        assert_eq!(name, spec_name);
-    } else {
-        panic!("Unexpected error type: {:?}", result);
+    match result {
+        Err(Error::Internal {
+            kind,
+            message,
+            context,
+        }) => {
+            assert_eq!(kind, ErrorKind::Specification);
+            assert!(message.contains("already exists"));
+            assert!(message.contains(spec_name));
+            if let Some(ctx) = context {
+                if let Some(details) = &ctx.details {
+                    assert_eq!(details["spec_name"], spec_name);
+                }
+            }
+        }
+        _ => panic!("Unexpected error type: {:?}", result),
     }
     // Ensure content was not overwritten
     assert_eq!(
@@ -379,10 +400,22 @@ fn test_remove_spec_not_found() {
 
     let result = manager.remove_spec(spec_name);
     assert!(result.is_err());
-    if let Err(Error::SpecNotFound { name }) = result {
-        assert_eq!(name, spec_name);
-    } else {
-        panic!("Unexpected error type: {:?}", result);
+    match result {
+        Err(Error::Internal {
+            kind,
+            message,
+            context,
+        }) => {
+            assert_eq!(kind, ErrorKind::Specification);
+            assert!(message.contains("not found"));
+            assert!(message.contains(spec_name));
+            if let Some(ctx) = context {
+                if let Some(details) = &ctx.details {
+                    assert_eq!(details["spec_name"], spec_name);
+                }
+            }
+        }
+        _ => panic!("Unexpected error type: {:?}", result),
     }
 }
 
@@ -521,7 +554,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         // The error message has changed due to our refactoring
         assert!(
             msg.contains("oauth2")
@@ -562,7 +600,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         // The error message has changed due to our refactoring
         assert!(
             msg.contains("OpenID Connect")
@@ -603,7 +646,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(msg.contains("HTTP scheme 'negotiate'"));
         assert!(msg.contains("requires complex authentication flows"));
     } else {
@@ -639,7 +687,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(msg.contains("Unsupported request body content type 'application/xml'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
@@ -675,7 +728,12 @@ paths:
 
     let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         assert!(msg.contains("Unsupported request body content type 'text/plain'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
@@ -1073,13 +1131,15 @@ async fn test_remote_spec_fetching_timeout() {
         )
         .await;
     assert!(result.is_err());
-    if let Err(Error::RequestFailed { reason }) = result {
-        assert!(reason.contains("timed out"));
-    } else {
-        panic!(
-            "Expected RequestFailed error with timeout, got: {:?}",
-            result
-        );
+    match result {
+        Err(Error::Internal {
+            kind: ErrorKind::Network,
+            message,
+            ..
+        }) => {
+            assert!(message.contains("timed out"));
+        }
+        _ => panic!("Expected Network error with timeout, got: {:?}", result),
     }
 }
 
@@ -1105,13 +1165,15 @@ async fn test_remote_spec_fetching_size_limit() {
         .add_spec_from_url("large-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
-    if let Err(Error::RequestFailed { reason }) = result {
-        assert!(reason.contains("too large"));
-    } else {
-        panic!(
-            "Expected RequestFailed error for size limit, got: {:?}",
-            result
-        );
+    match result {
+        Err(Error::Internal {
+            kind: ErrorKind::Network,
+            message,
+            ..
+        }) => {
+            assert!(message.contains("too large"));
+        }
+        _ => panic!("Expected Network error for size limit, got: {:?}", result),
     }
 }
 
@@ -1130,13 +1192,15 @@ async fn test_remote_spec_fetching_invalid_url() {
         )
         .await;
     assert!(result.is_err());
-    if let Err(Error::RequestFailed { reason }) = result {
-        assert!(reason.contains("Failed to connect") || reason.contains("Network error"));
-    } else {
-        panic!(
-            "Expected RequestFailed error for invalid URL, got: {:?}",
-            result
-        );
+    match result {
+        Err(Error::Internal {
+            kind: ErrorKind::Network,
+            message,
+            ..
+        }) => {
+            assert!(message.contains("Failed to connect") || message.contains("Network error"));
+        }
+        _ => panic!("Expected Network error for invalid URL, got: {:?}", result),
     }
 }
 
@@ -1159,13 +1223,18 @@ async fn test_remote_spec_fetching_http_error() {
         .add_spec_from_url("not-found-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
-    if let Err(Error::RequestFailed { reason }) = result {
-        assert!(reason.contains("HTTP 404"));
-    } else {
-        panic!(
+    match result {
+        Err(Error::Internal {
+            kind: ErrorKind::HttpRequest,
+            message,
+            ..
+        }) => {
+            assert!(message.contains("404"));
+        }
+        _ => panic!(
             "Expected RequestFailed error for HTTP 404, got: {:?}",
             result
-        );
+        ),
     }
 }
 
@@ -1238,7 +1307,12 @@ paths:
         .add_spec_from_url("oauth2-api", &spec_url, false, true)
         .await;
     assert!(result.is_err());
-    if let Err(Error::Validation(msg)) = result {
+    if let Err(Error::Internal {
+        kind: ErrorKind::Validation,
+        message: msg,
+        ..
+    }) = result
+    {
         // Check for any OAuth2-related validation error
         assert!(
             msg.contains("oauth2") || msg.contains("OAuth2"),
