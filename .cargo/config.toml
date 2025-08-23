@@ -1,0 +1,27 @@
+[build]
+# Optimize build performance
+rustflags = ["-Ctarget-cpu=native"]
+
+# Faster incremental builds (commented out - lld not available on all systems)
+# [target.x86_64-unknown-linux-gnu]
+# rustflags = ["-Clink-arg=-fuse-ld=lld"]
+
+# [target.x86_64-apple-darwin]  
+# rustflags = ["-Clink-arg=-fuse-ld=lld"]
+
+# Test configuration
+[env]
+# Disable debug output in tests for performance
+RUST_LOG = { value = "off", condition = { env-not-set = ["RUST_LOG"] } }
+
+# Speed up compilation
+CARGO_INCREMENTAL = "1"
+CARGO_BUILD_JOBS = "0"  # Use all available cores
+
+# Test-specific aliases
+[alias]
+test-unit = "test --lib"
+test-integration = "test --test '*' --features integration"
+test-all = "test --workspace --features integration"
+test-fast = "nextest run --profile fast"
+test-ci = "nextest run --profile ci"

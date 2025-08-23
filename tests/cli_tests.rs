@@ -1,11 +1,16 @@
+#![cfg(feature = "integration")]
+
+mod common;
+
 use assert_cmd::Command;
+use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
 use std::path::PathBuf;
 
 // Helper to get the path to the test binary
 fn get_bin() -> Command {
-    Command::cargo_bin("aperture").unwrap()
+    aperture_cmd()
 }
 
 // Helper to create a temporary config directory for tests

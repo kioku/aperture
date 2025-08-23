@@ -1,6 +1,11 @@
+#![cfg(feature = "integration")]
+
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::fs::FileSystem;
+mod common;
+
 use assert_cmd::Command;
+use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
 use std::path::PathBuf;
@@ -382,8 +387,7 @@ paths:
     .unwrap();
 
     // Add the spec using the CLI
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "test-api", spec_path.to_str().unwrap()])
         .output()
@@ -400,8 +404,7 @@ paths:
     );
 
     // Verify the spec was added
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "list"])
         .assert()
@@ -410,8 +413,7 @@ paths:
 
     // Verify we can use the generated command with the resolved parameter
     // Check if the command structure is correct by looking at the error output
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["api", "test-api", "pets", "get-pet-by-id", "--help"])
         .output()
@@ -534,14 +536,14 @@ paths:
     .unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "special-api", spec_path.to_str().unwrap()])
         .assert()
         .success();
 
     // Test the help output shows the special parameters correctly
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     let output = cmd
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["api", "special-api", "users", "get-user", "--help"])
@@ -559,7 +561,7 @@ paths:
     );
 
     // Test dry-run with special character parameters
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     let output = cmd
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args([

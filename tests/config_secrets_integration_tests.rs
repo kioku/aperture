@@ -1,4 +1,8 @@
-use assert_cmd::Command;
+#![cfg(feature = "integration")]
+
+mod common;
+
+use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -35,7 +39,7 @@ servers:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec first
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -50,7 +54,7 @@ servers:
         ));
 
     // Set a secret for the bearerAuth scheme
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "set-secret", "test-api", "bearerAuth", "--env", "TEST_BEARER_TOKEN"])
         .assert()
@@ -58,7 +62,7 @@ servers:
         .stdout(predicate::str::contains("Set secret for scheme 'bearerAuth' in API 'test-api' to use environment variable 'TEST_BEARER_TOKEN'"));
 
     // List secrets to verify it was set
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "list-secrets", "test-api"])
         .assert()
@@ -76,7 +80,7 @@ fn test_config_set_secret_nonexistent_api() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().join(".config").join("aperture");
     // Try to set secret for non-existent API
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -118,7 +122,7 @@ servers:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec first
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -130,7 +134,7 @@ servers:
         .success();
 
     // List secrets for API with no configured secrets
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "list-secrets", "test-api"])
         .assert()
@@ -145,7 +149,7 @@ fn test_config_set_secret_invalid_arguments() {
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().join(".config").join("aperture");
     // Try to set secret without providing both scheme and env
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "set-secret", "test-api", "bearerAuth"])
         .assert()
@@ -192,7 +196,7 @@ servers:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -204,7 +208,7 @@ servers:
         .success();
 
     // Set two secrets
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -217,7 +221,7 @@ servers:
         .assert()
         .success();
 
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -231,7 +235,7 @@ servers:
         .success();
 
     // Verify both secrets are configured
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "list-secrets", "test-api"])
         .assert()
@@ -240,7 +244,7 @@ servers:
         .stdout(predicate::str::contains("apiKey"));
 
     // Remove one secret
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "remove-secret", "test-api", "bearerAuth"])
         .assert()
@@ -250,7 +254,7 @@ servers:
         ));
 
     // Verify only one secret remains
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "list-secrets", "test-api"])
         .assert()
@@ -265,7 +269,7 @@ fn test_config_remove_secret_nonexistent_api() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Try to remove secret from nonexistent API
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "remove-secret", "nonexistent-api", "bearerAuth"])
         .assert()
@@ -307,7 +311,7 @@ servers:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -319,7 +323,7 @@ servers:
         .success();
 
     // Try to remove a secret that was never configured
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "remove-secret", "test-api", "bearerAuth"])
         .assert()
@@ -365,7 +369,7 @@ servers:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -377,7 +381,7 @@ servers:
         .success();
 
     // Configure only one secret
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -391,7 +395,7 @@ servers:
         .success();
 
     // Try to remove the unconfigured scheme
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "remove-secret", "test-api", "apiKey"])
         .assert()
@@ -438,7 +442,7 @@ servers:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -450,7 +454,7 @@ servers:
         .success();
 
     // Set multiple secrets
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -463,7 +467,7 @@ servers:
         .assert()
         .success();
 
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -477,7 +481,7 @@ servers:
         .success();
 
     // Clear all secrets with --force to skip confirmation
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "clear-secrets", "test-api", "--force"])
         .assert()
@@ -487,7 +491,7 @@ servers:
         ));
 
     // Verify no secrets remain
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "list-secrets", "test-api"])
         .assert()
@@ -503,7 +507,7 @@ fn test_config_clear_secrets_nonexistent_api() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Try to clear secrets from nonexistent API
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "clear-secrets", "nonexistent-api", "--force"])
         .assert()
@@ -538,7 +542,7 @@ servers:
     fs::write(&spec_file, spec_content).unwrap();
 
     // Add the spec
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&[
             "config",
@@ -550,7 +554,7 @@ servers:
         .success();
 
     // Try to clear secrets when none are configured
-    let mut cmd = Command::cargo_bin("aperture").unwrap();
+    let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(&["config", "clear-secrets", "test-api", "--force"])
         .assert()

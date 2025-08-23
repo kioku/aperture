@@ -1,7 +1,12 @@
+#![cfg(feature = "integration")]
+
+mod common;
+
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::fs::OsFileSystem;
 use assert_cmd::Command;
+use common::aperture_cmd;
 use tempfile::TempDir;
 
 fn create_temp_config_manager() -> (ConfigManager<OsFileSystem>, TempDir) {
@@ -464,8 +469,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Add spec without --strict flag
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "test-api", spec_file.to_str().unwrap()])
         .output()

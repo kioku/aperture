@@ -96,14 +96,21 @@ Uses custom `x-aperture-secret` extensions in OpenAPI specs to map authenticatio
 ## Testing Strategy
 
 ### Test Organization
-- **Unit Tests**: In `tests/` directory with `_tests.rs` suffix
-- **Integration Tests**: Full end-to-end testing using `assert_cmd` and `wiremock`
+- **Unit Tests**: In `tests/` directory with `_tests.rs` suffix (~0.2s runtime)
+- **Integration Tests**: Full end-to-end testing using `assert_cmd` and `wiremock` (~9s runtime)
 - **Mock Dependencies**: File system operations use trait abstractions for testability
+- **Performance**: Optimized test suite runs in ~10s total (87% improvement from original ~2min)
 
 ### Key Testing Tools
 - `assert_cmd`: CLI testing framework
 - `wiremock`: HTTP mocking for API interactions
 - `predicates`: Assertion helpers for complex conditions
+- `cargo-nextest`: Enhanced test runner with better parallelization (optional but recommended)
+
+### Test Execution
+- **Unit tests only**: `cargo test --no-default-features`
+- **Full suite**: `cargo test --features integration`
+- **With nextest**: `cargo nextest run --profile fast` or use `./scripts/test-fast.sh`
 
 ## Implementation Phases
 

@@ -1,7 +1,12 @@
+#![cfg(feature = "integration")]
+
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::fs::OsFileSystem;
+mod common;
+
 use assert_cmd::Command;
+use common::aperture_cmd;
 use predicates::prelude::*;
 use std::path::Path;
 use tempfile::TempDir;
@@ -92,8 +97,7 @@ fn test_cli_non_strict_mode_with_warnings() {
         .unwrap();
 
     // Add spec without --strict flag (default non-strict mode)
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "test-api", spec_path.to_str().unwrap()])
         .output()
@@ -136,8 +140,7 @@ fn test_cli_non_strict_mode_with_warnings() {
     );
 
     // Verify spec was added
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "list"])
         .assert()
@@ -154,8 +157,7 @@ fn test_cli_strict_mode_rejection() {
         .unwrap();
 
     // Add spec with --strict flag
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args([
             "config",
@@ -183,8 +185,7 @@ fn test_cli_strict_mode_rejection() {
     );
 
     // Verify spec was NOT added
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "list"])
         .assert()
@@ -201,16 +202,14 @@ fn test_cli_force_flag_with_non_strict_mode() {
         .unwrap();
 
     // Add spec first time
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "test-api", spec_path.to_str().unwrap()])
         .assert()
         .success();
 
     // Try to add again without force - should fail
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "test-api", spec_path.to_str().unwrap()])
         .assert()
@@ -218,8 +217,7 @@ fn test_cli_force_flag_with_non_strict_mode() {
         .stderr(predicate::str::contains("already exists"));
 
     // Add with force flag - should succeed with warnings
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args([
             "config",
@@ -249,16 +247,14 @@ fn test_generated_commands_exclude_multipart_endpoints() {
         .unwrap();
 
     // Add spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "test-api", spec_path.to_str().unwrap()])
         .assert()
         .success();
 
     // Check available commands - multipart endpoints should not be available
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["api", "test-api", "users", "--help"])
         .output()
@@ -287,8 +283,7 @@ fn test_generated_commands_exclude_multipart_endpoints() {
     );
 
     // Check documents namespace should not exist at all
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["api", "test-api", "documents", "--help"])
         .assert()
@@ -381,16 +376,14 @@ fn test_cli_list_verbose_shows_skipped_endpoints() {
         .unwrap();
 
     // Add spec
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "test-api", spec_path.to_str().unwrap()])
         .assert()
         .success();
 
     // Run config list --verbose
-    let output = Command::cargo_bin("aperture")
-        .unwrap()
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "list", "--verbose"])
         .output()
@@ -446,8 +439,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Add spec with --strict flag
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args([
             "config",
@@ -463,8 +455,7 @@ paths:
         ));
 
     // Add spec without --strict flag (should succeed)
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args([
             "config",
@@ -481,8 +472,7 @@ paths:
     std::fs::write(&cache_file, b"corrupted data").unwrap();
 
     // Reinit should succeed because it uses the saved non-strict preference
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "reinit", "non-strict-api"])
         .assert()
@@ -542,8 +532,7 @@ paths:
     let spec_url = format!("{}/spec.yaml", mock_server.uri());
 
     // Test with --strict flag (should fail)
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "--strict", "url-strict-api", &spec_url])
         .assert()
@@ -553,8 +542,7 @@ paths:
         ));
 
     // Test without --strict flag (should succeed)
-    Command::cargo_bin("aperture")
-        .unwrap()
+    aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .args(["config", "add", "url-non-strict-api", &spec_url])
         .assert()

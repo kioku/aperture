@@ -72,6 +72,7 @@ Authentication is handled through custom `x-aperture-secret` extensions in OpenA
 #### Supported Authentication Schemes
 
 1. **API Key** (header, query, or cookie)
+
 ```yaml
 components:
   securitySchemes:
@@ -85,6 +86,7 @@ components:
 ```
 
 2. **HTTP Bearer Token**
+
 ```yaml
 components:
   securitySchemes:
@@ -97,6 +99,7 @@ components:
 ```
 
 3. **HTTP Basic Authentication**
+
 ```yaml
 components:
   securitySchemes:
@@ -105,10 +108,11 @@ components:
       scheme: basic
       x-aperture-secret:
         source: env
-        name: BASIC_CREDENTIALS  # Format: username:password (will be base64 encoded automatically)
+        name: BASIC_CREDENTIALS # Format: username:password (will be base64 encoded automatically)
 ```
 
 4. **Custom HTTP Schemes** (Token, DSN, ApiKey, proprietary schemes)
+
 ```yaml
 components:
   securitySchemes:
@@ -119,7 +123,7 @@ components:
       x-aperture-secret:
         source: env
         name: API_TOKEN
-    
+
     # Sentry-style DSN authentication
     dsnAuth:
       type: http
@@ -127,7 +131,7 @@ components:
       x-aperture-secret:
         source: env
         name: SENTRY_DSN
-    
+
     # Any custom scheme name
     customAuth:
       type: http
@@ -142,6 +146,7 @@ All custom HTTP schemes are treated as bearer-like tokens and formatted as: `Aut
 #### Unsupported Authentication
 
 The following authentication types require complex flows and are not supported:
+
 - OAuth2 (all flows)
 - OpenID Connect
 - HTTP Negotiate (Kerberos/NTLM)
@@ -155,7 +160,6 @@ Starting from v0.1.4, Aperture handles APIs with unsupported features gracefully
   - Only endpoints that require unsupported features are skipped
   - Endpoints with multiple authentication options (where at least one is supported) remain available
   - Clear warnings show which endpoints are skipped and why
-  
 - **Strict Mode**: Use the `--strict` flag with `aperture config add` to reject specs with any unsupported features
 
 This allows you to use most endpoints of an API even if some require unsupported authentication methods or content types:
@@ -192,6 +196,7 @@ aperture config list-secrets myapi
 ```
 
 **Priority system:**
+
 1. **Config-based secrets** (set via CLI commands) take highest priority
 2. **x-aperture-secret extensions** (in OpenAPI specs) used as fallback
 3. Clear error messages when neither is available
@@ -215,7 +220,7 @@ paths:
   /users/{userId}:
     get:
       parameters:
-        - $ref: '#/components/parameters/userId'
+        - $ref: "#/components/parameters/userId"
 ```
 
 ## Installation
@@ -244,6 +249,7 @@ Aperture provides JSON filtering capabilities through the `--jq` flag:
 
 **Basic Filtering (Default)**
 Without any special features, Aperture supports basic field access:
+
 ```bash
 # Simple field extraction
 aperture api my-api get-user --id 123 --jq '.name'
@@ -276,10 +282,12 @@ cargo build --release --features jq
 ⚠️ **Known Issue:** The advanced JQ feature (`--features jq`) currently has a bug where filters return the entire JSON document instead of filtered results. See [issue #25](https://github.com/kioku/aperture/issues/25) for details. For production use, we recommend using the default build without the `jq` feature flag.
 
 **Supported without `jq` feature:**
+
 - Basic field access: `.field`, `.nested.field`
 - Array index access: `.items[0]`
 
 **Requires `jq` feature (currently broken):**
+
 - Complex filters: `.[] | select()`, `map()`, array slicing
 - Pipe operations and transformations
 - Advanced JQ syntax
@@ -332,6 +340,7 @@ APERTURE_ENV=staging aperture api my-api users list
 ```
 
 **URL Resolution Priority:**
+
 1. Explicit test parameter (for testing)
 2. Per-API configuration (with environment support)
 3. `APERTURE_BASE_URL` environment variable (global override)
@@ -355,6 +364,7 @@ aperture api my-api users list --server-var env=staging  # Overrides default 'pr
 ```
 
 **OpenAPI Specification Example:**
+
 ```yaml
 servers:
   - url: https://{region}.api.example.com/{version}
@@ -369,6 +379,7 @@ servers:
 ```
 
 **Features:**
+
 - **Validation:** Enum values are validated, invalid values are rejected
 - **Defaults:** Variables with defaults are optional, others are required
 - **URL Encoding:** Variable values are automatically URL-encoded
@@ -441,6 +452,7 @@ aperture api my-api --batch-file operations.json --json-errors --jq '.batch_exec
 ```
 
 **Example batch file (JSON):**
+
 ```json
 {
   "operations": [
@@ -449,7 +461,7 @@ aperture api my-api --batch-file operations.json --json-errors --jq '.batch_exec
       "args": ["users", "get-user-by-id", "--id", "123"]
     },
     {
-      "id": "get-user-2", 
+      "id": "get-user-2",
       "args": ["users", "get-user-by-id", "--id", "456"]
     }
   ]
@@ -549,17 +561,31 @@ RUST_LOG=debug cargo run -- config list
 
 The project uses comprehensive testing strategies:
 
-- **Unit Tests**: Located in `tests/` directory
-- **Integration Tests**: End-to-end CLI testing using `assert_cmd`
+- **Unit Tests**: Fast, isolated tests without external dependencies
+- **Integration Tests**: End-to-end CLI testing using `assert_cmd` and `wiremock`
 - **HTTP Mocking**: API interaction testing using `wiremock`
 
 ```bash
-# Run integration tests
-cargo test --test integration_tests
+# Run unit tests only (fastest)
+cargo test --no-default-features
 
-# Run with HTTP mocking
-cargo test --test executor_tests
+# Run all tests including integration
+cargo test --features integration
+
+# Run specific test file
+cargo test --features integration --test integration_tests
+
+# Using cargo-nextest (recommended for better parallelization)
+cargo install cargo-nextest --locked
+cargo nextest run --profile fast        # Fast local development
+cargo nextest run --profile default     # Standard configuration
+cargo nextest run --profile ci          # CI optimized
+
+# Or use the provided script
+./scripts/test-fast.sh
 ```
+
+See [ADR-007](docs/adr/007-test-suite-performance-optimization.md) for test performance optimizations and metrics.
 
 ## Project Status
 

@@ -1,0 +1,49 @@
+[profile.default]
+# Number of tests to run simultaneously
+test-threads = "num-cpus"
+
+# Retry failed tests up to this many times
+retries = 1
+
+# Fail fast on first test failure
+fail-fast = false
+
+# Set default timeout for tests
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+# Test execution strategy
+status-level = "all"
+
+[profile.ci]
+# CI-optimized configuration
+test-threads = "num-cpus"
+retries = 2
+fail-fast = true
+slow-timeout = { period = "30s", terminate-after = 1 }
+
+[profile.fast]
+# For faster local development
+test-threads = "num-cpus"
+retries = 0
+fail-fast = true
+slow-timeout = { period = "15s", terminate-after = 1 }
+
+# Integration tests might be slower
+[[profile.default.overrides]]
+filter = 'test(test_.*integration.*)'
+slow-timeout = { period = "120s", terminate-after = 2 }
+
+[[profile.ci.overrides]]
+filter = 'test(test_.*integration.*)'
+slow-timeout = { period = "90s", terminate-after = 1 }
+
+# Unit tests should be fast
+[[profile.default.overrides]]
+filter = 'test(test_) and not test(test_.*integration.*)'
+slow-timeout = { period = "30s", terminate-after = 1 }
+
+[profile.default.junit]
+# JUnit output for CI integration
+path = "target/nextest-junit.xml"
+store-success-output = false
+store-failure-output = true
