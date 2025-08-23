@@ -2,6 +2,85 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2025-08-23
+
+### Release Highlights
+
+- **⚠️ Breaking**: CLI parameter flags now use kebab-case (e.g., `--user-id` instead of `--userId`)
+- **Performance**: Binary size reduced by 67% (11MB → 3.6MB), test suite 75% faster (~30s → ~8s)
+- **New Feature**: Optional OpenAPI 3.1 support via `--features openapi31`
+- **Architecture**: Error system consolidated from 47+ types to 8 categories
+- **Developer Experience**: Added cargo-nextest support and optimized CI pipeline
+
+### Build
+
+- Add cargo-nextest configuration for optimized testing
+
+### ⚙️ Miscellaneous Tasks
+
+- Optimize GitHub Actions workflow for faster testing
+
+### ⚡ Performance
+
+- Implement binary caching in integration_tests.rs
+- Migrate remaining tests to cached binary
+- Implement MockServer pooling infrastructure
+
+### 🐛 Bug Fixes
+
+- Redact authentication headers in dry-run output
+- Convert parameter flags to kebab-case for CLI consistency
+- Use unified parser for --describe-json to support OpenAPI 3.1
+- Correct OpenAPI 3.1 parser string replacement
+- Preserve security schemes during OpenAPI 3.1 to 3.0 conversion
+- Reduce binary size from 11MB to 3.6MB
+- Resolve clippy warnings after error consolidation
+- Complete source code error consolidation migration
+- Resolve final compilation errors in error consolidation
+- Replace unwrap() with expect() and update error documentation
+- Replace sleep-based delays with faster cache TTL
+- Add missing Command import in cli_tests.rs
+- Resolve test timing and JSON parsing issues
+- Address PR review issues and consolidate documentation
+- Remove broken pooling infrastructure from test optimizations
+- Correct nextest thread configuration syntax
+
+### 📚 Documentation
+
+- Update table of contents for JQ Support section
+- Add comprehensive code-level optimization analysis and plan
+- Add comprehensive documentation to error module
+- Add comprehensive ADR for test suite optimization
+
+### 🚀 Features
+
+- Add OpenAPI 3.1 support with oas3 fallback parser
+- Make OpenAPI 3.1 support optional via openapi31 feature flag
+- Complete error consolidation with helper methods and direct usage migration
+- Complete error type consolidation for binary size reduction
+
+### 🚜 Refactor
+
+- Optimize string allocations in error module using Cow
+- Centralize string literals into constants module
+- Split large execute_request function into smaller helpers
+- Add ErrorKind and ErrorContext types
+- Migrate specification errors to new structure
+- Migrate authentication errors to new structure
+- Migrate validation errors to new structure
+- Migrate request/response errors to new structure
+- Complete error consolidation migration
+- Complete source code error consolidation
+- Replace error macros with builder methods
+- Split HttpRequest into Network and HttpRequest error kinds
+
+### 🧪 Testing
+
+- Add comprehensive integration tests for kebab-case parameters
+- Update existing tests for kebab-case parameter flags
+- Add shared test utilities module
+- Add test categorization attributes
+
 ## [0.1.4] - 2025-08-01
 
 ### 🎨 Styling
