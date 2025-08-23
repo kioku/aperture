@@ -1,6 +1,6 @@
 [profile.default]
 # Number of tests to run simultaneously
-test-threads = "logical"
+test-threads = "num-cpus"
 
 # Retry failed tests up to this many times
 retries = 1
@@ -16,14 +16,14 @@ status-level = "all"
 
 [profile.ci]
 # CI-optimized configuration
-test-threads = "logical"
+test-threads = "num-cpus"
 retries = 2
 fail-fast = true
 slow-timeout = { period = "30s", terminate-after = 1 }
 
 [profile.fast]
 # For faster local development
-test-threads = "logical"
+test-threads = "num-cpus"
 retries = 0
 fail-fast = true
 slow-timeout = { period = "15s", terminate-after = 1 }
