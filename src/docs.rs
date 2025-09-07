@@ -69,14 +69,14 @@ impl DocumentationGenerator {
             command.method.to_uppercase(),
             command.path
         )
-        .unwrap();
+        .ok();
 
         if let Some(summary) = &command.summary {
-            write!(help, "**{summary}**\n\n").unwrap();
+            write!(help, "**{summary}**\n\n").ok();
         }
 
         if let Some(description) = &command.description {
-            write!(help, "{description}\n\n").unwrap();
+            write!(help, "{description}\n\n").ok();
         }
     }
 
@@ -120,7 +120,7 @@ impl DocumentationGenerator {
         if let Some(ref body) = command.request_body {
             help.push_str("## Request Body\n\n");
             if let Some(ref description) = body.description {
-                write!(help, "{description}\n\n").unwrap();
+                write!(help, "{description}\n\n").ok();
             }
             write!(help, "Required: {}\n\n", body.required).ok();
         }
