@@ -810,6 +810,32 @@ impl Error {
         }
     }
 
+    /// Create an operation not found error with suggestions
+    pub fn operation_not_found_with_suggestions(
+        operation: impl Into<String>,
+        suggestions: &[String],
+    ) -> Self {
+        use serde_json::json;
+        let operation = operation.into();
+        let suggestion_text = if suggestions.is_empty() {
+            "Check available operations with --help or --describe-json".to_string()
+        } else {
+            format!("Did you mean one of these?\n{}", suggestions.join("\n"))
+        };
+
+        Self::Internal {
+            kind: ErrorKind::Runtime,
+            message: Cow::Owned(format!("Operation '{operation}' not found")),
+            context: Some(ErrorContext::new(
+                Some(json!({
+                    "operation": operation,
+                    "suggestions": suggestions
+                })),
+                Some(Cow::Owned(suggestion_text)),
+            )),
+        }
+    }
+
     /// Create a network request failed error
     pub fn network_request_failed(reason: impl Into<String>) -> Self {
         let reason = reason.into();

@@ -1,18 +1,15 @@
 //! Documentation and help system for improved CLI discoverability
 
 #![allow(
-    clippy::format_push_string,
-    clippy::uninlined_format_args,
-    clippy::if_not_else,
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
-    clippy::missing_const_for_fn
+    clippy::format_push_string,  // Many format operations for string building
+    clippy::uninlined_format_args  // Legacy format style for consistency
 )]
 
 use crate::cache::models::{CachedCommand, CachedSpec};
 use crate::error::Error;
 use crate::utils::to_kebab_case;
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 /// Documentation generator for API operations
 pub struct DocumentationGenerator {
@@ -22,11 +19,15 @@ pub struct DocumentationGenerator {
 impl DocumentationGenerator {
     /// Create a new documentation generator
     #[must_use]
-    pub fn new(specs: BTreeMap<String, CachedSpec>) -> Self {
+    pub const fn new(specs: BTreeMap<String, CachedSpec>) -> Self {
         Self { specs }
     }
 
     /// Generate comprehensive help for a specific command
+    /// Generate command help documentation
+    ///
+    /// # Errors
+    /// Returns an error if the API or operation is not found
     pub fn generate_command_help(
         &self,
         api_name: &str,
@@ -44,8 +45,7 @@ impl DocumentationGenerator {
             .find(|cmd| to_kebab_case(&cmd.operation_id) == operation_id)
             .ok_or_else(|| {
                 Error::spec_not_found(format!(
-                    "Operation '{}' not found in API '{}'",
-                    operation_id, api_name
+                    "Operation '{operation_id}' not found in API '{api_name}'"
                 ))
             })?;
 
@@ -66,18 +66,20 @@ impl DocumentationGenerator {
 
     /// Add command header with title and description
     fn add_command_header(help: &mut String, command: &CachedCommand) {
-        help.push_str(&format!(
+        write!(
+            help,
             "# {} {}\n\n",
             command.method.to_uppercase(),
             command.path
-        ));
+        )
+        .unwrap();
 
         if let Some(summary) = &command.summary {
-            help.push_str(&format!("**{}**\n\n", summary));
+            write!(help, "**{summary}**\n\n").unwrap();
         }
 
         if let Some(description) = &command.description {
-            help.push_str(&format!("{}\n\n", description));
+            write!(help, "{description}\n\n").unwrap();
         }
     }
 
@@ -118,7 +120,7 @@ impl DocumentationGenerator {
         if let Some(ref body) = command.request_body {
             help.push_str("## Request Body\n\n");
             if let Some(ref description) = body.description {
-                help.push_str(&format!("{}\n\n", description));
+                write!(help, "{description}\n\n").unwrap();
             }
             help.push_str(&format!("Required: {}\n\n", body.required));
         }
@@ -132,7 +134,15 @@ impl DocumentationGenerator {
         operation_id: &str,
         command: &CachedCommand,
     ) {
-        if !command.examples.is_empty() {
+        if command.examples.is_empty() {
+            help.push_str("## Example\n\n");
+            help.push_str(&Self::generate_basic_example(
+                api_name,
+                tag,
+                operation_id,
+                command,
+            ));
+        } else {
             help.push_str("## Examples\n\n");
             for (i, example) in command.examples.iter().enumerate() {
                 help.push_str(&format!("### Example {}\n\n", i + 1));
@@ -142,14 +152,6 @@ impl DocumentationGenerator {
                 }
                 help.push_str(&format!("```bash\n{}\n```\n\n", example.command_line));
             }
-        } else {
-            help.push_str("## Example\n\n");
-            help.push_str(&Self::generate_basic_example(
-                api_name,
-                tag,
-                operation_id,
-                command,
-            ));
         }
     }
 
@@ -239,6 +241,9 @@ impl DocumentationGenerator {
     }
 
     /// Generate API overview with statistics
+    ///
+    /// # Errors
+    /// Returns an error if the API is not found
     pub fn generate_api_overview(&self, api_name: &str) -> Result<String, Error> {
         let spec = self
             .specs
@@ -319,6 +324,7 @@ impl DocumentationGenerator {
     }
 
     /// Generate interactive help menu
+    #[must_use]
     pub fn generate_interactive_menu(&self) -> String {
         let mut menu = String::new();
 
@@ -326,7 +332,11 @@ impl DocumentationGenerator {
         menu.push_str("Welcome to Aperture! Here are some ways to get started:\n\n");
 
         // Available APIs
-        if !self.specs.is_empty() {
+        if self.specs.is_empty() {
+            menu.push_str("## No APIs Configured\n\n");
+            menu.push_str("Get started by adding an API specification:\n");
+            menu.push_str("```bash\naperture config add myapi ./openapi.yaml\n```\n\n");
+        } else {
             menu.push_str("## Your APIs\n\n");
             for (api_name, spec) in &self.specs {
                 let operation_count = spec.commands.len();
@@ -336,10 +346,6 @@ impl DocumentationGenerator {
                 ));
             }
             menu.push('\n');
-        } else {
-            menu.push_str("## No APIs Configured\n\n");
-            menu.push_str("Get started by adding an API specification:\n");
-            menu.push_str("```bash\naperture config add myapi ./openapi.yaml\n```\n\n");
         }
 
         // Common commands

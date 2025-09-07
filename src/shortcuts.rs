@@ -148,7 +148,14 @@ impl ShortcutResolver {
 
         match candidates.len() {
             0 => ResolutionResult::NotFound,
-            1 => ResolutionResult::Resolved(Box::new(candidates.into_iter().next().unwrap())),
+            1 => {
+                // Safe to unwrap since we know there's exactly one element
+                let candidate = candidates
+                    .into_iter()
+                    .next()
+                    .expect("candidates should have exactly one element");
+                ResolutionResult::Resolved(Box::new(candidate))
+            }
             _ => {
                 // Sort by confidence score (descending)
                 candidates.sort_by(|a, b| b.confidence.cmp(&a.confidence));
@@ -158,7 +165,12 @@ impl ShortcutResolver {
                     && (candidates.len() == 1
                         || candidates[0].confidence > candidates[1].confidence + 10)
                 {
-                    ResolutionResult::Resolved(Box::new(candidates.into_iter().next().unwrap()))
+                    // Safe to unwrap since we know candidates is not empty (len >= 2)
+                    let candidate = candidates
+                        .into_iter()
+                        .next()
+                        .expect("candidates should not be empty after sorting");
+                    ResolutionResult::Resolved(Box::new(candidate))
                 } else {
                     ResolutionResult::Ambiguous(candidates)
                 }

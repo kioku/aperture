@@ -547,24 +547,10 @@ fn find_operation<'a>(
     // Generate suggestions for similar operations
     let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
 
-    if suggestions.is_empty() {
-        Err(Error::operation_not_found(operation_name))
-    } else {
-        use serde_json::json;
-        let suggestion_text = format!("Did you mean one of these?\n{}", suggestions.join("\n"));
-
-        Err(Error::Internal {
-            kind: crate::error::ErrorKind::Runtime,
-            message: std::borrow::Cow::Owned(format!("Operation '{operation_name}' not found")),
-            context: Some(crate::error::ErrorContext::new(
-                Some(json!({
-                    "operation": operation_name,
-                    "suggestions": suggestions
-                })),
-                Some(std::borrow::Cow::Owned(suggestion_text)),
-            )),
-        })
-    }
+    Err(Error::operation_not_found_with_suggestions(
+        operation_name,
+        &suggestions,
+    ))
 }
 
 fn find_operation_with_matches<'a>(
@@ -601,24 +587,10 @@ fn find_operation_with_matches<'a>(
     // Generate suggestions for similar operations
     let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
 
-    if suggestions.is_empty() {
-        Err(Error::operation_not_found(operation_name))
-    } else {
-        use serde_json::json;
-        let suggestion_text = format!("Did you mean one of these?\n{}", suggestions.join("\n"));
-
-        Err(Error::Internal {
-            kind: crate::error::ErrorKind::Runtime,
-            message: std::borrow::Cow::Owned(format!("Operation '{operation_name}' not found")),
-            context: Some(crate::error::ErrorContext::new(
-                Some(json!({
-                    "operation": operation_name,
-                    "suggestions": suggestions
-                })),
-                Some(std::borrow::Cow::Owned(suggestion_text)),
-            )),
-        })
-    }
+    Err(Error::operation_not_found_with_suggestions(
+        operation_name,
+        &suggestions,
+    ))
 }
 
 /// Builds the full URL with path parameters substituted

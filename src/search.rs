@@ -78,22 +78,42 @@ impl CommandSearcher {
                 let mut highlights = Vec::new();
                 let mut total_score = 0i64;
 
-                // Build searchable text from command attributes
+                // Build searchable text from command attributes with pre-allocated capacity
                 let operation_id_kebab = to_kebab_case(&command.operation_id);
-                let search_text = format!(
-                    "{} {} {} {} {} {}",
-                    operation_id_kebab,
-                    command.operation_id, // Include original operation ID for searching
-                    command.method,
-                    command.path,
-                    command.summary.as_deref().unwrap_or(""),
-                    command.description.as_deref().unwrap_or("")
-                );
+                let summary = command.summary.as_deref().unwrap_or("");
+                let description = command.description.as_deref().unwrap_or("");
+
+                // Pre-calculate capacity to avoid multiple allocations
+                let capacity = operation_id_kebab.len()
+                    + command.operation_id.len()
+                    + command.method.len()
+                    + command.path.len()
+                    + summary.len()
+                    + description.len()
+                    + 6; // 6 spaces
+
+                let mut search_text = String::with_capacity(capacity);
+                search_text.push_str(&operation_id_kebab);
+                search_text.push(' ');
+                search_text.push_str(&command.operation_id);
+                search_text.push(' ');
+                search_text.push_str(&command.method);
+                search_text.push(' ');
+                search_text.push_str(&command.path);
+                search_text.push(' ');
+                search_text.push_str(summary);
+                search_text.push(' ');
+                search_text.push_str(description);
 
                 // Score based on different matching strategies
                 if let Some(ref regex) = regex_pattern {
                     if regex.is_match(&search_text) {
-                        total_score = 100; // Fixed high score for regex matches
+                        // Dynamic scoring based on match quality for regex
+                        let base_score = 90;
+                        let query_len = regex.as_str().len();
+                        #[allow(clippy::cast_possible_wrap)]
+                        let match_specificity_bonus = query_len.min(10) as i64;
+                        total_score = base_score + match_specificity_bonus;
                         highlights.push(format!("Regex match: {}", regex.as_str()));
                     }
                 } else {
