@@ -40,6 +40,17 @@ impl CachedSpec {
     }
 }
 
+/// Example usage for a command
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CommandExample {
+    /// Brief description of what this example demonstrates
+    pub description: String,
+    /// The complete command line example
+    pub command_line: String,
+    /// Optional explanation of the parameters used
+    pub explanation: Option<String>,
+}
+
 /// Information about an endpoint that was skipped during spec validation
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SkippedEndpoint {
@@ -101,6 +112,9 @@ pub struct CachedCommand {
     pub deprecated: bool,
     /// External documentation URL if available
     pub external_docs_url: Option<String>,
+    /// Usage examples for this command (added in v0.1.6)
+    #[serde(default)]
+    pub examples: Vec<CommandExample>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

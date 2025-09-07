@@ -1,6 +1,6 @@
 use crate::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
-    CachedSecurityScheme, CachedSpec, SkippedEndpoint, CACHE_FORMAT_VERSION,
+    CachedSecurityScheme, CachedSpec, CommandExample, SkippedEndpoint, CACHE_FORMAT_VERSION,
 };
 use crate::constants;
 use crate::error::Error;
@@ -252,6 +252,7 @@ impl SpecTransformer {
     }
 
     /// Transforms a single operation into a cached command
+    #[allow(clippy::too_many_lines)]
     fn transform_operation(
         spec: &OpenAPI,
         method: &str,
@@ -351,6 +352,16 @@ impl SpecTransformer {
             },
         );
 
+        // Generate examples for this command
+        let examples = Self::generate_command_examples(
+            &name,
+            &operation_id,
+            method,
+            path,
+            &parameters,
+            request_body.as_ref(),
+        );
+
         Ok(CachedCommand {
             name,
             description: operation.description.clone(),
@@ -368,6 +379,7 @@ impl SpecTransformer {
                 .external_docs
                 .as_ref()
                 .map(|docs| docs.url.clone()),
+            examples,
         })
     }
 
@@ -670,6 +682,132 @@ impl SpecTransformer {
     /// Resolves a parameter reference to its actual parameter definition
     fn resolve_parameter_reference(spec: &OpenAPI, reference: &str) -> Result<Parameter, Error> {
         crate::spec::resolve_parameter_reference(spec, reference)
+    }
+
+    /// Generate examples for a command
+    #[allow(clippy::too_many_lines)]
+    fn generate_command_examples(
+        tag: &str,
+        operation_id: &str,
+        method: &str,
+        path: &str,
+        parameters: &[CachedParameter],
+        request_body: Option<&CachedRequestBody>,
+    ) -> Vec<CommandExample> {
+        use crate::utils::to_kebab_case;
+
+        let mut examples = Vec::new();
+        let operation_kebab = to_kebab_case(operation_id);
+        let tag_lower = tag.to_lowercase();
+
+        // Build base command
+        let base_cmd = format!("aperture api myapi {tag_lower} {operation_kebab}");
+
+        // Example 1: Simple required parameters only
+        let required_params: Vec<&CachedParameter> =
+            parameters.iter().filter(|p| p.required).collect();
+
+        if !required_params.is_empty() {
+            let mut cmd = base_cmd.clone();
+            for param in &required_params {
+                use std::fmt::Write;
+                write!(
+                    &mut cmd,
+                    " --{} {}",
+                    param.name,
+                    param.example.as_deref().unwrap_or("<value>")
+                )
+                .unwrap();
+            }
+
+            examples.push(CommandExample {
+                description: "Basic usage with required parameters".to_string(),
+                command_line: cmd,
+                explanation: Some(format!("{method} {path}")),
+            });
+        }
+
+        // Example 2: With request body if present
+        if request_body.is_some() {
+            let mut cmd = base_cmd.clone();
+
+            // Add required path/query parameters
+            for param in &required_params {
+                if param.location == "path" || param.location == "query" {
+                    use std::fmt::Write;
+                    write!(
+                        &mut cmd,
+                        " --{} {}",
+                        param.name,
+                        param.example.as_deref().unwrap_or("123")
+                    )
+                    .unwrap();
+                }
+            }
+
+            // Add body example
+            cmd.push_str(r#" --body '{"name": "example", "value": 42}'"#);
+
+            examples.push(CommandExample {
+                description: "With request body".to_string(),
+                command_line: cmd,
+                explanation: Some("Sends JSON data in the request body".to_string()),
+            });
+        }
+
+        // Example 3: With optional parameters
+        let optional_params: Vec<&CachedParameter> = parameters
+            .iter()
+            .filter(|p| !p.required && p.location == "query")
+            .take(2) // Limit to 2 optional params for brevity
+            .collect();
+
+        if !optional_params.is_empty() && !required_params.is_empty() {
+            let mut cmd = base_cmd.clone();
+
+            // Add required parameters
+            for param in &required_params {
+                use std::fmt::Write;
+                write!(
+                    &mut cmd,
+                    " --{} {}",
+                    param.name,
+                    param.example.as_deref().unwrap_or("value")
+                )
+                .unwrap();
+            }
+
+            // Add optional parameters
+            for param in &optional_params {
+                use std::fmt::Write;
+                write!(
+                    &mut cmd,
+                    " --{} {}",
+                    param.name,
+                    param.example.as_deref().unwrap_or("optional")
+                )
+                .unwrap();
+            }
+
+            examples.push(CommandExample {
+                description: "With optional parameters".to_string(),
+                command_line: cmd,
+                explanation: Some(
+                    "Includes optional query parameters for filtering or customization".to_string(),
+                ),
+            });
+        }
+
+        // If no examples were generated, create a simple one
+        if examples.is_empty() {
+            examples.push(CommandExample {
+                description: "Basic usage".to_string(),
+                command_line: base_cmd,
+                explanation: Some(format!("Executes {method} {path}")),
+            });
+        }
+
+        examples
     }
 }
 

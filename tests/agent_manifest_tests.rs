@@ -118,6 +118,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             tags: vec!["users".to_string(), "admin".to_string()],
             deprecated: false,
             external_docs_url: Some("https://docs.example.com/users".to_string()),
+            examples: vec![],
         },
         // Deprecated command with request body
         CachedCommand {
@@ -145,6 +146,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             tags: vec!["users".to_string()],
             deprecated: true,
             external_docs_url: None,
+            examples: vec![],
         },
         // Public endpoint with no auth
         CachedCommand {
@@ -166,6 +168,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             tags: vec!["health".to_string()],
             deprecated: false,
             external_docs_url: None,
+            examples: vec![],
         },
     ];
 

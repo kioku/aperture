@@ -38,6 +38,7 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 security_requirements: vec![],
                 deprecated: false,
                 external_docs_url: None,
+                examples: vec![],
             },
             CachedCommand {
                 operation_id: "listUsers".to_string(),
@@ -53,6 +54,7 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 security_requirements: vec![],
                 deprecated: false,
                 external_docs_url: None,
+                examples: vec![],
             },
             CachedCommand {
                 operation_id: "createUser".to_string(),
@@ -68,6 +70,7 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 security_requirements: vec![],
                 deprecated: false,
                 external_docs_url: None,
+                examples: vec![],
             },
             CachedCommand {
                 operation_id: "getIssue".to_string(),
@@ -83,6 +86,7 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 security_requirements: vec![],
                 deprecated: false,
                 external_docs_url: None,
+                examples: vec![],
             },
         ],
         servers: vec![],

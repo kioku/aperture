@@ -101,8 +101,27 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
             };
 
             let subcommand_name_static = to_static_str(subcommand_name);
-            let mut operation_command = Command::new(subcommand_name_static)
-                .about(cached_command.description.clone().unwrap_or_default());
+
+            // Build help text with examples
+            let mut help_text = cached_command.description.clone().unwrap_or_default();
+            if !cached_command.examples.is_empty() {
+                help_text.push_str("\n\nExamples:");
+                for example in &cached_command.examples {
+                    use std::fmt::Write;
+                    write!(
+                        &mut help_text,
+                        "\n  {}\n    {}",
+                        example.description, example.command_line
+                    )
+                    .unwrap();
+                    if let Some(ref explanation) = example.explanation {
+                        use std::fmt::Write;
+                        write!(&mut help_text, "\n    ({explanation})").unwrap();
+                    }
+                }
+            }
+
+            let mut operation_command = Command::new(subcommand_name_static).about(help_text);
 
             // Add parameters as CLI arguments
             for param in &cached_command.parameters {
@@ -130,6 +149,14 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
                     .help("Pass custom header(s) to the request. Format: 'Name: Value'. Can be used multiple times.")
                     .value_name("HEADER")
                     .action(ArgAction::Append),
+            );
+
+            // Add examples flag for showing extended examples
+            operation_command = operation_command.arg(
+                Arg::new("examples")
+                    .long("examples")
+                    .help("Show extended usage examples for this command")
+                    .action(ArgAction::SetTrue),
             );
 
             group_command = group_command.subcommand(operation_command);

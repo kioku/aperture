@@ -53,5 +53,6 @@ pub fn test_command(name: &str, operation_id: &str, method: &str, path: &str) ->
         tags: vec![name.to_string()],
         deprecated: false,
         external_docs_url: None,
+        examples: vec![],
     }
 }

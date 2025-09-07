@@ -337,8 +337,17 @@ pub async fn execute_request(
     cache_config: Option<&CacheConfig>,
     capture_output: bool,
 ) -> Result<Option<String>, Error> {
-    // Find the operation from the command hierarchy
-    let operation = find_operation(spec, matches)?;
+    // Find the operation from the command hierarchy (also returns the operation's ArgMatches)
+    let (operation, operation_matches) = find_operation_with_matches(spec, matches)?;
+
+    // Check if --examples flag is present in the operation's matches
+    // Only check if the flag was actually defined (it won't be in tests)
+    if operation_matches.try_get_one::<bool>("examples").is_ok()
+        && operation_matches.get_flag("examples")
+    {
+        print_extended_examples(operation);
+        return Ok(None);
+    }
 
     // Extract server variable arguments
     let server_var_args = extract_server_var_args(matches);
@@ -353,13 +362,19 @@ pub async fn execute_request(
     let base_url = resolver.resolve_with_variables(base_url, &server_var_args)?;
 
     // Build the full URL with path parameters
-    let url = build_url(&base_url, &operation.path, operation, matches)?;
+    let url = build_url(&base_url, &operation.path, operation, operation_matches)?;
 
     // Create HTTP client
     let client = build_http_client()?;
 
     // Build headers including authentication and idempotency
-    let mut headers = build_headers(spec, operation, matches, &spec.name, global_config)?;
+    let mut headers = build_headers(
+        spec,
+        operation,
+        operation_matches,
+        &spec.name,
+        global_config,
+    )?;
 
     // Add idempotency key if provided
     if let Some(key) = idempotency_key {
@@ -377,7 +392,7 @@ pub async fn execute_request(
     let mut request = client.request(method.clone(), &url).headers(headers);
 
     // Extract request body
-    let request_body = extract_request_body(operation, matches)?;
+    let request_body = extract_request_body(operation, operation_matches)?;
     if let Some(ref body) = request_body {
         let json_body: Value = serde_json::from_str(body)
             .expect("JSON body was validated in extract_request_body, parsing should succeed");
@@ -453,6 +468,53 @@ pub async fn execute_request(
 }
 
 /// Finds the operation from the command hierarchy
+/// Print extended examples for a command
+fn print_extended_examples(operation: &CachedCommand) {
+    println!("Command: {}\n", to_kebab_case(&operation.operation_id));
+
+    if let Some(ref summary) = operation.summary {
+        println!("Description: {summary}\n");
+    }
+
+    println!("Method: {} {}\n", operation.method, operation.path);
+
+    if operation.examples.is_empty() {
+        println!("No examples available for this command.");
+        return;
+    }
+
+    println!("Examples:\n");
+    for (i, example) in operation.examples.iter().enumerate() {
+        println!("{}. {}", i + 1, example.description);
+        println!("   {}", example.command_line);
+        if let Some(ref explanation) = example.explanation {
+            println!("   {explanation}");
+        }
+        println!();
+    }
+
+    // Additional helpful information
+    if !operation.parameters.is_empty() {
+        println!("Parameters:");
+        for param in &operation.parameters {
+            let required = if param.required { " (required)" } else { "" };
+            let param_type = param.schema_type.as_deref().unwrap_or("string");
+            println!("  --{}{} [{}]", param.name, required, param_type);
+            if let Some(ref desc) = param.description {
+                println!("      {desc}");
+            }
+        }
+        println!();
+    }
+
+    if operation.request_body.is_some() {
+        println!("Request Body:");
+        println!("  --body JSON (required)");
+        println!("      JSON data to send in the request body");
+    }
+}
+
+#[allow(dead_code)]
 fn find_operation<'a>(
     spec: &'a CachedSpec,
     matches: &ArgMatches,
@@ -474,6 +536,39 @@ fn find_operation<'a>(
             let kebab_id = to_kebab_case(&command.operation_id);
             if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
                 return Ok(command);
+            }
+        }
+    }
+
+    let operation_name = subcommand_path
+        .last()
+        .map_or("unknown".to_string(), ToString::to_string);
+    Err(Error::operation_not_found(operation_name))
+}
+
+fn find_operation_with_matches<'a>(
+    spec: &'a CachedSpec,
+    matches: &'a ArgMatches,
+) -> Result<(&'a CachedCommand, &'a ArgMatches), Error> {
+    // Get the subcommand path from matches
+    let mut current_matches = matches;
+    let mut subcommand_path = Vec::new();
+    let mut final_matches = matches;
+
+    while let Some((name, sub_matches)) = current_matches.subcommand() {
+        subcommand_path.push(name);
+        final_matches = current_matches;
+        current_matches = sub_matches;
+    }
+
+    // For now, just find the first matching operation
+    // In a real implementation, we'd match based on the full path
+    if let Some(operation_name) = subcommand_path.last() {
+        for command in &spec.commands {
+            // Convert operation_id to kebab-case for comparison
+            let kebab_id = to_kebab_case(&command.operation_id);
+            if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
+                return Ok((command, final_matches));
             }
         }
     }

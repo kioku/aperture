@@ -67,6 +67,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 tags: vec!["users".to_string()],
                 deprecated: false,
                 external_docs_url: None,
+                examples: vec![],
             },
             CachedCommand {
                 name: "posts".to_string(),
@@ -90,6 +91,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 tags: vec!["posts".to_string()],
                 deprecated: false,
                 external_docs_url: None,
+                examples: vec![],
             },
         ],
         base_url: Some("https://api.example.com".to_string()),

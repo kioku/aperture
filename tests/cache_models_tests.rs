@@ -28,6 +28,7 @@ fn test_cached_spec_serialization_deserialization() {
                 tags: vec!["get-user".to_string()],
                 deprecated: false,
                 external_docs_url: None,
+                examples: vec![],
             },
             CachedCommand {
                 name: "create-user".to_string(),
@@ -48,6 +49,7 @@ fn test_cached_spec_serialization_deserialization() {
                 tags: vec!["create-user".to_string()],
                 deprecated: false,
                 external_docs_url: None,
+                examples: vec![],
             },
         ],
         base_url: Some("https://api.example.com".to_string()),
