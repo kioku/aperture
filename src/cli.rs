@@ -222,6 +222,44 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Get detailed help and documentation for APIs and commands
+    #[command(
+        long_about = "Get comprehensive help and documentation for APIs and operations.\n\n\
+                      This provides detailed information including parameters, examples,\n\
+                      response schemas, and authentication requirements. Use it to learn\n\
+                      about available functionality without trial and error.\n\n\
+                      Examples:\n  \
+                      aperture help                        # Interactive help menu\n  \
+                      aperture help myapi                  # API overview\n  \
+                      aperture help myapi users get-user  # Detailed command help"
+    )]
+    Help {
+        /// API name (optional, shows interactive menu if omitted)
+        api: Option<String>,
+        /// Tag/category name (optional)
+        tag: Option<String>,
+        /// Operation name (optional)
+        operation: Option<String>,
+        /// Show enhanced formatting with examples
+        #[arg(long, help = "Enhanced formatting with examples and tips")]
+        enhanced: bool,
+    },
+    /// Show API overview with statistics and quick start guide
+    #[command(
+        long_about = "Display comprehensive API overview with statistics and examples.\n\n\
+                      Shows operation counts, method distribution, available categories,\n\
+                      and sample commands to help you get started quickly with any API.\n\n\
+                      Examples:\n  \
+                      aperture overview myapi\n  \
+                      aperture overview --all  # Overview of all registered APIs"
+    )]
+    Overview {
+        /// API name (required unless using --all)
+        api: Option<String>,
+        /// Show overview for all registered APIs
+        #[arg(long, conflicts_with = "api", help = "Show overview for all APIs")]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

@@ -5,13 +5,13 @@ use aperture_cli::cli::{Cli, Commands, ConfigCommands};
 use aperture_cli::config::manager::{get_config_dir, ConfigManager};
 use aperture_cli::config::models::{GlobalConfig, SecretSource};
 use aperture_cli::constants;
+use aperture_cli::docs::{DocumentationGenerator, HelpFormatter};
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
 use aperture_cli::response_cache::{CacheConfig, ResponseCache};
 use aperture_cli::search::{format_search_results, CommandSearcher};
 use aperture_cli::shortcuts::{ResolutionResult, ShortcutResolver};
-use aperture_cli::utils::to_kebab_case;
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
@@ -227,6 +227,23 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
         Commands::Exec { ref args } => {
             execute_shortcut_command(manager, args.clone(), &cli).await?;
         }
+        Commands::Help {
+            ref api,
+            ref tag,
+            ref operation,
+            enhanced,
+        } => {
+            execute_help_command(
+                manager,
+                api.as_deref(),
+                tag.as_deref(),
+                operation.as_deref(),
+                enhanced,
+            )?;
+        }
+        Commands::Overview { ref api, all } => {
+            execute_overview_command(manager, api.as_deref(), all)?;
+        }
     }
 
     Ok(())
@@ -305,51 +322,15 @@ fn list_commands(context: &str) -> Result<(), Error> {
         _ => e,
     })?;
 
-    // Group commands by their primary tag
-    let mut tag_groups: std::collections::BTreeMap<
-        String,
-        Vec<&aperture_cli::cache::models::CachedCommand>,
-    > = std::collections::BTreeMap::new();
+    // Use enhanced formatter for better output
+    let formatted_output = HelpFormatter::format_command_list(&spec);
+    println!("{formatted_output}");
 
-    for command in &spec.commands {
-        let primary_tag = command.tags.first().map_or_else(
-            || constants::DEFAULT_GROUP.to_string(),
-            std::clone::Clone::clone,
-        );
-        tag_groups.entry(primary_tag).or_default().push(command);
-    }
-
-    println!("Available commands for API: {}", spec.name);
-    println!("API Version: {}", spec.version);
-    if let Some(base_url) = &spec.base_url {
-        println!("Base URL: {base_url}");
-    }
-    println!();
-
-    if tag_groups.is_empty() {
-        println!("No commands available for this API.");
-        return Ok(());
-    }
-
-    for (tag, commands) in tag_groups {
-        println!("{tag}");
-        for command in commands {
-            let kebab_id = to_kebab_case(&command.operation_id);
-            let description = command
-                .summary
-                .as_ref()
-                .or(command.description.as_ref())
-                .map(|s| format!(" - {s}"))
-                .unwrap_or_default();
-            println!(
-                "  ├─ {} ({}){}",
-                kebab_id,
-                command.method.to_uppercase(),
-                description
-            );
-        }
-        println!();
-    }
+    // Add helpful tips at the end
+    println!("💡 **Tips**:");
+    println!("   • Use 'aperture help {context}' for detailed API documentation");
+    println!("   • Use 'aperture search <term> --api {context}' to find specific operations");
+    println!("   • Use shortcuts: 'aperture exec <operation-id> --help'");
 
     Ok(())
 }
@@ -1007,4 +988,143 @@ fn count_shortcut_args(args: &[String]) -> usize {
     // If no flags found, assume up to 3 args can be shortcut components
     // (e.g., "users", "get", "by-id" but not more than that)
     std::cmp::min(args.len(), 3)
+}
+
+/// Execute help command with enhanced documentation
+fn execute_help_command(
+    manager: &ConfigManager<OsFileSystem>,
+    api_name: Option<&str>,
+    tag: Option<&str>,
+    operation: Option<&str>,
+    enhanced: bool,
+) -> Result<(), Error> {
+    match (api_name, tag, operation) {
+        // No arguments - show interactive help menu
+        (None, None, None) => {
+            let specs = load_all_specs(manager)?;
+            let doc_gen = DocumentationGenerator::new(specs);
+            println!("{}", doc_gen.generate_interactive_menu());
+        }
+        // API specified - show API overview or specific command help
+        (Some(api), tag_opt, operation_opt) => {
+            let specs = load_all_specs(manager)?;
+            let doc_gen = DocumentationGenerator::new(specs);
+
+            match (tag_opt, operation_opt) {
+                // Just API name - show API overview
+                (None, None) => {
+                    let overview = doc_gen.generate_api_overview(api)?;
+                    println!("{overview}");
+                }
+                // API and tag and operation - show detailed command help
+                (Some(tag), Some(op)) => {
+                    let help = doc_gen.generate_command_help(api, tag, op)?;
+                    if enhanced {
+                        println!("{help}");
+                    } else {
+                        // Show simplified help
+                        println!("{}", help.lines().take(20).collect::<Vec<_>>().join("\n"));
+                        println!("\n💡 Use --enhanced for full documentation with examples");
+                    }
+                }
+                // Invalid combination
+                _ => {
+                    eprintln!("Invalid help command. Usage:");
+                    eprintln!("  aperture help                        # Interactive menu");
+                    eprintln!("  aperture help <api>                  # API overview");
+                    eprintln!("  aperture help <api> <tag> <operation> # Command help");
+                    std::process::exit(1);
+                }
+            }
+        }
+        // Invalid combination
+        _ => {
+            eprintln!("Invalid help command arguments");
+            std::process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
+/// Execute overview command
+fn execute_overview_command(
+    manager: &ConfigManager<OsFileSystem>,
+    api_name: Option<&str>,
+    all: bool,
+) -> Result<(), Error> {
+    if all {
+        let specs = load_all_specs(manager)?;
+        if specs.is_empty() {
+            println!("No API specifications configured.");
+            println!("Use 'aperture config add <name> <spec-file>' to get started.");
+            return Ok(());
+        }
+
+        println!("📊 All APIs Overview\n");
+        println!("{}", "═".repeat(60));
+
+        for (api_name, spec) in &specs {
+            println!("\n🔗 **{}** (v{})", spec.name, spec.version);
+
+            if let Some(ref base_url) = spec.base_url {
+                println!("   Base URL: {base_url}");
+            }
+
+            let operation_count = spec.commands.len();
+            println!("   Operations: {operation_count}");
+
+            // Count methods
+            let mut method_counts = std::collections::BTreeMap::new();
+            for command in &spec.commands {
+                *method_counts.entry(command.method.clone()).or_insert(0) += 1;
+            }
+
+            let method_summary: Vec<String> = method_counts
+                .iter()
+                .map(|(method, count)| format!("{method}: {count}"))
+                .collect();
+            println!("   Methods: {}", method_summary.join(", "));
+
+            println!("   Quick start: aperture list-commands {api_name}");
+        }
+
+        println!("\n{}", "═".repeat(60));
+        println!("💡 Use 'aperture overview <api>' for detailed information about a specific API");
+    } else if let Some(api) = api_name {
+        let specs = load_all_specs(manager)?;
+        let doc_gen = DocumentationGenerator::new(specs);
+        let overview = doc_gen.generate_api_overview(api)?;
+        println!("{overview}");
+    } else {
+        eprintln!("Error: Must specify API name or use --all flag");
+        eprintln!("Usage:");
+        eprintln!("  aperture overview <api>");
+        eprintln!("  aperture overview --all");
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+/// Load all cached specs from the manager
+fn load_all_specs(
+    manager: &ConfigManager<OsFileSystem>,
+) -> Result<std::collections::BTreeMap<String, CachedSpec>, Error> {
+    let specs = manager.list_specs()?;
+    let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
+    let mut all_specs = std::collections::BTreeMap::new();
+
+    for spec_name in &specs {
+        match loader::load_cached_spec(&cache_dir, spec_name) {
+            Ok(spec) => {
+                all_specs.insert(spec_name.clone(), spec);
+            }
+            Err(e) => {
+                eprintln!("Warning: Could not load spec '{spec_name}': {e}");
+            }
+        }
+    }
+
+    Ok(all_specs)
 }
