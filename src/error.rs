@@ -824,7 +824,7 @@ impl Error {
         };
 
         Self::Internal {
-            kind: ErrorKind::Runtime,
+            kind: ErrorKind::Validation,
             message: Cow::Owned(format!("Operation '{operation}' not found")),
             context: Some(ErrorContext::new(
                 Some(json!({

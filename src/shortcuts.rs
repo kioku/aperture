@@ -149,12 +149,15 @@ impl ShortcutResolver {
         match candidates.len() {
             0 => ResolutionResult::NotFound,
             1 => {
-                // Safe to unwrap since we know there's exactly one element
-                let candidate = candidates
-                    .into_iter()
-                    .next()
-                    .expect("candidates should have exactly one element");
-                ResolutionResult::Resolved(Box::new(candidate))
+                // Handle the single candidate case safely
+                candidates.into_iter().next().map_or_else(
+                    || {
+                        // This should never happen given len() == 1, but handle defensively
+                        eprintln!("Warning: Expected exactly one candidate but found none");
+                        ResolutionResult::NotFound
+                    },
+                    |candidate| ResolutionResult::Resolved(Box::new(candidate)),
+                )
             }
             _ => {
                 // Sort by confidence score (descending)
@@ -165,12 +168,15 @@ impl ShortcutResolver {
                     && (candidates.len() == 1
                         || candidates[0].confidence > candidates[1].confidence + 10)
                 {
-                    // Safe to unwrap since we know candidates is not empty (len >= 2)
-                    let candidate = candidates
-                        .into_iter()
-                        .next()
-                        .expect("candidates should not be empty after sorting");
-                    ResolutionResult::Resolved(Box::new(candidate))
+                    // Handle the high-confidence candidate case safely
+                    candidates.into_iter().next().map_or_else(
+                        || {
+                            // This should never happen given we just accessed candidates[0], but handle defensively
+                            eprintln!("Warning: Expected candidates after sorting but found none");
+                            ResolutionResult::NotFound
+                        },
+                        |candidate| ResolutionResult::Resolved(Box::new(candidate)),
+                    )
                 } else {
                     ResolutionResult::Ambiguous(candidates)
                 }

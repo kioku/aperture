@@ -1,8 +1,8 @@
 //! Documentation and help system for improved CLI discoverability
 
 #![allow(
-    clippy::format_push_string,  // Many format operations for string building
-    clippy::uninlined_format_args  // Legacy format style for consistency
+    clippy::format_push_string,  // Many format operations for string building - TODO: Convert to write! macro
+    clippy::uninlined_format_args  // Format args to be inlined - TODO: Fix remaining instances
 )]
 
 use crate::cache::models::{CachedCommand, CachedSpec};
@@ -86,10 +86,11 @@ impl DocumentationGenerator {
     /// Add usage section with command syntax
     fn add_usage_section(help: &mut String, api_name: &str, tag: &str, operation_id: &str) {
         help.push_str("## Usage\n\n");
-        help.push_str(&format!(
-            "```bash\naperture api {} {} {}\n```\n\n",
-            api_name, tag, operation_id
-        ));
+        write!(
+            help,
+            "```bash\naperture api {api_name} {tag} {operation_id}\n```\n\n"
+        )
+        .ok();
     }
 
     /// Add parameters section if parameters exist
@@ -103,13 +104,15 @@ impl DocumentationGenerator {
                     ""
                 };
                 let param_type = param.schema_type.as_deref().unwrap_or("string");
-                help.push_str(&format!(
-                    "- `--{}` ({}){}  - {}\n",
+                writeln!(
+                    help,
+                    "- `--{}` ({}){}  - {}",
                     to_kebab_case(&param.name),
                     param_type,
                     required_badge,
                     param.description.as_deref().unwrap_or("No description")
-                ));
+                )
+                .ok();
             }
             help.push('\n');
         }
@@ -122,7 +125,7 @@ impl DocumentationGenerator {
             if let Some(ref description) = body.description {
                 write!(help, "{description}\n\n").unwrap();
             }
-            help.push_str(&format!("Required: {}\n\n", body.required));
+            write!(help, "Required: {}\n\n", body.required).ok();
         }
     }
 
@@ -145,12 +148,12 @@ impl DocumentationGenerator {
         } else {
             help.push_str("## Examples\n\n");
             for (i, example) in command.examples.iter().enumerate() {
-                help.push_str(&format!("### Example {}\n\n", i + 1));
-                help.push_str(&format!("**{}**\n\n", example.description));
+                write!(help, "### Example {}\n\n", i + 1).ok();
+                write!(help, "**{}**\n\n", example.description).ok();
                 if let Some(ref explanation) = example.explanation {
-                    help.push_str(&format!("{}\n\n", explanation));
+                    write!(help, "{explanation}\n\n").ok();
                 }
-                help.push_str(&format!("```bash\n{}\n```\n\n", example.command_line));
+                write!(help, "```bash\n{}\n```\n\n", example.command_line).ok();
             }
         }
     }
@@ -160,11 +163,13 @@ impl DocumentationGenerator {
         if !command.responses.is_empty() {
             help.push_str("## Responses\n\n");
             for response in &command.responses {
-                help.push_str(&format!(
-                    "- **{}**: {}\n",
+                writeln!(
+                    help,
+                    "- **{}**: {}",
                     response.status_code,
                     response.description.as_deref().unwrap_or("No description")
-                ));
+                )
+                .ok();
             }
             help.push('\n');
         }
@@ -176,7 +181,7 @@ impl DocumentationGenerator {
             help.push_str("## Authentication\n\n");
             help.push_str("This operation requires authentication. Available schemes:\n\n");
             for scheme_name in &command.security_requirements {
-                help.push_str(&format!("- {}\n", scheme_name));
+                writeln!(help, "- {scheme_name}").ok();
             }
             help.push('\n');
         }
@@ -189,7 +194,7 @@ impl DocumentationGenerator {
         }
 
         if let Some(ref docs_url) = command.external_docs_url {
-            help.push_str(&format!("📖 **External Documentation**: {}\n\n", docs_url));
+            write!(help, "📖 **External Documentation**: {docs_url}\n\n").ok();
         }
     }
 
@@ -200,21 +205,20 @@ impl DocumentationGenerator {
         operation_id: &str,
         command: &CachedCommand,
     ) -> String {
-        let mut example = format!(
-            "```bash\naperture api {} {} {}",
-            api_name, tag, operation_id
-        );
+        let mut example = format!("```bash\naperture api {api_name} {tag} {operation_id}");
 
         // Add required parameters
         for param in &command.parameters {
             if param.required {
                 let param_type = param.schema_type.as_deref().unwrap_or("string");
                 let example_value = Self::generate_example_value(param_type);
-                example.push_str(&format!(
+                write!(
+                    example,
                     " --{} {}",
                     to_kebab_case(&param.name),
                     example_value
-                ));
+                )
+                .ok();
             }
         }
 
@@ -253,11 +257,11 @@ impl DocumentationGenerator {
         let mut overview = String::new();
 
         // API header
-        overview.push_str(&format!("# {} API\n\n", spec.name));
-        overview.push_str(&format!("**Version**: {}\n", spec.version));
+        write!(overview, "# {} API\n\n", spec.name).ok();
+        writeln!(overview, "**Version**: {}", spec.version).ok();
 
         if let Some(ref base_url) = spec.base_url {
-            overview.push_str(&format!("**Base URL**: {}\n", base_url));
+            writeln!(overview, "**Base URL**: {base_url}").ok();
         }
         overview.push('\n');
 
@@ -278,14 +282,14 @@ impl DocumentationGenerator {
         }
 
         overview.push_str("## Statistics\n\n");
-        overview.push_str(&format!("- **Total Operations**: {}\n", total_operations));
+        writeln!(overview, "- **Total Operations**: {total_operations}").ok();
         overview.push_str("- **Methods**:\n");
         for (method, count) in method_counts {
-            overview.push_str(&format!("  - {}: {}\n", method, count));
+            writeln!(overview, "  - {method}: {count}").ok();
         }
         overview.push_str("- **Categories**:\n");
         for (tag, count) in tag_counts {
-            overview.push_str(&format!("  - {}: {}\n", tag, count));
+            writeln!(overview, "  - {tag}: {count}").ok();
         }
         overview.push('\n');
 

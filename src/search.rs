@@ -83,27 +83,11 @@ impl CommandSearcher {
                 let summary = command.summary.as_deref().unwrap_or("");
                 let description = command.description.as_deref().unwrap_or("");
 
-                // Pre-calculate capacity to avoid multiple allocations
-                let capacity = operation_id_kebab.len()
-                    + command.operation_id.len()
-                    + command.method.len()
-                    + command.path.len()
-                    + summary.len()
-                    + description.len()
-                    + 6; // 6 spaces
-
-                let mut search_text = String::with_capacity(capacity);
-                search_text.push_str(&operation_id_kebab);
-                search_text.push(' ');
-                search_text.push_str(&command.operation_id);
-                search_text.push(' ');
-                search_text.push_str(&command.method);
-                search_text.push(' ');
-                search_text.push_str(&command.path);
-                search_text.push(' ');
-                search_text.push_str(summary);
-                search_text.push(' ');
-                search_text.push_str(description);
+                // Use format! for more efficient single allocation
+                let search_text = format!(
+                    "{operation_id_kebab} {} {} {} {summary} {description}",
+                    command.operation_id, command.method, command.path
+                );
 
                 // Score based on different matching strategies
                 if let Some(ref regex) = regex_pattern {
