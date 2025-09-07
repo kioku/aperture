@@ -12,4 +12,5 @@ pub mod resilience;
 pub mod response_cache;
 pub mod search;
 pub mod spec;
+pub mod suggestions;
 pub mod utils;

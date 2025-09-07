@@ -395,6 +395,7 @@ impl Error {
         use serde_json::json;
         let scheme_name = scheme_name.into();
         let env_var = env_var.into();
+        let suggestion = crate::suggestions::suggest_auth_fix(&scheme_name, Some(&env_var));
         Self::Internal {
             kind: ErrorKind::Authentication,
             message: Cow::Owned(format!(
@@ -402,7 +403,7 @@ impl Error {
             )),
             context: Some(ErrorContext::new(
                 Some(json!({ "scheme_name": scheme_name, "env_var": env_var })),
-                Some(Cow::Owned(format!("Set the environment variable: export {env_var}=<your-secret>"))),
+                Some(Cow::Owned(suggestion)),
             )),
         }
     }
