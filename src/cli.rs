@@ -183,6 +183,26 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Search for API operations across all specifications
+    #[command(long_about = "Search for API operations by keyword or pattern.\n\n\
+                      Search through all registered API specifications to find\n\
+                      relevant operations. The search includes operation IDs,\n\
+                      descriptions, paths, and HTTP methods.\n\n\
+                      Examples:\n  \
+                      aperture search 'list users'     # Find user listing operations\n  \
+                      aperture search 'POST create'     # Find POST operations with 'create'\n  \
+                      aperture search issues --api sm   # Search only in 'sm' API\n  \
+                      aperture search 'get.*by.*id'     # Regex pattern search")]
+    Search {
+        /// Search query (keywords, patterns, or regex)
+        query: String,
+        /// Limit search to a specific API context
+        #[arg(long, value_name = "API", help = "Search only in specified API")]
+        api: Option<String>,
+        /// Show detailed results including paths and parameters
+        #[arg(long, help = "Show detailed information for each result")]
+        verbose: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

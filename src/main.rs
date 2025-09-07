@@ -9,6 +9,7 @@ use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
 use aperture_cli::response_cache::{CacheConfig, ResponseCache};
+use aperture_cli::search::{format_search_results, CommandSearcher};
 use aperture_cli::utils::to_kebab_case;
 use clap::Parser;
 use std::fs;
@@ -215,6 +216,71 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
         } => {
             execute_api_command(context, args.clone(), &cli).await?;
         }
+        Commands::Search {
+            ref query,
+            ref api,
+            verbose,
+        } => {
+            execute_search_command(manager, query, api.as_deref(), verbose)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn execute_search_command(
+    manager: &ConfigManager<OsFileSystem>,
+    query: &str,
+    api_filter: Option<&str>,
+    verbose: bool,
+) -> Result<(), Error> {
+    // Get all registered APIs
+    let specs = manager.list_specs()?;
+
+    if specs.is_empty() {
+        println!("No API specifications found. Use 'aperture config add' to register APIs.");
+        return Ok(());
+    }
+
+    // Load all cached specs
+    let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
+    let mut all_specs = std::collections::BTreeMap::new();
+
+    for spec_name in &specs {
+        // Skip if we have an API filter and this isn't the one
+        if let Some(filter) = api_filter {
+            if spec_name != filter {
+                continue;
+            }
+        }
+
+        match loader::load_cached_spec(&cache_dir, spec_name) {
+            Ok(spec) => {
+                all_specs.insert(spec_name.clone(), spec);
+            }
+            Err(e) => {
+                eprintln!("Warning: Could not load spec '{spec_name}': {e}");
+            }
+        }
+    }
+
+    if all_specs.is_empty() {
+        if let Some(filter) = api_filter {
+            println!("API '{filter}' not found or could not be loaded.");
+        } else {
+            println!("No API specifications could be loaded.");
+        }
+        return Ok(());
+    }
+
+    // Perform the search
+    let searcher = CommandSearcher::new();
+    let results = searcher.search(&all_specs, query, api_filter)?;
+
+    // Format and display results
+    let output = format_search_results(&results, verbose);
+    for line in output {
+        println!("{line}");
     }
 
     Ok(())

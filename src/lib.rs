@@ -10,5 +10,6 @@ pub mod fs;
 pub mod interactive;
 pub mod resilience;
 pub mod response_cache;
+pub mod search;
 pub mod spec;
 pub mod utils;
