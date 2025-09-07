@@ -203,6 +203,25 @@ pub enum Commands {
         #[arg(long, help = "Show detailed information for each result")]
         verbose: bool,
     },
+    /// Execute API operations using shortcuts or direct operation IDs
+    #[command(
+        name = "exec",
+        long_about = "Execute API operations using shortcuts instead of full paths.\n\n\
+                      This command attempts to resolve shortcuts to their full command paths:\n\
+                      - Direct operation IDs: getUserById --id 123\n\
+                      - HTTP method + path: GET /users/123\n\
+                      - Tag-based shortcuts: users list\n\n\
+                      When multiple matches are found, you'll get suggestions to choose from.\n\n\
+                      Examples:\n  \
+                      aperture exec getUserById --id 123\n  \
+                      aperture exec GET /users/123\n  \
+                      aperture exec users list"
+    )]
+    Exec {
+        /// Shortcut command arguments
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
