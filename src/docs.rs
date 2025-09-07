@@ -1,9 +1,6 @@
 //! Documentation and help system for improved CLI discoverability
 
-#![allow(
-    clippy::format_push_string,  // Many format operations for string building - TODO: Convert to write! macro
-    clippy::uninlined_format_args  // Format args to be inlined - TODO: Fix remaining instances
-)]
+// Note: Previously suppressed clippy lints have been fixed
 
 use crate::cache::models::{CachedCommand, CachedSpec};
 use crate::error::Error;
@@ -295,15 +292,16 @@ impl DocumentationGenerator {
 
         // Quick start examples
         overview.push_str("## Quick Start\n\n");
-        overview.push_str(&format!(
-            "List all available commands:\n```bash\naperture list-commands {}\n```\n\n",
-            api_name
-        ));
+        write!(
+            overview,
+            "List all available commands:\n```bash\naperture list-commands {api_name}\n```\n\n"
+        )
+        .ok();
 
-        overview.push_str(&format!(
-            "Search for specific operations:\n```bash\naperture search \"keyword\" --api {}\n```\n\n",
-            api_name
-        ));
+        write!(
+            overview,
+            "Search for specific operations:\n```bash\naperture search \"keyword\" --api {api_name}\n```\n\n"
+        ).ok();
 
         // Show first few operations as examples
         if !spec.commands.is_empty() {
@@ -311,16 +309,14 @@ impl DocumentationGenerator {
             for (i, command) in spec.commands.iter().take(3).enumerate() {
                 let tag = command.tags.first().map_or("api", String::as_str);
                 let operation_kebab = to_kebab_case(&command.operation_id);
-                overview.push_str(&format!(
-                    "{}. **{}** ({})\n   ```bash\n   aperture api {} {} {}\n   ```\n   {}\n\n",
+                write!(
+                    overview,
+                    "{}. **{}** ({})\n   ```bash\n   aperture api {api_name} {tag} {operation_kebab}\n   ```\n   {}\n\n",
                     i + 1,
                     command.summary.as_deref().unwrap_or(&command.operation_id),
                     command.method.to_uppercase(),
-                    api_name,
-                    tag,
-                    operation_kebab,
                     command.description.as_deref().unwrap_or("No description")
-                ));
+                ).ok();
             }
         }
 
@@ -344,10 +340,12 @@ impl DocumentationGenerator {
             menu.push_str("## Your APIs\n\n");
             for (api_name, spec) in &self.specs {
                 let operation_count = spec.commands.len();
-                menu.push_str(&format!(
-                    "- **{}** ({} operations) - Version {}\n",
-                    api_name, operation_count, spec.version
-                ));
+                writeln!(
+                    menu,
+                    "- **{api_name}** ({operation_count} operations) - Version {}",
+                    spec.version
+                )
+                .ok();
             }
             menu.push('\n');
         }
@@ -381,15 +379,17 @@ impl HelpFormatter {
         let mut output = String::new();
 
         // Header with API info
-        output.push_str(&format!("📋 {} API Commands\n", spec.name));
-        output.push_str(&format!(
-            "   Version: {} | Operations: {}\n",
+        writeln!(output, "📋 {} API Commands", spec.name).ok();
+        writeln!(
+            output,
+            "   Version: {} | Operations: {}",
             spec.version,
             spec.commands.len()
-        ));
+        )
+        .ok();
 
         if let Some(ref base_url) = spec.base_url {
-            output.push_str(&format!("   Base URL: {base_url}\n"));
+            writeln!(output, "   Base URL: {base_url}").ok();
         }
         output.push_str(&"═".repeat(60));
         output.push('\n');
@@ -406,7 +406,7 @@ impl HelpFormatter {
         }
 
         for (tag, commands) in tag_groups {
-            output.push_str(&format!("\n📁 {tag}\n"));
+            writeln!(output, "\n📁 {tag}").ok();
             output.push_str(&"─".repeat(40));
             output.push('\n');
 
@@ -420,16 +420,18 @@ impl HelpFormatter {
                     .map(|s| format!(" - {}", s.lines().next().unwrap_or(s)))
                     .unwrap_or_default();
 
-                output.push_str(&format!(
-                    "  {} {} {}{}\n",
+                writeln!(
+                    output,
+                    "  {} {} {}{}",
                     method_badge,
                     operation_kebab,
                     if command.deprecated { "⚠️" } else { "" },
                     description
-                ));
+                )
+                .ok();
 
                 // Show path as subdued text
-                output.push_str(&format!("     {} {}\n", "Path:", command.path));
+                writeln!(output, "     Path: {}", command.path).ok();
             }
         }
 

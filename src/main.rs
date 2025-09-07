@@ -227,7 +227,7 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
         Commands::Exec { ref args } => {
             execute_shortcut_command(manager, args.clone(), &cli).await?;
         }
-        Commands::Help {
+        Commands::Docs {
             ref api,
             ref tag,
             ref operation,
@@ -328,7 +328,7 @@ fn list_commands(context: &str) -> Result<(), Error> {
 
     // Add helpful tips at the end
     println!("💡 **Tips**:");
-    println!("   • Use 'aperture help {context}' for detailed API documentation");
+    println!("   • Use 'aperture docs {context}' for detailed API documentation");
     println!("   • Use 'aperture search <term> --api {context}' to find specific operations");
     println!("   • Use shortcuts: 'aperture exec <operation-id> --help'");
 
@@ -1029,10 +1029,10 @@ fn execute_help_command(
                 }
                 // Invalid combination
                 _ => {
-                    eprintln!("Invalid help command. Usage:");
-                    eprintln!("  aperture help                        # Interactive menu");
-                    eprintln!("  aperture help <api>                  # API overview");
-                    eprintln!("  aperture help <api> <tag> <operation> # Command help");
+                    eprintln!("Invalid docs command. Usage:");
+                    eprintln!("  aperture docs                        # Interactive menu");
+                    eprintln!("  aperture docs <api>                  # API overview");
+                    eprintln!("  aperture docs <api> <tag> <operation> # Command help");
                     std::process::exit(1);
                 }
             }

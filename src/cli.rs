@@ -222,18 +222,18 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Get detailed help and documentation for APIs and commands
+    /// Get detailed documentation for APIs and commands
     #[command(
-        long_about = "Get comprehensive help and documentation for APIs and operations.\n\n\
+        long_about = "Get comprehensive documentation for APIs and operations.\n\n\
                       This provides detailed information including parameters, examples,\n\
                       response schemas, and authentication requirements. Use it to learn\n\
                       about available functionality without trial and error.\n\n\
                       Examples:\n  \
-                      aperture help                        # Interactive help menu\n  \
-                      aperture help myapi                  # API overview\n  \
-                      aperture help myapi users get-user  # Detailed command help"
+                      aperture docs                        # Interactive help menu\n  \
+                      aperture docs myapi                  # API overview\n  \
+                      aperture docs myapi users get-user  # Detailed command help"
     )]
-    Help {
+    Docs {
         /// API name (optional, shows interactive menu if omitted)
         api: Option<String>,
         /// Tag/category name (optional)
