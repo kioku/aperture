@@ -51,7 +51,21 @@ impl DocumentationGenerator {
 
         let mut help = String::new();
 
-        // Command title and description
+        // Build help sections
+        Self::add_command_header(&mut help, command);
+        Self::add_usage_section(&mut help, api_name, tag, operation_id);
+        Self::add_parameters_section(&mut help, command);
+        Self::add_request_body_section(&mut help, command);
+        Self::add_examples_section(&mut help, api_name, tag, operation_id, command);
+        Self::add_responses_section(&mut help, command);
+        Self::add_authentication_section(&mut help, command);
+        Self::add_metadata_section(&mut help, command);
+
+        Ok(help)
+    }
+
+    /// Add command header with title and description
+    fn add_command_header(help: &mut String, command: &CachedCommand) {
         help.push_str(&format!(
             "# {} {}\n\n",
             command.method.to_uppercase(),
@@ -65,15 +79,19 @@ impl DocumentationGenerator {
         if let Some(description) = &command.description {
             help.push_str(&format!("{}\n\n", description));
         }
+    }
 
-        // Usage section
+    /// Add usage section with command syntax
+    fn add_usage_section(help: &mut String, api_name: &str, tag: &str, operation_id: &str) {
         help.push_str("## Usage\n\n");
         help.push_str(&format!(
             "```bash\naperture api {} {} {}\n```\n\n",
             api_name, tag, operation_id
         ));
+    }
 
-        // Parameters section
+    /// Add parameters section if parameters exist
+    fn add_parameters_section(help: &mut String, command: &CachedCommand) {
         if !command.parameters.is_empty() {
             help.push_str("## Parameters\n\n");
             for param in &command.parameters {
@@ -84,7 +102,7 @@ impl DocumentationGenerator {
                 };
                 let param_type = param.schema_type.as_deref().unwrap_or("string");
                 help.push_str(&format!(
-                    "- `--{}` ({}){} - {}\n",
+                    "- `--{}` ({}){}  - {}\n",
                     to_kebab_case(&param.name),
                     param_type,
                     required_badge,
@@ -93,8 +111,10 @@ impl DocumentationGenerator {
             }
             help.push('\n');
         }
+    }
 
-        // Request body section
+    /// Add request body section if present
+    fn add_request_body_section(help: &mut String, command: &CachedCommand) {
         if let Some(ref body) = command.request_body {
             help.push_str("## Request Body\n\n");
             if let Some(ref description) = body.description {
@@ -102,8 +122,16 @@ impl DocumentationGenerator {
             }
             help.push_str(&format!("Required: {}\n\n", body.required));
         }
+    }
 
-        // Examples section
+    /// Add examples section with command examples
+    fn add_examples_section(
+        help: &mut String,
+        api_name: &str,
+        tag: &str,
+        operation_id: &str,
+        command: &CachedCommand,
+    ) {
         if !command.examples.is_empty() {
             help.push_str("## Examples\n\n");
             for (i, example) in command.examples.iter().enumerate() {
@@ -115,7 +143,6 @@ impl DocumentationGenerator {
                 help.push_str(&format!("```bash\n{}\n```\n\n", example.command_line));
             }
         } else {
-            // Generate basic example
             help.push_str("## Example\n\n");
             help.push_str(&Self::generate_basic_example(
                 api_name,
@@ -124,8 +151,10 @@ impl DocumentationGenerator {
                 command,
             ));
         }
+    }
 
-        // Response information
+    /// Add responses section if responses exist
+    fn add_responses_section(help: &mut String, command: &CachedCommand) {
         if !command.responses.is_empty() {
             help.push_str("## Responses\n\n");
             for response in &command.responses {
@@ -137,8 +166,10 @@ impl DocumentationGenerator {
             }
             help.push('\n');
         }
+    }
 
-        // Security requirements
+    /// Add authentication section if security requirements exist
+    fn add_authentication_section(help: &mut String, command: &CachedCommand) {
         if !command.security_requirements.is_empty() {
             help.push_str("## Authentication\n\n");
             help.push_str("This operation requires authentication. Available schemes:\n\n");
@@ -147,8 +178,10 @@ impl DocumentationGenerator {
             }
             help.push('\n');
         }
+    }
 
-        // Additional metadata
+    /// Add metadata section with deprecation and external docs
+    fn add_metadata_section(help: &mut String, command: &CachedCommand) {
         if command.deprecated {
             help.push_str("⚠️  **This operation is deprecated**\n\n");
         }
@@ -156,8 +189,6 @@ impl DocumentationGenerator {
         if let Some(ref docs_url) = command.external_docs_url {
             help.push_str(&format!("📖 **External Documentation**: {}\n\n", docs_url));
         }
-
-        Ok(help)
     }
 
     /// Generate a basic example for a command
