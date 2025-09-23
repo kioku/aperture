@@ -4,6 +4,7 @@ use crate::cache::models::{
 };
 use crate::constants;
 use crate::error::Error;
+use crate::utils::to_kebab_case;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 use serde_json;
 use std::collections::HashMap;
@@ -695,8 +696,6 @@ impl SpecTransformer {
         parameters: &[CachedParameter],
         request_body: Option<&CachedRequestBody>,
     ) -> Vec<CommandExample> {
-        use crate::utils::to_kebab_case;
-
         let mut examples = Vec::new();
         let operation_kebab = to_kebab_case(operation_id);
         let tag_lower = tag.to_lowercase();
