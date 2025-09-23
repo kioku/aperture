@@ -8,12 +8,25 @@ use crate::response_cache::{
     CacheConfig, CacheKey, CachedRequestInfo, CachedResponse, ResponseCache,
 };
 use crate::utils::to_kebab_case;
+use base64::{engine::general_purpose, Engine as _};
 use clap::ArgMatches;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
 use serde_json::Value;
-use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write;
 use std::str::FromStr;
+use tabled::Table;
+
+#[cfg(feature = "jq")]
+use jaq_interpret::{Ctx, FilterT, ParseCtx, RcIter, Val};
+#[cfg(feature = "jq")]
+use jaq_parse::parse;
+#[cfg(feature = "jq")]
+use jaq_std::std;
+#[cfg(feature = "jq")]
+use std::rc::Rc;
 
 /// Represents supported authentication schemes
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,7 +279,6 @@ async fn store_in_cache(
                 .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
                 .collect(),
             body_hash: body.map(|b| {
-                use sha2::{Digest, Sha256};
                 let mut hasher = Sha256::new();
                 hasher.update(b.as_bytes());
                 format!("{:x}", hasher.finalize())
@@ -848,7 +860,6 @@ fn add_authentication_header(
                         // Basic auth expects "username:password" format in the secret
                         // The secret should contain the raw "username:password" string
                         // We'll base64 encode it before adding to the header
-                        use base64::{engine::general_purpose, Engine as _};
                         let encoded = general_purpose::STANDARD.encode(&secret_value);
                         format!("Basic {encoded}")
                     }
@@ -975,9 +986,6 @@ struct KeyValue {
 /// Prints JSON data as a formatted table
 #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<String>, Error> {
-    use std::collections::BTreeMap;
-    use tabled::Table;
-
     match json_value {
         Value::Array(items) => {
             if items.is_empty() {
@@ -1052,7 +1060,6 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
             if capture_output {
                 let mut output = String::new();
                 for (i, item) in items.iter().enumerate() {
-                    use std::fmt::Write;
                     writeln!(&mut output, "{}: {}", i, format_value_for_table(item)).unwrap();
                 }
                 return Ok(Some(output.trim_end().to_string()));
@@ -1159,10 +1166,6 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
     #[cfg(feature = "jq")]
     {
         // Use jaq (pure Rust implementation) when available
-        use jaq_interpret::{Ctx, FilterT, ParseCtx, RcIter, Val};
-        use jaq_parse::parse;
-        use jaq_std::std;
-
         // Parse the filter expression
         let (expr, errs) = parse(filter, jaq_parse::main());
         if !errs.is_empty() {
@@ -1356,9 +1359,6 @@ fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
 #[cfg(feature = "jq")]
 /// Convert serde_json::Value to jaq Val
 fn serde_json_to_jaq_val(value: &Value) -> jaq_interpret::Val {
-    use jaq_interpret::Val;
-    use std::rc::Rc;
-
     match value {
         Value::Null => Val::Null,
         Value::Bool(b) => Val::Bool(*b),
@@ -1395,8 +1395,6 @@ fn serde_json_to_jaq_val(value: &Value) -> jaq_interpret::Val {
 #[cfg(feature = "jq")]
 /// Convert jaq Val to serde_json::Value
 fn jaq_val_to_serde_json(val: &jaq_interpret::Val) -> Value {
-    use jaq_interpret::Val;
-
     match val {
         Val::Null => Value::Null,
         Val::Bool(b) => Value::Bool(*b),

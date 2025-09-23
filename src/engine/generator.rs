@@ -3,6 +3,7 @@ use crate::constants;
 use crate::utils::to_kebab_case;
 use clap::{Arg, ArgAction, Command};
 use std::collections::HashMap;
+use std::fmt::Write;
 
 /// Converts a String to a 'static str by leaking it
 ///
@@ -107,7 +108,6 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
             if !cached_command.examples.is_empty() {
                 help_text.push_str("\n\nExamples:");
                 for example in &cached_command.examples {
-                    use std::fmt::Write;
                     write!(
                         &mut help_text,
                         "\n  {}\n    {}",
@@ -115,7 +115,6 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
                     )
                     .unwrap();
                     if let Some(ref explanation) = example.explanation {
-                        use std::fmt::Write;
                         write!(&mut help_text, "\n    ({explanation})").unwrap();
                     }
                 }
