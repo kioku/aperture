@@ -183,6 +183,83 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Search for API operations across all specifications
+    #[command(long_about = "Search for API operations by keyword or pattern.\n\n\
+                      Search through all registered API specifications to find\n\
+                      relevant operations. The search includes operation IDs,\n\
+                      descriptions, paths, and HTTP methods.\n\n\
+                      Examples:\n  \
+                      aperture search 'list users'     # Find user listing operations\n  \
+                      aperture search 'POST create'     # Find POST operations with 'create'\n  \
+                      aperture search issues --api sm   # Search only in 'sm' API\n  \
+                      aperture search 'get.*by.*id'     # Regex pattern search")]
+    Search {
+        /// Search query (keywords, patterns, or regex)
+        query: String,
+        /// Limit search to a specific API context
+        #[arg(long, value_name = "API", help = "Search only in specified API")]
+        api: Option<String>,
+        /// Show detailed results including paths and parameters
+        #[arg(long, help = "Show detailed information for each result")]
+        verbose: bool,
+    },
+    /// Execute API operations using shortcuts or direct operation IDs
+    #[command(
+        name = "exec",
+        long_about = "Execute API operations using shortcuts instead of full paths.\n\n\
+                      This command attempts to resolve shortcuts to their full command paths:\n\
+                      - Direct operation IDs: getUserById --id 123\n\
+                      - HTTP method + path: GET /users/123\n\
+                      - Tag-based shortcuts: users list\n\n\
+                      When multiple matches are found, you'll get suggestions to choose from.\n\n\
+                      Examples:\n  \
+                      aperture exec getUserById --id 123\n  \
+                      aperture exec GET /users/123\n  \
+                      aperture exec users list"
+    )]
+    Exec {
+        /// Shortcut command arguments
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Get detailed documentation for APIs and commands
+    #[command(
+        long_about = "Get comprehensive documentation for APIs and operations.\n\n\
+                      This provides detailed information including parameters, examples,\n\
+                      response schemas, and authentication requirements. Use it to learn\n\
+                      about available functionality without trial and error.\n\n\
+                      Examples:\n  \
+                      aperture docs                        # Interactive help menu\n  \
+                      aperture docs myapi                  # API overview\n  \
+                      aperture docs myapi users get-user  # Detailed command help"
+    )]
+    Docs {
+        /// API name (optional, shows interactive menu if omitted)
+        api: Option<String>,
+        /// Tag/category name (optional)
+        tag: Option<String>,
+        /// Operation name (optional)
+        operation: Option<String>,
+        /// Show enhanced formatting with examples
+        #[arg(long, help = "Enhanced formatting with examples and tips")]
+        enhanced: bool,
+    },
+    /// Show API overview with statistics and quick start guide
+    #[command(
+        long_about = "Display comprehensive API overview with statistics and examples.\n\n\
+                      Shows operation counts, method distribution, available categories,\n\
+                      and sample commands to help you get started quickly with any API.\n\n\
+                      Examples:\n  \
+                      aperture overview myapi\n  \
+                      aperture overview --all  # Overview of all registered APIs"
+    )]
+    Overview {
+        /// API name (required unless using --all)
+        api: Option<String>,
+        /// Show overview for all registered APIs
+        #[arg(long, conflicts_with = "api", help = "Show overview for all APIs")]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

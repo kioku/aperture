@@ -47,6 +47,7 @@ fn create_test_spec() -> CachedSpec {
             tags: vec!["users".to_string()],
             deprecated: false,
             external_docs_url: None,
+            examples: vec![],
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],

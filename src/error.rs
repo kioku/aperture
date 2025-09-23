@@ -395,6 +395,7 @@ impl Error {
         use serde_json::json;
         let scheme_name = scheme_name.into();
         let env_var = env_var.into();
+        let suggestion = crate::suggestions::suggest_auth_fix(&scheme_name, Some(&env_var));
         Self::Internal {
             kind: ErrorKind::Authentication,
             message: Cow::Owned(format!(
@@ -402,7 +403,7 @@ impl Error {
             )),
             context: Some(ErrorContext::new(
                 Some(json!({ "scheme_name": scheme_name, "env_var": env_var })),
-                Some(Cow::Owned(format!("Set the environment variable: export {env_var}=<your-secret>"))),
+                Some(Cow::Owned(suggestion)),
             )),
         }
     }
@@ -805,6 +806,32 @@ impl Error {
                 Some(Cow::Borrowed(
                     "Check available operations with --help or --describe-json",
                 )),
+            )),
+        }
+    }
+
+    /// Create an operation not found error with suggestions
+    pub fn operation_not_found_with_suggestions(
+        operation: impl Into<String>,
+        suggestions: &[String],
+    ) -> Self {
+        use serde_json::json;
+        let operation = operation.into();
+        let suggestion_text = if suggestions.is_empty() {
+            "Check available operations with --help or --describe-json".to_string()
+        } else {
+            format!("Did you mean one of these?\n{}", suggestions.join("\n"))
+        };
+
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Operation '{operation}' not found")),
+            context: Some(ErrorContext::new(
+                Some(json!({
+                    "operation": operation,
+                    "suggestions": suggestions
+                })),
+                Some(Cow::Owned(suggestion_text)),
             )),
         }
     }

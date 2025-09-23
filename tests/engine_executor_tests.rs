@@ -41,6 +41,7 @@ macro_rules! cached_command {
             tags: vec![$name.to_string()],
             deprecated: false,
             external_docs_url: None,
+            examples: vec![],
         }
     };
 }

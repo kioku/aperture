@@ -789,6 +789,7 @@ mod tests {
                 tags: vec!["users".to_string()],
                 deprecated: false,
                 external_docs_url: None,
+                examples: vec![],
             }],
             base_url: Some("https://test-api.example.com".to_string()),
             servers: vec!["https://test-api.example.com".to_string()],
