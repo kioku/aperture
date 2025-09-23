@@ -816,7 +816,10 @@ impl Default for SpecTransformer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openapiv3::{Info, OpenAPI};
+    use openapiv3::{
+        Components, Info, OpenAPI, Operation, Parameter, ParameterData, ParameterSchemaOrContent,
+        PathItem, ReferenceOr, Responses, Schema, SchemaData, SchemaKind, Type,
+    };
 
     fn create_test_spec() -> OpenAPI {
         OpenAPI {
@@ -947,8 +950,6 @@ mod tests {
 
     #[test]
     fn test_transform_with_operations() {
-        use openapiv3::{Operation, PathItem, ReferenceOr, Responses};
-
         let transformer = SpecTransformer::new();
         let mut spec = create_test_spec();
 
@@ -980,11 +981,6 @@ mod tests {
 
     #[test]
     fn test_transform_with_parameter_reference() {
-        use openapiv3::{
-            Components, Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem,
-            ReferenceOr, Responses, Schema, SchemaData, SchemaKind, Type,
-        };
-
         let transformer = SpecTransformer::new();
         let mut spec = create_test_spec();
 
@@ -1048,8 +1044,6 @@ mod tests {
 
     #[test]
     fn test_transform_with_invalid_parameter_reference() {
-        use openapiv3::{Operation, PathItem, ReferenceOr, Responses};
-
         let transformer = SpecTransformer::new();
         let mut spec = create_test_spec();
 
@@ -1083,8 +1077,6 @@ mod tests {
 
     #[test]
     fn test_transform_with_missing_parameter_reference() {
-        use openapiv3::{Components, Operation, PathItem, ReferenceOr, Responses};
-
         let transformer = SpecTransformer::new();
         let mut spec = create_test_spec();
 
@@ -1121,11 +1113,6 @@ mod tests {
 
     #[test]
     fn test_transform_with_nested_parameter_reference() {
-        use openapiv3::{
-            Components, Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem,
-            ReferenceOr, Responses, Schema, SchemaData, SchemaKind, Type,
-        };
-
         let transformer = SpecTransformer::new();
         let mut spec = create_test_spec();
 
@@ -1191,8 +1178,6 @@ mod tests {
 
     #[test]
     fn test_transform_with_circular_parameter_reference() {
-        use openapiv3::{Components, Operation, PathItem, ReferenceOr, Responses};
-
         let transformer = SpecTransformer::new();
         let mut spec = create_test_spec();
 
@@ -1242,8 +1227,6 @@ mod tests {
 
     #[test]
     fn test_transform_with_indirect_circular_reference() {
-        use openapiv3::{Components, Operation, PathItem, ReferenceOr, Responses};
-
         let transformer = SpecTransformer::new();
         let mut spec = create_test_spec();
 
@@ -1300,8 +1283,6 @@ mod tests {
 
     #[test]
     fn test_transform_with_complex_circular_reference() {
-        use openapiv3::{Components, Operation, PathItem, ReferenceOr, Responses};
-
         let transformer = SpecTransformer::new();
         let mut spec = create_test_spec();
 
@@ -1365,11 +1346,6 @@ mod tests {
 
     #[test]
     fn test_transform_with_depth_limit() {
-        use openapiv3::{
-            Components, Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem,
-            ReferenceOr, Responses, Schema, SchemaData, SchemaKind, Type,
-        };
-
         let transformer = SpecTransformer::new();
         let mut spec = create_test_spec();
 

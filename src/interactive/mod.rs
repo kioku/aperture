@@ -391,6 +391,7 @@ pub fn handle_cancellation_input() -> Result<bool, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants;
 
     #[test]
     fn test_select_from_options_empty() {
@@ -401,7 +402,6 @@ mod tests {
 
     #[test]
     fn test_select_from_options_structure() {
-        use crate::constants;
         let options = vec![
             (
                 "bearerAuth".to_string(),

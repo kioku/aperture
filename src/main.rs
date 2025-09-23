@@ -420,9 +420,6 @@ fn list_specs_with_details(
 }
 
 fn display_skipped_endpoints_info(cached_spec: &aperture_cli::cache::models::CachedSpec) {
-    use aperture_cli::config::manager::ConfigManager;
-    use aperture_cli::fs::OsFileSystem;
-
     // Convert to warnings for consistent display
     let warnings = ConfigManager::<OsFileSystem>::skipped_endpoints_to_warnings(
         &cached_spec.skipped_endpoints,
