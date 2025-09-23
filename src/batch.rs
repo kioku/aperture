@@ -1,5 +1,6 @@
 use crate::cache::models::CachedSpec;
 use crate::config::models::GlobalConfig;
+use crate::engine::generator;
 use crate::error::Error;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use serde::{Deserialize, Serialize};
@@ -308,8 +309,6 @@ impl BatchProcessor {
         jq_filter: Option<&str>,
         suppress_output: bool,
     ) -> Result<String, Error> {
-        use crate::engine::generator;
-
         // Generate the command tree (we don't use experimental flags for batch operations)
         let command = generator::generate_command_tree_with_flags(spec, false);
 

@@ -7,6 +7,7 @@ use crate::error::Error;
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 use serde_json;
 use std::collections::HashMap;
+use std::fmt::Write;
 
 /// Options for transforming an `OpenAPI` specification
 #[derive(Debug, Clone)]
@@ -710,7 +711,6 @@ impl SpecTransformer {
         if !required_params.is_empty() {
             let mut cmd = base_cmd.clone();
             for param in &required_params {
-                use std::fmt::Write;
                 write!(
                     &mut cmd,
                     " --{} {}",
@@ -734,7 +734,6 @@ impl SpecTransformer {
             // Add required path/query parameters
             for param in &required_params {
                 if param.location == "path" || param.location == "query" {
-                    use std::fmt::Write;
                     write!(
                         &mut cmd,
                         " --{} {}",
@@ -767,7 +766,6 @@ impl SpecTransformer {
 
             // Add required parameters
             for param in &required_params {
-                use std::fmt::Write;
                 write!(
                     &mut cmd,
                     " --{} {}",
@@ -779,7 +777,6 @@ impl SpecTransformer {
 
             // Add optional parameters
             for param in &optional_params {
-                use std::fmt::Write;
                 write!(
                     &mut cmd,
                     " --{} {}",

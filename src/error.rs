@@ -353,7 +353,6 @@ impl Error {
 
     /// Create a cached spec corrupted error
     pub fn cached_spec_corrupted(name: impl Into<String>, reason: impl Into<String>) -> Self {
-        use serde_json::json;
         let name = name.into();
         let reason = reason.into();
         Self::Internal {
@@ -372,7 +371,6 @@ impl Error {
 
     /// Create a cache version mismatch error
     pub fn cache_version_mismatch(name: impl Into<String>, found: u32, expected: u32) -> Self {
-        use serde_json::json;
         let name = name.into();
         Self::Internal {
             kind: ErrorKind::Specification,
@@ -392,7 +390,6 @@ impl Error {
 
     /// Create a secret not set error
     pub fn secret_not_set(scheme_name: impl Into<String>, env_var: impl Into<String>) -> Self {
-        use serde_json::json;
         let scheme_name = scheme_name.into();
         let env_var = env_var.into();
         let suggestion = crate::suggestions::suggest_auth_fix(&scheme_name, Some(&env_var));
@@ -410,7 +407,6 @@ impl Error {
 
     /// Create an unsupported auth scheme error
     pub fn unsupported_auth_scheme(scheme: impl Into<String>) -> Self {
-        use serde_json::json;
         let scheme = scheme.into();
         Self::Internal {
             kind: ErrorKind::Authentication,
@@ -426,7 +422,6 @@ impl Error {
 
     /// Create an unsupported security scheme error
     pub fn unsupported_security_scheme(scheme_type: impl Into<String>) -> Self {
-        use serde_json::json;
         let scheme_type = scheme_type.into();
         Self::Internal {
             kind: ErrorKind::Authentication,
@@ -465,7 +460,6 @@ impl Error {
 
     /// Create an invalid JSON body error
     pub fn invalid_json_body(reason: impl Into<String>) -> Self {
-        use serde_json::json;
         let reason = reason.into();
         Self::Internal {
             kind: ErrorKind::Validation,
@@ -481,7 +475,6 @@ impl Error {
 
     /// Create an invalid path error
     pub fn invalid_path(path: impl Into<String>, reason: impl Into<String>) -> Self {
-        use serde_json::json;
         let path = path.into();
         let reason = reason.into();
         Self::Internal {
@@ -496,7 +489,6 @@ impl Error {
 
     /// Create a request failed error
     pub fn request_failed(status: reqwest::StatusCode, reason: impl Into<String>) -> Self {
-        use serde_json::json;
         let reason = reason.into();
         Self::Internal {
             kind: ErrorKind::HttpRequest,
@@ -512,7 +504,6 @@ impl Error {
 
     /// Create a response read error
     pub fn response_read_error(reason: impl Into<String>) -> Self {
-        use serde_json::json;
         let reason = reason.into();
         Self::Internal {
             kind: ErrorKind::HttpRequest,
@@ -528,7 +519,6 @@ impl Error {
 
     /// Create an invalid HTTP method error
     pub fn invalid_http_method(method: impl Into<String>) -> Self {
-        use serde_json::json;
         let method = method.into();
         Self::Internal {
             kind: ErrorKind::HttpRequest,
@@ -546,7 +536,6 @@ impl Error {
 
     /// Create an invalid header name error
     pub fn invalid_header_name(name: impl Into<String>, reason: impl Into<String>) -> Self {
-        use serde_json::json;
         let name = name.into();
         let reason = reason.into();
         Self::Internal {
@@ -563,7 +552,6 @@ impl Error {
 
     /// Create an invalid header value error
     pub fn invalid_header_value(name: impl Into<String>, reason: impl Into<String>) -> Self {
-        use serde_json::json;
         let name = name.into();
         let reason = reason.into();
         Self::Internal {
@@ -580,7 +568,6 @@ impl Error {
 
     /// Create an invalid header format error
     pub fn invalid_header_format(header: impl Into<String>) -> Self {
-        use serde_json::json;
         let header = header.into();
         Self::Internal {
             kind: ErrorKind::Headers,
@@ -626,7 +613,6 @@ impl Error {
         invalid_chars: impl Into<String>,
         suggestion: impl Into<String>,
     ) -> Self {
-        use serde_json::json;
         let invalid_chars = invalid_chars.into();
         Self::Internal {
             kind: ErrorKind::Interactive,
@@ -656,7 +642,6 @@ impl Error {
         last_error: impl Into<String>,
         suggestions: &[String],
     ) -> Self {
-        use serde_json::json;
         let last_error = last_error.into();
         Self::Internal {
             kind: ErrorKind::Interactive,
@@ -693,7 +678,6 @@ impl Error {
 
     /// Create an unknown server variable error
     pub fn unknown_server_variable(name: impl Into<String>, available: &[String]) -> Self {
-        use serde_json::json;
         let name = name.into();
         let available_list = available.join(", ");
         Self::Internal {
@@ -710,7 +694,6 @@ impl Error {
 
     /// Create an unresolved template variable error
     pub fn unresolved_template_variable(name: impl Into<String>, url: impl Into<String>) -> Self {
-        use serde_json::json;
         let name = name.into();
         let url = url.into();
         Self::Internal {
@@ -749,7 +732,6 @@ impl Error {
 
     /// Create an invalid server variable format error
     pub fn invalid_server_var_format(arg: impl Into<String>, reason: impl Into<String>) -> Self {
-        use serde_json::json;
         let arg = arg.into();
         let reason = reason.into();
         Self::Internal {
@@ -772,7 +754,6 @@ impl Error {
         value: impl Into<String>,
         allowed_values: &[String],
     ) -> Self {
-        use serde_json::json;
         let name = name.into();
         let value = value.into();
         Self::Internal {
@@ -796,7 +777,6 @@ impl Error {
 
     /// Create an operation not found error
     pub fn operation_not_found(operation: impl Into<String>) -> Self {
-        use serde_json::json;
         let operation = operation.into();
         Self::Internal {
             kind: ErrorKind::Runtime,
@@ -815,7 +795,6 @@ impl Error {
         operation: impl Into<String>,
         suggestions: &[String],
     ) -> Self {
-        use serde_json::json;
         let operation = operation.into();
         let suggestion_text = if suggestions.is_empty() {
             "Check available operations with --help or --describe-json".to_string()
@@ -897,7 +876,6 @@ impl Error {
         operation_id: Option<impl Into<String>>,
         security_schemes: &[String],
     ) -> Self {
-        use serde_json::json;
         let body = body.into();
         let api_name = api_name.into();
         let operation_id = operation_id.map(std::convert::Into::into);
