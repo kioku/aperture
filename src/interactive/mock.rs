@@ -1,4 +1,7 @@
 use crate::error::Error;
+use std::io::{BufRead, Write};
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 #[cfg(test)]
@@ -53,14 +56,12 @@ impl InputOutput for RealInputOutput {
     }
 
     fn flush(&self) -> Result<(), Error> {
-        use std::io::Write;
         std::io::stdout()
             .flush()
             .map_err(|e| Error::io_error(format!("Failed to flush stdout: {e}")))
     }
 
     fn read_line(&self) -> Result<String, Error> {
-        use std::io::BufRead;
         let stdin = std::io::stdin();
         let mut line = String::new();
         stdin
@@ -71,10 +72,6 @@ impl InputOutput for RealInputOutput {
     }
 
     fn read_line_with_timeout(&self, timeout: Duration) -> Result<String, Error> {
-        use std::io::BufRead;
-        use std::sync::mpsc;
-        use std::thread;
-
         let (tx, rx) = mpsc::channel();
 
         // Spawn a thread to read from stdin

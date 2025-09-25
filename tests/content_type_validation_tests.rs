@@ -866,8 +866,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Use a custom test that captures stderr to check warnings
-    use std::process::Command;
-    let output = Command::new(env!("CARGO_BIN_EXE_aperture"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_aperture"))
         .env("APERTURE_CONFIG_DIR", _temp_dir.path().to_str().unwrap())
         .args(["config", "add", "mixed-test", spec_file.to_str().unwrap()])
         .output()

@@ -630,7 +630,10 @@ impl Default for SpecValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openapiv3::{Components, Info, OpenAPI};
+    use openapiv3::{
+        Components, Info, MediaType, OpenAPI, Operation, PathItem, ReferenceOr as PathRef,
+        RequestBody, Responses,
+    };
 
     fn create_test_spec() -> OpenAPI {
         OpenAPI {
@@ -760,10 +763,6 @@ mod tests {
 
     #[test]
     fn test_validate_with_mode_non_strict_mixed_content() {
-        use openapiv3::{
-            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
-        };
-
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();
 
@@ -816,10 +815,6 @@ mod tests {
 
     #[test]
     fn test_validate_with_mode_non_strict_only_unsupported() {
-        use openapiv3::{
-            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
-        };
-
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();
 
@@ -861,10 +856,6 @@ mod tests {
 
     #[test]
     fn test_validate_with_mode_strict() {
-        use openapiv3::{
-            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
-        };
-
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();
 
@@ -908,10 +899,6 @@ mod tests {
 
     #[test]
     fn test_validate_with_mode_multiple_content_types() {
-        use openapiv3::{
-            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
-        };
-
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();
 
@@ -966,10 +953,6 @@ mod tests {
 
     #[test]
     fn test_validate_with_mode_multiple_unsupported_types_single_endpoint() {
-        use openapiv3::{
-            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
-        };
-
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();
 
@@ -1089,8 +1072,6 @@ mod tests {
 
     #[test]
     fn test_validate_parameter_reference_allowed() {
-        use openapiv3::{Operation, PathItem, ReferenceOr as PathRef, Responses};
-
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();
 
@@ -1114,10 +1095,6 @@ mod tests {
 
     #[test]
     fn test_validate_request_body_non_json_rejected() {
-        use openapiv3::{
-            MediaType, Operation, PathItem, ReferenceOr as PathRef, RequestBody, Responses,
-        };
-
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();
 

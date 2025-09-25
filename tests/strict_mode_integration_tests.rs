@@ -10,6 +10,8 @@ use common::aperture_cmd;
 use predicates::prelude::*;
 use std::path::Path;
 use tempfile::TempDir;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn create_temp_config_manager() -> (ConfigManager<OsFileSystem>, TempDir) {
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
@@ -482,9 +484,6 @@ paths:
 
 #[test]
 fn test_strict_mode_with_url_spec() {
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
     // Start a mock server
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let mock_server = runtime.block_on(async { MockServer::start().await });

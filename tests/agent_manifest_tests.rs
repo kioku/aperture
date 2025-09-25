@@ -6,7 +6,15 @@ use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
     CachedSecurityScheme, CachedSpec,
 };
+use aperture_cli::config::models::{ApiConfig, GlobalConfig};
 use aperture_cli::constants;
+use indexmap::IndexMap;
+use openapiv3::{
+    APIKeyLocation, BooleanType, Components, ExternalDocumentation, Info, MediaType, OpenAPI,
+    Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem, Paths, QueryStyle,
+    ReferenceOr, RequestBody, Responses, Schema, SchemaData, SchemaKind, SecurityRequirement,
+    SecurityScheme, Server, ServerVariable, StringType, Type,
+};
 use std::collections::HashMap;
 
 /// Creates a comprehensive test spec with various security schemes and operations
@@ -344,8 +352,6 @@ fn test_manifest_json_structure() {
 
 #[test]
 fn test_manifest_with_global_config() {
-    use aperture_cli::config::models::{ApiConfig, GlobalConfig};
-
     let spec = create_comprehensive_test_spec();
 
     // Create global config with URL override
@@ -375,14 +381,6 @@ fn test_manifest_with_global_config() {
 
 #[test]
 fn test_manifest_from_openapi() {
-    use aperture_cli::agent::generate_capability_manifest_from_openapi;
-    use openapiv3::{
-        APIKeyLocation, Components, ExternalDocumentation, Info, MediaType, OpenAPI, Operation,
-        Parameter, ParameterData, ParameterSchemaOrContent, PathItem, Paths, QueryStyle,
-        ReferenceOr, RequestBody, Responses, Schema, SchemaKind, SecurityRequirement,
-        SecurityScheme, Server, StringType, Type,
-    };
-
     // Create a complete OpenAPI spec
     let mut paths = Paths::default();
 
@@ -586,13 +584,6 @@ fn test_manifest_from_openapi() {
 
 #[test]
 fn test_manifest_with_parameter_references() {
-    use indexmap::IndexMap;
-    use openapiv3::{
-        BooleanType, Components, Info, OpenAPI, Operation, Parameter, ParameterData,
-        ParameterSchemaOrContent, PathItem, Paths, ReferenceOr, Responses, Schema, SchemaData,
-        SchemaKind, Server, StringType, Type,
-    };
-
     // Create OpenAPI spec with parameter references
     let spec = OpenAPI {
         openapi: "3.0.0".to_string(),

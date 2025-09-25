@@ -5,6 +5,7 @@ use crate::constants;
 use crate::engine::loader;
 use crate::error::Error;
 use crate::fs::{FileSystem, OsFileSystem};
+use crate::interactive::{confirm, prompt_for_input, select_from_options};
 use crate::spec::{SpecTransformer, SpecValidator};
 use openapiv3::{OpenAPI, ReferenceOr};
 use std::collections::HashMap;
@@ -1130,8 +1131,6 @@ impl<F: FileSystem> ConfigManager<F> {
         current_secrets: &std::collections::HashMap<String, ApertureSecret>,
         options: &[(String, String)],
     ) -> Result<(), Error> {
-        use crate::interactive::{confirm, prompt_for_input, select_from_options};
-
         loop {
             let selected_scheme =
                 select_from_options("\nSelect a security scheme to configure:", options)?;
@@ -1198,8 +1197,6 @@ impl<F: FileSystem> ConfigManager<F> {
         selected_scheme: &str,
         env_var: &str,
     ) -> Result<(), Error> {
-        use crate::interactive::confirm;
-
         // Validate environment variable name using the comprehensive validator
         if let Err(e) = crate::interactive::validate_env_var_name(env_var) {
             println!("Invalid environment variable name: {e}");

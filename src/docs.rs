@@ -1,7 +1,5 @@
 //! Documentation and help system for improved CLI discoverability
 
-// Note: Previously suppressed clippy lints have been fixed
-
 use crate::cache::models::{CachedCommand, CachedSpec};
 use crate::error::Error;
 use crate::utils::to_kebab_case;

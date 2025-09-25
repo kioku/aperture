@@ -723,7 +723,9 @@ fn extract_aperture_secret_from_extensions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+    use crate::cache::models::{
+        CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
+    };
 
     #[test]
     fn test_command_name_conversion() {
@@ -740,8 +742,6 @@ mod tests {
 
     #[test]
     fn test_generate_capability_manifest() {
-        use crate::cache::models::{CachedApertureSecret, CachedSecurityScheme};
-
         let mut security_schemes = HashMap::new();
         security_schemes.insert(
             "bearerAuth".to_string(),

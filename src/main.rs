@@ -9,6 +9,7 @@ use aperture_cli::docs::{DocumentationGenerator, HelpFormatter};
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
+use aperture_cli::interactive::confirm;
 use aperture_cli::response_cache::{CacheConfig, ResponseCache};
 use aperture_cli::search::{format_search_results, CommandSearcher};
 use aperture_cli::shortcuts::{ResolutionResult, ShortcutResolver};
@@ -190,7 +191,6 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
 
                 // Confirm operation unless --force is used
                 if !force {
-                    use aperture_cli::interactive::confirm;
                     println!(
                         "This will remove all {} secret configuration(s) for API '{api_name}':",
                         secrets.len()
@@ -420,9 +420,6 @@ fn list_specs_with_details(
 }
 
 fn display_skipped_endpoints_info(cached_spec: &aperture_cli::cache::models::CachedSpec) {
-    use aperture_cli::config::manager::ConfigManager;
-    use aperture_cli::fs::OsFileSystem;
-
     // Convert to warnings for consistent display
     let warnings = ConfigManager::<OsFileSystem>::skipped_endpoints_to_warnings(
         &cached_spec.skipped_endpoints,
