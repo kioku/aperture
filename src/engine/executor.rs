@@ -22,10 +22,6 @@ use tabled::Table;
 #[cfg(feature = "jq")]
 use jaq_interpret::{Ctx, FilterT, ParseCtx, RcIter, Val};
 #[cfg(feature = "jq")]
-use jaq_parse::parse;
-#[cfg(feature = "jq")]
-use jaq_std::std;
-#[cfg(feature = "jq")]
 use std::rc::Rc;
 
 /// Represents supported authentication schemes
@@ -1176,23 +1172,25 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
         }
 
         // Create parsing context and compile the filter
-        let mut defs = jaq_std::std();
+        let defs = jaq_std::std();
         let mut ctx = ParseCtx::new(Vec::new());
         ctx.insert_defs(defs);
-        let filter = ctx.compile(main.unwrap());
+        let compiled_filter = ctx.compile(main.unwrap());
 
         // Convert serde_json::Value to jaq Val
         let jaq_value = serde_json_to_jaq_val(&json_value);
 
         // Execute the filter
-        // Create an empty input stream (we're processing a single value, not streaming)
+        // jaq processes filters by passing the input value directly to run()
         let inputs = RcIter::new(core::iter::empty());
-
-        // Create execution context
         let ctx = Ctx::new([], &inputs);
 
         // Run the filter on the input value
-        let output = filter.run((ctx, jaq_value));
+        // TODO: Issue #25 - The jaq library integration is not working correctly.
+        // Filters are parsed correctly but return the entire input document
+        // instead of the filtered result. This needs further investigation
+        // into the jaq library's execution model.
+        let output = compiled_filter.run((ctx, jaq_value));
 
         // Collect all results
         let results: Result<Vec<Val>, _> = output.collect();
