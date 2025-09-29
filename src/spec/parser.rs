@@ -225,7 +225,7 @@ fn parse_with_oas3_direct_with_original(
                 Error::serialization_error(format!(
                     "Failed to parse OpenAPI 3.1 spec as YAML or JSON: {e}"
                 ))
-            })?;
+            })?
         }
     };
 
