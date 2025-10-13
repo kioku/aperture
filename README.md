@@ -271,26 +271,25 @@ cargo build --release --features openapi31
 
 Without this feature, only OpenAPI 3.0.x specifications are supported. When a 3.1 spec is detected without the feature enabled, a helpful error message will guide you to rebuild with the feature.
 
-**Advanced Filtering (Experimental)**
-The `jq` feature flag enables advanced JSON filtering using a pure Rust JQ implementation:
+**Advanced Filtering**
+The `jq` feature flag enables advanced JSON filtering using a pure Rust JQ implementation (jaq v2.x):
 
 ```bash
-# Build with JQ support (currently has known issues - see issue #25)
+# Build with full JQ support
 cargo build --release --features jq
 ```
 
-⚠️ **Known Issue:** The advanced JQ feature (`--features jq`) currently has a bug where filters return the entire JSON document instead of filtered results. See [issue #25](https://github.com/kioku/aperture/issues/25) for details. For production use, we recommend using the default build without the `jq` feature flag.
-
-**Supported without `jq` feature:**
+**Supported without `jq` feature (basic filtering):**
 
 - Basic field access: `.field`, `.nested.field`
 - Array index access: `.items[0]`
 
-**Requires `jq` feature (currently broken):**
+**Requires `jq` feature (advanced filtering):**
 
-- Complex filters: `.[] | select()`, `map()`, array slicing
-- Pipe operations and transformations
-- Advanced JQ syntax
+- Array operations: `.[]`, `.[0:5]`, `.items[0].name`
+- Nested field extraction: `.metadata.role`
+- Complex filters and transformations
+- Standard JQ syntax support
 
 ## Getting Started
 
@@ -415,17 +414,18 @@ aperture api my-api users list --format table
 # Output as YAML
 aperture api my-api users list --format yaml
 
-# Extract specific fields with JQ filtering (basic - works by default)
+# Extract specific fields with JQ filtering (basic - works without feature)
 aperture api my-api users get-user --id 123 --jq '.name'
 aperture api my-api users get-user --id 123 --jq '.email'
 
-# Nested field access (works by default)
+# Nested field access (works without feature)
 aperture api my-api get-data --jq '.data.items[0].name'
 
-# Complex JQ transformations (requires --features jq, currently broken)
-# aperture api my-api get-data --jq '.items | map(select(.active)) | .[0:5]'
+# Advanced JQ transformations (requires --features jq)
+aperture api my-api get-data --jq '.items[0].name'
+aperture api my-api users list --jq '.[].email'
 
-# JQ filtering with --describe-json (basic access works)
+# JQ filtering with --describe-json
 aperture api my-api --describe-json --jq '.api.info.title'
 aperture api my-api --describe-json --jq '.commands.users'
 ```
@@ -442,13 +442,12 @@ aperture --batch-file operations.json --batch-concurrency 10
 aperture --batch-file operations.json --batch-rate-limit 50
 
 # Analyze batch results with JQ filtering (requires --json-errors)
-# Basic field access (works by default):
+# Basic field access (works without jq feature):
 aperture api my-api --batch-file operations.json --json-errors --jq '.batch_execution_summary.total_operations'
 aperture api my-api --batch-file operations.json --json-errors --jq '.batch_execution_summary.failed_operations'
 
-# Complex filters (require --features jq, currently broken):
-# aperture api my-api --batch-file operations.json --json-errors --jq '.batch_execution_summary.operations[] | select(.success == false)'
-# aperture api my-api --batch-file operations.json --json-errors --jq '{total: .batch_execution_summary.total_operations, failed: .batch_execution_summary.failed_operations}'
+# Advanced filters (require --features jq):
+aperture api my-api --batch-file operations.json --json-errors --jq '.batch_execution_summary.successful_operations'
 ```
 
 **Example batch file (JSON):**
