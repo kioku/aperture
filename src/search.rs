@@ -135,11 +135,11 @@ impl CommandSearcher {
 
                 // Only include results with positive scores
                 if total_score > 0 {
-                    let tag = command
-                        .tags
-                        .first()
-                        .map_or_else(|| constants::DEFAULT_GROUP.to_string(), Clone::clone);
-                    let command_path = format!("{} {}", tag.to_lowercase(), operation_id_kebab);
+                    let tag = command.tags.first().map_or_else(
+                        || constants::DEFAULT_GROUP.to_string(),
+                        |t| to_kebab_case(t),
+                    );
+                    let command_path = format!("{tag} {operation_id_kebab}");
 
                     results.push(CommandSearchResult {
                         api_context: api_name.clone(),
@@ -171,11 +171,11 @@ impl CommandSearcher {
 
         for command in &spec.commands {
             let operation_id_kebab = to_kebab_case(&command.operation_id);
-            let tag = command
-                .tags
-                .first()
-                .map_or_else(|| constants::DEFAULT_GROUP.to_string(), Clone::clone);
-            let full_command = format!("{} {}", tag.to_lowercase(), operation_id_kebab);
+            let tag = command.tags.first().map_or_else(
+                || constants::DEFAULT_GROUP.to_string(),
+                |t| to_kebab_case(t),
+            );
+            let full_command = format!("{tag} {operation_id_kebab}");
 
             // Check fuzzy match score
             if let Some(score) = self.matcher.fuzzy_match(&full_command, input) {
@@ -187,7 +187,7 @@ impl CommandSearcher {
             // Also check just the operation ID
             if let Some(score) = self.matcher.fuzzy_match(&operation_id_kebab, input) {
                 if score > 0 {
-                    suggestions.push((full_command, score + 10)); // Bonus for direct match
+                    suggestions.push((full_command.clone(), score + 10)); // Bonus for direct match
                 }
             }
         }

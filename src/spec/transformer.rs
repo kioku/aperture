@@ -698,10 +698,10 @@ impl SpecTransformer {
     ) -> Vec<CommandExample> {
         let mut examples = Vec::new();
         let operation_kebab = to_kebab_case(operation_id);
-        let tag_lower = tag.to_lowercase();
+        let tag_kebab = to_kebab_case(tag);
 
         // Build base command
-        let base_cmd = format!("aperture api myapi {tag_lower} {operation_kebab}");
+        let base_cmd = format!("aperture api myapi {tag_kebab} {operation_kebab}");
 
         // Example 1: Simple required parameters only
         let required_params: Vec<&CachedParameter> =

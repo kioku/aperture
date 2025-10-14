@@ -89,7 +89,7 @@ impl ShortcutResolver {
 
                 // Index by tags
                 for tag in &command.tags {
-                    let tag_key = tag.to_lowercase();
+                    let tag_key = to_kebab_case(tag);
                     self.tag_map.entry(tag_key.clone()).or_default().push((
                         api_name.clone(),
                         spec.clone(),
@@ -195,14 +195,14 @@ impl ShortcutResolver {
                     let tag = command
                         .tags
                         .first()
-                        .map_or_else(|| "api".to_string(), Clone::clone);
+                        .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
                     let operation_kebab = to_kebab_case(&command.operation_id);
 
                     ResolvedShortcut {
                         full_command: vec![
                             "api".to_string(),
                             api_name.clone(),
-                            tag.to_lowercase(),
+                            tag,
                             operation_kebab,
                         ],
                         spec: spec.clone(),
@@ -231,14 +231,14 @@ impl ShortcutResolver {
                     let tag = command
                         .tags
                         .first()
-                        .map_or_else(|| "api".to_string(), Clone::clone);
+                        .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
                     let operation_kebab = to_kebab_case(&command.operation_id);
 
                     ResolvedShortcut {
                         full_command: vec![
                             "api".to_string(),
                             api_name.clone(),
-                            tag.to_lowercase(),
+                            tag,
                             operation_kebab,
                         ],
                         spec: spec.clone(),
@@ -254,22 +254,18 @@ impl ShortcutResolver {
     fn try_tag_resolution(&self, args: &[String]) -> Option<Vec<ResolvedShortcut>> {
         let mut candidates = Vec::new();
 
-        // Try single tag lookup
-        if let Some(matches) = self.tag_map.get(&args[0].to_lowercase()) {
+        // Try single tag lookup - convert to kebab-case for matching
+        let tag_kebab = to_kebab_case(&args[0]);
+        if let Some(matches) = self.tag_map.get(&tag_kebab) {
             for (api_name, spec, command) in matches {
                 let tag = command
                     .tags
                     .first()
-                    .map_or_else(|| "api".to_string(), Clone::clone);
+                    .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
                 let operation_kebab = to_kebab_case(&command.operation_id);
 
                 candidates.push(ResolvedShortcut {
-                    full_command: vec![
-                        "api".to_string(),
-                        api_name.clone(),
-                        tag.to_lowercase(),
-                        operation_kebab,
-                    ],
+                    full_command: vec!["api".to_string(), api_name.clone(), tag, operation_kebab],
                     spec: spec.clone(),
                     command: command.clone(),
                     confidence: 70, // Medium confidence for tag-only match
@@ -279,22 +275,22 @@ impl ShortcutResolver {
 
         // Try tag + operation combination if we have 2+ args
         if args.len() >= 2 {
-            let tag = args[0].to_lowercase();
-            let operation = args[1].to_lowercase();
+            let tag = to_kebab_case(&args[0]);
+            let operation = to_kebab_case(&args[1]);
             let tag_operation_key = format!("{tag} {operation}");
             if let Some(matches) = self.tag_map.get(&tag_operation_key) {
                 for (api_name, spec, command) in matches {
                     let tag = command
                         .tags
                         .first()
-                        .map_or_else(|| "api".to_string(), Clone::clone);
+                        .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
                     let operation_kebab = to_kebab_case(&command.operation_id);
 
                     candidates.push(ResolvedShortcut {
                         full_command: vec![
                             "api".to_string(),
                             api_name.clone(),
-                            tag.to_lowercase(),
+                            tag,
                             operation_kebab,
                         ],
                         spec: spec.clone(),
@@ -328,14 +324,14 @@ impl ShortcutResolver {
                     let tag = command
                         .tags
                         .first()
-                        .map_or_else(|| "api".to_string(), Clone::clone);
+                        .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
                     let operation_kebab = to_kebab_case(&command.operation_id);
 
                     candidates.push(ResolvedShortcut {
                         full_command: vec![
                             "api".to_string(),
                             api_name.clone(),
-                            tag.to_lowercase(),
+                            tag,
                             operation_kebab,
                         ],
                         spec: spec.clone(),
