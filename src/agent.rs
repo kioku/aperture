@@ -211,13 +211,11 @@ pub fn generate_capability_manifest_from_openapi(
                         spec.security.as_ref(),
                     );
 
-                    // Group by first tag or "default", converted to lowercase
-                    let group_name = op
-                        .tags
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| constants::DEFAULT_GROUP.to_string())
-                        .to_lowercase();
+                    // Group by first tag or "default", converted to kebab-case
+                    let group_name = op.tags.first().map_or_else(
+                        || constants::DEFAULT_GROUP.to_string(),
+                        |tag| to_kebab_case(tag),
+                    );
 
                     command_groups
                         .entry(group_name)
@@ -274,7 +272,7 @@ pub fn generate_capability_manifest(
         let group_name = if cached_command.name.is_empty() {
             constants::DEFAULT_GROUP.to_string()
         } else {
-            cached_command.name.to_lowercase()
+            to_kebab_case(&cached_command.name)
         };
 
         let command_info = convert_cached_command_to_info(cached_command);

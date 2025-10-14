@@ -87,13 +87,13 @@ paths:
         .stdout(predicate::str::contains("GET"))
         .stdout(predicate::str::contains("/events"));
 
-    // Test MixedCaseTag as lowercase
+    // Test MixedCaseTag as kebab-case
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
         .arg("uppercase-test")
-        .arg("mixedcasetag") // lowercase tag
+        .arg("mixed-case-tag") // kebab-case tag
         .arg("get-mixed")
         .assert()
         .success()
@@ -390,13 +390,13 @@ paths:
         .assert()
         .success();
 
-    // Test that CLI accepts lowercase versions of tags
+    // Test that CLI accepts kebab-case versions of tags
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .arg("api")
         .arg("--dry-run")
         .arg("case-test")
-        .arg("uppercase") // lowercase version
+        .arg("uppercase") // lowercase version (no hyphens needed for single word)
         .arg("test1")
         .assert()
         .success();
@@ -406,7 +406,7 @@ paths:
         .arg("api")
         .arg("--dry-run")
         .arg("case-test")
-        .arg("mixedcase") // lowercase version
+        .arg("mixed-case") // kebab-case version
         .arg("test2")
         .assert()
         .success();
