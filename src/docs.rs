@@ -271,8 +271,7 @@ impl DocumentationGenerator {
             let primary_tag = command
                 .tags
                 .first()
-                .cloned()
-                .unwrap_or_else(|| "untagged".to_string());
+                .map_or_else(|| "untagged".to_string(), |t| to_kebab_case(t));
             *tag_counts.entry(primary_tag).or_insert(0) += 1;
         }
 
@@ -305,7 +304,10 @@ impl DocumentationGenerator {
         if !spec.commands.is_empty() {
             overview.push_str("## Sample Operations\n\n");
             for (i, command) in spec.commands.iter().take(3).enumerate() {
-                let tag = command.tags.first().map_or("api", String::as_str);
+                let tag = command
+                    .tags
+                    .first()
+                    .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
                 let operation_kebab = to_kebab_case(&command.operation_id);
                 write!(
                     overview,
@@ -398,8 +400,7 @@ impl HelpFormatter {
             let tag = command
                 .tags
                 .first()
-                .cloned()
-                .unwrap_or_else(|| "General".to_string());
+                .map_or_else(|| "General".to_string(), |t| to_kebab_case(t));
             tag_groups.entry(tag).or_insert_with(Vec::new).push(command);
         }
 

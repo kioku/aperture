@@ -449,3 +449,170 @@ paths:
         .stdout(predicate::str::contains("/work_packages/123"))
         .stdout(predicate::str::contains("include=attachments"));
 }
+
+#[test]
+fn test_list_commands_with_space_tags() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("list-test.yaml");
+
+    // Create OpenAPI spec with tags containing spaces
+    let spec_content = r#"openapi: 3.0.0
+info:
+  title: List Test API
+  version: 1.0.0
+  description: Test API for list-commands
+servers:
+  - url: https://api.example.com
+paths:
+  /work_packages:
+    get:
+      tags:
+        - Work Packages
+      operationId: listWorkPackages
+      summary: List all work packages
+      responses:
+        '200':
+          description: Success
+  /wiki_pages:
+    get:
+      tags:
+        - Wiki Pages
+      operationId: listWikiPages
+      summary: List all wiki pages
+      responses:
+        '200':
+          description: Success
+"#;
+
+    fs::write(&spec_file, spec_content).unwrap();
+
+    // Add the spec
+    let mut cmd = aperture_cmd();
+    cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .arg("config")
+        .arg("add")
+        .arg("list-test")
+        .arg(spec_file.to_str().unwrap())
+        .assert()
+        .success();
+
+    // Run list-commands and verify kebab-case tags appear in output
+    let mut cmd = aperture_cmd();
+    let output = cmd
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .arg("list-commands")
+        .arg("list-test")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Verify kebab-case tags are in output (as section headers)
+    assert!(
+        stdout.contains("work-packages") || stdout.contains("Work Packages"),
+        "Expected tag 'work-packages' or 'Work Packages' in output:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("wiki-pages") || stdout.contains("Wiki Pages"),
+        "Expected tag 'wiki-pages' or 'Wiki Pages' in output:\n{}",
+        stdout
+    );
+
+    // Verify operations are listed
+    assert!(
+        stdout.contains("list-work-packages"),
+        "Expected operation 'list-work-packages' in output:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("list-wiki-pages"),
+        "Expected operation 'list-wiki-pages' in output:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn test_search_with_space_tags() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("search-test.yaml");
+
+    // Create OpenAPI spec with tags containing spaces
+    let spec_content = r#"openapi: 3.0.0
+info:
+  title: Search Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /work_packages:
+    get:
+      tags:
+        - Work Packages
+      operationId: listWorkPackages
+      summary: List all work packages
+      description: Returns a list of work packages
+      responses:
+        '200':
+          description: Success
+  /work_packages/{id}:
+    get:
+      tags:
+        - Work Packages
+      operationId: getWorkPackage
+      summary: Get a work package
+      description: Returns a single work package by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success
+"#;
+
+    fs::write(&spec_file, spec_content).unwrap();
+
+    // Add the spec
+    let mut cmd = aperture_cmd();
+    cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .arg("config")
+        .arg("add")
+        .arg("search-test")
+        .arg(spec_file.to_str().unwrap())
+        .assert()
+        .success();
+
+    // Search for "packages" and verify results use kebab-case tags
+    let mut cmd = aperture_cmd();
+    let output = cmd
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .arg("search")
+        .arg("packages")
+        .arg("--api")
+        .arg("search-test")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Verify search results contain kebab-case tags
+    assert!(
+        stdout.contains("work-packages"),
+        "Expected kebab-case tag 'work-packages' in search results:\n{}",
+        stdout
+    );
+
+    // Verify the command paths use kebab-case
+    assert!(
+        stdout.contains("list-work-packages") || stdout.contains("get-work-package"),
+        "Expected kebab-case operation names in search results:\n{}",
+        stdout
+    );
+}
