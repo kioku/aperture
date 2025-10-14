@@ -259,6 +259,7 @@ fn test_comprehensive_manifest_generation() {
     assert_eq!(get_user.summary, Some("Get user by ID".to_string()));
     assert_eq!(get_user.security_requirements, vec!["bearerAuth"]);
     assert_eq!(get_user.tags, vec!["users", "admin"]);
+    assert_eq!(get_user.original_tags, vec!["users", "admin"]);
     assert!(!get_user.deprecated);
     assert_eq!(
         get_user.external_docs_url,

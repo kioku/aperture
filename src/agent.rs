@@ -57,9 +57,12 @@ pub struct CommandInfo {
     /// Security requirements for this operation
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub security_requirements: Vec<String>,
-    /// Tags associated with this operation
+    /// Tags associated with this operation (kebab-case)
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
+    /// Original tag names from the `OpenAPI` spec (before kebab-case conversion)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub original_tags: Vec<String>,
     /// Whether this operation is deprecated
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub deprecated: bool,
@@ -337,7 +340,12 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
         parameters,
         request_body,
         security_requirements: cached_command.security_requirements.clone(),
-        tags: cached_command.tags.clone(),
+        tags: cached_command
+            .tags
+            .iter()
+            .map(|t| to_kebab_case(t))
+            .collect(),
+        original_tags: cached_command.tags.clone(),
         deprecated: cached_command.deprecated,
         external_docs_url: cached_command.external_docs_url.clone(),
     }
@@ -504,7 +512,8 @@ fn convert_openapi_operation_to_info(
         parameters,
         request_body,
         security_requirements,
-        tags: operation.tags.clone(),
+        tags: operation.tags.iter().map(|t| to_kebab_case(t)).collect(),
+        original_tags: operation.tags.clone(),
         deprecated: operation.deprecated,
         external_docs_url: operation
             .external_docs

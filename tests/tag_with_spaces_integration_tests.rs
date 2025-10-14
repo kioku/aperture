@@ -193,6 +193,34 @@ paths:
         "Unexpected 'Project Phases' tag in JSON manifest"
     );
 
+    // Verify that tags arrays within commands are kebab-case
+    let work_packages_commands = commands["work-packages"].as_array().unwrap();
+    assert!(!work_packages_commands.is_empty());
+    let first_command = &work_packages_commands[0];
+
+    // Verify tags field contains kebab-case
+    let tags = first_command["tags"].as_array().unwrap();
+    assert_eq!(tags.len(), 1);
+    assert_eq!(tags[0].as_str().unwrap(), "work-packages");
+
+    // Verify original_tags field contains original values
+    let original_tags = first_command["original_tags"].as_array().unwrap();
+    assert_eq!(original_tags.len(), 1);
+    assert_eq!(original_tags[0].as_str().unwrap(), "Work Packages");
+
+    // Same verification for project-phases
+    let project_phases_commands = commands["project-phases"].as_array().unwrap();
+    assert!(!project_phases_commands.is_empty());
+    let first_command = &project_phases_commands[0];
+
+    let tags = first_command["tags"].as_array().unwrap();
+    assert_eq!(tags.len(), 1);
+    assert_eq!(tags[0].as_str().unwrap(), "project-phases");
+
+    let original_tags = first_command["original_tags"].as_array().unwrap();
+    assert_eq!(original_tags.len(), 1);
+    assert_eq!(original_tags[0].as_str().unwrap(), "Project Phases");
+
     // Verify we can use the kebab-case tags from the manifest to execute commands
     for tag_name in commands.keys() {
         let commands_in_tag = commands[tag_name].as_array().unwrap();
