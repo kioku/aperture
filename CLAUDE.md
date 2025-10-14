@@ -132,7 +132,7 @@ The project follows a structured development approach:
 - `tokio`: Async runtime
 
 ### Optional Dependencies (Feature-Gated)
-- `jaq-interpret`, `jaq-parse`, `jaq-std`: Pure Rust JQ implementation (enabled with `--features jq`)
+- `jaq-core`, `jaq-json`, `jaq-std`: Pure Rust JQ implementation v2.x (enabled with `--features jq`)
 - `ahash`: High-performance hashing for JQ support
 
 ### Development/Testing
@@ -143,13 +143,13 @@ The project follows a structured development approach:
 ## Feature Flags
 
 ### `jq` Feature
-Enables advanced JSON filtering using JQ syntax with a pure Rust implementation:
+Enables advanced JSON filtering using JQ syntax with a pure Rust implementation (jaq v2.x):
 - **Build:** `cargo build --features jq`
-- **Test:** `cargo test --features jq` (Note: 5 tests currently fail due to issue #25)
+- **Test:** `cargo test --features jq`
 - **Without feature:** Only basic field access works (`.field`, `.nested.field`)
-- **With feature:** Should provide full JQ syntax support, but currently broken (see issue #25)
+- **With feature:** Full JQ syntax support including nested fields, array operations, and filters
 
-**Known Issue:** The jaq library integration is broken. When enabled, all JQ filters return the complete JSON document instead of filtered results. This affects describe-json, batch operations, and regular API calls. Use the default build without this feature for production.
+**Implementation:** Uses jaq-core, jaq-json, and jaq-std for a pure Rust implementation of JQ. This feature enables filtering of API responses, batch operation outputs, and describe-json results using standard JQ syntax.
 
 ### `openapi31` Feature
 Enables support for OpenAPI 3.1 specifications:

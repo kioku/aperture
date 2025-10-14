@@ -20,13 +20,9 @@ use std::str::FromStr;
 use tabled::Table;
 
 #[cfg(feature = "jq")]
-use jaq_interpret::{Ctx, FilterT, ParseCtx, RcIter, Val};
+use jaq_core::{Ctx, RcIter};
 #[cfg(feature = "jq")]
-use jaq_parse::parse;
-#[cfg(feature = "jq")]
-use jaq_std::std;
-#[cfg(feature = "jq")]
-use std::rc::Rc;
+use jaq_json::Val;
 
 /// Represents supported authentication schemes
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1165,29 +1161,59 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
 
     #[cfg(feature = "jq")]
     {
-        // Use jaq (pure Rust implementation) when available
-        // Parse the filter expression
-        let (expr, errs) = parse(filter, jaq_parse::main());
-        if !errs.is_empty() {
-            return Err(Error::jq_filter_error(
-                filter,
-                format!("Parse error in jq expression: {}", errs[0]),
-            ));
-        }
+        // Use jaq v2.x (pure Rust implementation)
+        use jaq_core::load::{Arena, File, Loader};
+        use jaq_core::Compiler;
 
-        // Create parsing context and compile the filter
-        let mut ctx = ParseCtx::new(Vec::new());
-        ctx.insert_defs(std());
-        let filter =
-            ctx.compile(expr.expect("JQ expression was already validated, should be Some"));
+        // Create the program from the filter string
+        let program = File {
+            code: filter,
+            path: (),
+        };
+
+        // Collect both standard library and JSON definitions into vectors
+        // This avoids hanging issues with lazy iterator chains
+        let defs: Vec<_> = jaq_std::defs().chain(jaq_json::defs()).collect();
+        let funs: Vec<_> = jaq_std::funs().chain(jaq_json::funs()).collect();
+
+        // Create loader with both standard library and JSON definitions
+        let loader = Loader::new(defs);
+        let arena = Arena::default();
+
+        // Parse the filter
+        let modules = match loader.load(&arena, program) {
+            Ok(modules) => modules,
+            Err(errs) => {
+                return Err(Error::jq_filter_error(
+                    filter,
+                    format!("Parse error: {:?}", errs),
+                ));
+            }
+        };
+
+        // Compile the filter with both standard library and JSON functions
+        let filter_fn = match Compiler::default().with_funs(funs).compile(modules) {
+            Ok(filter) => filter,
+            Err(errs) => {
+                return Err(Error::jq_filter_error(
+                    filter,
+                    format!("Compilation error: {:?}", errs),
+                ));
+            }
+        };
 
         // Convert serde_json::Value to jaq Val
-        let jaq_value = serde_json_to_jaq_val(&json_value);
+        let jaq_value = Val::from(json_value);
 
         // Execute the filter
         let inputs = RcIter::new(core::iter::empty());
         let ctx = Ctx::new([], &inputs);
-        let results: Result<Vec<Val>, _> = filter.run((ctx, jaq_value.into())).collect();
+
+        // Run the filter on the input value
+        let output = filter_fn.run((ctx, jaq_value));
+
+        // Collect all results
+        let results: Result<Vec<Val>, _> = output.collect();
 
         match results {
             Ok(vals) => {
@@ -1195,13 +1221,14 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
                     Ok(constants::NULL_VALUE.to_string())
                 } else if vals.len() == 1 {
                     // Single result - convert back to JSON
-                    let json_val = jaq_val_to_serde_json(&vals[0]);
+                    let json_val = serde_json::Value::from(vals[0].clone());
                     serde_json::to_string_pretty(&json_val).map_err(|e| {
                         Error::serialization_error(format!("Failed to serialize result: {e}"))
                     })
                 } else {
                     // Multiple results - return as JSON array
-                    let json_vals: Vec<Value> = vals.iter().map(jaq_val_to_serde_json).collect();
+                    let json_vals: Vec<Value> =
+                        vals.into_iter().map(serde_json::Value::from).collect();
                     let array = Value::Array(json_vals);
                     serde_json::to_string_pretty(&array).map_err(|e| {
                         Error::serialization_error(format!("Failed to serialize results: {e}"))
@@ -1356,71 +1383,129 @@ fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
     current.clone()
 }
 
-#[cfg(feature = "jq")]
-/// Convert serde_json::Value to jaq Val
-fn serde_json_to_jaq_val(value: &Value) -> jaq_interpret::Val {
-    match value {
-        Value::Null => Val::Null,
-        Value::Bool(b) => Val::Bool(*b),
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                // Convert i64 to isize safely
-                if let Ok(isize_val) = isize::try_from(i) {
-                    Val::Int(isize_val)
-                } else {
-                    // Fallback to float for large numbers
-                    Val::Float(i as f64)
-                }
-            } else if let Some(f) = n.as_f64() {
-                Val::Float(f)
-            } else {
-                Val::Null
-            }
-        }
-        Value::String(s) => Val::Str(s.clone().into()),
-        Value::Array(arr) => {
-            let jaq_arr: Vec<Val> = arr.iter().map(serde_json_to_jaq_val).collect();
-            Val::Arr(Rc::new(jaq_arr))
-        }
-        Value::Object(obj) => {
-            let mut jaq_obj = indexmap::IndexMap::with_hasher(ahash::RandomState::new());
-            for (k, v) in obj {
-                jaq_obj.insert(Rc::new(k.clone()), serde_json_to_jaq_val(v));
-            }
-            Val::Obj(Rc::new(jaq_obj))
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_apply_jq_filter_simple_field_access() {
+        let json = r#"{"name": "Alice", "age": 30}"#;
+        let result = apply_jq_filter(json, ".name").unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed, serde_json::json!("Alice"));
+    }
+
+    #[test]
+    fn test_apply_jq_filter_nested_field_access() {
+        let json = r#"{"user": {"name": "Bob", "id": 123}}"#;
+        let result = apply_jq_filter(json, ".user.name").unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed, serde_json::json!("Bob"));
+    }
+
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_array_index() {
+        let json = r#"{"items": ["first", "second", "third"]}"#;
+        let result = apply_jq_filter(json, ".items[1]").unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed, serde_json::json!("second"));
+    }
+
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_array_iteration() {
+        let json = r#"[{"id": 1}, {"id": 2}, {"id": 3}]"#;
+        let result = apply_jq_filter(json, ".[].id").unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        // JQ returns multiple results as an array
+        assert_eq!(parsed, serde_json::json!([1, 2, 3]));
+    }
+
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_complex_expression() {
+        let json = r#"{"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}"#;
+        let result = apply_jq_filter(json, ".users | map(.name)").unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed, serde_json::json!(["Alice", "Bob"]));
+    }
+
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_select() {
+        let json =
+            r#"[{"id": 1, "active": true}, {"id": 2, "active": false}, {"id": 3, "active": true}]"#;
+        let result = apply_jq_filter(json, "[.[] | select(.active)]").unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed,
+            serde_json::json!([{"id": 1, "active": true}, {"id": 3, "active": true}])
+        );
+    }
+
+    #[test]
+    fn test_apply_jq_filter_invalid_json() {
+        let json = "not valid json";
+        let result = apply_jq_filter(json, ".field");
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let error_msg = err.to_string();
+            assert!(error_msg.contains("JQ filter error"));
+            assert!(error_msg.contains(".field"));
+            assert!(error_msg.contains("Response is not valid JSON"));
+        } else {
+            panic!("Expected error");
         }
     }
-}
 
-#[cfg(feature = "jq")]
-/// Convert jaq Val to serde_json::Value
-fn jaq_val_to_serde_json(val: &jaq_interpret::Val) -> Value {
-    match val {
-        Val::Null => Value::Null,
-        Val::Bool(b) => Value::Bool(*b),
-        Val::Int(i) => {
-            // Convert isize to i64
-            Value::Number((*i as i64).into())
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_invalid_expression() {
+        let json = r#"{"name": "test"}"#;
+        let result = apply_jq_filter(json, "invalid..expression");
+        assert!(result.is_err());
+        if let Err(err) = result {
+            let error_msg = err.to_string();
+            assert!(error_msg.contains("JQ filter error") || error_msg.contains("Parse error"));
+            assert!(error_msg.contains("invalid..expression"));
+        } else {
+            panic!("Expected error");
         }
-        Val::Float(f) => {
-            if let Some(num) = serde_json::Number::from_f64(*f) {
-                Value::Number(num)
-            } else {
-                Value::Null
-            }
-        }
-        Val::Str(s) => Value::String(s.to_string()),
-        Val::Arr(arr) => {
-            let json_arr: Vec<Value> = arr.iter().map(jaq_val_to_serde_json).collect();
-            Value::Array(json_arr)
-        }
-        Val::Obj(obj) => {
-            let mut json_obj = serde_json::Map::new();
-            for (k, v) in obj.iter() {
-                json_obj.insert(k.to_string(), jaq_val_to_serde_json(v));
-            }
-            Value::Object(json_obj)
-        }
-        _ => Value::Null, // Handle any other Val variants as null
+    }
+
+    #[test]
+    fn test_apply_jq_filter_null_result() {
+        let json = r#"{"name": "test"}"#;
+        let result = apply_jq_filter(json, ".missing_field").unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed, serde_json::json!(null));
+    }
+
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_arithmetic() {
+        let json = r#"{"x": 10, "y": 20}"#;
+        let result = apply_jq_filter(json, ".x + .y").unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed, serde_json::json!(30));
+    }
+
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_string_concatenation() {
+        let json = r#"{"first": "Hello", "second": "World"}"#;
+        let result = apply_jq_filter(json, r#".first + " " + .second"#).unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed, serde_json::json!("Hello World"));
+    }
+
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_length() {
+        let json = r#"{"items": [1, 2, 3, 4, 5]}"#;
+        let result = apply_jq_filter(json, ".items | length").unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed, serde_json::json!(5));
     }
 }
