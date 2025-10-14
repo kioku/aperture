@@ -1209,7 +1209,7 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
                 }
             }
             Err(e) => Err(Error::jq_filter_error(
-                filter,
+                format!("{:?}", filter),
                 format!("Filter execution error: {e}"),
             )),
         }
