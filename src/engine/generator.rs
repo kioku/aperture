@@ -169,11 +169,23 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 }
 
 /// Creates a clap Arg from a `CachedParameter`
+///
+/// # Boolean Parameter Handling
+///
+/// Boolean parameters use `ArgAction::SetTrue`, treating them as flags:
+/// - **Optional booleans** (`required: false`): Flag presence = true, absence = false
+/// - **Required booleans** (`required: true`): Flag MUST be provided, presence = true
+///
+/// Examples:
+/// - `--verbose` (optional): omitting the flag means `verbose=false`
+/// - `--enable-feature` (required): user MUST provide the flag to proceed
+///
+/// This differs from non-boolean parameters which require explicit values (e.g., `--id 123`).
 fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool) -> Arg {
     let param_name_static = to_static_str(param.name.clone());
     let mut arg = Arg::new(param_name_static);
 
-    // Check if this is a boolean parameter
+    // Check if this is a boolean parameter (type: "boolean" in OpenAPI schema)
     let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
 
     match param.location.as_str() {
@@ -192,9 +204,11 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
 
                 if is_boolean {
                     // Boolean path parameters are treated as flags
+                    // Required booleans must be provided; optional booleans default to false when absent
                     arg = arg
                         .long(long_name)
                         .help(format!("Path parameter: {}", param.name))
+                        .required(param.required)
                         .action(ArgAction::SetTrue);
                 } else {
                     let value_name = to_static_str(param.name.to_uppercase());
@@ -213,6 +227,7 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
 
             if is_boolean {
                 // Boolean parameters are proper flags
+                // Required booleans must be provided; optional booleans default to false when absent
                 arg = arg
                     .long(long_name)
                     .help(format!(
@@ -220,6 +235,7 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
                         capitalize_first(&param.location),
                         param.name
                     ))
+                    .required(param.required)
                     .action(ArgAction::SetTrue);
             } else {
                 let value_name = to_static_str(param.name.to_uppercase());
@@ -241,9 +257,11 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
 
             if is_boolean {
                 // Boolean parameters are proper flags
+                // Required booleans must be provided; optional booleans default to false when absent
                 arg = arg
                     .long(long_name)
                     .help(format!("{} parameter", param.name))
+                    .required(param.required)
                     .action(ArgAction::SetTrue);
             } else {
                 let value_name = to_static_str(param.name.to_uppercase());
