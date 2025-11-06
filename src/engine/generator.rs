@@ -153,8 +153,8 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 
             // Add examples flag for showing extended examples
             operation_command = operation_command.arg(
-                Arg::new("examples")
-                    .long("examples")
+                Arg::new("show-examples")
+                    .long("show-examples")
                     .help("Show extended usage examples for this command")
                     .action(ArgAction::SetTrue),
             );
@@ -173,6 +173,9 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
     let param_name_static = to_static_str(param.name.clone());
     let mut arg = Arg::new(param_name_static);
 
+    // Check if this is a boolean parameter
+    let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
+
     match param.location.as_str() {
         "path" => {
             if use_positional_args {
@@ -186,40 +189,71 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
             } else {
                 // Default mode: path parameters become flags too
                 let long_name = to_static_str(to_kebab_case(&param.name));
-                let value_name = to_static_str(param.name.to_uppercase());
-                arg = arg
-                    .long(long_name)
-                    .help(format!("Path parameter: {}", param.name))
-                    .value_name(value_name)
-                    .required(param.required)
-                    .action(ArgAction::Set);
+
+                if is_boolean {
+                    // Boolean path parameters are treated as flags
+                    arg = arg
+                        .long(long_name)
+                        .help(format!("Path parameter: {}", param.name))
+                        .action(ArgAction::SetTrue);
+                } else {
+                    let value_name = to_static_str(param.name.to_uppercase());
+                    arg = arg
+                        .long(long_name)
+                        .help(format!("Path parameter: {}", param.name))
+                        .value_name(value_name)
+                        .required(param.required)
+                        .action(ArgAction::Set);
+                }
             }
         }
         "query" | "header" => {
             // Query and header parameters are flags
             let long_name = to_static_str(to_kebab_case(&param.name));
-            let value_name = to_static_str(param.name.to_uppercase());
-            arg = arg
-                .long(long_name)
-                .help(format!(
-                    "{} {} parameter",
-                    capitalize_first(&param.location),
-                    param.name
-                ))
-                .value_name(value_name)
-                .required(param.required)
-                .action(ArgAction::Set);
+
+            if is_boolean {
+                // Boolean parameters are proper flags
+                arg = arg
+                    .long(long_name)
+                    .help(format!(
+                        "{} {} parameter",
+                        capitalize_first(&param.location),
+                        param.name
+                    ))
+                    .action(ArgAction::SetTrue);
+            } else {
+                let value_name = to_static_str(param.name.to_uppercase());
+                arg = arg
+                    .long(long_name)
+                    .help(format!(
+                        "{} {} parameter",
+                        capitalize_first(&param.location),
+                        param.name
+                    ))
+                    .value_name(value_name)
+                    .required(param.required)
+                    .action(ArgAction::Set);
+            }
         }
         _ => {
             // Unknown location, treat as flag
             let long_name = to_static_str(to_kebab_case(&param.name));
-            let value_name = to_static_str(param.name.to_uppercase());
-            arg = arg
-                .long(long_name)
-                .help(format!("{} parameter", param.name))
-                .value_name(value_name)
-                .required(param.required)
-                .action(ArgAction::Set);
+
+            if is_boolean {
+                // Boolean parameters are proper flags
+                arg = arg
+                    .long(long_name)
+                    .help(format!("{} parameter", param.name))
+                    .action(ArgAction::SetTrue);
+            } else {
+                let value_name = to_static_str(param.name.to_uppercase());
+                arg = arg
+                    .long(long_name)
+                    .help(format!("{} parameter", param.name))
+                    .value_name(value_name)
+                    .required(param.required)
+                    .action(ArgAction::Set);
+            }
         }
     }
 

@@ -151,7 +151,6 @@ async fn test_kebab_case_parameters_work_end_to_end() {
             "--organization-id-or-slug",
             "my-org",
             "--include-members",
-            "true",
             "--x-custom-header",
             "test-value",
         ])

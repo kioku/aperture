@@ -152,7 +152,6 @@ async fn test_flag_based_syntax_with_caching() {
             "--id",
             "123",
             "--include-profile",
-            "true",
             "--x-request-id",
             "req-123",
         ])
@@ -226,16 +225,9 @@ async fn test_legacy_positional_syntax_with_caching() {
         .unwrap();
     assert!(id_arg.get_long().is_none());
 
-    // Create matches using positional syntax
+    // Create matches using positional syntax (without include-profile flag)
     let matches = command
-        .try_get_matches_from(vec![
-            "api",
-            "users",
-            "get-user-by-id",
-            "456",
-            "--include-profile",
-            "false",
-        ])
+        .try_get_matches_from(vec!["api", "users", "get-user-by-id", "456"])
         .unwrap();
 
     // First request should hit the API
@@ -298,7 +290,9 @@ async fn test_different_parameter_combinations_cache_separately() {
 
     Mock::given(method("GET"))
         .and(path("/users/123"))
-        .and(wiremock::matchers::query_param("include_profile", "false"))
+        .and(wiremock::matchers::query_param_is_missing(
+            "include_profile",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": "123",
             "name": "User without profile"
@@ -307,7 +301,7 @@ async fn test_different_parameter_combinations_cache_separately() {
         .mount(&mock_server)
         .await;
 
-    // Request with include_profile=true
+    // Request with include_profile=true (flag present)
     let command1 = generate_command_tree_with_flags(&spec, false);
     let matches1 = command1
         .try_get_matches_from(vec![
@@ -317,7 +311,6 @@ async fn test_different_parameter_combinations_cache_separately() {
             "--id",
             "123",
             "--include-profile",
-            "true",
         ])
         .unwrap();
 
@@ -336,18 +329,10 @@ async fn test_different_parameter_combinations_cache_separately() {
     .await;
     assert!(result1.is_ok());
 
-    // Request with include_profile=false (should be cached separately)
+    // Request without include_profile (flag absent, should be cached separately)
     let command2 = generate_command_tree_with_flags(&spec, false);
     let matches2 = command2
-        .try_get_matches_from(vec![
-            "api",
-            "users",
-            "get-user-by-id",
-            "--id",
-            "123",
-            "--include-profile",
-            "false",
-        ])
+        .try_get_matches_from(vec!["api", "users", "get-user-by-id", "--id", "123"])
         .unwrap();
 
     let result2 = execute_request(
@@ -467,7 +452,6 @@ async fn test_dry_run_with_flag_based_syntax() {
             "--id",
             "123",
             "--include-profile",
-            "true",
         ])
         .unwrap();
 
