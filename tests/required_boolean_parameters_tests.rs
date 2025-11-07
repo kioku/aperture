@@ -1,11 +1,15 @@
-/// Tests for required boolean parameter handling
+/// Tests for boolean parameter handling with required/optional semantics
 ///
-/// Required boolean parameters must be explicitly provided by the user.
+/// Boolean parameters have special handling:
+/// - **Path parameters**: Always optional (flag presence = true, absence = false)
+/// - **Query/Header parameters**: Respect OpenAPI required field
+///
 /// This test suite verifies that:
-/// 1. Required boolean path parameters error when missing
-/// 2. Required boolean query parameters error when missing
-/// 3. Required booleans work correctly when provided
-/// 4. Optional booleans continue to work as before (default to false when absent)
+/// 1. Boolean path parameters default to false when flag omitted (even if OpenAPI marks as required)
+/// 2. Boolean path parameters substitute "true"/"false" correctly in URLs
+/// 3. Required boolean query parameters error when missing
+/// 4. Required booleans work correctly when provided
+/// 5. Optional booleans continue to work as before (default to false when absent)
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedSpec, CACHE_FORMAT_VERSION,
 };
@@ -164,24 +168,28 @@ fn create_spec_with_mixed_boolean_params() -> CachedSpec {
 }
 
 #[test]
-fn test_required_boolean_path_parameter_missing_errors() {
+fn test_required_boolean_path_parameter_missing_defaults_to_false() {
     let spec = create_spec_with_required_boolean_path_param();
     let cmd = generate_command_tree_with_flags(&spec, false);
 
-    // Try WITHOUT the required boolean flag - should ERROR
+    // Boolean path parameters are always optional, even if OpenAPI spec marks them as required
+    // When flag is omitted, it defaults to false
     let result = cmd.try_get_matches_from(vec!["api", "items", "get-item", "--id", "123"]);
 
     assert!(
-        result.is_err(),
-        "Required boolean path parameter should error when missing"
+        result.is_ok(),
+        "Boolean path parameters should be optional regardless of OpenAPI required field: {:?}",
+        result.err()
     );
 
-    let err = result.unwrap_err();
-    let err_str = err.to_string();
+    let matches = result.unwrap();
+    let (_, sub_matches) = matches.subcommand().unwrap();
+    let (_, operation_matches) = sub_matches.subcommand().unwrap();
+
+    // When flag is not provided, get_flag returns false
     assert!(
-        err_str.contains("required") || err_str.contains("--active"),
-        "Error message should mention the required parameter: {}",
-        err_str
+        !operation_matches.get_flag("active"),
+        "Boolean path parameter should be false when flag not provided"
     );
 }
 
@@ -330,7 +338,7 @@ fn test_optional_boolean_defaults_to_false_when_absent() {
 async fn test_required_boolean_path_param_url_substitution() {
     let mock_server = MockServer::start().await;
 
-    // When the flag is provided, expect "true" in the URL
+    // Test Case 1: When the flag is provided, expect "true" in the URL
     Mock::given(method("GET"))
         .and(path("/items/123/true"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -369,7 +377,41 @@ async fn test_required_boolean_path_param_url_substitution() {
         result.err()
     );
 
-    // Verify the mock was called (confirming URL was /items/123/true)
+    // Test Case 2: When the flag is NOT provided, expect "false" in the URL
+    Mock::given(method("GET"))
+        .and(path("/items/456/false"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "456",
+            "active": false
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let cmd2 = generate_command_tree_with_flags(&spec, false);
+    let matches2 = cmd2
+        .try_get_matches_from(vec!["api", "items", "get-item", "--id", "456"])
+        .expect("Command should parse without --active flag");
+
+    let result2 = execute_request(
+        &spec,
+        &matches2,
+        None,
+        false,
+        None,
+        None,
+        &OutputFormat::Json,
+        None,
+        None,
+        false,
+    )
+    .await;
+
+    assert!(
+        result2.is_ok(),
+        "Request should succeed with boolean=false in URL: {:?}",
+        result2.err()
+    );
 }
 
 #[tokio::test]

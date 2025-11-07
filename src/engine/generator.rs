@@ -173,12 +173,16 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 /// # Boolean Parameter Handling
 ///
 /// Boolean parameters use `ArgAction::SetTrue`, treating them as flags:
+///
+/// **Path Parameters:**
+/// - Always optional regardless of `OpenAPI` `required` field
+/// - Flag presence = true (substitutes "true" in path), absence = false (substitutes "false")
+/// - Example: `/items/{active}` with `--active` → `/items/true`, without → `/items/false`
+///
+/// **Query/Header Parameters:**
 /// - **Optional booleans** (`required: false`): Flag presence = true, absence = false
 /// - **Required booleans** (`required: true`): Flag MUST be provided, presence = true
-///
-/// Examples:
-/// - `--verbose` (optional): omitting the flag means `verbose=false`
-/// - `--enable-feature` (required): user MUST provide the flag to proceed
+/// - Example: `--verbose` (optional) omitted means `verbose=false`
 ///
 /// This differs from non-boolean parameters which require explicit values (e.g., `--id 123`).
 fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool) -> Arg {
@@ -204,11 +208,12 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
 
                 if is_boolean {
                     // Boolean path parameters are treated as flags
-                    // Required booleans must be provided; optional booleans default to false when absent
+                    // Always optional: flag presence = true, absence = false (substituted in path)
+                    // This provides consistent UX regardless of OpenAPI required field
                     arg = arg
                         .long(long_name)
                         .help(format!("Path parameter: {}", param.name))
-                        .required(param.required)
+                        .required(false)
                         .action(ArgAction::SetTrue);
                 } else {
                     let value_name = to_static_str(param.name.to_uppercase());
