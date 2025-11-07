@@ -196,12 +196,24 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
         "path" => {
             if use_positional_args {
                 // Legacy mode: path parameters are positional arguments
-                let value_name = to_static_str(param.name.to_uppercase());
-                arg = arg
-                    .help(format!("{} parameter", param.name))
-                    .value_name(value_name)
-                    .required(param.required)
-                    .action(ArgAction::Set);
+                if is_boolean {
+                    // Boolean path parameters must use SetTrue even in positional mode
+                    // because executor always reads them via get_flag()
+                    // They remain as flags, not positional args, to avoid clap panic
+                    let long_name = to_static_str(to_kebab_case(&param.name));
+                    arg = arg
+                        .long(long_name)
+                        .help(format!("Path parameter: {}", param.name))
+                        .required(false)
+                        .action(ArgAction::SetTrue);
+                } else {
+                    let value_name = to_static_str(param.name.to_uppercase());
+                    arg = arg
+                        .help(format!("{} parameter", param.name))
+                        .value_name(value_name)
+                        .required(param.required)
+                        .action(ArgAction::Set);
+                }
             } else {
                 // Default mode: path parameters become flags too
                 let long_name = to_static_str(to_kebab_case(&param.name));
