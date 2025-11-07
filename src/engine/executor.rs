@@ -718,15 +718,36 @@ fn build_headers(
 
     // Add header parameters from matches
     for param in &operation.parameters {
-        if param.location == "header" {
-            if let Some(value) = current_matches.get_one::<String>(&param.name) {
-                let header_name = HeaderName::from_str(&param.name)
-                    .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
-                let header_value = HeaderValue::from_str(value)
-                    .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))?;
-                headers.insert(header_name, header_value);
-            }
+        // Skip non-header parameters early
+        if param.location != "header" {
+            continue;
         }
+
+        let header_name = HeaderName::from_str(&param.name)
+            .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
+
+        // Check if this is a boolean parameter
+        let is_boolean = matches!(param.schema_type.as_deref(), Some("boolean"));
+
+        let header_value = if is_boolean {
+            // Boolean header parameters are flags
+            // Note: Required boolean headers are enforced by clap at parse time via .required(true)
+            if current_matches.get_flag(&param.name) {
+                HeaderValue::from_static("true")
+            } else {
+                // If flag not present and optional, skip adding header
+                continue;
+            }
+        } else if let Some(value) = current_matches.get_one::<String>(&param.name) {
+            // Non-boolean header parameters
+            HeaderValue::from_str(value)
+                .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))?
+        } else {
+            // No value provided for optional non-boolean parameter
+            continue;
+        };
+
+        headers.insert(header_name, header_value);
     }
 
     // Add authentication headers based on security requirements
