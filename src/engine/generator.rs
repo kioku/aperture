@@ -153,8 +153,8 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 
             // Add examples flag for showing extended examples
             operation_command = operation_command.arg(
-                Arg::new("examples")
-                    .long("examples")
+                Arg::new("show-examples")
+                    .long("show-examples")
                     .help("Show extended usage examples for this command")
                     .action(ArgAction::SetTrue),
             );
@@ -169,57 +169,126 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 }
 
 /// Creates a clap Arg from a `CachedParameter`
+///
+/// # Boolean Parameter Handling
+///
+/// Boolean parameters use `ArgAction::SetTrue`, treating them as flags:
+///
+/// **Path Parameters:**
+/// - Always optional regardless of `OpenAPI` `required` field
+/// - Flag presence = true (substitutes "true" in path), absence = false (substitutes "false")
+/// - Example: `/items/{active}` with `--active` → `/items/true`, without → `/items/false`
+///
+/// **Query/Header Parameters:**
+/// - **Optional booleans** (`required: false`): Flag presence = true, absence = false
+/// - **Required booleans** (`required: true`): Flag MUST be provided, presence = true
+/// - Example: `--verbose` (optional) omitted means `verbose=false`
+///
+/// This differs from non-boolean parameters which require explicit values (e.g., `--id 123`).
 fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool) -> Arg {
     let param_name_static = to_static_str(param.name.clone());
     let mut arg = Arg::new(param_name_static);
+
+    // Check if this is a boolean parameter (type: "boolean" in OpenAPI schema)
+    let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
 
     match param.location.as_str() {
         "path" => {
             if use_positional_args {
                 // Legacy mode: path parameters are positional arguments
-                let value_name = to_static_str(param.name.to_uppercase());
-                arg = arg
-                    .help(format!("{} parameter", param.name))
-                    .value_name(value_name)
-                    .required(param.required)
-                    .action(ArgAction::Set);
+                if is_boolean {
+                    // Boolean path parameters must use SetTrue even in positional mode
+                    // because executor always reads them via get_flag()
+                    // They remain as flags, not positional args, to avoid clap panic
+                    let long_name = to_static_str(to_kebab_case(&param.name));
+                    arg = arg
+                        .long(long_name)
+                        .help(format!("Path parameter: {}", param.name))
+                        .required(false)
+                        .action(ArgAction::SetTrue);
+                } else {
+                    let value_name = to_static_str(param.name.to_uppercase());
+                    arg = arg
+                        .help(format!("{} parameter", param.name))
+                        .value_name(value_name)
+                        .required(param.required)
+                        .action(ArgAction::Set);
+                }
             } else {
                 // Default mode: path parameters become flags too
                 let long_name = to_static_str(to_kebab_case(&param.name));
-                let value_name = to_static_str(param.name.to_uppercase());
-                arg = arg
-                    .long(long_name)
-                    .help(format!("Path parameter: {}", param.name))
-                    .value_name(value_name)
-                    .required(param.required)
-                    .action(ArgAction::Set);
+
+                if is_boolean {
+                    // Boolean path parameters are treated as flags
+                    // Always optional: flag presence = true, absence = false (substituted in path)
+                    // This provides consistent UX regardless of OpenAPI required field
+                    arg = arg
+                        .long(long_name)
+                        .help(format!("Path parameter: {}", param.name))
+                        .required(false)
+                        .action(ArgAction::SetTrue);
+                } else {
+                    let value_name = to_static_str(param.name.to_uppercase());
+                    arg = arg
+                        .long(long_name)
+                        .help(format!("Path parameter: {}", param.name))
+                        .value_name(value_name)
+                        .required(param.required)
+                        .action(ArgAction::Set);
+                }
             }
         }
         "query" | "header" => {
             // Query and header parameters are flags
             let long_name = to_static_str(to_kebab_case(&param.name));
-            let value_name = to_static_str(param.name.to_uppercase());
-            arg = arg
-                .long(long_name)
-                .help(format!(
-                    "{} {} parameter",
-                    capitalize_first(&param.location),
-                    param.name
-                ))
-                .value_name(value_name)
-                .required(param.required)
-                .action(ArgAction::Set);
+
+            if is_boolean {
+                // Boolean parameters are proper flags
+                // Required booleans must be provided; optional booleans default to false when absent
+                arg = arg
+                    .long(long_name)
+                    .help(format!(
+                        "{} {} parameter",
+                        capitalize_first(&param.location),
+                        param.name
+                    ))
+                    .required(param.required)
+                    .action(ArgAction::SetTrue);
+            } else {
+                let value_name = to_static_str(param.name.to_uppercase());
+                arg = arg
+                    .long(long_name)
+                    .help(format!(
+                        "{} {} parameter",
+                        capitalize_first(&param.location),
+                        param.name
+                    ))
+                    .value_name(value_name)
+                    .required(param.required)
+                    .action(ArgAction::Set);
+            }
         }
         _ => {
             // Unknown location, treat as flag
             let long_name = to_static_str(to_kebab_case(&param.name));
-            let value_name = to_static_str(param.name.to_uppercase());
-            arg = arg
-                .long(long_name)
-                .help(format!("{} parameter", param.name))
-                .value_name(value_name)
-                .required(param.required)
-                .action(ArgAction::Set);
+
+            if is_boolean {
+                // Boolean parameters are proper flags
+                // Required booleans must be provided; optional booleans default to false when absent
+                arg = arg
+                    .long(long_name)
+                    .help(format!("{} parameter", param.name))
+                    .required(param.required)
+                    .action(ArgAction::SetTrue);
+            } else {
+                let value_name = to_static_str(param.name.to_uppercase());
+                arg = arg
+                    .long(long_name)
+                    .help(format!("{} parameter", param.name))
+                    .value_name(value_name)
+                    .required(param.required)
+                    .action(ArgAction::Set);
+            }
         }
     }
 

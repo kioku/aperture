@@ -348,10 +348,12 @@ pub async fn execute_request(
     // Find the operation from the command hierarchy (also returns the operation's ArgMatches)
     let (operation, operation_matches) = find_operation_with_matches(spec, matches)?;
 
-    // Check if --examples flag is present in the operation's matches
-    // Only check if the flag was actually defined (it won't be in tests)
-    if operation_matches.try_get_one::<bool>("examples").is_ok()
-        && operation_matches.get_flag("examples")
+    // Check if --show-examples flag is present in the operation's matches
+    // Only check if the flag exists in the matches (it won't exist in some test scenarios)
+    if operation_matches
+        .try_contains_id("show-examples")
+        .unwrap_or(false)
+        && operation_matches.get_flag("show-examples")
     {
         print_extended_examples(operation);
         return Ok(None);
@@ -568,11 +570,9 @@ fn find_operation_with_matches<'a>(
     // Get the subcommand path from matches
     let mut current_matches = matches;
     let mut subcommand_path = Vec::new();
-    let mut final_matches = matches;
 
     while let Some((name, sub_matches)) = current_matches.subcommand() {
         subcommand_path.push(name);
-        final_matches = current_matches;
         current_matches = sub_matches;
     }
 
@@ -583,7 +583,8 @@ fn find_operation_with_matches<'a>(
             // Convert operation_id to kebab-case for comparison
             let kebab_id = to_kebab_case(&command.operation_id);
             if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
-                return Ok((command, final_matches));
+                // Return current_matches (the deepest subcommand) which contains the operation's arguments
+                return Ok((command, current_matches));
             }
         }
     }
@@ -628,16 +629,31 @@ fn build_url(
             let close_pos = open_pos + close;
             let param_name = &url[open_pos + 1..close_pos];
 
-            if let Some(value) = current_matches
+            // Check if this is a boolean parameter
+            let param = operation.parameters.iter().find(|p| p.name == param_name);
+            let is_boolean = param
+                .and_then(|p| p.schema_type.as_ref())
+                .is_some_and(|t| t == "boolean");
+
+            let value = if is_boolean {
+                // Boolean path parameters are flags
+                if current_matches.get_flag(param_name) {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                }
+            } else if let Some(string_value) = current_matches
                 .try_get_one::<String>(param_name)
                 .ok()
                 .flatten()
             {
-                url.replace_range(open_pos..=close_pos, value);
-                start = open_pos + value.len();
+                string_value.clone()
             } else {
                 return Err(Error::missing_path_parameter(param_name));
-            }
+            };
+
+            url.replace_range(open_pos..=close_pos, &value);
+            start = open_pos + value.len();
         } else {
             break;
         }
@@ -648,13 +664,23 @@ fn build_url(
     for arg in current_matches.ids() {
         let arg_str = arg.as_str();
         // Skip non-query args - only process query parameters from the operation
-        let is_query_param = operation
+        let param = operation
             .parameters
             .iter()
-            .any(|p| p.name == arg_str && p.location == "query");
-        if is_query_param {
-            if let Some(value) = current_matches.get_one::<String>(arg_str) {
-                query_params.push(format!("{}={}", arg_str, urlencoding::encode(value)));
+            .find(|p| p.name == arg_str && p.location == "query");
+
+        if let Some(param) = param {
+            // Check if this is a boolean parameter
+            let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
+
+            if is_boolean {
+                // Boolean parameters are flags - check if the flag is set
+                if current_matches.get_flag(arg_str) {
+                    query_params.push(format!("{arg_str}=true"));
+                }
+            } else if let Some(value) = current_matches.get_one::<String>(arg_str) {
+                // Non-boolean parameters have string values
+                query_params.push(format!("{arg_str}={}", urlencoding::encode(value)));
             }
         }
     }
@@ -692,15 +718,36 @@ fn build_headers(
 
     // Add header parameters from matches
     for param in &operation.parameters {
-        if param.location == "header" {
-            if let Some(value) = current_matches.get_one::<String>(&param.name) {
-                let header_name = HeaderName::from_str(&param.name)
-                    .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
-                let header_value = HeaderValue::from_str(value)
-                    .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))?;
-                headers.insert(header_name, header_value);
-            }
+        // Skip non-header parameters early
+        if param.location != "header" {
+            continue;
         }
+
+        let header_name = HeaderName::from_str(&param.name)
+            .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
+
+        // Check if this is a boolean parameter
+        let is_boolean = matches!(param.schema_type.as_deref(), Some("boolean"));
+
+        let header_value = if is_boolean {
+            // Boolean header parameters are flags
+            // Note: Required boolean headers are enforced by clap at parse time via .required(true)
+            if current_matches.get_flag(&param.name) {
+                HeaderValue::from_static("true")
+            } else {
+                // If flag not present and optional, skip adding header
+                continue;
+            }
+        } else if let Some(value) = current_matches.get_one::<String>(&param.name) {
+            // Non-boolean header parameters
+            HeaderValue::from_str(value)
+                .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))?
+        } else {
+            // No value provided for optional non-boolean parameter
+            continue;
+        };
+
+        headers.insert(header_name, header_value);
     }
 
     // Add authentication headers based on security requirements
