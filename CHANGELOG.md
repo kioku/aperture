@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6] - 2025-11-12
+
+### ⚙️ Miscellaneous Tasks
+
+- Clean up unused imports and fix warnings
+- Enhance release script with changelog automation
+
+### 🐛 Bug Fixes
+
+- Resolve panic conditions and improve error handling
+- Resolve panic conditions and improve error handling for production stability
+- Rename help command to docs to avoid clap conflict
+- **docs:** Replace .unwrap() with .ok() for consistency
+- Resolve compilation errors with openapi31 and jq features
+- Resolve variable shadowing to enable jq feature compilation
+- Migrate to jaq v2.x to resolve compilation and functionality issues
+- Convert tags with spaces to kebab-case for CLI compatibility
+- Convert tags to kebab-case in documentation generator
+- Resolve clap panic from parameter name conflicts and add boolean parameter support
+- Enforce required boolean parameters with proper validation
+- Make boolean path parameters consistently optional
+- Ensure boolean parameters work correctly in positional args mode
+
+### 📚 Documentation
+
+- Update CLAUDE.md to reflect working jq feature with v2.x
+- Update README to reflect working jq feature
+
+### 🚀 Features
+
+- Add search command to CLI interface
+- Add enhanced help with examples
+- Improve error messages with smart suggestions
+- Implement command shortcuts and aliases
+- Integrate comprehensive documentation features
+- Add original_tags field for full tag consistency in JSON manifests
+- Add boolean header parameter support
+
+### 🚜 Refactor
+
+- Break down long generate_command_help function
+- Move inline imports to module/function level for better performance and readability
+- Eliminate remaining high-priority inline imports in production code
+- Fix final production code inline import in transformer.rs
+- Complete inline import elimination - move all remaining imports to proper scope
+- Complete standardization of import patterns
+
+### 🧪 Testing
+
+- Fix list-commands assertion to expect 'General' instead of 'default'
+- Add integration tests for --show-examples execution path
+
 ## [0.1.5] - 2025-08-23
 
 ### Release Highlights
