@@ -1,18 +1,45 @@
 #!/bin/bash
 set -e
 
-# Simple release script
 echo "Creating new release..."
 
-# Install cargo-release if needed
+# Prompt for version first
+echo "Enter version (e.g., 0.1.6):"
+read -r VERSION
+
+# Install tools if needed
 if ! command -v cargo-release &>/dev/null; then
   echo "Installing cargo-release..."
   cargo install cargo-release
 fi
 
-# Check everything looks good
+if ! command -v git-cliff &>/dev/null; then
+  echo "Installing git-cliff..."
+  cargo install git-cliff
+fi
+
+# Update CHANGELOG with git-cliff
+echo "Updating CHANGELOG.md..."
+git-cliff --unreleased --tag "v${VERSION}" --prepend CHANGELOG.md
+
+# Show what was added
+echo "New changelog entry:"
+git-cliff --unreleased --tag "v${VERSION}"
+
+# Review and confirm
+echo "Review CHANGELOG.md. Continue? (y/n)"
+read -r CONFIRM
+if [[ $CONFIRM != "y" ]]; then
+  git checkout CHANGELOG.md
+  exit 1
+fi
+
+# Stage the changelog
+git add CHANGELOG.md
+
+# Run existing checks
 cargo test
 cargo clippy
 
-# Release (will prompt for version)
-cargo release --execute
+# Release
+cargo release "${VERSION}" --execute
