@@ -13,7 +13,7 @@ use openapiv3::{
     APIKeyLocation, BooleanType, Components, ExternalDocumentation, Info, MediaType, OpenAPI,
     Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem, Paths, QueryStyle,
     ReferenceOr, RequestBody, Responses, Schema, SchemaData, SchemaKind, SecurityRequirement,
-    SecurityScheme, Server, ServerVariable, StringType, Type,
+    SecurityScheme, Server, StringType, Type,
 };
 use std::collections::HashMap;
 
