@@ -1,0 +1,29 @@
+# Rule: no-todo-macro
+# Catches todo!() and unimplemented!() macros before they reach production
+#
+# Bad:
+#   fn process(&self) -> Result<()> {
+#       todo!()
+#   }
+#
+# Good:
+#   fn process(&self) -> Result<()> {
+#       Err(MyError::NotImplemented("process".into()))
+#   }
+
+id: no-todo-macro
+language: rust
+severity: error
+message: "Remove todo!()/unimplemented!() before merging. These will panic at runtime."
+
+rule:
+  any:
+    - pattern: todo!($$$)
+    - pattern: unimplemented!($$$)
+
+note: |
+  todo!() and unimplemented!() are placeholders that panic at runtime.
+  Before merging:
+  - Implement the functionality, or
+  - Return a proper error type, or
+  - Remove the dead code path entirely

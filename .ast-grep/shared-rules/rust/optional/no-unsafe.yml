@@ -1,0 +1,28 @@
+# Rule: no-unsafe
+# Flags unsafe blocks for review
+#
+# This rule highlights unsafe code for careful review.
+# Unsafe code is sometimes necessary but should be minimized.
+
+id: no-unsafe
+language: rust
+severity: warning
+message: "Unsafe block detected. Ensure this is necessary and well-documented with a SAFETY comment."
+
+rule:
+  kind: unsafe_block
+
+note: |
+  Unsafe code requires extra scrutiny. For each unsafe block:
+
+  1. Document invariants with a SAFETY comment:
+     // SAFETY: pointer is valid because...
+     unsafe { ... }
+
+  2. Minimize the unsafe scope
+
+  3. Consider if there's a safe alternative:
+     - Use safe abstractions from std/crates
+     - Wrap unsafe in a safe API with clear contracts
+
+  4. Ensure proper testing (Miri, sanitizers)

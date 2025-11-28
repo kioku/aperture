@@ -1,0 +1,18 @@
+# ast-grep configuration for aperture project
+# https://ast-grep.github.io/guide/project/project-config.html
+
+# Rule directories to scan
+ruleDirs:
+  # Shared Rust rules (symlinked to ~/.config/ast-grep/rules/rust)
+  - .ast-grep/shared-rules/rust/core
+  - .ast-grep/shared-rules/rust/strict
+  - .ast-grep/shared-rules/rust/optional
+
+# Language-specific settings
+languageGlobs:
+  rust:
+    - "**/*.rs"
+
+# Test file patterns (optional, for test-specific rules)
+testConfigs:
+  - testDir: tests
