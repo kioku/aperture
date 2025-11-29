@@ -20,11 +20,18 @@ ignores:
   - "**/tests/**"
   - "**/test_*.rs"
   - "**/*_test.rs"
+  - "**/*_tests.rs"
   - "**/benches/**"
   - "**/examples/**"
 
 rule:
   pattern: $EXPR.unwrap()
+  not:
+    inside:
+      kind: attribute_item
+      has:
+        kind: identifier
+        regex: "^(test|cfg)$"
 
 fix: "$EXPR.expect(\"TODO: add error message\")"
 

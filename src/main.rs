@@ -643,10 +643,12 @@ async fn execute_batch_operations(
 
         // Apply JQ filter if provided
         let output = if let Some(jq_filter) = &cli.jq {
-            let summary_json = serde_json::to_string(&summary).unwrap();
+            let summary_json = serde_json::to_string(&summary)
+                .expect("JSON serialization of valid structure cannot fail");
             executor::apply_jq_filter(&summary_json, jq_filter)?
         } else {
-            serde_json::to_string_pretty(&summary).unwrap()
+            serde_json::to_string_pretty(&summary)
+                .expect("JSON serialization of valid structure cannot fail")
         };
 
         println!("{output}");

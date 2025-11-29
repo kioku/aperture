@@ -552,7 +552,7 @@ fn find_operation<'a>(
 
     let operation_name = subcommand_path
         .last()
-        .map_or("unknown".to_string(), ToString::to_string);
+        .map_or_else(|| "unknown".to_string(), ToString::to_string);
 
     // Generate suggestions for similar operations
     let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
@@ -591,7 +591,7 @@ fn find_operation_with_matches<'a>(
 
     let operation_name = subcommand_path
         .last()
-        .map_or("unknown".to_string(), ToString::to_string);
+        .map_or_else(|| "unknown".to_string(), ToString::to_string);
 
     // Generate suggestions for similar operations
     let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
@@ -1103,7 +1103,8 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
             if capture_output {
                 let mut output = String::new();
                 for (i, item) in items.iter().enumerate() {
-                    writeln!(&mut output, "{}: {}", i, format_value_for_table(item)).unwrap();
+                    writeln!(&mut output, "{}: {}", i, format_value_for_table(item))
+                        .expect("writing to String cannot fail");
                 }
                 return Ok(Some(output.trim_end().to_string()));
             }

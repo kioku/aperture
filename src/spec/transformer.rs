@@ -419,8 +419,7 @@ impl SpecTransformer {
                                         .iter()
                                         .filter_map(|v| v.as_ref())
                                         .map(|v| {
-                                            serde_json::to_string(v)
-                                                .unwrap_or_else(|_| v.to_string())
+                                            serde_json::to_string(v).unwrap_or_else(|_| v.clone())
                                         })
                                         .collect();
                                     let format = match &string_type.format {
@@ -716,7 +715,7 @@ impl SpecTransformer {
                     param.name,
                     param.example.as_deref().unwrap_or("<value>")
                 )
-                .unwrap();
+                .expect("writing to String cannot fail");
             }
 
             examples.push(CommandExample {
@@ -739,7 +738,7 @@ impl SpecTransformer {
                         param.name,
                         param.example.as_deref().unwrap_or("123")
                     )
-                    .unwrap();
+                    .expect("writing to String cannot fail");
                 }
             }
 
@@ -771,7 +770,7 @@ impl SpecTransformer {
                     param.name,
                     param.example.as_deref().unwrap_or("value")
                 )
-                .unwrap();
+                .expect("writing to String cannot fail");
             }
 
             // Add optional parameters
@@ -782,7 +781,7 @@ impl SpecTransformer {
                     param.name,
                     param.example.as_deref().unwrap_or("optional")
                 )
-                .unwrap();
+                .expect("writing to String cannot fail");
             }
 
             examples.push(CommandExample {

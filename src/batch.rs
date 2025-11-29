@@ -129,7 +129,7 @@ impl BatchProcessor {
     pub fn new(config: BatchConfig) -> Self {
         let rate_limiter = config.rate_limit.map(|limit| {
             Arc::new(RateLimiter::direct(Quota::per_second(
-                NonZeroU32::new(limit).unwrap_or(NonZeroU32::new(1).unwrap()),
+                NonZeroU32::new(limit).unwrap_or(NonZeroU32::new(1).expect("1 is non-zero")),
             )))
         });
 
@@ -217,7 +217,10 @@ impl BatchProcessor {
 
             let handle = tokio::spawn(async move {
                 // Acquire semaphore permit for concurrency control
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore
+                    .acquire()
+                    .await
+                    .expect("semaphore should not be closed");
 
                 // Apply rate limiting if configured
                 if let Some(limiter) = rate_limiter {

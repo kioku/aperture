@@ -67,8 +67,10 @@ fn fix_yaml_boolean_values(mut content: String, properties: &[&str]) -> String {
 /// Fix boolean values in JSON format
 fn fix_json_boolean_values(mut content: String, properties: &[&str]) -> String {
     for property in properties {
-        let pattern_0 = Regex::new(&format!(r#""{property}"\s*:\s*0\b"#)).unwrap();
-        let pattern_1 = Regex::new(&format!(r#""{property}"\s*:\s*1\b"#)).unwrap();
+        let pattern_0 =
+            Regex::new(&format!(r#""{property}"\s*:\s*0\b"#)).expect("regex pattern is valid");
+        let pattern_1 =
+            Regex::new(&format!(r#""{property}"\s*:\s*1\b"#)).expect("regex pattern is valid");
 
         content = pattern_0
             .replace_all(&content, &format!(r#""{property}":false"#))

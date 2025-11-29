@@ -551,9 +551,7 @@ fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo 
                                     .enumeration
                                     .iter()
                                     .filter_map(|v| v.as_ref())
-                                    .map(|v| {
-                                        serde_json::to_string(v).unwrap_or_else(|_| v.to_string())
-                                    })
+                                    .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.clone()))
                                     .collect();
                                 (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
                             }

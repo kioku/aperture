@@ -114,9 +114,10 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
                         "\n  {}\n    {}",
                         example.description, example.command_line
                     )
-                    .unwrap();
+                    .expect("writing to String buffer cannot fail");
                     if let Some(ref explanation) = example.explanation {
-                        write!(&mut help_text, "\n    ({explanation})").unwrap();
+                        write!(&mut help_text, "\n    ({explanation})")
+                            .expect("writing to String buffer cannot fail");
                     }
                 }
             }
