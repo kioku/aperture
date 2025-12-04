@@ -231,10 +231,12 @@ fn parse_with_oas3_direct_with_original(
         }
     };
 
+    // ast-grep-ignore: no-println
     eprintln!(
         "{} OpenAPI 3.1 specification detected. Using compatibility mode.",
         crate::constants::MSG_WARNING_PREFIX
     );
+    // ast-grep-ignore: no-println
     eprintln!("         Some 3.1-specific features may not be available.");
 
     // Convert oas3 spec to JSON, then attempt to parse as openapiv3

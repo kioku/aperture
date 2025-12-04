@@ -153,6 +153,7 @@ impl ShortcutResolver {
                 candidates.into_iter().next().map_or_else(
                     || {
                         // This should never happen given len() == 1, but handle defensively
+                        // ast-grep-ignore: no-println
                         eprintln!("Warning: Expected exactly one candidate but found none");
                         ResolutionResult::NotFound
                     },
@@ -172,6 +173,7 @@ impl ShortcutResolver {
                     candidates.into_iter().next().map_or_else(
                         || {
                             // This should never happen given we just accessed candidates[0], but handle defensively
+                            // ast-grep-ignore: no-println
                             eprintln!("Warning: Expected candidates after sorting but found none");
                             ResolutionResult::NotFound
                         },

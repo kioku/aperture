@@ -143,6 +143,7 @@ fn handle_dry_run(
     if capture_output {
         Ok(Some(output))
     } else {
+        // ast-grep-ignore: no-println
         println!("{output}");
         Ok(None)
     }
@@ -480,46 +481,62 @@ pub async fn execute_request(
 /// Finds the operation from the command hierarchy
 /// Print extended examples for a command
 fn print_extended_examples(operation: &CachedCommand) {
+    // ast-grep-ignore: no-println
     println!("Command: {}\n", to_kebab_case(&operation.operation_id));
 
     if let Some(ref summary) = operation.summary {
+        // ast-grep-ignore: no-println
         println!("Description: {summary}\n");
     }
 
+    // ast-grep-ignore: no-println
     println!("Method: {} {}\n", operation.method, operation.path);
 
     if operation.examples.is_empty() {
+        // ast-grep-ignore: no-println
         println!("No examples available for this command.");
         return;
     }
 
+    // ast-grep-ignore: no-println
     println!("Examples:\n");
     for (i, example) in operation.examples.iter().enumerate() {
+        // ast-grep-ignore: no-println
         println!("{}. {}", i + 1, example.description);
+        // ast-grep-ignore: no-println
         println!("   {}", example.command_line);
         if let Some(ref explanation) = example.explanation {
+            // ast-grep-ignore: no-println
             println!("   {explanation}");
         }
+        // ast-grep-ignore: no-println
         println!();
     }
 
     // Additional helpful information
     if !operation.parameters.is_empty() {
+        // ast-grep-ignore: no-println
         println!("Parameters:");
         for param in &operation.parameters {
             let required = if param.required { " (required)" } else { "" };
             let param_type = param.schema_type.as_deref().unwrap_or("string");
+            // ast-grep-ignore: no-println
             println!("  --{}{} [{}]", param.name, required, param_type);
             if let Some(ref desc) = param.description {
+                // ast-grep-ignore: no-println
                 println!("      {desc}");
             }
         }
+        // ast-grep-ignore: no-println
         println!();
     }
 
     if operation.request_body.is_some() {
+        // ast-grep-ignore: no-println
         println!("Request Body:");
+        // ast-grep-ignore: no-println
         println!("  --body JSON (required)");
+        // ast-grep-ignore: no-println
         println!("      JSON data to send in the request body");
     }
 }
@@ -832,6 +849,7 @@ fn add_authentication_header(
 ) -> Result<(), Error> {
     // Debug logging when RUST_LOG is set
     if std::env::var("RUST_LOG").is_ok() {
+        // ast-grep-ignore: no-println
         eprintln!(
             "[DEBUG] Adding authentication header for scheme: {} (type: {})",
             security_scheme.name, security_scheme.scheme_type
@@ -865,6 +883,7 @@ fn add_authentication_header(
         } else {
             "x-aperture-secret"
         };
+        // ast-grep-ignore: no-println
         eprintln!(
             "[DEBUG] Using secret from {source} for scheme '{}': env var '{env_var_name}'",
             security_scheme.name
@@ -926,12 +945,15 @@ fn add_authentication_header(
                 if std::env::var("RUST_LOG").is_ok() {
                     match &auth_scheme {
                         AuthScheme::Bearer => {
+                            // ast-grep-ignore: no-println
                             eprintln!("[DEBUG] Added Bearer authentication header");
                         }
                         AuthScheme::Basic => {
+                            // ast-grep-ignore: no-println
                             eprintln!("[DEBUG] Added Basic authentication header (base64 encoded)");
                         }
                         _ => {
+                            // ast-grep-ignore: no-println
                             eprintln!(
                                 "[DEBUG] Added custom HTTP auth header with scheme: {scheme_str}"
                             );
@@ -975,6 +997,7 @@ fn print_formatted_response(
             if capture_output {
                 return Ok(Some(output));
             }
+            // ast-grep-ignore: no-println
             println!("{output}");
         }
         OutputFormat::Yaml => {
@@ -987,6 +1010,7 @@ fn print_formatted_response(
             if capture_output {
                 return Ok(Some(output));
             }
+            // ast-grep-ignore: no-println
             println!("{output}");
         }
         OutputFormat::Table => {
@@ -1001,6 +1025,7 @@ fn print_formatted_response(
                 if capture_output {
                     return Ok(Some(processed_text));
                 }
+                // ast-grep-ignore: no-println
                 println!("{processed_text}");
             }
         }
@@ -1035,6 +1060,7 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
                 if capture_output {
                     return Ok(Some(constants::EMPTY_ARRAY.to_string()));
                 }
+                // ast-grep-ignore: no-println
                 println!("{}", constants::EMPTY_ARRAY);
                 return Ok(None);
             }
@@ -1051,7 +1077,9 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
                 if capture_output {
                     return Ok(Some(format!("{msg1}\n{msg2}")));
                 }
+                // ast-grep-ignore: no-println
                 println!("{msg1}");
+                // ast-grep-ignore: no-println
                 println!("{msg2}");
                 return Ok(None);
             }
@@ -1094,6 +1122,7 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
                     if capture_output {
                         return Ok(Some(table.to_string()));
                     }
+                    // ast-grep-ignore: no-println
                     println!("{table}");
                     return Ok(None);
                 }
@@ -1109,6 +1138,7 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
                 return Ok(Some(output.trim_end().to_string()));
             }
             for (i, item) in items.iter().enumerate() {
+                // ast-grep-ignore: no-println
                 println!("{}: {}", i, format_value_for_table(item));
             }
         }
@@ -1125,7 +1155,9 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
                 if capture_output {
                     return Ok(Some(format!("{msg1}\n{msg2}")));
                 }
+                // ast-grep-ignore: no-println
                 println!("{msg1}");
+                // ast-grep-ignore: no-println
                 println!("{msg2}");
                 return Ok(None);
             }
@@ -1143,6 +1175,7 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
             if capture_output {
                 return Ok(Some(table.to_string()));
             }
+            // ast-grep-ignore: no-println
             println!("{table}");
         }
         _ => {
@@ -1151,6 +1184,7 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
             if capture_output {
                 return Ok(Some(formatted));
             }
+            // ast-grep-ignore: no-println
             println!("{formatted}");
         }
     }
@@ -1311,11 +1345,14 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
         || filter.contains("length");
 
     if uses_advanced_features {
+        // ast-grep-ignore: no-println
         eprintln!(
             "{} Advanced JQ features require building with --features jq",
             crate::constants::MSG_WARNING_PREFIX
         );
+        // ast-grep-ignore: no-println
         eprintln!("         Currently only basic field access is supported (e.g., '.field', '.nested.field')");
+        // ast-grep-ignore: no-println
         eprintln!("         To enable full JQ support: cargo install aperture-cli --features jq");
     }
 

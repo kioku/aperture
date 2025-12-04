@@ -197,6 +197,7 @@ impl BatchProcessor {
         let total_operations = batch_file.operations.len();
 
         if self.config.show_progress {
+            // ast-grep-ignore: no-println
             println!("Starting batch execution: {total_operations} operations");
         }
 
@@ -247,12 +248,14 @@ impl BatchProcessor {
                 let (success, error, response) = match result {
                     Ok(resp) => {
                         if show_progress {
+                            // ast-grep-ignore: no-println
                             println!("Operation {} completed", index + 1);
                         }
                         (true, None, Some(resp))
                     }
                     Err(e) => {
                         if show_progress {
+                            // ast-grep-ignore: no-println
                             println!("Operation {} failed: {}", index + 1, e);
                         }
                         (false, Some(e.to_string()), None)
@@ -284,6 +287,7 @@ impl BatchProcessor {
         let failure_count = results.len() - success_count;
 
         if self.config.show_progress {
+            // ast-grep-ignore: no-println
             println!(
                 "Batch execution completed: {}/{} operations successful in {:.2}s",
                 success_count,

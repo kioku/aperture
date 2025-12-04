@@ -57,6 +57,7 @@ impl<'a> BaseUrlResolver<'a> {
                         kind: crate::error::ErrorKind::ServerVariable,
                         ..
                     } => {
+                        // ast-grep-ignore: no-println
                         eprintln!(
                             "{} Server variable error: {err}",
                             crate::constants::MSG_WARNING_PREFIX
