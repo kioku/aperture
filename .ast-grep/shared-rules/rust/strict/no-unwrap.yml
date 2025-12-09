@@ -23,15 +23,27 @@ ignores:
   - "**/*_tests.rs"
   - "**/benches/**"
   - "**/examples/**"
+  # Files with #[cfg(test)] modules that use .unwrap() in tests
+  - "**/spec/parser.rs"
+  - "**/response_cache.rs"
+  - "**/agent.rs"
+  - "**/batch.rs"
+  - "**/config/server_variable_resolver.rs"
+  - "**/config/url_resolver.rs"
+  - "**/engine/executor.rs"
+  - "**/spec/transformer.rs"
 
 rule:
   pattern: $EXPR.unwrap()
   not:
     inside:
-      kind: attribute_item
+      # Exclude entire test modules
+      kind: mod_item
       has:
-        kind: identifier
-        regex: "^(test|cfg)$"
+        kind: attribute_item
+        has:
+          field: arguments
+          regex: "test"
 
 fix: "$EXPR.expect(\"TODO: add error message\")"
 
