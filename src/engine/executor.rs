@@ -1,4 +1,4 @@
-use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
+use crate::cache::models::{CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec};
 use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
@@ -640,6 +640,28 @@ fn find_operation_with_matches<'a>(
     ))
 }
 
+/// Get query parameter value formatted for URL
+/// Returns None if the parameter value should be skipped
+fn get_query_param_value(
+    param: &CachedParameter,
+    current_matches: &ArgMatches,
+    arg_str: &str,
+) -> Option<String> {
+    let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
+
+    if is_boolean {
+        // Boolean parameters are flags - add only if set
+        current_matches
+            .get_flag(arg_str)
+            .then(|| format!("{arg_str}=true"))
+    } else {
+        // Non-boolean parameters have string values
+        current_matches
+            .get_one::<String>(arg_str)
+            .map(|value| format!("{arg_str}={}", urlencoding::encode(value)))
+    }
+}
+
 /// Builds the full URL with path parameters substituted
 ///
 /// Note: Server variable substitution is now handled by `BaseUrlResolver.resolve_with_variables()`
@@ -679,10 +701,11 @@ fn build_url(
         let value = if is_boolean {
             // Boolean path parameters are flags
             if current_matches.get_flag(param_name) {
-                "true".to_string()
+                "true"
             } else {
-                "false".to_string()
+                "false"
             }
+            .to_string()
         } else {
             match current_matches
                 .try_get_one::<String>(param_name)
@@ -712,17 +735,9 @@ fn build_url(
             continue;
         };
 
-        // Check if this is a boolean parameter
-        let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
-
-        if is_boolean {
-            // Boolean parameters are flags - check if the flag is set
-            if current_matches.get_flag(arg_str) {
-                query_params.push(format!("{arg_str}=true"));
-            }
-        } else if let Some(value) = current_matches.get_one::<String>(arg_str) {
-            // Non-boolean parameters have string values
-            query_params.push(format!("{arg_str}={}", urlencoding::encode(value)));
+        // Get query param value using helper (handles boolean vs string params)
+        if let Some(value) = get_query_param_value(param, current_matches, arg_str) {
+            query_params.push(value);
         }
     }
 
@@ -732,6 +747,32 @@ fn build_url(
     }
 
     Ok(url)
+}
+
+/// Get header value for a parameter from CLI matches
+/// Returns None if the parameter value should be skipped
+fn get_header_param_value(
+    param: &CachedParameter,
+    current_matches: &ArgMatches,
+) -> Result<Option<HeaderValue>, Error> {
+    let is_boolean = matches!(param.schema_type.as_deref(), Some("boolean"));
+
+    // Handle boolean and non-boolean parameters separately to avoid
+    // panics from mismatched types (get_flag on string or get_one on bool)
+    if is_boolean {
+        return Ok(current_matches
+            .get_flag(&param.name)
+            .then_some(HeaderValue::from_static("true")));
+    }
+
+    // Non-boolean: get string value
+    current_matches
+        .get_one::<String>(&param.name)
+        .map(|value| {
+            HeaderValue::from_str(value)
+                .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))
+        })
+        .transpose()
 }
 
 /// Builds headers including authentication
@@ -767,30 +808,9 @@ fn build_headers(
         let header_name = HeaderName::from_str(&param.name)
             .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
 
-        // Check if this is a boolean parameter
-        let is_boolean = matches!(param.schema_type.as_deref(), Some("boolean"));
-
-        let header_value = if is_boolean {
-            // Boolean header parameters are flags
-            // Note: Required boolean headers are enforced by clap at parse time via .required(true)
-            if current_matches.get_flag(&param.name) {
-                HeaderValue::from_static("true")
-            } else {
-                // If flag not present and optional, skip adding header
-                continue;
-            }
-        } else {
-            match current_matches.get_one::<String>(&param.name) {
-                Some(value) => {
-                    // Non-boolean header parameters
-                    HeaderValue::from_str(value)
-                        .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))?
-                }
-                None => {
-                    // No value provided for optional non-boolean parameter
-                    continue;
-                }
-            }
+        // Get header value using helper (handles boolean vs string params)
+        let Some(header_value) = get_header_param_value(param, current_matches)? else {
+            continue;
         };
 
         headers.insert(header_name, header_value);
@@ -1108,37 +1128,33 @@ fn print_numbered_list(items: &[Value], capture_output: bool) -> Option<String> 
     None
 }
 
+/// Helper to output or capture a message
+fn output_or_capture(message: &str, capture_output: bool) -> Option<String> {
+    if capture_output {
+        return Some(message.to_string());
+    }
+    // ast-grep-ignore: no-println
+    println!("{message}");
+    None
+}
+
 /// Prints JSON data as a formatted table
 #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<String>, Error> {
     match json_value {
         Value::Array(items) => {
             if items.is_empty() {
-                if capture_output {
-                    return Ok(Some(constants::EMPTY_ARRAY.to_string()));
-                }
-                // ast-grep-ignore: no-println
-                println!("{}", constants::EMPTY_ARRAY);
-                return Ok(None);
+                return Ok(output_or_capture(constants::EMPTY_ARRAY, capture_output));
             }
 
             // Check if array is too large
             if items.len() > MAX_TABLE_ROWS {
-                let msg1 = format!(
-                    "Array too large: {} items (max {} for table display)",
+                let msg = format!(
+                    "Array too large: {} items (max {} for table display)\nUse --format json or --jq to process the full data",
                     items.len(),
                     MAX_TABLE_ROWS
                 );
-                let msg2 = "Use --format json or --jq to process the full data";
-
-                if capture_output {
-                    return Ok(Some(format!("{msg1}\n{msg2}")));
-                }
-                // ast-grep-ignore: no-println
-                println!("{msg1}");
-                // ast-grep-ignore: no-println
-                println!("{msg2}");
-                return Ok(None);
+                return Ok(output_or_capture(&msg, capture_output));
             }
 
             // Try to create a table from array of objects
@@ -1185,31 +1201,17 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
             }
 
             let table = Table::new(&rows);
-            if capture_output {
-                return Ok(Some(table.to_string()));
-            }
-            // ast-grep-ignore: no-println
-            println!("{table}");
-            return Ok(None);
+            Ok(output_or_capture(&table.to_string(), capture_output))
         }
         Value::Object(obj) => {
             // Check if object has too many fields
             if obj.len() > MAX_TABLE_ROWS {
-                let msg1 = format!(
-                    "Object too large: {} fields (max {} for table display)",
+                let msg = format!(
+                    "Object too large: {} fields (max {} for table display)\nUse --format json or --jq to process the full data",
                     obj.len(),
                     MAX_TABLE_ROWS
                 );
-                let msg2 = "Use --format json or --jq to process the full data";
-
-                if capture_output {
-                    return Ok(Some(format!("{msg1}\n{msg2}")));
-                }
-                // ast-grep-ignore: no-println
-                println!("{msg1}");
-                // ast-grep-ignore: no-println
-                println!("{msg2}");
-                return Ok(None);
+                return Ok(output_or_capture(&msg, capture_output));
             }
 
             // Create a simple key-value table for objects
@@ -1222,24 +1224,14 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
                 .collect();
 
             let table = Table::new(&rows);
-            if capture_output {
-                return Ok(Some(table.to_string()));
-            }
-            // ast-grep-ignore: no-println
-            println!("{table}");
+            Ok(output_or_capture(&table.to_string(), capture_output))
         }
         _ => {
             // For primitive values, just print them
             let formatted = format_value_for_table(json_value);
-            if capture_output {
-                return Ok(Some(formatted));
-            }
-            // ast-grep-ignore: no-println
-            println!("{formatted}");
+            Ok(output_or_capture(&formatted, capture_output))
         }
     }
-
-    Ok(None)
 }
 
 /// Formats a JSON value for display in a table cell

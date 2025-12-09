@@ -139,11 +139,9 @@ impl ShortcutResolver {
             candidates.extend(matches);
         }
 
-        // 4. Partial matching (fuzzy)
+        // 4. Partial matching (fuzzy) - only if no candidates found yet
         if candidates.is_empty() {
-            if let Some(matches) = self.try_partial_matching(args) {
-                candidates.extend(matches);
-            }
+            candidates.extend(self.try_partial_matching(args).unwrap_or_default());
         }
 
         match candidates.len() {

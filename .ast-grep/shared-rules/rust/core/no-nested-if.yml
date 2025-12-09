@@ -37,6 +37,8 @@ rule:
         - kind: match_arm
         - kind: let_declaration
         - kind: assignment_expression
+        - kind: return_expression
+        - kind: call_expression
     kind: if_expression
 
 note: |
