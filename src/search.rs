@@ -171,43 +171,53 @@ impl CommandSearcher {
             total_score += score;
         }
 
-        // Bonus score for exact substring matches
+        // Bonus score for exact substring matches in various fields
         let query_lower = query.to_lowercase();
 
-        Self::add_operation_id_kebab_bonus(
+        Self::add_field_bonus(
             &query_lower,
             operation_id_kebab,
+            "Operation",
+            50,
             &mut total_score,
             &mut highlights,
         );
-
-        Self::add_operation_id_bonus(
+        Self::add_field_bonus(
             &query_lower,
             &command.operation_id,
+            "Operation",
+            50,
             &mut total_score,
             &mut highlights,
         );
-
-        Self::add_method_bonus(
+        Self::add_field_bonus(
             &query_lower,
             &command.method,
+            "Method",
+            30,
             &mut total_score,
             &mut highlights,
         );
-
-        Self::add_path_bonus(
+        Self::add_field_bonus(
             &query_lower,
             &command.path,
+            "Path",
+            20,
             &mut total_score,
             &mut highlights,
         );
 
-        Self::add_summary_bonus(
-            &query_lower,
-            command.summary.as_deref(),
-            &mut total_score,
-            &mut highlights,
-        );
+        // Summary requires special handling for Option type
+        if let Some(summary) = &command.summary {
+            Self::add_field_bonus(
+                &query_lower,
+                summary,
+                "Summary",
+                15,
+                &mut total_score,
+                &mut highlights,
+            );
+        }
 
         ScoringResult {
             score: total_score,
@@ -215,68 +225,18 @@ impl CommandSearcher {
         }
     }
 
-    /// Add bonus score if operation ID (kebab case) matches query
-    fn add_operation_id_kebab_bonus(
+    /// Add bonus score if a field value contains the query string
+    fn add_field_bonus(
         query_lower: &str,
-        operation_id_kebab: &str,
+        field_value: &str,
+        field_label: &str,
+        score: i64,
         total_score: &mut i64,
         highlights: &mut Vec<String>,
     ) {
-        if operation_id_kebab.to_lowercase().contains(query_lower) {
-            *total_score += 50;
-            highlights.push(format!("Operation: {operation_id_kebab}"));
-        }
-    }
-
-    /// Add bonus score if original operation ID matches query
-    fn add_operation_id_bonus(
-        query_lower: &str,
-        operation_id: &str,
-        total_score: &mut i64,
-        highlights: &mut Vec<String>,
-    ) {
-        if operation_id.to_lowercase().contains(query_lower) {
-            *total_score += 50;
-            highlights.push(format!("Operation: {operation_id}"));
-        }
-    }
-
-    /// Add bonus score if HTTP method matches query
-    fn add_method_bonus(
-        query_lower: &str,
-        method: &str,
-        total_score: &mut i64,
-        highlights: &mut Vec<String>,
-    ) {
-        if method.to_lowercase().contains(query_lower) {
-            *total_score += 30;
-            highlights.push(format!("Method: {method}"));
-        }
-    }
-
-    /// Add bonus score if path matches query
-    fn add_path_bonus(
-        query_lower: &str,
-        path: &str,
-        total_score: &mut i64,
-        highlights: &mut Vec<String>,
-    ) {
-        if path.to_lowercase().contains(query_lower) {
-            *total_score += 20;
-            highlights.push(format!("Path: {path}"));
-        }
-    }
-
-    /// Add bonus score if summary matches query
-    fn add_summary_bonus(
-        query_lower: &str,
-        summary: Option<&str>,
-        total_score: &mut i64,
-        highlights: &mut Vec<String>,
-    ) {
-        if summary.is_some_and(|s| s.to_lowercase().contains(query_lower)) {
-            *total_score += 15;
-            highlights.push("Summary match".to_string());
+        if field_value.to_lowercase().contains(query_lower) {
+            *total_score += score;
+            highlights.push(format!("{field_label}: {field_value}"));
         }
     }
 
