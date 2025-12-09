@@ -140,7 +140,6 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
     // Check format - must start with letter or underscore, followed by alphanumeric or underscore
     if !name.chars().next().unwrap_or('_').is_ascii_alphabetic() && !name.starts_with('_') {
         let first_char = name.chars().next().unwrap_or('?');
-        // ast-grep-ignore: no-nested-if
         let suggested_name = if first_char.is_ascii_digit() {
             format!("VAR_{name}")
         } else {
@@ -163,7 +162,6 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
         let suggested_name = name
             .chars()
             .map(|c| {
-                // ast-grep-ignore: no-nested-if
                 if c.is_ascii_alphanumeric() || c == '_' {
                     c
                 } else {
@@ -273,7 +271,6 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
                 io,
                 timeout,
             )?;
-            // ast-grep-ignore: no-nested-if
             if should_continue {
                 continue; // User chose to continue, skip this iteration
             }

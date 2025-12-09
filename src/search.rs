@@ -377,7 +377,6 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
                 .parameters
                 .iter()
                 .map(|p| {
-                    // ast-grep-ignore: no-nested-if
                     let required = if p.required { "*" } else { "" };
                     format!("--{}{}", p.name, required)
                 })

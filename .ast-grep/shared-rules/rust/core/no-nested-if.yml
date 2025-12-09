@@ -1,6 +1,11 @@
 # Rule: no-nested-if
 # Prevents doubly nested if statements to encourage flatter code
 #
+# This rule only catches direct nesting in block bodies, NOT:
+# - If expressions used as values (let x = if cond { a } else { b })
+# - If expressions inside closures
+# - If expressions inside match arms
+#
 # Bad:
 #   if user.is_some() {
 #       if user.unwrap().is_active {
@@ -26,7 +31,12 @@ message: "Nested if statements detected. Use early returns, guard clauses, let-e
 rule:
   kind: if_expression
   inside:
-    stopBy: end
+    stopBy:
+      any:
+        - kind: closure_expression
+        - kind: match_arm
+        - kind: let_declaration
+        - kind: assignment_expression
     kind: if_expression
 
 note: |

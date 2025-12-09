@@ -678,7 +678,6 @@ fn build_url(
 
         let value = if is_boolean {
             // Boolean path parameters are flags
-            // ast-grep-ignore: no-nested-if
             if current_matches.get_flag(param_name) {
                 "true".to_string()
             } else {
@@ -718,11 +717,9 @@ fn build_url(
 
         if is_boolean {
             // Boolean parameters are flags - check if the flag is set
-            // ast-grep-ignore: no-nested-if
             if current_matches.get_flag(arg_str) {
                 query_params.push(format!("{arg_str}=true"));
             }
-        // ast-grep-ignore: no-nested-if
         } else if let Some(value) = current_matches.get_one::<String>(arg_str) {
             // Non-boolean parameters have string values
             query_params.push(format!("{arg_str}={}", urlencoding::encode(value)));
@@ -776,7 +773,6 @@ fn build_headers(
         let header_value = if is_boolean {
             // Boolean header parameters are flags
             // Note: Required boolean headers are enforced by clap at parse time via .required(true)
-            // ast-grep-ignore: no-nested-if
             if current_matches.get_flag(&param.name) {
                 HeaderValue::from_static("true")
             } else {
@@ -918,7 +914,6 @@ fn add_authentication_header(
 
     // Debug logging for resolved secret source
     if std::env::var("RUST_LOG").is_ok() {
-        // ast-grep-ignore: no-nested-if
         let source = if secret_config.is_some() {
             "config"
         } else {
@@ -1119,7 +1114,6 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
     match json_value {
         Value::Array(items) => {
             if items.is_empty() {
-                // ast-grep-ignore: no-nested-if
                 if capture_output {
                     return Ok(Some(constants::EMPTY_ARRAY.to_string()));
                 }
@@ -1137,7 +1131,6 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
                 );
                 let msg2 = "Use --format json or --jq to process the full data";
 
-                // ast-grep-ignore: no-nested-if
                 if capture_output {
                     return Ok(Some(format!("{msg1}\n{msg2}")));
                 }
@@ -1209,7 +1202,6 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
                 );
                 let msg2 = "Use --format json or --jq to process the full data";
 
-                // ast-grep-ignore: no-nested-if
                 if capture_output {
                     return Ok(Some(format!("{msg1}\n{msg2}")));
                 }

@@ -141,7 +141,6 @@ impl ShortcutResolver {
 
         // 4. Partial matching (fuzzy)
         if candidates.is_empty() {
-            // ast-grep-ignore: no-nested-if
             if let Some(matches) = self.try_partial_matching(args) {
                 candidates.extend(matches);
             }
@@ -279,7 +278,6 @@ impl ShortcutResolver {
 
         // Try tag + operation combination if we have 2+ args
         if args.len() < 2 {
-            // ast-grep-ignore: no-nested-if
             return if candidates.is_empty() {
                 None
             } else {
