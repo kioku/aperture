@@ -162,43 +162,47 @@ impl SpecValidator {
         let mut unsupported_schemes = HashMap::new();
         if let Some(components) = &spec.components {
             for (name, scheme_ref) in &components.security_schemes {
-                match scheme_ref {
-                    ReferenceOr::Item(scheme) => {
-                        if let Err(e) = Self::validate_security_scheme(name, scheme) {
-                            Self::handle_security_scheme_error(
-                                e,
-                                strict,
-                                name,
-                                &mut result,
-                                &mut unsupported_schemes,
-                            );
-                        }
-                    }
-                    ReferenceOr::Reference { .. } => {
-                        result.add_error(Error::validation_error(format!(
-                            "Security scheme references are not supported: '{name}'"
-                        )));
-                    }
-                }
+                let ReferenceOr::Item(scheme) = scheme_ref else {
+                    result.add_error(Error::validation_error(format!(
+                        "Security scheme references are not supported: '{name}'"
+                    )));
+                    continue;
+                };
+
+                let Err(e) = Self::validate_security_scheme(name, scheme) else {
+                    continue;
+                };
+
+                Self::handle_security_scheme_error(
+                    e,
+                    strict,
+                    name,
+                    &mut result,
+                    &mut unsupported_schemes,
+                );
             }
         }
 
         // Validate operations
         for (path, path_item_ref) in spec.paths.iter() {
-            if let ReferenceOr::Item(path_item) = path_item_ref {
-                for (method, operation_opt) in crate::spec::http_methods_iter(path_item) {
-                    if let Some(operation) = operation_opt {
-                        Self::validate_operation(
-                            path,
-                            &method.to_lowercase(),
-                            operation,
-                            &mut result,
-                            strict,
-                            &unsupported_schemes,
-                            spec,
-                        );
-                    }
-                }
+            let ReferenceOr::Item(path_item) = path_item_ref else {
+                continue;
+            };
+
+            for (method, operation_opt) in crate::spec::http_methods_iter(path_item) {
+                let Some(operation) = operation_opt else {
+                    continue;
+                };
+
+                Self::validate_operation(
+                    path,
+                    &method.to_lowercase(),
+                    operation,
+                    &mut result,
+                    strict,
+                    &unsupported_schemes,
+                    spec,
+                );
             }
         }
 
@@ -250,66 +254,68 @@ impl SpecValidator {
             return Ok(None);
         };
 
-        if let Some(aperture_secret) = extensions.get(crate::constants::EXT_APERTURE_SECRET) {
-            // Validate that it's an object
-            let secret_obj = aperture_secret.as_object().ok_or_else(|| {
+        let Some(aperture_secret) = extensions.get(crate::constants::EXT_APERTURE_SECRET) else {
+            return Ok(None);
+        };
+
+        // Validate that it's an object
+        let secret_obj = aperture_secret.as_object().ok_or_else(|| {
+            Error::validation_error(format!(
+                "Invalid x-aperture-secret in security scheme '{name}': must be an object"
+            ))
+        })?;
+
+        // Validate required 'source' field
+        let source = secret_obj
+            .get(crate::constants::EXT_KEY_SOURCE)
+            .ok_or_else(|| {
                 Error::validation_error(format!(
-                    "Invalid x-aperture-secret in security scheme '{name}': must be an object"
+                    "Missing 'source' field in x-aperture-secret for security scheme '{name}'"
+                ))
+            })?
+            .as_str()
+            .ok_or_else(|| {
+                Error::validation_error(format!(
+                    "Invalid 'source' field in x-aperture-secret for security scheme '{name}': must be a string"
                 ))
             })?;
 
-            // Validate required 'source' field
-            let source = secret_obj
-                .get(crate::constants::EXT_KEY_SOURCE)
-                .ok_or_else(|| {
-                    Error::validation_error(format!(
-                        "Missing 'source' field in x-aperture-secret for security scheme '{name}'"
-                    ))
-                })?
-                .as_str()
-                .ok_or_else(|| {
-                    Error::validation_error(format!(
-                        "Invalid 'source' field in x-aperture-secret for security scheme '{name}': must be a string"
-                    ))
-                })?;
+        // Currently only 'env' source is supported
+        if source != crate::constants::SOURCE_ENV {
+            return Err(Error::validation_error(format!(
+                "Unsupported source '{source}' in x-aperture-secret for security scheme '{name}'. Only 'env' is supported."
+            )));
+        }
 
-            // Currently only 'env' source is supported
-            if source != crate::constants::SOURCE_ENV {
-                return Err(Error::validation_error(format!(
-                    "Unsupported source '{source}' in x-aperture-secret for security scheme '{name}'. Only 'env' is supported."
-                )));
-            }
+        // Validate required 'name' field
+        let env_name = secret_obj
+            .get(crate::constants::EXT_KEY_NAME)
+            .ok_or_else(|| {
+                Error::validation_error(format!(
+                    "Missing 'name' field in x-aperture-secret for security scheme '{name}'"
+                ))
+            })?
+            .as_str()
+            .ok_or_else(|| {
+                Error::validation_error(format!(
+                    "Invalid 'name' field in x-aperture-secret for security scheme '{name}': must be a string"
+                ))
+            })?;
 
-            // Validate required 'name' field
-            let env_name = secret_obj
-                .get(crate::constants::EXT_KEY_NAME)
-                .ok_or_else(|| {
-                    Error::validation_error(format!(
-                        "Missing 'name' field in x-aperture-secret for security scheme '{name}'"
-                    ))
-                })?
-                .as_str()
-                .ok_or_else(|| {
-                    Error::validation_error(format!(
-                        "Invalid 'name' field in x-aperture-secret for security scheme '{name}': must be a string"
-                    ))
-                })?;
+        // Validate environment variable name format
+        if env_name.is_empty() {
+            return Err(Error::validation_error(format!(
+                "Empty 'name' field in x-aperture-secret for security scheme '{name}'"
+            )));
+        }
 
-            // Validate environment variable name format
-            if env_name.is_empty() {
-                return Err(Error::validation_error(format!(
-                    "Empty 'name' field in x-aperture-secret for security scheme '{name}'"
-                )));
-            }
-
-            // Check for valid environment variable name (alphanumeric and underscore, not starting with digit)
-            if !env_name.chars().all(|c| c.is_alphanumeric() || c == '_')
-                || env_name.chars().next().is_some_and(char::is_numeric)
-            {
-                return Err(Error::validation_error(format!(
-                    "Invalid environment variable name '{env_name}' in x-aperture-secret for security scheme '{name}'. Must contain only alphanumeric characters and underscores, and not start with a digit."
-                )));
-            }
+        // Check for valid environment variable name (alphanumeric and underscore, not starting with digit)
+        if !env_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            || env_name.chars().next().is_some_and(char::is_numeric)
+        {
+            return Err(Error::validation_error(format!(
+                "Invalid environment variable name '{env_name}' in x-aperture-secret for security scheme '{name}'. Must contain only alphanumeric characters and underscores, and not start with a digit."
+            )));
         }
 
         Ok(None)
@@ -401,14 +407,15 @@ impl SpecValidator {
             .filter_map(|scheme_name| {
                 unsupported_schemes.get(scheme_name).map(|msg| {
                     // Extract the specific reason from the validation message
-                    if msg.contains("OAuth2") {
-                        format!("{scheme_name} (OAuth2)")
-                    } else if msg.contains("OpenID Connect") {
-                        format!("{scheme_name} (OpenID Connect)")
-                    } else if msg.contains("complex authentication flows") {
-                        format!("{scheme_name} (requires complex flow)")
-                    } else {
-                        scheme_name.clone()
+                    match () {
+                        () if msg.contains("OAuth2") => format!("{scheme_name} (OAuth2)"),
+                        () if msg.contains("OpenID Connect") => {
+                            format!("{scheme_name} (OpenID Connect)")
+                        }
+                        () if msg.contains("complex authentication flows") => {
+                            format!("{scheme_name} (requires complex flow)")
+                        }
+                        () => scheme_name.clone(),
                     }
                 })
             })

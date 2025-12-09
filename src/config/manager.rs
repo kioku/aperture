@@ -185,15 +185,20 @@ impl<F: FileSystem> ConfigManager<F> {
         if !warnings.is_empty() {
             let lines = Self::format_validation_warnings(warnings, total_operations, "");
             for line in lines {
-                if line.is_empty() {
-                    // ast-grep-ignore: no-println
-                    eprintln!();
-                } else if line.starts_with("Skipping") || line.starts_with("Endpoints") {
-                    // ast-grep-ignore: no-println
-                    eprintln!("{} {line}", crate::constants::MSG_WARNING_PREFIX);
-                } else {
-                    // ast-grep-ignore: no-println
-                    eprintln!("{line}");
+                // Use pattern matching to flatten nested if
+                match line.as_str() {
+                    "" => {
+                        // ast-grep-ignore: no-println
+                        eprintln!();
+                    }
+                    s if s.starts_with("Skipping") || s.starts_with("Endpoints") => {
+                        // ast-grep-ignore: no-println
+                        eprintln!("{} {line}", crate::constants::MSG_WARNING_PREFIX);
+                    }
+                    _ => {
+                        // ast-grep-ignore: no-println
+                        eprintln!("{line}");
+                    }
                 }
             }
             // ast-grep-ignore: no-println
@@ -349,19 +354,26 @@ impl<F: FileSystem> ConfigManager<F> {
 
         let mut specs = Vec::new();
         for entry in self.fs.read_dir(&specs_dir)? {
-            if self.fs.is_file(&entry) {
-                if let Some(file_name) = entry.file_name().and_then(|s| s.to_str()) {
-                    if std::path::Path::new(file_name)
-                        .extension()
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml"))
-                    {
-                        specs.push(
-                            file_name
-                                .trim_end_matches(crate::constants::FILE_EXT_YAML)
-                                .to_string(),
-                        );
-                    }
-                }
+            // Early return guard clause for non-files
+            if !self.fs.is_file(&entry) {
+                continue;
+            }
+
+            // Use let-else for file name extraction
+            let Some(file_name) = entry.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+
+            // Check if file has yaml extension
+            if std::path::Path::new(file_name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml"))
+            {
+                specs.push(
+                    file_name
+                        .trim_end_matches(crate::constants::FILE_EXT_YAML)
+                        .to_string(),
+                );
             }
         }
         Ok(specs)
@@ -834,19 +846,21 @@ impl<F: FileSystem> ConfigManager<F> {
         let mut config = self.load_global_config()?;
 
         // Check if the API exists in config
-        if let Some(api_config) = config.api_configs.get_mut(api_name) {
-            // Clear all secrets
-            api_config.secrets.clear();
+        let Some(api_config) = config.api_configs.get_mut(api_name) else {
+            // If API config doesn't exist, that's fine - no secrets to clear
+            return Ok(());
+        };
 
-            // If no other configuration remains, remove the entire API config
-            if api_config.base_url_override.is_none() {
-                config.api_configs.remove(api_name);
-            }
+        // Clear all secrets
+        api_config.secrets.clear();
 
-            // Save the updated config
-            self.save_global_config(&config)?;
+        // If no other configuration remains, remove the entire API config
+        if api_config.base_url_override.is_none() {
+            config.api_configs.remove(api_name);
         }
-        // If API config doesn't exist, that's fine - no secrets to clear
+
+        // Save the updated config
+        self.save_global_config(&config)?;
 
         Ok(())
     }
@@ -1108,14 +1122,15 @@ impl<F: FileSystem> ConfigManager<F> {
                     _ => {}
                 }
 
-                // Show current configuration status
-                if current_secrets.contains_key(&scheme.name) {
-                    description = format!("{description} [CONFIGURED]");
-                } else if scheme.aperture_secret.is_some() {
-                    description = format!("{description} [x-aperture-secret]");
-                } else {
-                    description = format!("{description} [NOT CONFIGURED]");
-                }
+                // Show current configuration status - use match to avoid nested if
+                description = match (
+                    current_secrets.contains_key(&scheme.name),
+                    &scheme.aperture_secret,
+                ) {
+                    (true, _) => format!("{description} [CONFIGURED]"),
+                    (false, Some(_)) => format!("{description} [x-aperture-secret]"),
+                    (false, None) => format!("{description} [NOT CONFIGURED]"),
+                };
 
                 // Add OpenAPI description if available
                 if let Some(openapi_desc) = &scheme.description {
@@ -1185,19 +1200,26 @@ impl<F: FileSystem> ConfigManager<F> {
             println!("   Description: {desc}");
         }
 
-        // Show current configuration
-        if let Some(current_secret) = current_secrets.get(selected_scheme) {
-            // ast-grep-ignore: no-println
-            println!("   Current: environment variable '{}'", current_secret.name);
-        } else if let Some(aperture_secret) = &scheme.aperture_secret {
-            // ast-grep-ignore: no-println
-            println!(
-                "   Current: x-aperture-secret -> '{}'",
-                aperture_secret.name
-            );
-        } else {
-            // ast-grep-ignore: no-println
-            println!("   Current: not configured");
+        // Show current configuration - use pattern matching to avoid nested if
+        match (
+            current_secrets.get(selected_scheme),
+            &scheme.aperture_secret,
+        ) {
+            (Some(current_secret), _) => {
+                // ast-grep-ignore: no-println
+                println!("   Current: environment variable '{}'", current_secret.name);
+            }
+            (None, Some(aperture_secret)) => {
+                // ast-grep-ignore: no-println
+                println!(
+                    "   Current: x-aperture-secret -> '{}'",
+                    aperture_secret.name
+                );
+            }
+            (None, None) => {
+                // ast-grep-ignore: no-println
+                println!("   Current: not configured");
+            }
         }
     }
 
@@ -1252,11 +1274,18 @@ impl<F: FileSystem> ConfigManager<F> {
         };
 
         for warning in warnings {
+            // Pattern match on reason content to avoid nested if-else chain
             if warning.reason.contains("no supported content types") {
                 categorized.content_type.push(warning);
-            } else if warning.reason.contains("unsupported authentication") {
+                continue;
+            }
+
+            if warning.reason.contains("unsupported authentication") {
                 categorized.auth.push(warning);
-            } else if warning
+                continue;
+            }
+
+            if warning
                 .reason
                 .contains("unsupported content types alongside JSON")
             {
@@ -1434,16 +1463,19 @@ async fn fetch_spec_from_url_with_timeout(
 
     // Make the request
     let response = client.get(url).send().await.map_err(|e| {
+        // Use early returns to avoid nested if-else chain
         if e.is_timeout() {
-            Error::network_request_failed(format!(
+            return Error::network_request_failed(format!(
                 "Request timed out after {} seconds",
                 timeout.as_secs()
-            ))
-        } else if e.is_connect() {
-            Error::network_request_failed(format!("Failed to connect to {url}: {e}"))
-        } else {
-            Error::network_request_failed(format!("Network error: {e}"))
+            ));
         }
+
+        if e.is_connect() {
+            return Error::network_request_failed(format!("Failed to connect to {url}: {e}"));
+        }
+
+        Error::network_request_failed(format!("Network error: {e}"))
     })?;
 
     // Check response status
@@ -1454,15 +1486,24 @@ async fn fetch_spec_from_url_with_timeout(
         ));
     }
 
-    // Check content length before downloading
-    if let Some(content_length) = response.content_length() {
-        if content_length > MAX_RESPONSE_SIZE {
-            return Err(Error::network_request_failed(format!(
-                "Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE} bytes)"
-            )));
-        }
+    // Check content length before downloading - use let-else to flatten
+    let Some(content_length) = response.content_length() else {
+        // No content length header, proceed to download with size check later
+        return download_and_validate_response(response).await;
+    };
+
+    if content_length > MAX_RESPONSE_SIZE {
+        return Err(Error::network_request_failed(format!(
+            "Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE} bytes)"
+        )));
     }
 
+    download_and_validate_response(response).await
+}
+
+/// Helper function to download and validate response body
+#[allow(clippy::future_not_send)]
+async fn download_and_validate_response(response: reqwest::Response) -> Result<String, Error> {
     // Read response body with size limit
     let bytes = response
         .bytes()

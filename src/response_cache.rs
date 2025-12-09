@@ -344,35 +344,72 @@ impl ResponseCache {
             }
 
             // Check if this entry matches the requested API
-            if let Some(target_api) = api_name {
-                if !filename_str.starts_with(&format!("{target_api}_")) {
+            let Some(target_api) = api_name else {
+                // No filter, include all entries
+                stats.total_entries += 1;
+
+                // Check if entry is expired
+                let Ok(metadata) = entry.metadata().await else {
                     continue;
+                };
+
+                stats.total_size_bytes += metadata.len();
+
+                // Try to read the cache file to check expiration
+                let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
+                    continue;
+                };
+
+                let Ok(cached_response) = serde_json::from_str::<CachedResponse>(&json_content)
+                else {
+                    continue;
+                };
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
+                    .as_secs();
+
+                if now > cached_response.cached_at + cached_response.ttl_seconds {
+                    stats.expired_entries += 1;
+                } else {
+                    stats.valid_entries += 1;
                 }
+
+                continue;
+            };
+
+            if !filename_str.starts_with(&format!("{target_api}_")) {
+                continue;
             }
 
             stats.total_entries += 1;
 
             // Check if entry is expired
-            if let Ok(metadata) = entry.metadata().await {
-                stats.total_size_bytes += metadata.len();
+            let Ok(metadata) = entry.metadata().await else {
+                continue;
+            };
 
-                // Try to read the cache file to check expiration
-                if let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await {
-                    if let Ok(cached_response) =
-                        serde_json::from_str::<CachedResponse>(&json_content)
-                    {
-                        let now = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
-                            .as_secs();
+            stats.total_size_bytes += metadata.len();
 
-                        if now > cached_response.cached_at + cached_response.ttl_seconds {
-                            stats.expired_entries += 1;
-                        } else {
-                            stats.valid_entries += 1;
-                        }
-                    }
-                }
+            // Try to read the cache file to check expiration
+            let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
+                continue;
+            };
+
+            let Ok(cached_response) = serde_json::from_str::<CachedResponse>(&json_content) else {
+                continue;
+            };
+
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
+                .as_secs();
+
+            if now > cached_response.cached_at + cached_response.ttl_seconds {
+                stats.expired_entries += 1;
+            } else {
+                stats.valid_entries += 1;
             }
         }
 
@@ -394,15 +431,21 @@ impl ResponseCache {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
-            if filename_str.starts_with(&format!("{api_name}_"))
-                && filename_str.ends_with(constants::CACHE_FILE_SUFFIX)
+            if !filename_str.starts_with(&format!("{api_name}_"))
+                || !filename_str.ends_with(constants::CACHE_FILE_SUFFIX)
             {
-                if let Ok(metadata) = entry.metadata().await {
-                    if let Ok(modified) = metadata.modified() {
-                        entries.push((entry.path(), modified));
-                    }
-                }
+                continue;
             }
+
+            let Ok(metadata) = entry.metadata().await else {
+                continue;
+            };
+
+            let Ok(modified) = metadata.modified() else {
+                continue;
+            };
+
+            entries.push((entry.path(), modified));
         }
 
         // If we have more entries than max_entries, remove the oldest ones

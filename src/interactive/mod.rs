@@ -140,6 +140,7 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
     // Check format - must start with letter or underscore, followed by alphanumeric or underscore
     if !name.chars().next().unwrap_or('_').is_ascii_alphabetic() && !name.starts_with('_') {
         let first_char = name.chars().next().unwrap_or('?');
+        // ast-grep-ignore: no-nested-if
         let suggested_name = if first_char.is_ascii_digit() {
             format!("VAR_{name}")
         } else {
@@ -162,6 +163,7 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
         let suggested_name = name
             .chars()
             .map(|c| {
+                // ast-grep-ignore: no-nested-if
                 if c.is_ascii_alphanumeric() || c == '_' {
                     c
                 } else {
@@ -264,23 +266,29 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
             timeout,
         )?;
 
-        // Handle empty input as cancellation
-        if selection.is_empty() {
-            if !confirm_with_io_and_timeout(
+        // Handle empty input as cancellation - use guard clause pattern
+        let selection = if selection.is_empty() {
+            let should_continue = confirm_with_io_and_timeout(
                 "Do you want to continue with the current operation?",
                 io,
                 timeout,
-            )? {
-                return Err(Error::invalid_config("Selection cancelled by user"));
+            )?;
+            // ast-grep-ignore: no-nested-if
+            if should_continue {
+                continue; // User chose to continue, skip this iteration
             }
-            // User chose to continue, skip this iteration
-            continue;
-        }
+            return Err(Error::invalid_config("Selection cancelled by user"));
+        } else {
+            selection
+        };
 
-        // Try parsing as a number first
-        if let Ok(num) = selection.parse::<usize>() {
-            if num > 0 && num <= options.len() {
+        // Try parsing as a number first - use match to avoid nested if
+        match selection.parse::<usize>() {
+            Ok(num) if num > 0 && num <= options.len() => {
                 return Ok(options[num - 1].0.clone());
+            }
+            _ => {
+                // Invalid number or parse error, fall through to name matching
             }
         }
 

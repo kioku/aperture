@@ -116,13 +116,16 @@ where
                 let is_last_attempt = attempt + 1 >= config.max_attempts;
                 let is_retryable = is_retryable_error(&error);
 
-                if is_last_attempt || !is_retryable {
+                // Handle non-retryable errors immediately
+                if !is_retryable {
                     let error_message = error.to_string();
-                    last_error = Some(error_message.clone());
+                    return Err(Error::transient_network_error(error_message, false));
+                }
 
-                    if !is_retryable {
-                        return Err(Error::transient_network_error(error_message, false));
-                    }
+                // Handle last attempt
+                if is_last_attempt {
+                    let error_message = error.to_string();
+                    last_error = Some(error_message);
                     break;
                 }
 

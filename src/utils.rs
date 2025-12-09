@@ -27,32 +27,30 @@ pub fn to_kebab_case(s: &str) -> String {
             c if c.is_alphanumeric() => {
                 let is_upper = c.is_uppercase();
 
-                // Insert hyphen at word boundaries
-                if !last_was_sep && is_upper && last_was_lower {
-                    result.push('-');
-                } else if !last_was_sep
+                // Determine if we need to insert a hyphen at word boundaries
+                let needs_simple_boundary_hyphen = !last_was_sep && is_upper && last_was_lower;
+
+                // Check if this is an acronym followed by a word (e.g., "HTTPSConnection")
+                let needs_acronym_boundary_check = !needs_simple_boundary_hyphen
+                    && !last_was_sep
                     && is_upper
                     && chars.peek().is_some_and(|&next| next.is_lowercase())
                     && !result.is_empty()
-                    && !result.chars().last().unwrap_or(' ').is_numeric()
-                {
-                    // Handle acronym followed by word (e.g., "HTTPSConnection" -> "https-connection")
-                    // But check if we're not in the middle of an all-caps word ending with 's' (APIs)
-                    // Collect the next few characters to check the pattern
-                    let remaining: Vec<char> = chars.clone().collect();
-                    let should_add_hyphen = match remaining.as_slice() {
-                        // If next char is lowercase and there are more chars after it, add hyphen
-                        [next, _, ..] if next.is_lowercase() => true,
-                        // If next char is lowercase and it's the last char, don't add hyphen
-                        // This prevents "APIs" from becoming "api-s"
-                        [next] if next.is_lowercase() => false,
-                        // No more characters
-                        _ => false,
-                    };
+                    && !result.chars().last().unwrap_or(' ').is_numeric();
 
-                    if should_add_hyphen {
-                        result.push('-');
-                    }
+                // Only compute acronym pattern if we didn't already add simple boundary hyphen
+                let needs_acronym_hyphen = needs_acronym_boundary_check && {
+                    // Check if we're not in the middle of an all-caps word ending with 's' (APIs)
+                    let remaining: Vec<char> = chars.clone().collect();
+                    matches!(remaining.as_slice(),
+                        // If next char is lowercase and there are more chars after it, add hyphen
+                        [next, _, ..] if next.is_lowercase()
+                    )
+                };
+
+                // Add hyphen if either condition is true (but not both, due to mutual exclusion above)
+                if needs_simple_boundary_hyphen || needs_acronym_hyphen {
+                    result.push('-');
                 }
 
                 // Use proper Unicode lowercase conversion
@@ -65,8 +63,12 @@ pub fn to_kebab_case(s: &str) -> String {
             }
             _ => {
                 // Convert other chars to hyphen, but avoid consecutive hyphens
-                if !last_was_sep && !result.is_empty() {
+                let should_add_separator = !last_was_sep && !result.is_empty();
+                if should_add_separator {
                     result.push('-');
+                }
+                // Update state only if we added a separator
+                if should_add_separator {
                     last_was_sep = true;
                     last_was_lower = false;
                 }

@@ -91,11 +91,9 @@ fn test_load_cached_spec_file_not_found() {
             assert_eq!(kind, ErrorKind::Specification);
             assert!(message.contains("No cached spec found"));
             assert!(message.contains("nonexistent-api"));
-            if let Some(ctx) = context {
-                if let Some(details) = &ctx.details {
-                    assert_eq!(details["spec_name"], "nonexistent-api");
-                }
-            }
+            let Some(ctx) = context else { return };
+            let Some(details) = &ctx.details else { return };
+            assert_eq!(details["spec_name"], "nonexistent-api");
         }
         _ => panic!("Expected CachedSpecNotFound error, got: {:?}", result),
     }
@@ -122,12 +120,10 @@ fn test_load_cached_spec_corrupted_data() {
             assert_eq!(kind, ErrorKind::Specification);
             assert!(message.contains("Failed to deserialize cached spec"));
             assert!(message.contains("corrupted-api"));
-            if let Some(ctx) = context {
-                if let Some(details) = &ctx.details {
-                    assert_eq!(details["spec_name"], "corrupted-api");
-                    assert!(details["corruption_reason"].is_string());
-                }
-            }
+            let Some(ctx) = context else { return };
+            let Some(details) = &ctx.details else { return };
+            assert_eq!(details["spec_name"], "corrupted-api");
+            assert!(details["corruption_reason"].is_string());
         }
         _ => panic!("Expected CachedSpecCorrupted error, got: {:?}", result),
     }
@@ -161,16 +157,14 @@ fn test_load_cached_spec_version_mismatch() {
             assert!(message.contains("Cache format version mismatch"));
             assert!(message.contains("old-version-api"));
             assert!(message.contains("found v1"));
-            if let Some(ctx) = context {
-                if let Some(details) = &ctx.details {
-                    assert_eq!(details["spec_name"], "old-version-api");
-                    assert_eq!(details["found_version"], 1);
-                    assert_eq!(
-                        details["expected_version"],
-                        aperture_cli::cache::models::CACHE_FORMAT_VERSION
-                    );
-                }
-            }
+            let Some(ctx) = context else { return };
+            let Some(details) = &ctx.details else { return };
+            assert_eq!(details["spec_name"], "old-version-api");
+            assert_eq!(details["found_version"], 1);
+            assert_eq!(
+                details["expected_version"],
+                aperture_cli::cache::models::CACHE_FORMAT_VERSION
+            );
         }
         _ => panic!("Expected CacheVersionMismatch error, got: {:?}", result),
     }

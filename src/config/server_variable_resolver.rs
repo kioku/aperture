@@ -45,19 +45,25 @@ impl<'a> ServerVariableResolver<'a> {
         let mut final_vars = HashMap::new();
 
         for (var_name, var_def) in &self.spec.server_variables {
+            // Check if user provided a value
             if let Some(provided_value) = resolved_vars.get(var_name) {
                 // Validate provided value against enum constraints
                 Self::validate_enum_constraint(var_name, provided_value, var_def)?;
                 final_vars.insert(var_name.clone(), provided_value.clone());
-            } else if let Some(default_value) = &var_def.default {
+                continue;
+            }
+
+            // Check if there's a default value
+            if let Some(default_value) = &var_def.default {
                 // Validate default value against enum constraints
                 Self::validate_enum_constraint(var_name, default_value, var_def)?;
                 // Use default value
                 final_vars.insert(var_name.clone(), default_value.clone());
-            } else {
-                // Required variable with no default - this is an error
-                return Err(Error::missing_server_variable(var_name));
+                continue;
             }
+
+            // Required variable with no default - this is an error
+            return Err(Error::missing_server_variable(var_name));
         }
 
         // Check for unknown variables provided by user

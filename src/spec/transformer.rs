@@ -583,14 +583,20 @@ impl SpecTransformer {
     fn extract_security_schemes(spec: &OpenAPI) -> HashMap<String, CachedSecurityScheme> {
         let mut security_schemes = HashMap::new();
 
-        if let Some(components) = &spec.components {
-            for (name, scheme_ref) in &components.security_schemes {
-                if let ReferenceOr::Item(scheme) = scheme_ref {
-                    if let Some(cached_scheme) = Self::transform_security_scheme(name, scheme) {
-                        security_schemes.insert(name.clone(), cached_scheme);
-                    }
-                }
-            }
+        let Some(components) = &spec.components else {
+            return security_schemes;
+        };
+
+        for (name, scheme_ref) in &components.security_schemes {
+            let ReferenceOr::Item(scheme) = scheme_ref else {
+                continue;
+            };
+
+            let Some(cached_scheme) = Self::transform_security_scheme(name, scheme) else {
+                continue;
+            };
+
+            security_schemes.insert(name.clone(), cached_scheme);
         }
 
         security_schemes
@@ -664,19 +670,19 @@ impl SpecTransformer {
             .get(crate::constants::EXT_APERTURE_SECRET)
             .and_then(|value| {
                 // The extension should be an object with "source" and "name" fields
-                if let Some(obj) = value.as_object() {
-                    let source = obj.get(crate::constants::EXT_KEY_SOURCE)?.as_str()?;
-                    let name = obj.get(crate::constants::EXT_KEY_NAME)?.as_str()?;
+                let obj = value.as_object()?;
+                let source = obj.get(crate::constants::EXT_KEY_SOURCE)?.as_str()?;
+                let name = obj.get(crate::constants::EXT_KEY_NAME)?.as_str()?;
 
-                    // Currently only "env" source is supported
-                    if source == constants::SOURCE_ENV {
-                        return Some(CachedApertureSecret {
-                            source: source.to_string(),
-                            name: name.to_string(),
-                        });
-                    }
+                // Currently only "env" source is supported
+                if source != constants::SOURCE_ENV {
+                    return None;
                 }
-                None
+
+                Some(CachedApertureSecret {
+                    source: source.to_string(),
+                    name: name.to_string(),
+                })
             })
     }
 
@@ -726,20 +732,22 @@ impl SpecTransformer {
         }
 
         // Example 2: With request body if present
-        if request_body.is_some() {
+        if let Some(_body) = request_body {
             let mut cmd = base_cmd.clone();
 
-            // Add required path/query parameters
-            for param in &required_params {
-                if param.location == "path" || param.location == "query" {
-                    write!(
-                        &mut cmd,
-                        " --{} {}",
-                        param.name,
-                        param.example.as_deref().unwrap_or("123")
-                    )
-                    .expect("writing to String cannot fail");
-                }
+            // Add required path/query parameters (only path and query params)
+            let path_query_params = required_params
+                .iter()
+                .filter(|p| p.location == "path" || p.location == "query");
+
+            for param in path_query_params {
+                write!(
+                    &mut cmd,
+                    " --{} {}",
+                    param.name,
+                    param.example.as_deref().unwrap_or("123")
+                )
+                .expect("writing to String cannot fail");
             }
 
             // Add body example

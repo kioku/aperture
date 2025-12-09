@@ -280,20 +280,16 @@ async fn test_execute_request_error_response() {
         // For backward compatibility, check if it's the old or new format
         // Old format includes JSON in the main message
         // New format has JSON in the context
-        match &e {
-            aperture_cli::error::Error::Internal { context, .. } => {
-                if let Some(ctx) = context {
-                    if let Some(details) = &ctx.details {
-                        let response_body = details.get("response_body").unwrap();
-                        assert!(response_body
-                            .as_str()
-                            .unwrap()
-                            .contains(r#""error":"User not found"#));
-                    }
-                }
-            }
-            _ => panic!("Unexpected error type: {:?}", e),
-        }
+        let aperture_cli::error::Error::Internal { context, .. } = &e else {
+            panic!("Unexpected error type: {:?}", e);
+        };
+        let Some(ctx) = context else { return };
+        let Some(details) = &ctx.details else { return };
+        let response_body = details.get("response_body").unwrap();
+        assert!(response_body
+            .as_str()
+            .unwrap()
+            .contains(r#""error":"User not found"#));
     }
 }
 

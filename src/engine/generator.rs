@@ -115,7 +115,9 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
                         example.description, example.command_line
                     )
                     .expect("writing to String buffer cannot fail");
-                    if let Some(ref explanation) = example.explanation {
+                    // Add explanation if present
+                    // ast-grep-ignore: no-nested-if
+                    if let Some(explanation) = example.explanation.as_ref() {
                         write!(&mut help_text, "\n    ({explanation})")
                             .expect("writing to String buffer cannot fail");
                     }
@@ -195,9 +197,8 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
 
     match param.location.as_str() {
         "path" => {
-            if use_positional_args {
-                // Legacy mode: path parameters are positional arguments
-                if is_boolean {
+            match (use_positional_args, is_boolean) {
+                (true, true) => {
                     // Boolean path parameters must use SetTrue even in positional mode
                     // because executor always reads them via get_flag()
                     // They remain as flags, not positional args, to avoid clap panic
@@ -207,7 +208,9 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
                         .help(format!("Path parameter: {}", param.name))
                         .required(false)
                         .action(ArgAction::SetTrue);
-                } else {
+                }
+                (true, false) => {
+                    // Legacy mode: path parameters are positional arguments (non-boolean)
                     let value_name = to_static_str(param.name.to_uppercase());
                     arg = arg
                         .help(format!("{} parameter", param.name))
@@ -215,20 +218,20 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
                         .required(param.required)
                         .action(ArgAction::Set);
                 }
-            } else {
-                // Default mode: path parameters become flags too
-                let long_name = to_static_str(to_kebab_case(&param.name));
-
-                if is_boolean {
-                    // Boolean path parameters are treated as flags
+                (false, true) => {
+                    // Default mode: Boolean path parameters are treated as flags
                     // Always optional: flag presence = true, absence = false (substituted in path)
                     // This provides consistent UX regardless of OpenAPI required field
+                    let long_name = to_static_str(to_kebab_case(&param.name));
                     arg = arg
                         .long(long_name)
                         .help(format!("Path parameter: {}", param.name))
                         .required(false)
                         .action(ArgAction::SetTrue);
-                } else {
+                }
+                (false, false) => {
+                    // Default mode: non-boolean path parameters
+                    let long_name = to_static_str(to_kebab_case(&param.name));
                     let value_name = to_static_str(param.name.to_uppercase());
                     arg = arg
                         .long(long_name)
@@ -255,19 +258,20 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
                     ))
                     .required(param.required)
                     .action(ArgAction::SetTrue);
-            } else {
-                let value_name = to_static_str(param.name.to_uppercase());
-                arg = arg
-                    .long(long_name)
-                    .help(format!(
-                        "{} {} parameter",
-                        capitalize_first(&param.location),
-                        param.name
-                    ))
-                    .value_name(value_name)
-                    .required(param.required)
-                    .action(ArgAction::Set);
+                return arg;
             }
+
+            let value_name = to_static_str(param.name.to_uppercase());
+            arg = arg
+                .long(long_name)
+                .help(format!(
+                    "{} {} parameter",
+                    capitalize_first(&param.location),
+                    param.name
+                ))
+                .value_name(value_name)
+                .required(param.required)
+                .action(ArgAction::Set);
         }
         _ => {
             // Unknown location, treat as flag
@@ -281,15 +285,16 @@ fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool)
                     .help(format!("{} parameter", param.name))
                     .required(param.required)
                     .action(ArgAction::SetTrue);
-            } else {
-                let value_name = to_static_str(param.name.to_uppercase());
-                arg = arg
-                    .long(long_name)
-                    .help(format!("{} parameter", param.name))
-                    .value_name(value_name)
-                    .required(param.required)
-                    .action(ArgAction::Set);
+                return arg;
             }
+
+            let value_name = to_static_str(param.name.to_uppercase());
+            arg = arg
+                .long(long_name)
+                .help(format!("{} parameter", param.name))
+                .value_name(value_name)
+                .required(param.required)
+                .action(ArgAction::Set);
         }
     }
 
