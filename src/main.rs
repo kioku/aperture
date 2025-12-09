@@ -82,26 +82,7 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
             }
             ConfigCommands::GetUrl { name } => {
                 let (base_override, env_urls, resolved) = manager.get_url(&name)?;
-
-                println!("Base URL configuration for '{name}':");
-                if let Some(base) = base_override {
-                    println!("  Base override: {base}");
-                } else {
-                    println!("  Base override: (none)");
-                }
-
-                if !env_urls.is_empty() {
-                    println!("  Environment URLs:");
-                    for (env, url) in env_urls {
-                        println!("    {env}: {url}");
-                    }
-                }
-
-                println!("\nResolved URL (current): {resolved}");
-
-                if let Ok(current_env) = std::env::var(constants::ENV_APERTURE_ENV) {
-                    println!("(Using APERTURE_ENV={current_env})");
-                }
+                print_url_configuration(&name, base_override.as_deref(), &env_urls, &resolved);
             }
             ConfigCommands::ListUrls {} => {
                 let all_urls = manager.list_urls()?;
@@ -113,16 +94,7 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
 
                 println!("Configured base URLs:");
                 for (api_name, (base_override, env_urls)) in all_urls {
-                    println!("\n{api_name}:");
-                    if let Some(base) = base_override {
-                        println!("  Base override: {base}");
-                    }
-                    if !env_urls.is_empty() {
-                        println!("  Environment URLs:");
-                        for (env, url) in env_urls {
-                            println!("    {env}: {url}");
-                        }
-                    }
+                    print_api_url_entry(&api_name, base_override.as_deref(), &env_urls);
                 }
             }
             ConfigCommands::Reinit { context, all } => {
@@ -169,14 +141,7 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 if secrets.is_empty() {
                     println!("No secrets configured for API '{api_name}'");
                 } else {
-                    println!("Configured secrets for API '{api_name}':");
-                    for (scheme_name, secret) in secrets {
-                        match secret.source {
-                            SecretSource::Env => {
-                                println!("  {scheme_name}: environment variable '{}'", secret.name);
-                            }
-                        }
-                    }
+                    print_secrets_list(&api_name, secrets);
                 }
             }
             ConfigCommands::RemoveSecret {
@@ -258,6 +223,67 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
     }
 
     Ok(())
+}
+
+/// Print the list of configured secrets for an API
+fn print_secrets_list(
+    api_name: &str,
+    secrets: std::collections::HashMap<String, aperture_cli::config::models::ApertureSecret>,
+) {
+    println!("Configured secrets for API '{api_name}':");
+    for (scheme_name, secret) in secrets {
+        match secret.source {
+            SecretSource::Env => {
+                println!("  {scheme_name}: environment variable '{}'", secret.name);
+            }
+        }
+    }
+}
+
+/// Print a single API URL entry in the list
+fn print_api_url_entry(
+    api_name: &str,
+    base_override: Option<&str>,
+    env_urls: &std::collections::HashMap<String, String>,
+) {
+    println!("\n{api_name}:");
+    if let Some(base) = base_override {
+        println!("  Base override: {base}");
+    }
+    if !env_urls.is_empty() {
+        println!("  Environment URLs:");
+        for (env, url) in env_urls {
+            println!("    {env}: {url}");
+        }
+    }
+}
+
+/// Print URL configuration for a specific API
+fn print_url_configuration(
+    name: &str,
+    base_override: Option<&str>,
+    env_urls: &std::collections::HashMap<String, String>,
+    resolved: &str,
+) {
+    println!("Base URL configuration for '{name}':");
+    if let Some(base) = base_override {
+        println!("  Base override: {base}");
+    } else {
+        println!("  Base override: (none)");
+    }
+
+    if !env_urls.is_empty() {
+        println!("  Environment URLs:");
+        for (env, url) in env_urls {
+            println!("    {env}: {url}");
+        }
+    }
+
+    println!("\nResolved URL (current): {resolved}");
+
+    if let Ok(current_env) = std::env::var(constants::ENV_APERTURE_ENV) {
+        println!("(Using APERTURE_ENV={current_env})");
+    }
 }
 
 fn execute_search_command(

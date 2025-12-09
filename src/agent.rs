@@ -11,6 +11,16 @@ use openapiv3::{OpenAPI, Operation, Parameter as OpenApiParameter, ReferenceOr, 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Type alias for schema information extracted from a parameter
+/// Returns: (`schema_type`, `format`, `default_value`, `enum_values`, `example`)
+type ParameterSchemaInfo = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+    Option<String>,
+);
+
 /// JSON manifest describing all available commands and parameters for an API context.
 /// This is output when the `--describe-json` flag is used.
 #[derive(Debug, Serialize, Deserialize)]
@@ -521,6 +531,72 @@ fn convert_openapi_operation_to_info(
     }
 }
 
+/// Extracts schema information from a parameter format
+fn extract_schema_info_from_parameter(
+    format: &openapiv3::ParameterSchemaOrContent,
+) -> ParameterSchemaInfo {
+    let openapiv3::ParameterSchemaOrContent::Schema(schema_ref) = format else {
+        return (
+            Some(constants::SCHEMA_TYPE_STRING.to_string()),
+            None,
+            None,
+            vec![],
+            None,
+        );
+    };
+
+    match schema_ref {
+        ReferenceOr::Item(schema) => {
+            let (schema_type, format, enums) =
+                extract_schema_type_from_schema_kind(&schema.schema_kind);
+
+            let default_value = schema
+                .schema_data
+                .default
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.to_string()));
+
+            (Some(schema_type), format, default_value, enums, None)
+        }
+        ReferenceOr::Reference { .. } => (
+            Some(constants::SCHEMA_TYPE_STRING.to_string()),
+            None,
+            None,
+            vec![],
+            None,
+        ),
+    }
+}
+
+/// Extracts type information from a schema kind
+fn extract_schema_type_from_schema_kind(
+    schema_kind: &openapiv3::SchemaKind,
+) -> (String, Option<String>, Vec<String>) {
+    match schema_kind {
+        openapiv3::SchemaKind::Type(type_val) => match type_val {
+            openapiv3::Type::String(string_type) => {
+                let enum_values: Vec<String> = string_type
+                    .enumeration
+                    .iter()
+                    .filter_map(|v| v.as_ref())
+                    .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.clone()))
+                    .collect();
+                (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
+            }
+            openapiv3::Type::Number(_) => (constants::SCHEMA_TYPE_NUMBER.to_string(), None, vec![]),
+            openapiv3::Type::Integer(_) => {
+                (constants::SCHEMA_TYPE_INTEGER.to_string(), None, vec![])
+            }
+            openapiv3::Type::Boolean(_) => {
+                (constants::SCHEMA_TYPE_BOOLEAN.to_string(), None, vec![])
+            }
+            openapiv3::Type::Array(_) => (constants::SCHEMA_TYPE_ARRAY.to_string(), None, vec![]),
+            openapiv3::Type::Object(_) => (constants::SCHEMA_TYPE_OBJECT.to_string(), None, vec![]),
+        },
+        _ => (constants::SCHEMA_TYPE_STRING.to_string(), None, vec![]),
+    }
+}
+
 /// Converts an `OpenAPI` parameter to `ParameterInfo` with full metadata
 fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo {
     let (param_data, location_str) = match param {
@@ -540,64 +616,7 @@ fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo 
 
     // Extract schema information
     let (schema_type, format, default_value, enum_values, example) =
-        if let openapiv3::ParameterSchemaOrContent::Schema(schema_ref) = &param_data.format {
-            match schema_ref {
-                ReferenceOr::Item(schema) => {
-                    let (schema_type, format, enums) = match &schema.schema_kind {
-                        openapiv3::SchemaKind::Type(type_val) => match type_val {
-                            openapiv3::Type::String(string_type) => {
-                                let enum_values: Vec<String> = string_type
-                                    .enumeration
-                                    .iter()
-                                    .filter_map(|v| v.as_ref())
-                                    .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.clone()))
-                                    .collect();
-                                (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
-                            }
-                            openapiv3::Type::Number(_) => {
-                                (constants::SCHEMA_TYPE_NUMBER.to_string(), None, vec![])
-                            }
-                            openapiv3::Type::Integer(_) => {
-                                (constants::SCHEMA_TYPE_INTEGER.to_string(), None, vec![])
-                            }
-                            openapiv3::Type::Boolean(_) => {
-                                (constants::SCHEMA_TYPE_BOOLEAN.to_string(), None, vec![])
-                            }
-                            openapiv3::Type::Array(_) => {
-                                (constants::SCHEMA_TYPE_ARRAY.to_string(), None, vec![])
-                            }
-                            openapiv3::Type::Object(_) => {
-                                (constants::SCHEMA_TYPE_OBJECT.to_string(), None, vec![])
-                            }
-                        },
-                        _ => (constants::SCHEMA_TYPE_STRING.to_string(), None, vec![]),
-                    };
-
-                    let default_value = schema
-                        .schema_data
-                        .default
-                        .as_ref()
-                        .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.to_string()));
-
-                    (Some(schema_type), format, default_value, enums, None)
-                }
-                ReferenceOr::Reference { .. } => (
-                    Some(constants::SCHEMA_TYPE_STRING.to_string()),
-                    None,
-                    None,
-                    vec![],
-                    None,
-                ),
-            }
-        } else {
-            (
-                Some(constants::SCHEMA_TYPE_STRING.to_string()),
-                None,
-                None,
-                vec![],
-                None,
-            )
-        };
+        extract_schema_info_from_parameter(&param_data.format);
 
     // Extract example from parameter data
     let example = param_data

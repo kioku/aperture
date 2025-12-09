@@ -1095,6 +1095,24 @@ struct KeyValue {
     value: String,
 }
 
+/// Prints items as a numbered list
+fn print_numbered_list(items: &[Value], capture_output: bool) -> Option<String> {
+    if capture_output {
+        let mut output = String::new();
+        for (i, item) in items.iter().enumerate() {
+            writeln!(&mut output, "{}: {}", i, format_value_for_table(item))
+                .expect("writing to String cannot fail");
+        }
+        return Some(output.trim_end().to_string());
+    }
+
+    for (i, item) in items.iter().enumerate() {
+        // ast-grep-ignore: no-println
+        println!("{}: {}", i, format_value_for_table(item));
+    }
+    None
+}
+
 /// Prints JSON data as a formatted table
 #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<String>, Error> {
@@ -1133,19 +1151,7 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
             // Try to create a table from array of objects
             let Some(Value::Object(_)) = items.first() else {
                 // Continue to fallback case
-                if capture_output {
-                    let mut output = String::new();
-                    for (i, item) in items.iter().enumerate() {
-                        writeln!(&mut output, "{}: {}", i, format_value_for_table(item))
-                            .expect("writing to String cannot fail");
-                    }
-                    return Ok(Some(output.trim_end().to_string()));
-                }
-                for (i, item) in items.iter().enumerate() {
-                    // ast-grep-ignore: no-println
-                    println!("{}: {}", i, format_value_for_table(item));
-                }
-                return Ok(None);
+                return Ok(print_numbered_list(items, capture_output));
             };
 
             // Create table for array of objects
@@ -1164,20 +1170,7 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
 
             if table_data.is_empty() {
                 // Fallback to numbered list
-                // ast-grep-ignore: no-nested-if
-                if capture_output {
-                    let mut output = String::new();
-                    for (i, item) in items.iter().enumerate() {
-                        writeln!(&mut output, "{}: {}", i, format_value_for_table(item))
-                            .expect("writing to String cannot fail");
-                    }
-                    return Ok(Some(output.trim_end().to_string()));
-                }
-                for (i, item) in items.iter().enumerate() {
-                    // ast-grep-ignore: no-println
-                    println!("{}: {}", i, format_value_for_table(item));
-                }
-                return Ok(None);
+                return Ok(print_numbered_list(items, capture_output));
             }
 
             // For now, use a simple key-value representation

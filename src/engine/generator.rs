@@ -13,6 +13,33 @@ fn to_static_str(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
 
+/// Builds help text with examples for a command
+fn build_help_text_with_examples(cached_command: &CachedCommand) -> String {
+    let mut help_text = cached_command.description.clone().unwrap_or_default();
+
+    if cached_command.examples.is_empty() {
+        return help_text;
+    }
+
+    help_text.push_str("\n\nExamples:");
+    for example in &cached_command.examples {
+        write!(
+            &mut help_text,
+            "\n  {}\n    {}",
+            example.description, example.command_line
+        )
+        .expect("writing to String buffer cannot fail");
+
+        // Add explanation if present
+        if let Some(explanation) = example.explanation.as_ref() {
+            write!(&mut help_text, "\n    ({explanation})")
+                .expect("writing to String buffer cannot fail");
+        }
+    }
+
+    help_text
+}
+
 /// Generates a dynamic clap command tree from a cached `OpenAPI` specification.
 ///
 /// This function creates a hierarchical command structure based on the `OpenAPI` spec:
@@ -105,24 +132,7 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
             let subcommand_name_static = to_static_str(subcommand_name);
 
             // Build help text with examples
-            let mut help_text = cached_command.description.clone().unwrap_or_default();
-            if !cached_command.examples.is_empty() {
-                help_text.push_str("\n\nExamples:");
-                for example in &cached_command.examples {
-                    write!(
-                        &mut help_text,
-                        "\n  {}\n    {}",
-                        example.description, example.command_line
-                    )
-                    .expect("writing to String buffer cannot fail");
-                    // Add explanation if present
-                    // ast-grep-ignore: no-nested-if
-                    if let Some(explanation) = example.explanation.as_ref() {
-                        write!(&mut help_text, "\n    ({explanation})")
-                            .expect("writing to String buffer cannot fail");
-                    }
-                }
-            }
+            let help_text = build_help_text_with_examples(cached_command);
 
             let mut operation_command = Command::new(subcommand_name_static).about(help_text);
 
