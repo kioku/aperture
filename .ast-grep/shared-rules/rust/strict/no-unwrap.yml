@@ -23,27 +23,18 @@ ignores:
   - "**/*_tests.rs"
   - "**/benches/**"
   - "**/examples/**"
-  # Files with #[cfg(test)] modules that use .unwrap() in tests
-  - "**/spec/parser.rs"
-  - "**/response_cache.rs"
-  - "**/agent.rs"
-  - "**/batch.rs"
-  - "**/config/server_variable_resolver.rs"
-  - "**/config/url_resolver.rs"
-  - "**/engine/executor.rs"
-  - "**/spec/transformer.rs"
 
 rule:
   pattern: $EXPR.unwrap()
   not:
     inside:
-      # Exclude entire test modules
+      stopBy: end
       kind: mod_item
-      has:
-        kind: attribute_item
-        has:
-          field: arguments
-          regex: "test"
+      follows:
+        # #[cfg(test)] is a SIBLING of mod_item in tree-sitter's Rust AST,
+        # not a child, so we use `follows` instead of `has`
+        stopBy: end
+        pattern: "#[cfg(test)]"
 
 fix: "$EXPR.expect(\"TODO: add error message\")"
 
