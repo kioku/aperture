@@ -1,3 +1,6 @@
+// These lints are overly pedantic for test code
+#![allow(clippy::too_many_lines)]
+
 /// Integration tests for boolean header parameter handling
 ///
 /// Verifies that boolean header parameters:
@@ -247,8 +250,7 @@ fn test_required_boolean_header_missing_errors_at_parse_time() {
     let error_message = error.to_string();
     assert!(
         error_message.contains("x-enable-feature") || error_message.contains("required"),
-        "Error should mention the missing required parameter or 'required'. Got: {}",
-        error_message
+        "Error should mention the missing required parameter or 'required'. Got: {error_message}"
     );
 }
 

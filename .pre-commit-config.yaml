@@ -9,7 +9,7 @@ repos:
 
     -   id: cargo-clippy
         name: cargo clippy
-        entry: cargo clippy --no-deps -- -D warnings
+        entry: cargo clippy --all-targets --features integration --no-deps -- -D warnings
         language: system
         types: [rust]
         pass_filenames: false

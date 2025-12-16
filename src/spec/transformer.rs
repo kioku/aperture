@@ -866,6 +866,9 @@ impl Default for SpecTransformer {
 }
 
 #[cfg(test)]
+#[allow(clippy::default_trait_access)]
+#[allow(clippy::field_reassign_with_default)]
+#[allow(clippy::too_many_lines)]
 mod tests {
     use super::*;
     use openapiv3::{
@@ -967,7 +970,7 @@ mod tests {
         variables.insert(
             "prefix".to_string(),
             openapiv3::ServerVariable {
-                default: "".to_string(), // Empty string default should be preserved
+                default: String::new(), // Empty string default should be preserved
                 description: Some("Optional prefix".to_string()),
                 enumeration: vec![],
                 extensions: indexmap::IndexMap::new(),
@@ -996,7 +999,7 @@ mod tests {
         // Verify empty string default is preserved
         assert!(cached.server_variables.contains_key("prefix"));
         let prefix_var = &cached.server_variables["prefix"];
-        assert_eq!(prefix_var.default, Some("".to_string()));
+        assert_eq!(prefix_var.default, Some(String::new()));
         assert_eq!(prefix_var.description, Some("Optional prefix".to_string()));
     }
 
@@ -1269,8 +1272,7 @@ mod tests {
             } => {
                 assert!(
                     msg.contains("Circular reference detected"),
-                    "Error message should mention circular reference: {}",
-                    msg
+                    "Error message should mention circular reference: {msg}"
                 );
             }
             _ => panic!("Expected Validation error for circular reference"),
@@ -1325,8 +1327,7 @@ mod tests {
             } => {
                 assert!(
                     msg.contains("Circular reference detected") || msg.contains("reference cycle"),
-                    "Error message should mention circular reference: {}",
-                    msg
+                    "Error message should mention circular reference: {msg}"
                 );
             }
             _ => panic!("Expected Validation error for circular reference"),
@@ -1388,8 +1389,7 @@ mod tests {
             } => {
                 assert!(
                     msg.contains("Circular reference detected") || msg.contains("reference cycle"),
-                    "Error message should mention circular reference: {}",
-                    msg
+                    "Error message should mention circular reference: {msg}"
                 );
             }
             _ => panic!("Expected Validation error for circular reference"),
@@ -1405,7 +1405,7 @@ mod tests {
 
         // Create a chain of references that exceeds MAX_REFERENCE_DEPTH
         for i in 0..12 {
-            let param_name = format!("param{}", i);
+            let param_name = format!("param{i}");
             let next_param = format!("param{}", i + 1);
 
             if i < 11 {
@@ -1413,7 +1413,7 @@ mod tests {
                 components.parameters.insert(
                     param_name,
                     ReferenceOr::Reference {
-                        reference: format!("#/components/parameters/{}", next_param),
+                        reference: format!("#/components/parameters/{next_param}"),
                     },
                 );
             } else {
@@ -1467,8 +1467,7 @@ mod tests {
             } => {
                 assert!(
                     msg.contains("Maximum reference depth") && msg.contains("10"),
-                    "Error message should mention depth limit: {}",
-                    msg
+                    "Error message should mention depth limit: {msg}"
                 );
             }
             _ => panic!("Expected Validation error for depth limit"),

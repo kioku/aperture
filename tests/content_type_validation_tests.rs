@@ -1,11 +1,14 @@
 #![cfg(feature = "integration")]
+// These lints are overly pedantic for integration tests
+#![allow(clippy::used_underscore_binding)]
+#![allow(clippy::significant_drop_tightening)]
+#![allow(clippy::too_many_lines)]
 
 mod common;
 
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::fs::OsFileSystem;
-use assert_cmd::Command;
 use common::aperture_cmd;
 use tempfile::TempDir;
 
@@ -20,7 +23,7 @@ fn test_all_unsupported_content_types() {
     let (config_manager, _temp_dir) = create_temp_config_manager();
 
     // Create a spec with all unsupported content types from issue #11
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: All Content Types API
@@ -187,7 +190,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     // Write spec to temp file
     let spec_file = _temp_dir.path().join("all-content-types.yaml");
@@ -222,7 +225,7 @@ fn test_multiple_content_types_per_endpoint() {
     let (config_manager, _temp_dir) = create_temp_config_manager();
 
     // Create a spec with endpoints that have multiple content types
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Mixed Content API
@@ -263,7 +266,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     // Write spec to temp file
     let spec_file = _temp_dir.path().join("mixed-content.yaml");
@@ -406,7 +409,7 @@ fn test_cli_warnings_for_different_content_types() {
     let config_dir = temp_dir.path().join(".aperture");
 
     // Create a spec with various content types
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Various Content Types
@@ -463,7 +466,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = temp_dir.path().join("various-content.yaml");
     std::fs::write(&spec_file, spec_content).unwrap();
@@ -485,7 +488,7 @@ paths:
     // Check for specific warning messages
     assert!(
         stderr.contains("Warning: Skipping 4 endpoints with unsupported content types (0 of 4 endpoints will be available)"),
-        "Should show correct count of skipped endpoints with available count. Actual stderr: {}", stderr
+        "Should show correct count of skipped endpoints with available count. Actual stderr: {stderr}"
     );
     assert!(
         stderr.contains("file uploads are not supported"),
@@ -510,7 +513,7 @@ fn test_wildcard_content_types() {
     let (config_manager, _temp_dir) = create_temp_config_manager();
 
     // Create a spec with various image types
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Image API
@@ -569,7 +572,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     // Write spec to temp file
     let spec_file = _temp_dir.path().join("image-types.yaml");
@@ -794,7 +797,7 @@ fn test_mixed_content_type_warnings() {
     let (_config_manager, _temp_dir) = create_temp_config_manager();
 
     // Create a spec with endpoints that have mixed content types
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Mixed Content API
@@ -859,7 +862,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     // Write spec to temp file
     let spec_file = _temp_dir.path().join("mixed-warnings.yaml");
@@ -915,7 +918,7 @@ fn test_empty_request_body_content() {
     let (config_manager, _temp_dir) = create_temp_config_manager();
 
     // Create a spec with endpoints that have empty request body content
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Empty Content API
@@ -941,7 +944,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     // Write spec to temp file
     let spec_file = _temp_dir.path().join("empty-content.yaml");

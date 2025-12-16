@@ -73,7 +73,7 @@ fn test_suggest_similar_operations() {
 
     // Test fuzzy matching for typos - search for something more unique
     let suggestions = suggest_similar_operations(&spec, "getUserById");
-    println!("Suggestions for 'getUserById': {:?}", suggestions);
+    println!("Suggestions for 'getUserById': {suggestions:?}");
     assert!(
         !suggestions.is_empty(),
         "Expected suggestions for 'getUserById', got none"
@@ -86,13 +86,13 @@ fn test_suggest_similar_operations() {
 
     // Test partial matching
     let suggestions = suggest_similar_operations(&spec, "list");
-    println!("Suggestions for 'list': {:?}", suggestions);
+    println!("Suggestions for 'list': {suggestions:?}");
     assert!(!suggestions.is_empty());
     assert!(suggestions[0].contains("list-users")); // Should match list-users
 
     // Test with completely unrelated term - fuzzy matching should still find something
     let suggestions = suggest_similar_operations(&spec, "xyz123");
-    println!("Suggestions for 'xyz123': {:?}", suggestions);
+    println!("Suggestions for 'xyz123': {suggestions:?}");
     // Fuzzy matching may or may not return results for completely unrelated terms
     // so we'll just check the function doesn't crash
 }
@@ -119,7 +119,7 @@ fn test_suggest_valid_values() {
     assert!(suggestion.contains("'pending'"));
 
     // Test with many values
-    let many_values: Vec<String> = (0..10).map(|i| format!("value{}", i)).collect();
+    let many_values: Vec<String> = (0..10).map(|i| format!("value{i}")).collect();
     let suggestion = suggest_valid_values("field", &many_values);
     assert!(suggestion.contains("..."));
     assert!(suggestion.contains("value0"));

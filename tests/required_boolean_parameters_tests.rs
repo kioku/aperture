@@ -2,10 +2,10 @@
 ///
 /// Boolean parameters have special handling:
 /// - **Path parameters**: Always optional (flag presence = true, absence = false)
-/// - **Query/Header parameters**: Respect OpenAPI required field
+/// - **Query/Header parameters**: Respect `OpenAPI` required field
 ///
 /// This test suite verifies that:
-/// 1. Boolean path parameters default to false when flag omitted (even if OpenAPI marks as required)
+/// 1. Boolean path parameters default to false when flag omitted (even if `OpenAPI` marks as required)
 /// 2. Boolean path parameters substitute "true"/"false" correctly in URLs
 /// 3. Required boolean query parameters error when missing
 /// 4. Required booleans work correctly when provided
@@ -235,8 +235,7 @@ fn test_required_boolean_query_parameter_missing_errors() {
     let err_str = err.to_string();
     assert!(
         err_str.contains("required") || err_str.contains("include-inactive"),
-        "Error message should mention the required parameter: {}",
-        err_str
+        "Error message should mention the required parameter: {err_str}"
     );
 }
 
@@ -288,7 +287,7 @@ fn test_mixed_required_and_optional_booleans() {
     );
 
     // Both flags provided should work
-    let result = cmd.clone().try_get_matches_from(vec![
+    let result = cmd.try_get_matches_from(vec![
         "api",
         "search",
         "search",

@@ -61,7 +61,7 @@ fn test_cached_spec_serialization_deserialization() {
 
     // Test serialization
     let serialized = serde_json::to_string_pretty(&spec).unwrap();
-    println!("Serialized: {}\n", serialized);
+    println!("Serialized: {serialized}\n");
 
     // Test deserialization
     let deserialized: CachedSpec = serde_json::from_str(&serialized).unwrap();

@@ -1,3 +1,8 @@
+// These lints are overly pedantic for test code that constructs complex OpenAPI types
+#![allow(clippy::default_trait_access)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::too_many_lines)]
+
 use aperture_cli::agent::{
     generate_capability_manifest, generate_capability_manifest_from_openapi, ApiCapabilityManifest,
     SecuritySchemeDetails,

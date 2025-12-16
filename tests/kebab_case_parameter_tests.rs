@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// Create a test spec with various snake_case and mixed-case parameters
+/// Create a test spec with various `snake_case` and mixed-case parameters
 fn create_snake_case_spec() -> CachedSpec {
     CachedSpec {
         cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,

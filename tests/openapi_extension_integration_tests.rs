@@ -1,3 +1,10 @@
+// These lints are overly pedantic for test code
+#![allow(clippy::default_trait_access)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::significant_drop_tightening)]
+#![allow(clippy::used_underscore_binding)]
+
 use aperture_cli::cache::models::CachedApertureSecret;
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::config::manager::ConfigManager;
@@ -222,7 +229,7 @@ async fn test_missing_extension_graceful_handling() {
     let (config_manager, _temp_dir) = create_temp_config_manager();
 
     // Create a temporary spec file without x-aperture-secret extension
-    let temp_spec = r#"
+    let temp_spec = r"
 openapi: 3.0.0
 info:
   title: No Extension API
@@ -245,7 +252,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let temp_file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(temp_file.path(), temp_spec).unwrap();
@@ -316,7 +323,6 @@ servers:
     let error_msg = error.to_string();
     assert!(
         error_msg.contains("must be an object"),
-        "Expected error about x-aperture-secret needing to be an object, got: {}",
-        error_msg
+        "Expected error about x-aperture-secret needing to be an object, got: {error_msg}"
     );
 }

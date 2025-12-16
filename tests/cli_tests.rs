@@ -142,12 +142,12 @@ fn test_config_list_multiple_specs() {
     let specs_dir = config_dir.join("specs");
     fs::create_dir_all(&specs_dir).unwrap();
     fs::write(
-        &specs_dir.join("api1.yaml"),
+        specs_dir.join("api1.yaml"),
         "openapi: 3.0.0\ninfo:\n  title: API1\n  version: 1.0.0\npaths: {}",
     )
     .unwrap();
     fs::write(
-        &specs_dir.join("api2.yaml"),
+        specs_dir.join("api2.yaml"),
         "openapi: 3.0.0\ninfo:\n  title: API2\n  version: 1.0.0\npaths: {}",
     )
     .unwrap();

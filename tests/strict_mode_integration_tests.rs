@@ -1,11 +1,13 @@
 #![cfg(feature = "integration")]
+// These lints are overly pedantic for test code
+#![allow(clippy::used_underscore_binding)]
+#![allow(clippy::significant_drop_tightening)]
 
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::fs::OsFileSystem;
 mod common;
 
-use assert_cmd::Command;
 use common::aperture_cmd;
 use predicates::prelude::*;
 use std::path::Path;
@@ -110,9 +112,7 @@ fn test_cli_non_strict_mode_with_warnings() {
 
     assert!(
         output.status.success(),
-        "Command should succeed in non-strict mode. stderr: {}, stdout: {}",
-        stderr,
-        stdout
+        "Command should succeed in non-strict mode. stderr: {stderr}, stdout: {stdout}"
     );
 
     // Check for warning messages
@@ -300,7 +300,7 @@ fn test_path_case_sensitivity_in_filtering() {
     let (config_manager, _temp_dir) = create_temp_config_manager();
 
     // Create a spec with case-sensitive paths
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Case Sensitive API
@@ -337,7 +337,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     // Write spec to temp file
     let spec_file = _temp_dir.path().join("case-sensitive.yaml");
@@ -409,7 +409,7 @@ fn test_reinit_preserves_strict_mode_preference() {
     let config_dir = temp_dir.path().join(".aperture");
 
     // Create a spec that passes non-strict but fails strict
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -435,7 +435,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     std::fs::write(&spec_file, spec_content).unwrap();
@@ -489,7 +489,7 @@ fn test_strict_mode_with_url_spec() {
     let mock_server = runtime.block_on(async { MockServer::start().await });
 
     // Create a spec with multipart content
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Remote API with Multipart
@@ -515,7 +515,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     // Mock the GET request for the spec
     runtime.block_on(async {

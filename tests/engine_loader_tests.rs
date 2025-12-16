@@ -95,7 +95,7 @@ fn test_load_cached_spec_file_not_found() {
             let Some(details) = &ctx.details else { return };
             assert_eq!(details["spec_name"], "nonexistent-api");
         }
-        _ => panic!("Expected CachedSpecNotFound error, got: {:?}", result),
+        _ => panic!("Expected CachedSpecNotFound error, got: {result:?}"),
     }
 }
 
@@ -125,7 +125,7 @@ fn test_load_cached_spec_corrupted_data() {
             assert_eq!(details["spec_name"], "corrupted-api");
             assert!(details["corruption_reason"].is_string());
         }
-        _ => panic!("Expected CachedSpecCorrupted error, got: {:?}", result),
+        _ => panic!("Expected CachedSpecCorrupted error, got: {result:?}"),
     }
 }
 
@@ -166,6 +166,6 @@ fn test_load_cached_spec_version_mismatch() {
                 aperture_cli::cache::models::CACHE_FORMAT_VERSION
             );
         }
-        _ => panic!("Expected CacheVersionMismatch error, got: {:?}", result),
+        _ => panic!("Expected CacheVersionMismatch error, got: {result:?}"),
     }
 }

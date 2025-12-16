@@ -159,10 +159,10 @@ async fn test_config_secret_overrides_aperture_secret() {
 
     // Use unique environment variable names for this test
     let test_id = "CONFIG_OVERRIDE_TEST";
-    let spec_bearer_env = format!("{}_SPEC_BEARER_TOKEN", test_id);
-    let config_bearer_env = format!("{}_CONFIG_BEARER_TOKEN", test_id);
-    let spec_api_key_env = format!("{}_SPEC_API_KEY", test_id);
-    let config_api_key_env = format!("{}_CONFIG_API_KEY", test_id);
+    let spec_bearer_env = format!("{test_id}_SPEC_BEARER_TOKEN");
+    let config_bearer_env = format!("{test_id}_CONFIG_BEARER_TOKEN");
+    let spec_api_key_env = format!("{test_id}_SPEC_API_KEY");
+    let config_api_key_env = format!("{test_id}_CONFIG_API_KEY");
 
     // Clean up any existing environment variables first
     cleanup_env_vars();
@@ -237,8 +237,8 @@ async fn test_aperture_secret_used_when_no_config() {
 
     // Use unique environment variable names for this test
     let test_id = "APERTURE_SECRET_TEST";
-    let spec_bearer_env = format!("{}_SPEC_BEARER_TOKEN", test_id);
-    let spec_api_key_env = format!("{}_SPEC_API_KEY", test_id);
+    let spec_bearer_env = format!("{test_id}_SPEC_BEARER_TOKEN");
+    let spec_api_key_env = format!("{test_id}_SPEC_API_KEY");
 
     // Clean up any existing environment variables first
     cleanup_env_vars();
@@ -437,9 +437,9 @@ async fn test_partial_config_override() {
 
     // Use unique environment variable names for this test
     let test_id = "PARTIAL_CONFIG_TEST";
-    let spec_bearer_env = format!("{}_SPEC_BEARER_TOKEN", test_id);
-    let config_bearer_env = format!("{}_CONFIG_BEARER_TOKEN", test_id);
-    let spec_api_key_env = format!("{}_SPEC_API_KEY", test_id);
+    let spec_bearer_env = format!("{test_id}_SPEC_BEARER_TOKEN");
+    let config_bearer_env = format!("{test_id}_CONFIG_BEARER_TOKEN");
+    let spec_api_key_env = format!("{test_id}_SPEC_API_KEY");
 
     // Clean up any existing environment variables first
     cleanup_env_vars();
@@ -630,10 +630,10 @@ async fn test_different_api_configs() {
 
     // Use unique environment variable names for this test
     let test_id = "DIFFERENT_API_TEST";
-    let spec_bearer_env = format!("{}_SPEC_BEARER_TOKEN", test_id);
-    let spec_api_key_env = format!("{}_SPEC_API_KEY", test_id);
-    let other_bearer_env = format!("{}_OTHER_API_BEARER_TOKEN", test_id);
-    let other_api_key_env = format!("{}_OTHER_API_KEY", test_id);
+    let spec_bearer_env = format!("{test_id}_SPEC_BEARER_TOKEN");
+    let spec_api_key_env = format!("{test_id}_SPEC_API_KEY");
+    let other_bearer_env = format!("{test_id}_OTHER_API_BEARER_TOKEN");
+    let other_api_key_env = format!("{test_id}_OTHER_API_KEY");
 
     // Clean up any existing environment variables first
     cleanup_env_vars();

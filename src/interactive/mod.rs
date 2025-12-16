@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_select_from_options_structure() {
-        let options = vec![
+        let options = [
             (
                 "bearerAuth".to_string(),
                 "Bearer token authentication".to_string(),

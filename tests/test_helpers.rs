@@ -4,6 +4,7 @@ use aperture_cli::cache::models::{
 };
 use aperture_cli::constants;
 
+#[must_use]
 pub fn test_parameter(name: &str, location: &str, required: bool) -> CachedParameter {
     CachedParameter {
         name: name.to_string(),
@@ -19,6 +20,7 @@ pub fn test_parameter(name: &str, location: &str, required: bool) -> CachedParam
     }
 }
 
+#[must_use]
 pub fn test_response(status_code: &str) -> CachedResponse {
     CachedResponse {
         status_code: status_code.to_string(),
@@ -28,6 +30,7 @@ pub fn test_response(status_code: &str) -> CachedResponse {
     }
 }
 
+#[must_use]
 pub fn test_request_body() -> CachedRequestBody {
     CachedRequestBody {
         content_type: constants::CONTENT_TYPE_JSON.to_string(),
@@ -38,6 +41,7 @@ pub fn test_request_body() -> CachedRequestBody {
     }
 }
 
+#[must_use]
 pub fn test_command(name: &str, operation_id: &str, method: &str, path: &str) -> CachedCommand {
     CachedCommand {
         name: name.to_string(),

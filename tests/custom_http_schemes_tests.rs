@@ -1,3 +1,11 @@
+// These lints are overly pedantic for test code
+#![allow(clippy::default_trait_access)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::significant_drop_tightening)]
+
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::error::{Error, ErrorKind as ApertureErrorKind};
 use aperture_cli::fs::FileSystem;
@@ -13,7 +21,14 @@ pub struct MockFileSystem {
     dirs: Arc<Mutex<HashMap<PathBuf, bool>>>,
 }
 
+impl Default for MockFileSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockFileSystem {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             files: Arc::new(Mutex::new(HashMap::new())),
@@ -123,7 +138,7 @@ fn test_add_spec_with_custom_http_scheme_token() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with Token HTTP scheme (common alternative to Bearer)
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Token Auth API
@@ -147,7 +162,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = setup_dir(&fs).join("token-api.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -167,7 +182,7 @@ fn test_add_spec_with_custom_http_scheme_apikey() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with ApiKey HTTP scheme (note: different from apiKey type)
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: ApiKey Scheme API
@@ -191,7 +206,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = setup_dir(&fs).join("apikey-scheme.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -207,7 +222,7 @@ fn test_add_spec_with_dsn_scheme() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with DSN HTTP scheme (Sentry-style)
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Sentry-style API
@@ -231,7 +246,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = setup_dir(&fs).join("dsn-api.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -247,7 +262,7 @@ fn test_rejected_complex_auth_schemes() {
     let (manager, fs) = setup_manager();
 
     // Test OAuth scheme (should be rejected)
-    let oauth_spec = r#"
+    let oauth_spec = r"
 openapi: 3.0.0
 info:
   title: OAuth API
@@ -271,7 +286,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = setup_dir(&fs).join("oauth-api.yaml");
     fs.write_all(&spec_path, oauth_spec.as_bytes())
@@ -285,7 +300,7 @@ paths:
     );
 
     // Test Negotiate scheme (should be rejected)
-    let negotiate_spec = r#"
+    let negotiate_spec = r"
 openapi: 3.0.0
 info:
   title: Negotiate API
@@ -306,7 +321,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = setup_dir(&fs).join("negotiate-api.yaml");
     fs.write_all(&spec_path, negotiate_spec.as_bytes())
@@ -325,7 +340,7 @@ fn test_add_spec_with_proprietary_http_scheme() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with a completely custom/proprietary HTTP scheme
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Proprietary Auth API
@@ -349,7 +364,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = setup_dir(&fs).join("proprietary-api.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -368,7 +383,7 @@ fn test_reject_oauth_http_scheme() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with 'oauth' as HTTP scheme (should be rejected)
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: OAuth HTTP Scheme API
@@ -387,7 +402,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = setup_dir(&fs).join("oauth-http.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -404,8 +419,7 @@ paths:
     {
         assert!(
             msg.contains("requires complex authentication flows"),
-            "Expected complex auth flow error, got: {}",
-            msg
+            "Expected complex auth flow error, got: {msg}"
         );
     } else {
         panic!("Expected Validation error for oauth HTTP scheme");
@@ -417,7 +431,7 @@ fn test_reject_negotiate_http_scheme() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with 'negotiate' HTTP scheme (Kerberos/NTLM)
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Negotiate Auth API
@@ -436,7 +450,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = setup_dir(&fs).join("negotiate-api.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -453,8 +467,7 @@ paths:
     {
         assert!(
             msg.contains("requires complex authentication flows"),
-            "Expected complex auth flow error, got: {}",
-            msg
+            "Expected complex auth flow error, got: {msg}"
         );
     } else {
         panic!("Expected Validation error for Negotiate scheme");

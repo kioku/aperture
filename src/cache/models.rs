@@ -23,8 +23,9 @@ pub struct CachedSpec {
 }
 
 impl CachedSpec {
-    /// Creates a new CachedSpec with default values for testing
+    /// Creates a new `CachedSpec` with default values for testing
     #[cfg(test)]
+    #[must_use]
     pub fn new_for_test(name: &str) -> Self {
         Self {
             cache_format_version: CACHE_FORMAT_VERSION,

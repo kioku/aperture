@@ -13,7 +13,7 @@ fn test_config_set_secret_basic_functionality() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Create a simple OpenAPI spec
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -33,7 +33,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -41,7 +41,7 @@ servers:
     // Add the spec first
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "test-api",
@@ -56,7 +56,7 @@ servers:
     // Set a secret for the bearerAuth scheme
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "set-secret", "test-api", "bearerAuth", "--env", "TEST_BEARER_TOKEN"])
+        .args(["config", "set-secret", "test-api", "bearerAuth", "--env", "TEST_BEARER_TOKEN"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Set secret for scheme 'bearerAuth' in API 'test-api' to use environment variable 'TEST_BEARER_TOKEN'"));
@@ -64,7 +64,7 @@ servers:
     // List secrets to verify it was set
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "list-secrets", "test-api"])
+        .args(["config", "list-secrets", "test-api"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -82,7 +82,7 @@ fn test_config_set_secret_nonexistent_api() {
     // Try to set secret for non-existent API
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-secret",
             "nonexistent-api",
@@ -103,7 +103,7 @@ fn test_config_list_secrets_empty() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Create a simple OpenAPI spec
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -116,7 +116,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -124,7 +124,7 @@ servers:
     // Add the spec first
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "test-api",
@@ -136,7 +136,7 @@ servers:
     // List secrets for API with no configured secrets
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "list-secrets", "test-api"])
+        .args(["config", "list-secrets", "test-api"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -151,7 +151,7 @@ fn test_config_set_secret_invalid_arguments() {
     // Try to set secret without providing both scheme and env
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "set-secret", "test-api", "bearerAuth"])
+        .args(["config", "set-secret", "test-api", "bearerAuth"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -165,7 +165,7 @@ fn test_config_remove_secret_success() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Create a simple OpenAPI spec with security schemes
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -190,7 +190,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -198,7 +198,7 @@ servers:
     // Add the spec
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "test-api",
@@ -210,7 +210,7 @@ servers:
     // Set two secrets
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-secret",
             "test-api",
@@ -223,7 +223,7 @@ servers:
 
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-secret",
             "test-api",
@@ -237,7 +237,7 @@ servers:
     // Verify both secrets are configured
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "list-secrets", "test-api"])
+        .args(["config", "list-secrets", "test-api"])
         .assert()
         .success()
         .stdout(predicate::str::contains("bearerAuth"))
@@ -246,7 +246,7 @@ servers:
     // Remove one secret
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "remove-secret", "test-api", "bearerAuth"])
+        .args(["config", "remove-secret", "test-api", "bearerAuth"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -256,7 +256,7 @@ servers:
     // Verify only one secret remains
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "list-secrets", "test-api"])
+        .args(["config", "list-secrets", "test-api"])
         .assert()
         .success()
         .stdout(predicate::str::contains("apiKey"))
@@ -271,7 +271,7 @@ fn test_config_remove_secret_nonexistent_api() {
     // Try to remove secret from nonexistent API
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "remove-secret", "nonexistent-api", "bearerAuth"])
+        .args(["config", "remove-secret", "nonexistent-api", "bearerAuth"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -285,7 +285,7 @@ fn test_config_remove_secret_nonexistent_scheme() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Create a simple OpenAPI spec
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -305,7 +305,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -313,7 +313,7 @@ servers:
     // Add the spec
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "test-api",
@@ -325,7 +325,7 @@ servers:
     // Try to remove a secret that was never configured
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "remove-secret", "test-api", "bearerAuth"])
+        .args(["config", "remove-secret", "test-api", "bearerAuth"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -339,7 +339,7 @@ fn test_config_remove_secret_unconfigured_scheme() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Create a simple OpenAPI spec with multiple schemes
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -363,7 +363,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -371,7 +371,7 @@ servers:
     // Add the spec
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "test-api",
@@ -383,7 +383,7 @@ servers:
     // Configure only one secret
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-secret",
             "test-api",
@@ -397,7 +397,7 @@ servers:
     // Try to remove the unconfigured scheme
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "remove-secret", "test-api", "apiKey"])
+        .args(["config", "remove-secret", "test-api", "apiKey"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -411,7 +411,7 @@ fn test_config_clear_secrets_success() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Create a simple OpenAPI spec with security schemes
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -436,7 +436,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -444,7 +444,7 @@ servers:
     // Add the spec
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "test-api",
@@ -456,7 +456,7 @@ servers:
     // Set multiple secrets
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-secret",
             "test-api",
@@ -469,7 +469,7 @@ servers:
 
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-secret",
             "test-api",
@@ -483,7 +483,7 @@ servers:
     // Clear all secrets with --force to skip confirmation
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "clear-secrets", "test-api", "--force"])
+        .args(["config", "clear-secrets", "test-api", "--force"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -493,7 +493,7 @@ servers:
     // Verify no secrets remain
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "list-secrets", "test-api"])
+        .args(["config", "list-secrets", "test-api"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -509,7 +509,7 @@ fn test_config_clear_secrets_nonexistent_api() {
     // Try to clear secrets from nonexistent API
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "clear-secrets", "nonexistent-api", "--force"])
+        .args(["config", "clear-secrets", "nonexistent-api", "--force"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -523,7 +523,7 @@ fn test_config_clear_secrets_no_secrets_configured() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Create a simple OpenAPI spec
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -536,7 +536,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -544,7 +544,7 @@ servers:
     // Add the spec
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "test-api",
@@ -556,7 +556,7 @@ servers:
     // Try to clear secrets when none are configured
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "clear-secrets", "test-api", "--force"])
+        .args(["config", "clear-secrets", "test-api", "--force"])
         .assert()
         .success()
         .stdout(predicate::str::contains(

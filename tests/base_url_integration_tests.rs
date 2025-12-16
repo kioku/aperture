@@ -1,4 +1,6 @@
 #![cfg(feature = "integration")]
+// These lints are overly pedantic for integration tests
+#![allow(clippy::too_many_lines)]
 
 mod common;
 
@@ -9,9 +11,9 @@ use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// Creates a test OpenAPI spec with servers defined
-fn create_test_spec_with_servers() -> &'static str {
-    r#"openapi: 3.0.0
+/// Creates a test `OpenAPI` spec with servers defined
+const fn create_test_spec_with_servers() -> &'static str {
+    r"openapi: 3.0.0
 info:
   title: Test API
   version: 1.0.0
@@ -47,12 +49,12 @@ paths:
             application/json:
               schema:
                 type: object
-"#
+"
 }
 
-/// Creates a test OpenAPI spec without servers (for fallback testing)
-fn create_test_spec_without_servers() -> &'static str {
-    r#"openapi: 3.0.0
+/// Creates a test `OpenAPI` spec without servers (for fallback testing)
+const fn create_test_spec_without_servers() -> &'static str {
+    r"openapi: 3.0.0
 info:
   title: Test API No Servers
   version: 1.0.0
@@ -80,7 +82,7 @@ paths:
       responses:
         '200':
           description: Success
-"#
+"
 }
 
 #[tokio::test]
@@ -95,7 +97,7 @@ async fn test_base_url_priority_hierarchy() {
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
@@ -115,7 +117,7 @@ async fn test_base_url_priority_hierarchy() {
     // Test 1: Default (spec base URL) - should use https://api.example.com from spec
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "api",
             "test-api",
             "--dry-run",
@@ -138,8 +140,8 @@ async fn test_base_url_priority_hierarchy() {
     // Test 2: Environment variable override (higher priority)
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .env("APERTURE_BASE_URL", &mock_server.uri())
-        .args(&[
+        .env("APERTURE_BASE_URL", mock_server.uri())
+        .args([
             "api",
             "test-api",
             "--dry-run",
@@ -162,7 +164,7 @@ async fn test_base_url_priority_hierarchy() {
     // Test 3: Config override (should override env var)
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "test-api",
@@ -177,8 +179,8 @@ async fn test_base_url_priority_hierarchy() {
     // Verify config override takes precedence over env var
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .env("APERTURE_BASE_URL", &mock_server.uri())
-        .args(&[
+        .env("APERTURE_BASE_URL", mock_server.uri())
+        .args([
             "api",
             "test-api",
             "--dry-run",
@@ -201,7 +203,7 @@ async fn test_base_url_priority_hierarchy() {
     // Test 4: Environment-specific config (highest priority after explicit)
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "test-api",
@@ -215,9 +217,9 @@ async fn test_base_url_priority_hierarchy() {
     // With APERTURE_ENV set, environment-specific URL should win
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .env("APERTURE_BASE_URL", &mock_server.uri())
+        .env("APERTURE_BASE_URL", mock_server.uri())
         .env("APERTURE_ENV", "staging")
-        .args(&[
+        .args([
             "api",
             "test-api",
             "--dry-run",
@@ -249,14 +251,14 @@ fn test_config_url_management_commands() {
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test set-url command
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "test-api",
@@ -271,7 +273,7 @@ fn test_config_url_management_commands() {
     // Test set-url with environment
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "test-api",
@@ -287,7 +289,7 @@ fn test_config_url_management_commands() {
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "test-api",
@@ -301,7 +303,7 @@ fn test_config_url_management_commands() {
     // Test get-url command
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "get-url", "test-api"])
+        .args(["config", "get-url", "test-api"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -320,7 +322,7 @@ fn test_config_url_management_commands() {
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_ENV", "prod")
-        .args(&["config", "get-url", "test-api"])
+        .args(["config", "get-url", "test-api"])
         .assert()
         .success()
         .stdout(predicate::str::contains("(Using APERTURE_ENV=prod)"));
@@ -328,7 +330,7 @@ fn test_config_url_management_commands() {
     // Test list-urls command
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "list-urls"])
+        .args(["config", "list-urls"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Configured base URLs:"))
@@ -348,7 +350,7 @@ fn test_config_url_error_handling() {
     // Test set-url on nonexistent spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "set-url", "nonexistent", "https://example.com"])
+        .args(["config", "set-url", "nonexistent", "https://example.com"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -358,7 +360,7 @@ fn test_config_url_error_handling() {
     // Test get-url on nonexistent spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "get-url", "nonexistent"])
+        .args(["config", "get-url", "nonexistent"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -368,7 +370,7 @@ fn test_config_url_error_handling() {
     // Test list-urls with no configurations
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "list-urls"])
+        .args(["config", "list-urls"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No base URLs configured."));
@@ -385,7 +387,7 @@ async fn test_base_url_fallback_behavior() {
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "no-servers-api",
@@ -397,7 +399,7 @@ async fn test_base_url_fallback_behavior() {
     // Test fallback URL when no configuration exists
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "api",
             "no-servers-api",
             "--dry-run",
@@ -429,14 +431,14 @@ async fn test_describe_json_with_base_url_resolution() {
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Test describe-json shows spec default URL
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["api", "test-api", "--describe-json"])
+        .args(["api", "test-api", "--describe-json"])
         .output()
         .unwrap();
 
@@ -451,7 +453,7 @@ async fn test_describe_json_with_base_url_resolution() {
     // Set custom URL and verify describe-json reflects it
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "test-api",
@@ -462,7 +464,7 @@ async fn test_describe_json_with_base_url_resolution() {
 
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["api", "test-api", "--describe-json"])
+        .args(["api", "test-api", "--describe-json"])
         .output()
         .unwrap();
 
@@ -477,7 +479,7 @@ async fn test_describe_json_with_base_url_resolution() {
     // Test environment-specific URL in describe-json
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "test-api",
@@ -491,7 +493,7 @@ async fn test_describe_json_with_base_url_resolution() {
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
         .env("APERTURE_ENV", "staging")
-        .args(&["api", "test-api", "--describe-json"])
+        .args(["api", "test-api", "--describe-json"])
         .output()
         .unwrap();
 
@@ -515,7 +517,7 @@ async fn test_backward_compatibility() {
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
@@ -535,8 +537,8 @@ async fn test_backward_compatibility() {
     // (this is how users configured base URLs before the new system)
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .env("APERTURE_BASE_URL", &mock_server.uri())
-        .args(&["api", "test-api", "users", "get-user-by-id", "--id", "123"])
+        .env("APERTURE_BASE_URL", mock_server.uri())
+        .args(["api", "test-api", "users", "get-user-by-id", "--id", "123"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"id\": \"123\""));
@@ -556,20 +558,20 @@ fn test_multiple_apis_url_management() {
     // Add both specs
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "add", "api1", spec_file1.to_str().unwrap()])
+        .args(["config", "add", "api1", spec_file1.to_str().unwrap()])
         .assert()
         .success();
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "add", "api2", spec_file2.to_str().unwrap()])
+        .args(["config", "add", "api2", spec_file2.to_str().unwrap()])
         .assert()
         .success();
 
     // Configure URLs for both APIs
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "api1",
@@ -580,7 +582,7 @@ fn test_multiple_apis_url_management() {
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "api1",
@@ -593,7 +595,7 @@ fn test_multiple_apis_url_management() {
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "api2",
@@ -605,7 +607,7 @@ fn test_multiple_apis_url_management() {
     // Test list-urls shows both APIs
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "list-urls"])
+        .args(["config", "list-urls"])
         .assert()
         .success()
         .stdout(predicate::str::contains("api1:"))
@@ -617,7 +619,7 @@ fn test_multiple_apis_url_management() {
     // Test that each API resolves its own URL correctly
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "get-url", "api1"])
+        .args(["config", "get-url", "api1"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -626,7 +628,7 @@ fn test_multiple_apis_url_management() {
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "get-url", "api2"])
+        .args(["config", "get-url", "api2"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -638,7 +640,7 @@ fn test_multiple_apis_url_management() {
 fn test_help_includes_new_commands() {
     // Test that help shows the new URL management commands
     aperture_cmd()
-        .args(&["config", "--help"])
+        .args(["config", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("set-url"))
@@ -647,7 +649,7 @@ fn test_help_includes_new_commands() {
 
     // Test individual command help
     aperture_cmd()
-        .args(&["config", "set-url", "--help"])
+        .args(["config", "set-url", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -656,7 +658,7 @@ fn test_help_includes_new_commands() {
         .stdout(predicate::str::contains("--env"));
 
     aperture_cmd()
-        .args(&["config", "get-url", "--help"])
+        .args(["config", "get-url", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -664,7 +666,7 @@ fn test_help_includes_new_commands() {
         ));
 
     aperture_cmd()
-        .args(&["config", "list-urls", "--help"])
+        .args(["config", "list-urls", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Display all configured base URLs"));
