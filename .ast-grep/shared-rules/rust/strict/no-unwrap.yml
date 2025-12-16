@@ -1,0 +1,49 @@
+# Rule: no-unwrap
+# Discourages .unwrap() in favor of proper error handling
+#
+# Bad:
+#   let value = some_option.unwrap();
+#   let data = result.unwrap();
+#
+# Good:
+#   let value = some_option?;
+#   let value = some_option.ok_or(MyError::Missing)?;
+#   let Some(value) = some_option else { return };
+#   let value = some_option.unwrap_or_default();
+
+id: no-unwrap
+language: rust
+severity: warning
+message: "Avoid .unwrap(). Use ?, .expect() with a message, or handle the None/Err case explicitly."
+
+ignores:
+  - "**/tests/**"
+  - "**/test_*.rs"
+  - "**/*_test.rs"
+  - "**/*_tests.rs"
+  - "**/benches/**"
+  - "**/examples/**"
+
+rule:
+  pattern: $EXPR.unwrap()
+  not:
+    inside:
+      stopBy: end
+      kind: mod_item
+      follows:
+        # #[cfg(test)] is a SIBLING of mod_item in tree-sitter's Rust AST,
+        # not a child, so we use `follows` instead of `has`
+        stopBy: end
+        pattern: "#[cfg(test)]"
+
+fix: "$EXPR.expect(\"TODO: add error message\")"
+
+note: |
+  .unwrap() causes panics on None/Err, crashing the program.
+  Alternatives:
+  - ? operator: Propagate errors up the call stack
+  - .expect("msg"): Panic with context (acceptable for invariants)
+  - .unwrap_or(default): Provide fallback value
+  - .unwrap_or_else(|| ...): Compute fallback lazily
+  - let-else: let Some(x) = opt else { handle_none() };
+  - match/if-let: Full control over both cases

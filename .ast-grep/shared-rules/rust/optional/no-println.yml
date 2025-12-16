@@ -1,0 +1,40 @@
+# Rule: no-println
+# Discourages println!/dbg! in library code
+#
+# Bad:
+#   println!("Processing user: {}", user.id);
+#   dbg!(value);
+#
+# Good:
+#   tracing::info!("Processing user: {}", user.id);
+#   log::debug!("value = {:?}", value);
+
+id: no-println
+language: rust
+severity: warning
+message: "Avoid println!/dbg! in library code. Use a structured logger (tracing, log) instead."
+
+ignores:
+  - "**/main.rs"
+  - "**/bin/**"
+  - "**/tests/**"
+  - "**/examples/**"
+  - "**/benches/**"
+  - "**/interactive/mock.rs"
+
+rule:
+  any:
+    - pattern: println!($$$)
+    - pattern: print!($$$)
+    - pattern: dbg!($$$)
+    - pattern: eprintln!($$$)
+    - pattern: eprint!($$$)
+
+note: |
+  println! and dbg! are for quick debugging, not production code.
+  Issues:
+  - No log levels (can't filter by severity)
+  - No structured data (hard to parse/search)
+  - Synchronous I/O (can block async runtimes)
+
+  Use tracing or log crate for proper observability.

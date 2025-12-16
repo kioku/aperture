@@ -233,11 +233,9 @@ paths: {}
             assert_eq!(kind, ErrorKind::Specification);
             assert!(message.contains("already exists"));
             assert!(message.contains(spec_name));
-            if let Some(ctx) = context {
-                if let Some(details) = &ctx.details {
-                    assert_eq!(details["spec_name"], spec_name);
-                }
-            }
+            let Some(ctx) = context else { return };
+            let Some(details) = &ctx.details else { return };
+            assert_eq!(details["spec_name"], spec_name);
         }
         _ => panic!("Unexpected error type: {:?}", result),
     }
@@ -409,11 +407,9 @@ fn test_remove_spec_not_found() {
             assert_eq!(kind, ErrorKind::Specification);
             assert!(message.contains("not found"));
             assert!(message.contains(spec_name));
-            if let Some(ctx) = context {
-                if let Some(details) = &ctx.details {
-                    assert_eq!(details["spec_name"], spec_name);
-                }
-            }
+            let Some(ctx) = context else { return };
+            let Some(details) = &ctx.details else { return };
+            assert_eq!(details["spec_name"], spec_name);
         }
         _ => panic!("Unexpected error type: {:?}", result),
     }

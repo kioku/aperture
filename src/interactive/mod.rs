@@ -14,6 +14,39 @@ const MAX_RETRIES: usize = 3;
 /// Default timeout for user input operations
 const INPUT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Result of handling an empty selection in the selection prompt
+enum EmptySelectionResult {
+    /// User chose to continue with the retry loop
+    Continue,
+    /// User chose to cancel the operation
+    Cancel,
+    /// Selection is non-empty, proceed with processing
+    ProcessSelection,
+}
+
+/// Handle empty selection by prompting user for confirmation
+fn handle_empty_selection<IO: InputOutput>(
+    selection: &str,
+    io: &IO,
+    timeout: Duration,
+) -> Result<EmptySelectionResult, Error> {
+    if !selection.is_empty() {
+        return Ok(EmptySelectionResult::ProcessSelection);
+    }
+
+    let should_continue = confirm_with_io_and_timeout(
+        "Do you want to continue with the current operation?",
+        io,
+        timeout,
+    )?;
+
+    Ok(if should_continue {
+        EmptySelectionResult::Continue
+    } else {
+        EmptySelectionResult::Cancel
+    })
+}
+
 /// Reserved environment variable names that should not be used
 const RESERVED_ENV_VARS: &[&str] = &[
     "PATH",
@@ -264,23 +297,23 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
             timeout,
         )?;
 
-        // Handle empty input as cancellation
-        if selection.is_empty() {
-            if !confirm_with_io_and_timeout(
-                "Do you want to continue with the current operation?",
-                io,
-                timeout,
-            )? {
-                return Err(Error::invalid_config("Selection cancelled by user"));
+        // Handle empty input - prompt to continue or cancel
+        let proceed_with_selection = handle_empty_selection(&selection, io, timeout)?;
+        match proceed_with_selection {
+            EmptySelectionResult::Continue => continue,
+            EmptySelectionResult::Cancel => {
+                return Err(Error::invalid_config("Selection cancelled by user"))
             }
-            // User chose to continue, skip this iteration
-            continue;
+            EmptySelectionResult::ProcessSelection => {} // Fall through to process selection
         }
 
-        // Try parsing as a number first
-        if let Ok(num) = selection.parse::<usize>() {
-            if num > 0 && num <= options.len() {
+        // Try parsing as a number first - use match to avoid nested if
+        match selection.parse::<usize>() {
+            Ok(num) if num > 0 && num <= options.len() => {
                 return Ok(options[num - 1].0.clone());
+            }
+            _ => {
+                // Invalid number or parse error, fall through to name matching
             }
         }
 
@@ -374,6 +407,7 @@ pub fn confirm_with_io_and_timeout<T: InputOutput>(
 /// # Errors
 /// Returns an error if stdin operations fail
 pub fn confirm_exit() -> Result<bool, Error> {
+    // ast-grep-ignore: no-println
     println!("\nInteractive session interrupted.");
     confirm("Do you want to exit without saving changes?")
 }
@@ -384,6 +418,7 @@ pub fn confirm_exit() -> Result<bool, Error> {
 /// # Errors
 /// Returns an error if the confirmation input operation fails
 pub fn handle_cancellation_input() -> Result<bool, Error> {
+    // ast-grep-ignore: no-println
     println!("Empty input detected. This will cancel the current operation.");
     confirm("Do you want to continue with the current operation?")
 }

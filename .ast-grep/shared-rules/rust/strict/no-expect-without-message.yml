@@ -1,0 +1,32 @@
+# Rule: no-expect-without-message
+# Ensures .expect() calls have meaningful error messages
+#
+# Bad:
+#   let value = opt.expect("");
+#   let value = opt.expect("failed");
+#
+# Good:
+#   let value = opt.expect("user must be authenticated at this point");
+#   let value = opt.expect("config file validated during startup");
+
+id: no-expect-without-message
+language: rust
+severity: warning
+message: "Provide a meaningful message to .expect() explaining why this should never fail."
+
+rule:
+  any:
+    - pattern: $EXPR.expect("")
+    - pattern: $EXPR.expect("failed")
+    - pattern: $EXPR.expect("error")
+    - pattern: $EXPR.expect("panic")
+    - pattern: $EXPR.expect("unreachable")
+
+note: |
+  .expect() messages should explain the invariant being asserted.
+  Good messages answer: "Why should this never be None/Err?"
+
+  Examples:
+  - "database connection established in main()"
+  - "regex is valid, tested at compile time"
+  - "mutex poisoned - Loss of data integrity, cannot recover"

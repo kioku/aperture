@@ -55,11 +55,14 @@ pub fn suggest_valid_values(param_name: &str, valid_values: &[String]) -> String
         .collect::<Vec<_>>()
         .join(", ");
 
-    if valid_values.len() > 5 {
-        format!("Valid values for '{param_name}' include: {values}, ...")
+    let suffix = if valid_values.len() > 5 {
+        "include"
     } else {
-        format!("Valid values for '{param_name}' are: {values}")
-    }
+        "are"
+    };
+    let ellipsis = if valid_values.len() > 5 { ", ..." } else { "" };
+
+    format!("Valid values for '{param_name}' {suffix}: {values}{ellipsis}")
 }
 
 /// Generate suggestions for authentication errors
@@ -74,13 +77,16 @@ pub fn suggest_auth_fix(scheme_name: &str, env_var: Option<&str>) -> String {
 /// Generate suggestions for network errors
 #[must_use]
 pub fn suggest_network_fix(url: &str, error: &str) -> String {
-    if error.contains("DNS") || error.contains("resolve") {
-        format!("Check that the host '{url}' is reachable and the URL is correct")
-    } else if error.contains("timeout") {
-        "Try increasing the timeout with --timeout or check your network connection".to_string()
-    } else if error.contains("refused") {
-        format!("The server at '{url}' refused the connection. Check if the service is running")
-    } else {
-        "Check your network connection and try again".to_string()
+    match () {
+        () if error.contains("DNS") || error.contains("resolve") => {
+            format!("Check that the host '{url}' is reachable and the URL is correct")
+        }
+        () if error.contains("timeout") => {
+            "Try increasing the timeout with --timeout or check your network connection".to_string()
+        }
+        () if error.contains("refused") => {
+            format!("The server at '{url}' refused the connection. Check if the service is running")
+        }
+        () => "Check your network connection and try again".to_string(),
     }
 }

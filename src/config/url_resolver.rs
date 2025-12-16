@@ -57,6 +57,7 @@ impl<'a> BaseUrlResolver<'a> {
                         kind: crate::error::ErrorKind::ServerVariable,
                         ..
                     } => {
+                        // ast-grep-ignore: no-println
                         eprintln!(
                             "{} Server variable error: {err}",
                             crate::constants::MSG_WARNING_PREFIX
@@ -103,11 +104,11 @@ impl<'a> BaseUrlResolver<'a> {
         if self.spec.server_variables.is_empty() {
             let template_vars = extract_template_variables(&base_url);
 
-            if let Some(first_var) = template_vars.first() {
-                return Err(Error::unresolved_template_variable(first_var, &base_url));
-            }
+            let Some(first_var) = template_vars.first() else {
+                return Ok(base_url);
+            };
 
-            return Ok(base_url);
+            return Err(Error::unresolved_template_variable(first_var, &base_url));
         }
 
         // Resolve server variables and apply template substitution
@@ -124,27 +125,38 @@ impl<'a> BaseUrlResolver<'a> {
         }
 
         // Priority 2: Per-API config override
-        if let Some(config) = self.global_config {
-            if let Some(api_config) = config.api_configs.get(&self.spec.name) {
-                // Check environment-specific URL first
-                let env_to_check = self.environment_override.as_ref().map_or_else(
-                    || std::env::var(crate::constants::ENV_APERTURE_ENV).unwrap_or_default(),
-                    std::clone::Clone::clone,
-                );
+        let Some(config) = self.global_config else {
+            // No global config, proceed to next priority
+            return self.resolve_env_or_spec_or_fallback();
+        };
 
-                if !env_to_check.is_empty() {
-                    if let Some(env_url) = api_config.environment_urls.get(&env_to_check) {
-                        return env_url.clone();
-                    }
-                }
+        let Some(api_config) = config.api_configs.get(&self.spec.name) else {
+            // No API-specific config, proceed to next priority
+            return self.resolve_env_or_spec_or_fallback();
+        };
 
-                // Then check general override
-                if let Some(override_url) = &api_config.base_url_override {
-                    return override_url.clone();
-                }
-            }
+        // Check environment-specific URL first
+        let env_to_check = self.environment_override.as_ref().map_or_else(
+            || std::env::var(crate::constants::ENV_APERTURE_ENV).unwrap_or_default(),
+            std::clone::Clone::clone,
+        );
+
+        // Early return if environment is set and has a URL
+        if !env_to_check.is_empty() && api_config.environment_urls.contains_key(&env_to_check) {
+            return api_config.environment_urls[&env_to_check].clone();
         }
 
+        // Then check general override
+        if let Some(override_url) = &api_config.base_url_override {
+            return override_url.clone();
+        }
+
+        // No config override found, proceed to next priority
+        self.resolve_env_or_spec_or_fallback()
+    }
+
+    /// Helper method to resolve URL from environment variable, spec default, or fallback
+    fn resolve_env_or_spec_or_fallback(&self) -> String {
         // Priority 3: Environment variable
         if let Ok(url) = std::env::var(crate::constants::ENV_APERTURE_BASE_URL) {
             return url;
@@ -174,16 +186,19 @@ fn extract_template_variables(url: &str) -> Vec<String> {
 
     while let Some(open) = url[start..].find('{') {
         let open_pos = start + open;
-        if let Some(close) = url[open_pos..].find('}') {
-            let close_pos = open_pos + close;
-            let var_name = &url[open_pos + 1..close_pos];
-            if !var_name.is_empty() {
-                template_vars.push(var_name.to_string());
-            }
-            start = close_pos + 1;
-        } else {
+
+        let Some(close) = url[open_pos..].find('}') else {
             break;
+        };
+
+        let close_pos = open_pos + close;
+        let var_name = &url[open_pos + 1..close_pos];
+
+        if !var_name.is_empty() {
+            template_vars.push(var_name.to_string());
         }
+
+        start = close_pos + 1;
     }
 
     template_vars

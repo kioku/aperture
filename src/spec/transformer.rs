@@ -10,6 +10,20 @@ use serde_json;
 use std::collections::HashMap;
 use std::fmt::Write;
 
+/// Type alias for schema type information extracted from a schema kind
+/// Returns: (`schema_type`, `format`, `default_value`, `enum_values`)
+type SchemaTypeInfo = (String, Option<String>, Option<String>, Vec<String>);
+
+/// Type alias for parameter schema information
+/// Returns: (`schema_json`, `schema_type`, `format`, `default_value`, `enum_values`)
+type ParameterSchemaInfo = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+);
+
 /// Options for transforming an `OpenAPI` specification
 #[derive(Debug, Clone)]
 pub struct TransformOptions {
@@ -405,119 +419,7 @@ impl SpecTransformer {
 
         // Extract schema information from parameter
         let (schema_json, schema_type, format, default_value, enum_values) =
-            if let openapiv3::ParameterSchemaOrContent::Schema(schema_ref) = &param_data.format {
-                match schema_ref {
-                    ReferenceOr::Item(schema) => {
-                        let schema_json = serde_json::to_string(schema).ok();
-
-                        // Extract type information
-                        let (schema_type, format, default, enums) = match &schema.schema_kind {
-                            openapiv3::SchemaKind::Type(type_val) => match type_val {
-                                openapiv3::Type::String(string_type) => {
-                                    let enum_values: Vec<String> = string_type
-                                        .enumeration
-                                        .iter()
-                                        .filter_map(|v| v.as_ref())
-                                        .map(|v| {
-                                            serde_json::to_string(v)
-                                                .unwrap_or_else(|_| v.to_string())
-                                        })
-                                        .collect();
-                                    let format = match &string_type.format {
-                                        openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => {
-                                            Some(format!("{fmt:?}"))
-                                        }
-                                        _ => None,
-                                    };
-                                    (
-                                        constants::SCHEMA_TYPE_STRING.to_string(),
-                                        format,
-                                        None,
-                                        enum_values,
-                                    )
-                                }
-                                openapiv3::Type::Number(number_type) => {
-                                    let format = match &number_type.format {
-                                        openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => {
-                                            Some(format!("{fmt:?}"))
-                                        }
-                                        _ => None,
-                                    };
-                                    ("number".to_string(), format, None, vec![])
-                                }
-                                openapiv3::Type::Integer(integer_type) => {
-                                    let format = match &integer_type.format {
-                                        openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => {
-                                            Some(format!("{fmt:?}"))
-                                        }
-                                        _ => None,
-                                    };
-                                    (
-                                        constants::SCHEMA_TYPE_INTEGER.to_string(),
-                                        format,
-                                        None,
-                                        vec![],
-                                    )
-                                }
-                                openapiv3::Type::Boolean(_) => (
-                                    constants::SCHEMA_TYPE_BOOLEAN.to_string(),
-                                    None,
-                                    None,
-                                    vec![],
-                                ),
-                                openapiv3::Type::Array(_) => {
-                                    (constants::SCHEMA_TYPE_ARRAY.to_string(), None, None, vec![])
-                                }
-                                openapiv3::Type::Object(_) => (
-                                    constants::SCHEMA_TYPE_OBJECT.to_string(),
-                                    None,
-                                    None,
-                                    vec![],
-                                ),
-                            },
-                            _ => (
-                                constants::SCHEMA_TYPE_STRING.to_string(),
-                                None,
-                                None,
-                                vec![],
-                            ),
-                        };
-
-                        // Extract default value if present
-                        let default_value =
-                            schema.schema_data.default.as_ref().map(|v| {
-                                serde_json::to_string(v).unwrap_or_else(|_| v.to_string())
-                            });
-
-                        (
-                            schema_json,
-                            Some(schema_type),
-                            format,
-                            default_value.or(default),
-                            enums,
-                        )
-                    }
-                    ReferenceOr::Reference { .. } => {
-                        // For references, use basic defaults
-                        (
-                            Some(r#"{"type": "string"}"#.to_string()),
-                            Some(constants::SCHEMA_TYPE_STRING.to_string()),
-                            None,
-                            None,
-                            vec![],
-                        )
-                    }
-                }
-            } else {
-                // No schema provided, use defaults
-                (
-                    Some(r#"{"type": "string"}"#.to_string()),
-                    Some(constants::SCHEMA_TYPE_STRING.to_string()),
-                    None,
-                    None,
-                    vec![],
-                )
-            };
+            Self::extract_parameter_schema_info(&param_data.format);
 
         // Extract example value
         let example = param_data
@@ -536,6 +438,148 @@ impl SpecTransformer {
             default_value,
             enum_values,
             example,
+        }
+    }
+
+    /// Extracts schema information from parameter schema or content
+    fn extract_parameter_schema_info(
+        format: &openapiv3::ParameterSchemaOrContent,
+    ) -> ParameterSchemaInfo {
+        let openapiv3::ParameterSchemaOrContent::Schema(schema_ref) = format else {
+            // No schema provided, use defaults
+            return (
+                Some(r#"{"type": "string"}"#.to_string()),
+                Some(constants::SCHEMA_TYPE_STRING.to_string()),
+                None,
+                None,
+                vec![],
+            );
+        };
+
+        match schema_ref {
+            ReferenceOr::Item(schema) => {
+                let schema_json = serde_json::to_string(schema).ok();
+
+                // Extract type information
+                let (schema_type, format, default, enums) =
+                    Self::extract_schema_type_info(&schema.schema_kind);
+
+                // Extract default value if present
+                let default_value = schema
+                    .schema_data
+                    .default
+                    .as_ref()
+                    .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.to_string()));
+
+                (
+                    schema_json,
+                    Some(schema_type),
+                    format,
+                    default_value.or(default),
+                    enums,
+                )
+            }
+            ReferenceOr::Reference { .. } => {
+                // For references, use basic defaults
+                (
+                    Some(r#"{"type": "string"}"#.to_string()),
+                    Some(constants::SCHEMA_TYPE_STRING.to_string()),
+                    None,
+                    None,
+                    vec![],
+                )
+            }
+        }
+    }
+
+    /// Extracts type information from schema kind
+    fn extract_schema_type_info(schema_kind: &openapiv3::SchemaKind) -> SchemaTypeInfo {
+        let openapiv3::SchemaKind::Type(type_val) = schema_kind else {
+            return (
+                constants::SCHEMA_TYPE_STRING.to_string(),
+                None,
+                None,
+                vec![],
+            );
+        };
+
+        match type_val {
+            openapiv3::Type::String(string_type) => Self::extract_string_type_info(string_type),
+            openapiv3::Type::Number(number_type) => Self::extract_number_type_info(number_type),
+            openapiv3::Type::Integer(integer_type) => Self::extract_integer_type_info(integer_type),
+            openapiv3::Type::Boolean(_) => (
+                constants::SCHEMA_TYPE_BOOLEAN.to_string(),
+                None,
+                None,
+                vec![],
+            ),
+            openapiv3::Type::Array(_) => {
+                (constants::SCHEMA_TYPE_ARRAY.to_string(), None, None, vec![])
+            }
+            openapiv3::Type::Object(_) => (
+                constants::SCHEMA_TYPE_OBJECT.to_string(),
+                None,
+                None,
+                vec![],
+            ),
+        }
+    }
+
+    /// Extracts information from a string type schema
+    fn extract_string_type_info(
+        string_type: &openapiv3::StringType,
+    ) -> (String, Option<String>, Option<String>, Vec<String>) {
+        let enum_values: Vec<String> = string_type
+            .enumeration
+            .iter()
+            .filter_map(|v| v.as_ref())
+            .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.clone()))
+            .collect();
+
+        let format = Self::extract_format_string(&string_type.format);
+
+        (
+            constants::SCHEMA_TYPE_STRING.to_string(),
+            format,
+            None,
+            enum_values,
+        )
+    }
+
+    /// Extracts information from a number type schema
+    fn extract_number_type_info(
+        number_type: &openapiv3::NumberType,
+    ) -> (String, Option<String>, Option<String>, Vec<String>) {
+        let format = match &number_type.format {
+            openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => Some(format!("{fmt:?}")),
+            _ => None,
+        };
+        ("number".to_string(), format, None, vec![])
+    }
+
+    /// Extracts information from an integer type schema
+    fn extract_integer_type_info(
+        integer_type: &openapiv3::IntegerType,
+    ) -> (String, Option<String>, Option<String>, Vec<String>) {
+        let format = match &integer_type.format {
+            openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => Some(format!("{fmt:?}")),
+            _ => None,
+        };
+        (
+            constants::SCHEMA_TYPE_INTEGER.to_string(),
+            format,
+            None,
+            vec![],
+        )
+    }
+
+    /// Extracts format string from a variant or unknown or empty type
+    fn extract_format_string(
+        format: &openapiv3::VariantOrUnknownOrEmpty<openapiv3::StringFormat>,
+    ) -> Option<String> {
+        match format {
+            openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => Some(format!("{fmt:?}")),
+            _ => None,
         }
     }
 
@@ -584,14 +628,20 @@ impl SpecTransformer {
     fn extract_security_schemes(spec: &OpenAPI) -> HashMap<String, CachedSecurityScheme> {
         let mut security_schemes = HashMap::new();
 
-        if let Some(components) = &spec.components {
-            for (name, scheme_ref) in &components.security_schemes {
-                if let ReferenceOr::Item(scheme) = scheme_ref {
-                    if let Some(cached_scheme) = Self::transform_security_scheme(name, scheme) {
-                        security_schemes.insert(name.clone(), cached_scheme);
-                    }
-                }
-            }
+        let Some(components) = &spec.components else {
+            return security_schemes;
+        };
+
+        for (name, scheme_ref) in &components.security_schemes {
+            let ReferenceOr::Item(scheme) = scheme_ref else {
+                continue;
+            };
+
+            let Some(cached_scheme) = Self::transform_security_scheme(name, scheme) else {
+                continue;
+            };
+
+            security_schemes.insert(name.clone(), cached_scheme);
         }
 
         security_schemes
@@ -665,19 +715,19 @@ impl SpecTransformer {
             .get(crate::constants::EXT_APERTURE_SECRET)
             .and_then(|value| {
                 // The extension should be an object with "source" and "name" fields
-                if let Some(obj) = value.as_object() {
-                    let source = obj.get(crate::constants::EXT_KEY_SOURCE)?.as_str()?;
-                    let name = obj.get(crate::constants::EXT_KEY_NAME)?.as_str()?;
+                let obj = value.as_object()?;
+                let source = obj.get(crate::constants::EXT_KEY_SOURCE)?.as_str()?;
+                let name = obj.get(crate::constants::EXT_KEY_NAME)?.as_str()?;
 
-                    // Currently only "env" source is supported
-                    if source == constants::SOURCE_ENV {
-                        return Some(CachedApertureSecret {
-                            source: source.to_string(),
-                            name: name.to_string(),
-                        });
-                    }
+                // Currently only "env" source is supported
+                if source != constants::SOURCE_ENV {
+                    return None;
                 }
-                None
+
+                Some(CachedApertureSecret {
+                    source: source.to_string(),
+                    name: name.to_string(),
+                })
             })
     }
 
@@ -716,7 +766,7 @@ impl SpecTransformer {
                     param.name,
                     param.example.as_deref().unwrap_or("<value>")
                 )
-                .unwrap();
+                .expect("writing to String cannot fail");
             }
 
             examples.push(CommandExample {
@@ -727,20 +777,22 @@ impl SpecTransformer {
         }
 
         // Example 2: With request body if present
-        if request_body.is_some() {
+        if let Some(_body) = request_body {
             let mut cmd = base_cmd.clone();
 
-            // Add required path/query parameters
-            for param in &required_params {
-                if param.location == "path" || param.location == "query" {
-                    write!(
-                        &mut cmd,
-                        " --{} {}",
-                        param.name,
-                        param.example.as_deref().unwrap_or("123")
-                    )
-                    .unwrap();
-                }
+            // Add required path/query parameters (only path and query params)
+            let path_query_params = required_params
+                .iter()
+                .filter(|p| p.location == "path" || p.location == "query");
+
+            for param in path_query_params {
+                write!(
+                    &mut cmd,
+                    " --{} {}",
+                    param.name,
+                    param.example.as_deref().unwrap_or("123")
+                )
+                .expect("writing to String cannot fail");
             }
 
             // Add body example
@@ -771,7 +823,7 @@ impl SpecTransformer {
                     param.name,
                     param.example.as_deref().unwrap_or("value")
                 )
-                .unwrap();
+                .expect("writing to String cannot fail");
             }
 
             // Add optional parameters
@@ -782,7 +834,7 @@ impl SpecTransformer {
                     param.name,
                     param.example.as_deref().unwrap_or("optional")
                 )
-                .unwrap();
+                .expect("writing to String cannot fail");
             }
 
             examples.push(CommandExample {

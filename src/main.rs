@@ -82,57 +82,33 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
             }
             ConfigCommands::GetUrl { name } => {
                 let (base_override, env_urls, resolved) = manager.get_url(&name)?;
-
-                println!("Base URL configuration for '{name}':");
-                if let Some(base) = base_override {
-                    println!("  Base override: {base}");
-                } else {
-                    println!("  Base override: (none)");
-                }
-
-                if !env_urls.is_empty() {
-                    println!("  Environment URLs:");
-                    for (env, url) in env_urls {
-                        println!("    {env}: {url}");
-                    }
-                }
-
-                println!("\nResolved URL (current): {resolved}");
-
-                if let Ok(current_env) = std::env::var(constants::ENV_APERTURE_ENV) {
-                    println!("(Using APERTURE_ENV={current_env})");
-                }
+                print_url_configuration(&name, base_override.as_deref(), &env_urls, &resolved);
             }
             ConfigCommands::ListUrls {} => {
                 let all_urls = manager.list_urls()?;
 
                 if all_urls.is_empty() {
                     println!("No base URLs configured.");
-                } else {
-                    println!("Configured base URLs:");
-                    for (api_name, (base_override, env_urls)) in all_urls {
-                        println!("\n{api_name}:");
-                        if let Some(base) = base_override {
-                            println!("  Base override: {base}");
-                        }
-                        if !env_urls.is_empty() {
-                            println!("  Environment URLs:");
-                            for (env, url) in env_urls {
-                                println!("    {env}: {url}");
-                            }
-                        }
-                    }
+                    return Ok(());
+                }
+
+                println!("Configured base URLs:");
+                for (api_name, (base_override, env_urls)) in all_urls {
+                    print_api_url_entry(&api_name, base_override.as_deref(), &env_urls);
                 }
             }
             ConfigCommands::Reinit { context, all } => {
                 if all {
                     reinit_all_specs(manager)?;
-                } else if let Some(spec_name) = context {
-                    reinit_spec(manager, &spec_name)?;
-                } else {
+                    return Ok(());
+                }
+
+                let Some(spec_name) = context else {
                     eprintln!("Error: Either specify a spec name or use --all flag");
                     std::process::exit(1);
-                }
+                };
+
+                reinit_spec(manager, &spec_name)?;
             }
             ConfigCommands::ClearCache { api_name, all } => {
                 clear_response_cache(manager, api_name.as_deref(), all).await?;
@@ -148,28 +124,24 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
             } => {
                 if interactive {
                     manager.set_secret_interactive(&api_name)?;
-                } else if let (Some(scheme), Some(env_var)) = (scheme_name, env) {
-                    manager.set_secret(&api_name, &scheme, &env_var)?;
-                    println!("Set secret for scheme '{scheme}' in API '{api_name}' to use environment variable '{env_var}'");
-                } else {
+                    return Ok(());
+                }
+
+                let (Some(scheme), Some(env_var)) = (scheme_name, env) else {
                     return Err(Error::invalid_config(
                         "Either provide --scheme and --env, or use --interactive",
                     ));
-                }
+                };
+
+                manager.set_secret(&api_name, &scheme, &env_var)?;
+                println!("Set secret for scheme '{scheme}' in API '{api_name}' to use environment variable '{env_var}'");
             }
             ConfigCommands::ListSecrets { api_name } => {
                 let secrets = manager.list_secrets(&api_name)?;
                 if secrets.is_empty() {
                     println!("No secrets configured for API '{api_name}'");
                 } else {
-                    println!("Configured secrets for API '{api_name}':");
-                    for (scheme_name, secret) in secrets {
-                        match secret.source {
-                            SecretSource::Env => {
-                                println!("  {scheme_name}: environment variable '{}'", secret.name);
-                            }
-                        }
-                    }
+                    print_secrets_list(&api_name, secrets);
                 }
             }
             ConfigCommands::RemoveSecret {
@@ -190,18 +162,22 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 }
 
                 // Confirm operation unless --force is used
-                if !force {
-                    println!(
-                        "This will remove all {} secret configuration(s) for API '{api_name}':",
-                        secrets.len()
-                    );
-                    for scheme_name in secrets.keys() {
-                        println!("  - {scheme_name}");
-                    }
-                    if !confirm("Are you sure you want to continue?")? {
-                        println!("Operation cancelled");
-                        return Ok(());
-                    }
+                if force {
+                    manager.clear_secrets(&api_name)?;
+                    println!("Cleared all secret configurations for API '{api_name}'");
+                    return Ok(());
+                }
+
+                println!(
+                    "This will remove all {} secret configuration(s) for API '{api_name}':",
+                    secrets.len()
+                );
+                for scheme_name in secrets.keys() {
+                    println!("  - {scheme_name}");
+                }
+                if !confirm("Are you sure you want to continue?")? {
+                    println!("Operation cancelled");
+                    return Ok(());
                 }
 
                 manager.clear_secrets(&api_name)?;
@@ -249,6 +225,67 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
     Ok(())
 }
 
+/// Print the list of configured secrets for an API
+fn print_secrets_list(
+    api_name: &str,
+    secrets: std::collections::HashMap<String, aperture_cli::config::models::ApertureSecret>,
+) {
+    println!("Configured secrets for API '{api_name}':");
+    for (scheme_name, secret) in secrets {
+        match secret.source {
+            SecretSource::Env => {
+                println!("  {scheme_name}: environment variable '{}'", secret.name);
+            }
+        }
+    }
+}
+
+/// Print a single API URL entry in the list
+fn print_api_url_entry(
+    api_name: &str,
+    base_override: Option<&str>,
+    env_urls: &std::collections::HashMap<String, String>,
+) {
+    println!("\n{api_name}:");
+    if let Some(base) = base_override {
+        println!("  Base override: {base}");
+    }
+    if !env_urls.is_empty() {
+        println!("  Environment URLs:");
+        for (env, url) in env_urls {
+            println!("    {env}: {url}");
+        }
+    }
+}
+
+/// Print URL configuration for a specific API
+fn print_url_configuration(
+    name: &str,
+    base_override: Option<&str>,
+    env_urls: &std::collections::HashMap<String, String>,
+    resolved: &str,
+) {
+    println!("Base URL configuration for '{name}':");
+    if let Some(base) = base_override {
+        println!("  Base override: {base}");
+    } else {
+        println!("  Base override: (none)");
+    }
+
+    if !env_urls.is_empty() {
+        println!("  Environment URLs:");
+        for (env, url) in env_urls {
+            println!("    {env}: {url}");
+        }
+    }
+
+    println!("\nResolved URL (current): {resolved}");
+
+    if let Ok(current_env) = std::env::var(constants::ENV_APERTURE_ENV) {
+        println!("(Using APERTURE_ENV={current_env})");
+    }
+}
+
 fn execute_search_command(
     manager: &ConfigManager<OsFileSystem>,
     query: &str,
@@ -269,10 +306,8 @@ fn execute_search_command(
 
     for spec_name in &specs {
         // Skip if we have an API filter and this isn't the one
-        if let Some(filter) = api_filter {
-            if spec_name != filter {
-                continue;
-            }
+        if api_filter.is_some_and(|filter| spec_name != filter) {
+            continue;
         }
 
         match loader::load_cached_spec(&cache_dir, spec_name) {
@@ -286,10 +321,9 @@ fn execute_search_command(
     }
 
     if all_specs.is_empty() {
-        if let Some(filter) = api_filter {
-            println!("API '{filter}' not found or could not be loaded.");
-        } else {
-            println!("No API specifications could be loaded.");
+        match api_filter {
+            Some(filter) => println!("API '{filter}' not found or could not be loaded."),
+            None => println!("No API specifications could be loaded."),
         }
         return Ok(());
     }
@@ -467,6 +501,8 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         let specs_dir = config_dir.join(constants::DIR_SPECS);
         let spec_path = specs_dir.join(format!("{context}.yaml"));
 
+        // Check path exists inline to avoid nested if
+        // ast-grep-ignore: no-nested-if
         if !spec_path.exists() {
             return Err(Error::spec_not_found(context));
         }
@@ -483,10 +519,9 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         )?;
 
         // Apply JQ filter if provided
-        let output = if let Some(jq_filter) = &cli.jq {
-            executor::apply_jq_filter(&manifest, jq_filter)?
-        } else {
-            manifest
+        let output = match &cli.jq {
+            Some(jq_filter) => executor::apply_jq_filter(&manifest, jq_filter)?,
+            None => manifest,
         };
 
         println!("{output}");
@@ -526,17 +561,19 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         |format_str| {
             // Check if the user explicitly provided a format or if it's the default
             // If the CLI format is not the default Json, use the CLI format
-            if format_str == "json" && !matches!(cli.format, aperture_cli::cli::OutputFormat::Json)
-            {
+            let is_default_json = format_str == "json"
+                && !matches!(cli.format, aperture_cli::cli::OutputFormat::Json);
+
+            if is_default_json {
                 // User didn't explicitly set format in dynamic command, use CLI global format
-                cli.format.clone()
-            } else {
-                match format_str.as_str() {
-                    "json" => aperture_cli::cli::OutputFormat::Json,
-                    "yaml" => aperture_cli::cli::OutputFormat::Yaml,
-                    "table" => aperture_cli::cli::OutputFormat::Table,
-                    _ => cli.format.clone(),
-                }
+                return cli.format.clone();
+            }
+
+            match format_str.as_str() {
+                "json" => aperture_cli::cli::OutputFormat::Json,
+                "yaml" => aperture_cli::cli::OutputFormat::Yaml,
+                "table" => aperture_cli::cli::OutputFormat::Table,
+                _ => cli.format.clone(),
             }
         },
     );
@@ -569,17 +606,20 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         false, // capture_output
     )
     .await
-    .map_err(|e| match &e {
-        Error::Network(req_err) => {
-            if req_err.is_connect() {
-                e.with_context("Failed to connect to API server")
-            } else if req_err.is_timeout() {
-                e.with_context("Request timed out")
-            } else {
-                e
-            }
+    .map_err(|e| {
+        let Error::Network(req_err) = &e else {
+            return e;
+        };
+
+        if req_err.is_connect() {
+            return e.with_context("Failed to connect to API server");
         }
-        _ => e,
+
+        if req_err.is_timeout() {
+            return e.with_context("Request timed out");
+        }
+
+        e
     })?;
 
     Ok(())
@@ -642,35 +682,47 @@ async fn execute_batch_operations(
         });
 
         // Apply JQ filter if provided
-        let output = if let Some(jq_filter) = &cli.jq {
-            let summary_json = serde_json::to_string(&summary).unwrap();
-            executor::apply_jq_filter(&summary_json, jq_filter)?
-        } else {
-            serde_json::to_string_pretty(&summary).unwrap()
+        let output = match &cli.jq {
+            Some(jq_filter) => {
+                let summary_json = serde_json::to_string(&summary)
+                    .expect("JSON serialization of valid structure cannot fail");
+                executor::apply_jq_filter(&summary_json, jq_filter)?
+            }
+            None => serde_json::to_string_pretty(&summary)
+                .expect("JSON serialization of valid structure cannot fail"),
         };
 
         println!("{output}");
-    } else {
-        // Output human-readable summary
-        println!("\n=== Batch Execution Summary ===");
-        println!("Total operations: {}", result.results.len());
-        println!("Successful: {}", result.success_count);
-        println!("Failed: {}", result.failure_count);
-        println!("Total time: {:.2}s", result.total_duration.as_secs_f64());
-
+        // Exit with error code if any operations failed
+        // ast-grep-ignore: no-nested-if
         if result.failure_count > 0 {
-            println!("\nFailed operations:");
-            for (i, op_result) in result.results.iter().enumerate() {
-                if !op_result.success {
-                    println!(
-                        "  {} - {}: {}",
-                        i + 1,
-                        op_result.operation.args.join(" "),
-                        op_result.error.as_deref().unwrap_or("Unknown error")
-                    );
-                }
-            }
+            std::process::exit(1);
         }
+        return Ok(());
+    }
+
+    // Output human-readable summary
+    println!("\n=== Batch Execution Summary ===");
+    println!("Total operations: {}", result.results.len());
+    println!("Successful: {}", result.success_count);
+    println!("Failed: {}", result.failure_count);
+    println!("Total time: {:.2}s", result.total_duration.as_secs_f64());
+
+    if result.failure_count == 0 {
+        return Ok(());
+    }
+
+    println!("\nFailed operations:");
+    for (i, op_result) in result.results.iter().enumerate() {
+        if op_result.success {
+            continue;
+        }
+        println!(
+            "  {} - {}: {}",
+            i + 1,
+            op_result.operation.args.join(" "),
+            op_result.error.as_deref().unwrap_or("Unknown error")
+        );
     }
 
     // Exit with error code if any operations failed
@@ -683,17 +735,19 @@ async fn execute_batch_operations(
 
 /// Prints an error message, either as JSON or user-friendly format
 fn print_error_with_json(error: &Error, json_format: bool) {
-    if json_format {
-        let json_error = error.to_json();
-        if let Ok(json_output) = serde_json::to_string_pretty(&json_error) {
-            eprintln!("{json_output}");
-        } else {
-            // Fallback to regular error if JSON serialization fails
-            print_error(error);
-        }
-    } else {
+    if !json_format {
         print_error(error);
+        return;
     }
+
+    let json_error = error.to_json();
+    let Ok(json_output) = serde_json::to_string_pretty(&json_error) else {
+        // Fallback to regular error if JSON serialization fails
+        print_error(error);
+        return;
+    };
+
+    eprintln!("{json_output}");
 }
 
 /// Clear response cache for a specific API or all APIs
@@ -719,16 +773,21 @@ async fn clear_response_cache(
 
     let cleared_count = if all {
         cache.clear_all().await?
-    } else if let Some(api) = api_name {
-        cache.clear_api_cache(api).await?
     } else {
-        eprintln!("Error: Either specify an API name or use --all flag");
-        std::process::exit(1);
+        let Some(api) = api_name else {
+            eprintln!("Error: Either specify an API name or use --all flag");
+            std::process::exit(1);
+        };
+        cache.clear_api_cache(api).await?
     };
 
     if all {
         println!("Cleared {cleared_count} cached responses for all APIs");
-    } else if let Some(api) = api_name {
+    } else {
+        let Some(api) = api_name else {
+            // This should never be reached due to the earlier check, but keeping for symmetry
+            unreachable!("API name must be Some if not all");
+        };
         println!("Cleared {cleared_count} cached responses for API '{api}'");
     }
 
@@ -769,7 +828,9 @@ async fn show_cache_stats(
     let size_mb = stats.total_size_bytes as f64 / 1024.0 / 1024.0;
     println!("  Total size: {size_mb:.2} MB");
 
-    if stats.total_entries > 0 {
+    if stats.total_entries == 0 {
+        // No entries, skip hit rate calculation
+    } else {
         #[allow(clippy::cast_precision_loss)]
         let hit_rate = stats.valid_entries as f64 / stats.total_entries as f64 * 100.0;
         println!("  Hit rate: {hit_rate:.1}%");
@@ -788,10 +849,11 @@ fn print_error(error: &Error) {
             context,
         } => {
             eprintln!("{kind}: {message}");
-            if let Some(ctx) = context {
-                if let Some(suggestion) = &ctx.suggestion {
-                    eprintln!("\nHint: {suggestion}");
-                }
+            let Some(ctx) = context else {
+                return;
+            };
+            if let Some(suggestion) = &ctx.suggestion {
+                eprintln!("\nHint: {suggestion}");
             }
         }
         Error::Io(io_err) => match io_err.kind() {
@@ -817,41 +879,49 @@ fn print_error(error: &Error) {
                     "Connection Error\n{req_err}\n\nHint: {}",
                     constants::ERR_CONNECTION
                 );
-            } else if req_err.is_timeout() {
+                return;
+            }
+
+            if req_err.is_timeout() {
                 eprintln!(
                     "Timeout Error\n{req_err}\n\nHint: {}",
                     constants::ERR_TIMEOUT
                 );
-            } else if req_err.is_status() {
-                if let Some(status) = req_err.status() {
-                    match status.as_u16() {
-                        401 => eprintln!(
-                            "Authentication Error\n{req_err}\n\nHint: {}",
-                            constants::ERR_API_CREDENTIALS
-                        ),
-                        403 => eprintln!(
-                            "Permission Error\n{req_err}\n\nHint: {}",
-                            constants::ERR_PERMISSION_DENIED
-                        ),
-                        404 => eprintln!(
-                            "Not Found Error\n{req_err}\n\nHint: {}",
-                            constants::ERR_ENDPOINT_NOT_FOUND
-                        ),
-                        429 => eprintln!(
-                            "Rate Limited\n{req_err}\n\nHint: {}",
-                            constants::ERR_RATE_LIMITED
-                        ),
-                        500..=599 => eprintln!(
-                            "Server Error\n{req_err}\n\nHint: {}",
-                            constants::ERR_SERVER_ERROR
-                        ),
-                        _ => eprintln!("HTTP Error\n{req_err}"),
-                    }
-                } else {
-                    eprintln!("Network Error\n{req_err}");
-                }
-            } else {
+                return;
+            }
+
+            if !req_err.is_status() {
                 eprintln!("Network Error\n{req_err}");
+                return;
+            }
+
+            let Some(status) = req_err.status() else {
+                eprintln!("Network Error\n{req_err}");
+                return;
+            };
+
+            match status.as_u16() {
+                401 => eprintln!(
+                    "Authentication Error\n{req_err}\n\nHint: {}",
+                    constants::ERR_API_CREDENTIALS
+                ),
+                403 => eprintln!(
+                    "Permission Error\n{req_err}\n\nHint: {}",
+                    constants::ERR_PERMISSION_DENIED
+                ),
+                404 => eprintln!(
+                    "Not Found Error\n{req_err}\n\nHint: {}",
+                    constants::ERR_ENDPOINT_NOT_FOUND
+                ),
+                429 => eprintln!(
+                    "Rate Limited\n{req_err}\n\nHint: {}",
+                    constants::ERR_RATE_LIMITED
+                ),
+                500..=599 => eprintln!(
+                    "Server Error\n{req_err}\n\nHint: {}",
+                    constants::ERR_SERVER_ERROR
+                ),
+                _ => eprintln!("HTTP Error\n{req_err}"),
             }
         }
         Error::Yaml(yaml_err) => {
@@ -1050,56 +1120,59 @@ fn execute_overview_command(
     api_name: Option<&str>,
     all: bool,
 ) -> Result<(), Error> {
-    if all {
-        let specs = load_all_specs(manager)?;
-        if specs.is_empty() {
-            println!("No API specifications configured.");
-            println!("Use 'aperture config add <name> <spec-file>' to get started.");
-            return Ok(());
-        }
+    if !all {
+        let Some(api) = api_name else {
+            eprintln!("Error: Must specify API name or use --all flag");
+            eprintln!("Usage:");
+            eprintln!("  aperture overview <api>");
+            eprintln!("  aperture overview --all");
+            std::process::exit(1);
+        };
 
-        println!("📊 All APIs Overview\n");
-        println!("{}", "═".repeat(60));
-
-        for (api_name, spec) in &specs {
-            println!("\n🔗 **{}** (v{})", spec.name, spec.version);
-
-            if let Some(ref base_url) = spec.base_url {
-                println!("   Base URL: {base_url}");
-            }
-
-            let operation_count = spec.commands.len();
-            println!("   Operations: {operation_count}");
-
-            // Count methods
-            let mut method_counts = std::collections::BTreeMap::new();
-            for command in &spec.commands {
-                *method_counts.entry(command.method.clone()).or_insert(0) += 1;
-            }
-
-            let method_summary: Vec<String> = method_counts
-                .iter()
-                .map(|(method, count)| format!("{method}: {count}"))
-                .collect();
-            println!("   Methods: {}", method_summary.join(", "));
-
-            println!("   Quick start: aperture list-commands {api_name}");
-        }
-
-        println!("\n{}", "═".repeat(60));
-        println!("💡 Use 'aperture overview <api>' for detailed information about a specific API");
-    } else if let Some(api) = api_name {
         let specs = load_all_specs(manager)?;
         let doc_gen = DocumentationGenerator::new(specs);
         let overview = doc_gen.generate_api_overview(api)?;
         println!("{overview}");
-    } else {
-        eprintln!("Error: Must specify API name or use --all flag");
-        eprintln!("Usage:");
-        eprintln!("  aperture overview <api>");
-        eprintln!("  aperture overview --all");
-        std::process::exit(1);
+        return Ok(());
     }
+
+    let specs = load_all_specs(manager)?;
+    if specs.is_empty() {
+        println!("No API specifications configured.");
+        println!("Use 'aperture config add <name> <spec-file>' to get started.");
+        return Ok(());
+    }
+
+    println!("📊 All APIs Overview\n");
+    println!("{}", "═".repeat(60));
+
+    for (api_name, spec) in &specs {
+        println!("\n🔗 **{}** (v{})", spec.name, spec.version);
+
+        if let Some(ref base_url) = spec.base_url {
+            println!("   Base URL: {base_url}");
+        }
+
+        let operation_count = spec.commands.len();
+        println!("   Operations: {operation_count}");
+
+        // Count methods
+        let mut method_counts = std::collections::BTreeMap::new();
+        for command in &spec.commands {
+            *method_counts.entry(command.method.clone()).or_insert(0) += 1;
+        }
+
+        let method_summary: Vec<String> = method_counts
+            .iter()
+            .map(|(method, count)| format!("{method}: {count}"))
+            .collect();
+        println!("   Methods: {}", method_summary.join(", "));
+
+        println!("   Quick start: aperture list-commands {api_name}");
+    }
+
+    println!("\n{}", "═".repeat(60));
+    println!("💡 Use 'aperture overview <api>' for detailed information about a specific API");
 
     Ok(())
 }

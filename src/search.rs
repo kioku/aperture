@@ -28,6 +28,15 @@ pub struct CommandSearchResult {
     pub highlights: Vec<String>,
 }
 
+/// Internal scoring result for a command match
+#[derive(Debug, Default)]
+struct ScoringResult {
+    /// The relevance score (higher is better)
+    score: i64,
+    /// Match highlights
+    highlights: Vec<String>,
+}
+
 /// Command searcher for finding operations across APIs
 pub struct CommandSearcher {
     /// Fuzzy matcher for similarity scoring
@@ -67,74 +76,18 @@ impl CommandSearcher {
         let regex_pattern = Regex::new(query).ok();
 
         for (api_name, spec) in specs {
-            // Apply API filter if specified
-            if let Some(filter) = api_filter {
-                if api_name != filter {
-                    continue;
-                }
+            // Apply API filter if specified - early continue if filter doesn't match
+            if api_filter.is_some_and(|filter| api_name != filter) {
+                continue;
             }
 
             for command in &spec.commands {
-                let mut highlights = Vec::new();
-                let mut total_score = 0i64;
-
-                // Build searchable text from command attributes with pre-allocated capacity
-                let operation_id_kebab = to_kebab_case(&command.operation_id);
-                let summary = command.summary.as_deref().unwrap_or("");
-                let description = command.description.as_deref().unwrap_or("");
-
-                // Use format! for more efficient single allocation
-                let search_text = format!(
-                    "{operation_id_kebab} {} {} {} {summary} {description}",
-                    command.operation_id, command.method, command.path
-                );
-
-                // Score based on different matching strategies
-                if let Some(ref regex) = regex_pattern {
-                    if regex.is_match(&search_text) {
-                        // Dynamic scoring based on match quality for regex
-                        let base_score = 90;
-                        let query_len = regex.as_str().len();
-                        #[allow(clippy::cast_possible_wrap)]
-                        let match_specificity_bonus = query_len.min(10) as i64;
-                        total_score = base_score + match_specificity_bonus;
-                        highlights.push(format!("Regex match: {}", regex.as_str()));
-                    }
-                } else {
-                    // Fuzzy match on complete search text
-                    if let Some(score) = self.matcher.fuzzy_match(&search_text, query) {
-                        total_score += score;
-                    }
-
-                    // Bonus score for exact substring matches
-                    let query_lower = query.to_lowercase();
-                    if operation_id_kebab.to_lowercase().contains(&query_lower) {
-                        total_score += 50;
-                        highlights.push(format!("Operation: {operation_id_kebab}"));
-                    }
-                    // Also check original operation ID
-                    if command.operation_id.to_lowercase().contains(&query_lower) {
-                        total_score += 50;
-                        highlights.push(format!("Operation: {}", command.operation_id));
-                    }
-                    if command.method.to_lowercase().contains(&query_lower) {
-                        total_score += 30;
-                        highlights.push(format!("Method: {}", command.method));
-                    }
-                    if command.path.to_lowercase().contains(&query_lower) {
-                        total_score += 20;
-                        highlights.push(format!("Path: {}", command.path));
-                    }
-                    if let Some(ref summary) = command.summary {
-                        if summary.to_lowercase().contains(&query_lower) {
-                            total_score += 15;
-                            highlights.push("Summary match".to_string());
-                        }
-                    }
-                }
+                // Score this command against the query
+                let score_result = self.score_command(command, query, regex_pattern.as_ref());
 
                 // Only include results with positive scores
-                if total_score > 0 {
+                if score_result.score > 0 {
+                    let operation_id_kebab = to_kebab_case(&command.operation_id);
                     let tag = command.tags.first().map_or_else(
                         || constants::DEFAULT_GROUP.to_string(),
                         |t| to_kebab_case(t),
@@ -145,8 +98,8 @@ impl CommandSearcher {
                         api_context: api_name.clone(),
                         command: command.clone(),
                         command_path,
-                        score: total_score,
-                        highlights,
+                        score: score_result.score,
+                        highlights: score_result.highlights,
                     });
                 }
             }
@@ -156,6 +109,135 @@ impl CommandSearcher {
         results.sort_by(|a, b| b.score.cmp(&a.score));
 
         Ok(results)
+    }
+
+    /// Score a single command against a query using regex or fuzzy matching
+    fn score_command(
+        &self,
+        command: &CachedCommand,
+        query: &str,
+        regex_pattern: Option<&Regex>,
+    ) -> ScoringResult {
+        let operation_id_kebab = to_kebab_case(&command.operation_id);
+        let summary = command.summary.as_deref().unwrap_or("");
+        let description = command.description.as_deref().unwrap_or("");
+
+        // Build searchable text from command attributes
+        let search_text = format!(
+            "{operation_id_kebab} {} {} {} {summary} {description}",
+            command.operation_id, command.method, command.path
+        );
+
+        // Score based on different matching strategies
+        regex_pattern.map_or_else(
+            || self.score_with_fuzzy_match(command, query, &search_text, &operation_id_kebab),
+            |regex| Self::score_with_regex(regex, &search_text),
+        )
+    }
+
+    /// Score a command using regex matching
+    fn score_with_regex(regex: &Regex, search_text: &str) -> ScoringResult {
+        // Regex mode - only score if it matches
+        if !regex.is_match(search_text) {
+            return ScoringResult::default();
+        }
+
+        // Dynamic scoring based on match quality for regex
+        let base_score = 90;
+        let query_len = regex.as_str().len();
+        #[allow(clippy::cast_possible_wrap)]
+        let match_specificity_bonus = query_len.min(10) as i64;
+        let total_score = base_score + match_specificity_bonus;
+
+        ScoringResult {
+            score: total_score,
+            highlights: vec![format!("Regex match: {}", regex.as_str())],
+        }
+    }
+
+    /// Score a command using fuzzy matching and substring bonuses
+    fn score_with_fuzzy_match(
+        &self,
+        command: &CachedCommand,
+        query: &str,
+        search_text: &str,
+        operation_id_kebab: &str,
+    ) -> ScoringResult {
+        let mut highlights = Vec::new();
+        let mut total_score = 0i64;
+
+        // Fuzzy match on complete search text
+        if let Some(score) = self.matcher.fuzzy_match(search_text, query) {
+            total_score += score;
+        }
+
+        // Bonus score for exact substring matches in various fields
+        let query_lower = query.to_lowercase();
+
+        Self::add_field_bonus(
+            &query_lower,
+            operation_id_kebab,
+            "Operation",
+            50,
+            &mut total_score,
+            &mut highlights,
+        );
+        Self::add_field_bonus(
+            &query_lower,
+            &command.operation_id,
+            "Operation",
+            50,
+            &mut total_score,
+            &mut highlights,
+        );
+        Self::add_field_bonus(
+            &query_lower,
+            &command.method,
+            "Method",
+            30,
+            &mut total_score,
+            &mut highlights,
+        );
+        Self::add_field_bonus(
+            &query_lower,
+            &command.path,
+            "Path",
+            20,
+            &mut total_score,
+            &mut highlights,
+        );
+
+        // Summary requires special handling for Option type
+        if let Some(summary) = &command.summary {
+            Self::add_field_bonus(
+                &query_lower,
+                summary,
+                "Summary",
+                15,
+                &mut total_score,
+                &mut highlights,
+            );
+        }
+
+        ScoringResult {
+            score: total_score,
+            highlights,
+        }
+    }
+
+    /// Add bonus score if a field value contains the query string
+    fn add_field_bonus(
+        query_lower: &str,
+        field_value: &str,
+        field_label: &str,
+        score: i64,
+        total_score: &mut i64,
+        highlights: &mut Vec<String>,
+    ) {
+        if field_value.to_lowercase().contains(query_lower) {
+            *total_score += score;
+            highlights.push(format!("{field_label}: {field_value}"));
+        }
     }
 
     /// Find similar commands to a given input
@@ -177,18 +259,16 @@ impl CommandSearcher {
             );
             let full_command = format!("{tag} {operation_id_kebab}");
 
-            // Check fuzzy match score
-            if let Some(score) = self.matcher.fuzzy_match(&full_command, input) {
-                if score > 0 {
-                    suggestions.push((full_command.clone(), score));
-                }
+            // Check fuzzy match score - use match with guard to avoid nesting
+            match self.matcher.fuzzy_match(&full_command, input) {
+                Some(score) if score > 0 => suggestions.push((full_command.clone(), score)),
+                _ => {}
             }
 
-            // Also check just the operation ID
-            if let Some(score) = self.matcher.fuzzy_match(&operation_id_kebab, input) {
-                if score > 0 {
-                    suggestions.push((full_command.clone(), score + 10)); // Bonus for direct match
-                }
+            // Also check just the operation ID - use match with guard to avoid nesting
+            match self.matcher.fuzzy_match(&operation_id_kebab, input) {
+                Some(score) if score > 0 => suggestions.push((full_command.clone(), score + 10)), // Bonus for direct match
+                _ => {}
             }
         }
 
@@ -240,30 +320,33 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
             lines.push(format!("   {summary}"));
         }
 
-        if verbose {
-            // Show highlights
-            if !result.highlights.is_empty() {
-                lines.push(format!("   Matches: {}", result.highlights.join(", ")));
-            }
+        if !verbose {
+            lines.push(String::new());
+            continue;
+        }
 
-            // Show parameters
-            if !result.command.parameters.is_empty() {
-                let params: Vec<String> = result
-                    .command
-                    .parameters
-                    .iter()
-                    .map(|p| {
-                        let required = if p.required { "*" } else { "" };
-                        format!("--{}{}", p.name, required)
-                    })
-                    .collect();
-                lines.push(format!("   Parameters: {}", params.join(" ")));
-            }
+        // Show highlights
+        if !result.highlights.is_empty() {
+            lines.push(format!("   Matches: {}", result.highlights.join(", ")));
+        }
 
-            // Show request body if present
-            if result.command.request_body.is_some() {
-                lines.push("   Request body: JSON required".to_string());
-            }
+        // Show parameters
+        if !result.command.parameters.is_empty() {
+            let params: Vec<String> = result
+                .command
+                .parameters
+                .iter()
+                .map(|p| {
+                    let required = if p.required { "*" } else { "" };
+                    format!("--{}{}", p.name, required)
+                })
+                .collect();
+            lines.push(format!("   Parameters: {}", params.join(" ")));
+        }
+
+        // Show request body if present
+        if result.command.request_body.is_some() {
+            lines.push("   Request body: JSON required".to_string());
         }
 
         lines.push(String::new());

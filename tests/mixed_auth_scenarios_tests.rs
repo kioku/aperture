@@ -48,11 +48,13 @@ impl FileSystem for MockFileSystem {
         let mut dirs = self.dirs.lock().unwrap();
         dirs.insert(path.to_path_buf(), true);
         // Also create parent directories
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                dirs.insert(parent.to_path_buf(), true);
-            }
+        let Some(parent) = path.parent() else {
+            return Ok(());
+        };
+        if parent.as_os_str().is_empty() {
+            return Ok(());
         }
+        dirs.insert(parent.to_path_buf(), true);
         Ok(())
     }
 
@@ -98,14 +100,15 @@ impl FileSystem for MockFileSystem {
             .keys()
             .filter_map(|k| {
                 let k_str = k.to_string_lossy();
-                if k_str.starts_with(&*path_str) && k_str.len() > path_str.len() {
-                    let relative = &k_str[path_str.len()..];
-                    let relative = relative.trim_start_matches('/');
-                    if !relative.is_empty() && !relative.contains('/') {
-                        return Some(PathBuf::from(relative));
-                    }
+                if !k_str.starts_with(&*path_str) || k_str.len() <= path_str.len() {
+                    return None;
                 }
-                None
+                let relative = &k_str[path_str.len()..];
+                let relative = relative.trim_start_matches('/');
+                if relative.is_empty() || relative.contains('/') {
+                    return None;
+                }
+                Some(PathBuf::from(relative))
             })
             .collect();
         Ok(entries)

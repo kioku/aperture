@@ -11,6 +11,16 @@ use openapiv3::{OpenAPI, Operation, Parameter as OpenApiParameter, ReferenceOr, 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Type alias for schema information extracted from a parameter
+/// Returns: (`schema_type`, `format`, `default_value`, `enum_values`, `example`)
+type ParameterSchemaInfo = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Vec<String>,
+    Option<String>,
+);
+
 /// JSON manifest describing all available commands and parameters for an API context.
 /// This is output when the `--describe-json` flag is used.
 #[derive(Debug, Serialize, Deserialize)]
@@ -202,30 +212,29 @@ pub fn generate_capability_manifest_from_openapi(
     let mut command_groups: HashMap<String, Vec<CommandInfo>> = HashMap::new();
 
     for (path, path_item) in &spec.paths.paths {
-        if let ReferenceOr::Item(item) = path_item {
-            // Process each HTTP method
-            for (method, operation) in crate::spec::http_methods_iter(item) {
-                if let Some(op) = operation {
-                    let command_info = convert_openapi_operation_to_info(
-                        method,
-                        path,
-                        op,
-                        spec,
-                        spec.security.as_ref(),
-                    );
+        let ReferenceOr::Item(item) = path_item else {
+            continue;
+        };
 
-                    // Group by first tag or "default", converted to kebab-case
-                    let group_name = op.tags.first().map_or_else(
-                        || constants::DEFAULT_GROUP.to_string(),
-                        |tag| to_kebab_case(tag),
-                    );
+        // Process each HTTP method
+        for (method, operation) in crate::spec::http_methods_iter(item) {
+            let Some(op) = operation else {
+                continue;
+            };
 
-                    command_groups
-                        .entry(group_name)
-                        .or_default()
-                        .push(command_info);
-                }
-            }
+            let command_info =
+                convert_openapi_operation_to_info(method, path, op, spec, spec.security.as_ref());
+
+            // Group by first tag or "default", converted to kebab-case
+            let group_name = op.tags.first().map_or_else(
+                || constants::DEFAULT_GROUP.to_string(),
+                |tag| to_kebab_case(tag),
+            );
+
+            command_groups
+                .entry(group_name)
+                .or_default()
+                .push(command_info);
         }
     }
 
@@ -462,29 +471,29 @@ fn convert_openapi_operation_to_info(
 
     // Extract request body info
     let request_body = operation.request_body.as_ref().and_then(|rb_ref| {
-        if let ReferenceOr::Item(body) = rb_ref {
-            // Prefer JSON content if available
-            let content_type = if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
-                constants::CONTENT_TYPE_JSON
-            } else {
-                body.content.keys().next().map(String::as_str)?
-            };
+        let ReferenceOr::Item(body) = rb_ref else {
+            return None;
+        };
 
-            let media_type = body.content.get(content_type)?;
-            let example = media_type
-                .example
-                .as_ref()
-                .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
-
-            Some(RequestBodyInfo {
-                required: body.required,
-                content_type: content_type.to_string(),
-                description: body.description.clone(),
-                example,
-            })
+        // Prefer JSON content if available
+        let content_type = if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
+            constants::CONTENT_TYPE_JSON
         } else {
-            None
-        }
+            body.content.keys().next().map(String::as_str)?
+        };
+
+        let media_type = body.content.get(content_type)?;
+        let example = media_type
+            .example
+            .as_ref()
+            .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
+
+        Some(RequestBodyInfo {
+            required: body.required,
+            content_type: content_type.to_string(),
+            description: body.description.clone(),
+            example,
+        })
     });
 
     // Extract security requirements
@@ -522,6 +531,72 @@ fn convert_openapi_operation_to_info(
     }
 }
 
+/// Extracts schema information from a parameter format
+fn extract_schema_info_from_parameter(
+    format: &openapiv3::ParameterSchemaOrContent,
+) -> ParameterSchemaInfo {
+    let openapiv3::ParameterSchemaOrContent::Schema(schema_ref) = format else {
+        return (
+            Some(constants::SCHEMA_TYPE_STRING.to_string()),
+            None,
+            None,
+            vec![],
+            None,
+        );
+    };
+
+    match schema_ref {
+        ReferenceOr::Item(schema) => {
+            let (schema_type, format, enums) =
+                extract_schema_type_from_schema_kind(&schema.schema_kind);
+
+            let default_value = schema
+                .schema_data
+                .default
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.to_string()));
+
+            (Some(schema_type), format, default_value, enums, None)
+        }
+        ReferenceOr::Reference { .. } => (
+            Some(constants::SCHEMA_TYPE_STRING.to_string()),
+            None,
+            None,
+            vec![],
+            None,
+        ),
+    }
+}
+
+/// Extracts type information from a schema kind
+fn extract_schema_type_from_schema_kind(
+    schema_kind: &openapiv3::SchemaKind,
+) -> (String, Option<String>, Vec<String>) {
+    match schema_kind {
+        openapiv3::SchemaKind::Type(type_val) => match type_val {
+            openapiv3::Type::String(string_type) => {
+                let enum_values: Vec<String> = string_type
+                    .enumeration
+                    .iter()
+                    .filter_map(|v| v.as_ref())
+                    .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.clone()))
+                    .collect();
+                (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
+            }
+            openapiv3::Type::Number(_) => (constants::SCHEMA_TYPE_NUMBER.to_string(), None, vec![]),
+            openapiv3::Type::Integer(_) => {
+                (constants::SCHEMA_TYPE_INTEGER.to_string(), None, vec![])
+            }
+            openapiv3::Type::Boolean(_) => {
+                (constants::SCHEMA_TYPE_BOOLEAN.to_string(), None, vec![])
+            }
+            openapiv3::Type::Array(_) => (constants::SCHEMA_TYPE_ARRAY.to_string(), None, vec![]),
+            openapiv3::Type::Object(_) => (constants::SCHEMA_TYPE_OBJECT.to_string(), None, vec![]),
+        },
+        _ => (constants::SCHEMA_TYPE_STRING.to_string(), None, vec![]),
+    }
+}
+
 /// Converts an `OpenAPI` parameter to `ParameterInfo` with full metadata
 fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo {
     let (param_data, location_str) = match param {
@@ -541,66 +616,7 @@ fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo 
 
     // Extract schema information
     let (schema_type, format, default_value, enum_values, example) =
-        if let openapiv3::ParameterSchemaOrContent::Schema(schema_ref) = &param_data.format {
-            match schema_ref {
-                ReferenceOr::Item(schema) => {
-                    let (schema_type, format, enums) = match &schema.schema_kind {
-                        openapiv3::SchemaKind::Type(type_val) => match type_val {
-                            openapiv3::Type::String(string_type) => {
-                                let enum_values: Vec<String> = string_type
-                                    .enumeration
-                                    .iter()
-                                    .filter_map(|v| v.as_ref())
-                                    .map(|v| {
-                                        serde_json::to_string(v).unwrap_or_else(|_| v.to_string())
-                                    })
-                                    .collect();
-                                (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
-                            }
-                            openapiv3::Type::Number(_) => {
-                                (constants::SCHEMA_TYPE_NUMBER.to_string(), None, vec![])
-                            }
-                            openapiv3::Type::Integer(_) => {
-                                (constants::SCHEMA_TYPE_INTEGER.to_string(), None, vec![])
-                            }
-                            openapiv3::Type::Boolean(_) => {
-                                (constants::SCHEMA_TYPE_BOOLEAN.to_string(), None, vec![])
-                            }
-                            openapiv3::Type::Array(_) => {
-                                (constants::SCHEMA_TYPE_ARRAY.to_string(), None, vec![])
-                            }
-                            openapiv3::Type::Object(_) => {
-                                (constants::SCHEMA_TYPE_OBJECT.to_string(), None, vec![])
-                            }
-                        },
-                        _ => (constants::SCHEMA_TYPE_STRING.to_string(), None, vec![]),
-                    };
-
-                    let default_value = schema
-                        .schema_data
-                        .default
-                        .as_ref()
-                        .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.to_string()));
-
-                    (Some(schema_type), format, default_value, enums, None)
-                }
-                ReferenceOr::Reference { .. } => (
-                    Some(constants::SCHEMA_TYPE_STRING.to_string()),
-                    None,
-                    None,
-                    vec![],
-                    None,
-                ),
-            }
-        } else {
-            (
-                Some(constants::SCHEMA_TYPE_STRING.to_string()),
-                None,
-                None,
-                vec![],
-                None,
-            )
-        };
+        extract_schema_info_from_parameter(&param_data.format);
 
     // Extract example from parameter data
     let example = param_data
@@ -626,14 +642,20 @@ fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo 
 fn extract_security_schemes_from_openapi(spec: &OpenAPI) -> HashMap<String, SecuritySchemeInfo> {
     let mut security_schemes = HashMap::new();
 
-    if let Some(components) = &spec.components {
-        for (name, scheme_ref) in &components.security_schemes {
-            if let ReferenceOr::Item(scheme) = scheme_ref {
-                if let Some(scheme_info) = convert_openapi_security_scheme(name, scheme) {
-                    security_schemes.insert(name.clone(), scheme_info);
-                }
-            }
-        }
+    let Some(components) = &spec.components else {
+        return security_schemes;
+    };
+
+    for (name, scheme_ref) in &components.security_schemes {
+        let ReferenceOr::Item(scheme) = scheme_ref else {
+            continue;
+        };
+
+        let Some(scheme_info) = convert_openapi_security_scheme(name, scheme) else {
+            continue;
+        };
+
+        security_schemes.insert(name.clone(), scheme_info);
     }
 
     security_schemes
@@ -712,18 +734,18 @@ fn extract_aperture_secret_from_extensions(
     extensions
         .get(constants::EXT_APERTURE_SECRET)
         .and_then(|value| {
-            if let Some(obj) = value.as_object() {
-                let source = obj.get(constants::EXT_KEY_SOURCE)?.as_str()?;
-                let name = obj.get(constants::EXT_KEY_NAME)?.as_str()?;
+            let obj = value.as_object()?;
+            let source = obj.get(constants::EXT_KEY_SOURCE)?.as_str()?;
+            let name = obj.get(constants::EXT_KEY_NAME)?.as_str()?;
 
-                if source == constants::SOURCE_ENV {
-                    return Some(CachedApertureSecret {
-                        source: source.to_string(),
-                        name: name.to_string(),
-                    });
-                }
+            if source != constants::SOURCE_ENV {
+                return None;
             }
-            None
+
+            Some(CachedApertureSecret {
+                source: source.to_string(),
+                name: name.to_string(),
+            })
         })
 }
 

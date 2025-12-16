@@ -90,38 +90,42 @@ impl DocumentationGenerator {
 
     /// Add parameters section if parameters exist
     fn add_parameters_section(help: &mut String, command: &CachedCommand) {
-        if !command.parameters.is_empty() {
-            help.push_str("## Parameters\n\n");
-            for param in &command.parameters {
-                let required_badge = if param.required {
-                    " **(required)**"
-                } else {
-                    ""
-                };
-                let param_type = param.schema_type.as_deref().unwrap_or("string");
-                writeln!(
-                    help,
-                    "- `--{}` ({}){}  - {}",
-                    to_kebab_case(&param.name),
-                    param_type,
-                    required_badge,
-                    param.description.as_deref().unwrap_or("No description")
-                )
-                .ok();
-            }
-            help.push('\n');
+        if command.parameters.is_empty() {
+            return;
         }
+
+        help.push_str("## Parameters\n\n");
+        for param in &command.parameters {
+            let required_badge = if param.required {
+                " **(required)**"
+            } else {
+                ""
+            };
+            let param_type = param.schema_type.as_deref().unwrap_or("string");
+            writeln!(
+                help,
+                "- `--{}` ({}){}  - {}",
+                to_kebab_case(&param.name),
+                param_type,
+                required_badge,
+                param.description.as_deref().unwrap_or("No description")
+            )
+            .ok();
+        }
+        help.push('\n');
     }
 
     /// Add request body section if present
     fn add_request_body_section(help: &mut String, command: &CachedCommand) {
-        if let Some(ref body) = command.request_body {
-            help.push_str("## Request Body\n\n");
-            if let Some(ref description) = body.description {
-                write!(help, "{description}\n\n").ok();
-            }
-            write!(help, "Required: {}\n\n", body.required).ok();
+        let Some(ref body) = command.request_body else {
+            return;
+        };
+
+        help.push_str("## Request Body\n\n");
+        if let Some(ref description) = body.description {
+            write!(help, "{description}\n\n").ok();
         }
+        write!(help, "Required: {}\n\n", body.required).ok();
     }
 
     /// Add examples section with command examples
@@ -140,16 +144,17 @@ impl DocumentationGenerator {
                 operation_id,
                 command,
             ));
-        } else {
-            help.push_str("## Examples\n\n");
-            for (i, example) in command.examples.iter().enumerate() {
-                write!(help, "### Example {}\n\n", i + 1).ok();
-                write!(help, "**{}**\n\n", example.description).ok();
-                if let Some(ref explanation) = example.explanation {
-                    write!(help, "{explanation}\n\n").ok();
-                }
-                write!(help, "```bash\n{}\n```\n\n", example.command_line).ok();
+            return;
+        }
+
+        help.push_str("## Examples\n\n");
+        for (i, example) in command.examples.iter().enumerate() {
+            write!(help, "### Example {}\n\n", i + 1).ok();
+            write!(help, "**{}**\n\n", example.description).ok();
+            if let Some(ref explanation) = example.explanation {
+                write!(help, "{explanation}\n\n").ok();
             }
+            write!(help, "```bash\n{}\n```\n\n", example.command_line).ok();
         }
     }
 
@@ -218,10 +223,11 @@ impl DocumentationGenerator {
         }
 
         // Add request body if required
-        if let Some(ref body) = command.request_body {
-            if body.required {
+        match command.request_body {
+            Some(ref body) if body.required => {
                 example.push_str(" --body '{\"key\": \"value\"}'");
             }
+            _ => {}
         }
 
         example.push_str("\n```\n\n");

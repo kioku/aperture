@@ -1,0 +1,59 @@
+# Rule: max-nesting-depth
+# Prevents control flow blocks nested more than 3 levels deep
+#
+# Bad:
+#   if a {
+#       for x in items {
+#           if b {
+#               while c {  // 4th level - violation
+#               }
+#           }
+#       }
+#   }
+#
+# Good:
+#   Extract deeply nested logic into helper functions
+
+id: max-nesting-depth
+language: rust
+severity: error
+message: "Block nesting exceeds 3 levels. Consider extracting to helper functions."
+
+rule:
+  any:
+    - kind: if_expression
+    - kind: for_expression
+    - kind: while_expression
+    - kind: loop_expression
+    - kind: match_expression
+  inside:
+    stopBy: end
+    any:
+      - kind: if_expression
+      - kind: for_expression
+      - kind: while_expression
+      - kind: loop_expression
+      - kind: match_expression
+    inside:
+      stopBy: end
+      any:
+        - kind: if_expression
+        - kind: for_expression
+        - kind: while_expression
+        - kind: loop_expression
+        - kind: match_expression
+      inside:
+        stopBy: end
+        any:
+          - kind: if_expression
+          - kind: for_expression
+          - kind: while_expression
+          - kind: loop_expression
+          - kind: match_expression
+
+note: |
+  Deep nesting makes code hard to read and maintain.
+  Refactoring strategies:
+  - Extract inner blocks to named helper functions
+  - Use early returns with let-else or guard clauses
+  - Use iterators and combinators instead of nested loops

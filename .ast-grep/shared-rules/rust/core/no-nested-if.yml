@@ -1,0 +1,49 @@
+# Rule: no-nested-if
+# Prevents doubly nested if statements to encourage flatter code
+#
+# This rule only catches direct nesting in block bodies, NOT:
+# - If expressions used as values (let x = if cond { a } else { b })
+# - If expressions inside closures
+# - If expressions inside match arms
+#
+# Bad:
+#   if user.is_some() {
+#       if user.unwrap().is_active {
+#           do_something();
+#       }
+#   }
+#
+# Good (guard clause):
+#   let Some(user) = user else { return };
+#   if !user.is_active { return };
+#   do_something();
+#
+# Good (combined with pattern matching):
+#   if let Some(user) = user && user.is_active {
+#       do_something();
+#   }
+
+id: no-nested-if
+language: rust
+severity: error
+message: "Nested if statements detected. Use early returns, guard clauses, let-else, or pattern matching."
+
+rule:
+  kind: if_expression
+  inside:
+    stopBy:
+      any:
+        - kind: closure_expression
+        - kind: match_arm
+        - kind: let_declaration
+        - kind: assignment_expression
+        - kind: return_expression
+        - kind: call_expression
+    kind: if_expression
+
+note: |
+  Nested ifs increase cognitive complexity. Rust idioms to flatten:
+  1. let-else: let Some(x) = opt else { return };
+  2. Guard clauses: if !condition { return; }
+  3. Pattern matching: match or if-let chains
+  4. Combinators: .map(), .and_then(), .ok_or()

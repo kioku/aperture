@@ -139,11 +139,9 @@ impl ShortcutResolver {
             candidates.extend(matches);
         }
 
-        // 4. Partial matching (fuzzy)
+        // 4. Partial matching (fuzzy) - only if no candidates found yet
         if candidates.is_empty() {
-            if let Some(matches) = self.try_partial_matching(args) {
-                candidates.extend(matches);
-            }
+            candidates.extend(self.try_partial_matching(args).unwrap_or_default());
         }
 
         match candidates.len() {
@@ -153,6 +151,7 @@ impl ShortcutResolver {
                 candidates.into_iter().next().map_or_else(
                     || {
                         // This should never happen given len() == 1, but handle defensively
+                        // ast-grep-ignore: no-println
                         eprintln!("Warning: Expected exactly one candidate but found none");
                         ResolutionResult::NotFound
                     },
@@ -163,23 +162,25 @@ impl ShortcutResolver {
                 // Sort by confidence score (descending)
                 candidates.sort_by(|a, b| b.confidence.cmp(&a.confidence));
 
-                // If the top candidate has significantly higher confidence, use it
-                if candidates[0].confidence >= 85
+                // Check if the top candidate has significantly higher confidence
+                let has_high_confidence = candidates[0].confidence >= 85
                     && (candidates.len() == 1
-                        || candidates[0].confidence > candidates[1].confidence + 10)
-                {
-                    // Handle the high-confidence candidate case safely
-                    candidates.into_iter().next().map_or_else(
-                        || {
-                            // This should never happen given we just accessed candidates[0], but handle defensively
-                            eprintln!("Warning: Expected candidates after sorting but found none");
-                            ResolutionResult::NotFound
-                        },
-                        |candidate| ResolutionResult::Resolved(Box::new(candidate)),
-                    )
-                } else {
-                    ResolutionResult::Ambiguous(candidates)
+                        || candidates[0].confidence > candidates[1].confidence + 10);
+
+                if !has_high_confidence {
+                    return ResolutionResult::Ambiguous(candidates);
                 }
+
+                // Handle the high-confidence candidate case safely
+                candidates.into_iter().next().map_or_else(
+                    || {
+                        // This should never happen given we just accessed candidates[0], but handle defensively
+                        // ast-grep-ignore: no-println
+                        eprintln!("Warning: Expected candidates after sorting but found none");
+                        ResolutionResult::NotFound
+                    },
+                    |candidate| ResolutionResult::Resolved(Box::new(candidate)),
+                )
             }
         }
     }
@@ -274,30 +275,32 @@ impl ShortcutResolver {
         }
 
         // Try tag + operation combination if we have 2+ args
-        if args.len() >= 2 {
-            let tag = to_kebab_case(&args[0]);
-            let operation = to_kebab_case(&args[1]);
-            let tag_operation_key = format!("{tag} {operation}");
-            if let Some(matches) = self.tag_map.get(&tag_operation_key) {
-                for (api_name, spec, command) in matches {
-                    let tag = command
-                        .tags
-                        .first()
-                        .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
-                    let operation_kebab = to_kebab_case(&command.operation_id);
+        if args.len() < 2 {
+            return if candidates.is_empty() {
+                None
+            } else {
+                Some(candidates)
+            };
+        }
 
-                    candidates.push(ResolvedShortcut {
-                        full_command: vec![
-                            "api".to_string(),
-                            api_name.clone(),
-                            tag,
-                            operation_kebab,
-                        ],
-                        spec: spec.clone(),
-                        command: command.clone(),
-                        confidence: 85, // Higher confidence for tag+operation match
-                    });
-                }
+        let tag = to_kebab_case(&args[0]);
+        let operation = to_kebab_case(&args[1]);
+        let tag_operation_key = format!("{tag} {operation}");
+
+        if let Some(matches) = self.tag_map.get(&tag_operation_key) {
+            for (api_name, spec, command) in matches {
+                let tag = command
+                    .tags
+                    .first()
+                    .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
+                let operation_kebab = to_kebab_case(&command.operation_id);
+
+                candidates.push(ResolvedShortcut {
+                    full_command: vec!["api".to_string(), api_name.clone(), tag, operation_kebab],
+                    spec: spec.clone(),
+                    command: command.clone(),
+                    confidence: 85, // Higher confidence for tag+operation match
+                });
             }
         }
 

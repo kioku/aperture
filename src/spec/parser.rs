@@ -67,8 +67,10 @@ fn fix_yaml_boolean_values(mut content: String, properties: &[&str]) -> String {
 /// Fix boolean values in JSON format
 fn fix_json_boolean_values(mut content: String, properties: &[&str]) -> String {
     for property in properties {
-        let pattern_0 = Regex::new(&format!(r#""{property}"\s*:\s*0\b"#)).unwrap();
-        let pattern_1 = Regex::new(&format!(r#""{property}"\s*:\s*1\b"#)).unwrap();
+        let pattern_0 =
+            Regex::new(&format!(r#""{property}"\s*:\s*0\b"#)).expect("regex pattern is valid");
+        let pattern_1 =
+            Regex::new(&format!(r#""{property}"\s*:\s*1\b"#)).expect("regex pattern is valid");
 
         content = pattern_0
             .replace_all(&content, &format!(r#""{property}":false"#))
@@ -229,10 +231,12 @@ fn parse_with_oas3_direct_with_original(
         }
     };
 
+    // ast-grep-ignore: no-println
     eprintln!(
         "{} OpenAPI 3.1 specification detected. Using compatibility mode.",
         crate::constants::MSG_WARNING_PREFIX
     );
+    // ast-grep-ignore: no-println
     eprintln!("         Some 3.1-specific features may not be available.");
 
     // Convert oas3 spec to JSON, then attempt to parse as openapiv3

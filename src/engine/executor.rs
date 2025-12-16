@@ -1,4 +1,4 @@
-use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
+use crate::cache::models::{CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec};
 use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
@@ -143,6 +143,7 @@ fn handle_dry_run(
     if capture_output {
         Ok(Some(output))
     } else {
+        // ast-grep-ignore: no-println
         println!("{output}");
         Ok(None)
     }
@@ -216,30 +217,30 @@ fn prepare_cache_context(
     headers: &reqwest::header::HeaderMap,
     body: Option<&str>,
 ) -> Result<Option<(CacheKey, ResponseCache)>, Error> {
-    if let Some(cache_cfg) = cache_config {
-        if cache_cfg.enabled {
-            let header_map: HashMap<String, String> = headers
-                .iter()
-                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-                .collect();
+    let Some(cache_cfg) = cache_config else {
+        return Ok(None);
+    };
 
-            let cache_key = CacheKey::from_request(
-                spec_name,
-                operation_id,
-                method.as_ref(),
-                url,
-                &header_map,
-                body,
-            )?;
-
-            let response_cache = ResponseCache::new(cache_cfg.clone())?;
-            Ok(Some((cache_key, response_cache)))
-        } else {
-            Ok(None)
-        }
-    } else {
-        Ok(None)
+    if !cache_cfg.enabled {
+        return Ok(None);
     }
+
+    let header_map: HashMap<String, String> = headers
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+
+    let cache_key = CacheKey::from_request(
+        spec_name,
+        operation_id,
+        method.as_ref(),
+        url,
+        &header_map,
+        body,
+    )?;
+
+    let response_cache = ResponseCache::new(cache_cfg.clone())?;
+    Ok(Some((cache_key, response_cache)))
 }
 
 /// Check cache for existing response
@@ -266,40 +267,43 @@ async fn store_in_cache(
     body: Option<&str>,
     cache_config: Option<&CacheConfig>,
 ) -> Result<(), Error> {
-    if let Some((cache_key, response_cache)) = cache_context {
-        let cached_request_info = CachedRequestInfo {
-            method: method.to_string(),
-            url,
-            headers: headers
-                .iter()
-                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-                .collect(),
-            body_hash: body.map(|b| {
-                let mut hasher = Sha256::new();
-                hasher.update(b.as_bytes());
-                format!("{:x}", hasher.finalize())
-            }),
-        };
+    let Some((cache_key, response_cache)) = cache_context else {
+        return Ok(());
+    };
 
-        let cache_ttl = cache_config.and_then(|cfg| {
-            if cfg.default_ttl.as_secs() > 0 {
-                Some(cfg.default_ttl)
-            } else {
-                None
-            }
-        });
+    let cached_request_info = CachedRequestInfo {
+        method: method.to_string(),
+        url,
+        headers: headers
+            .iter()
+            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect(),
+        body_hash: body.map(|b| {
+            let mut hasher = Sha256::new();
+            hasher.update(b.as_bytes());
+            format!("{:x}", hasher.finalize())
+        }),
+    };
 
-        response_cache
-            .store(
-                &cache_key,
-                response_text,
-                status.as_u16(),
-                response_headers,
-                cached_request_info,
-                cache_ttl,
-            )
-            .await?;
-    }
+    let cache_ttl = cache_config.and_then(|cfg| {
+        if cfg.default_ttl.as_secs() > 0 {
+            Some(cfg.default_ttl)
+        } else {
+            None
+        }
+    });
+
+    response_cache
+        .store(
+            &cache_key,
+            response_text,
+            status.as_u16(),
+            response_headers,
+            cached_request_info,
+            cache_ttl,
+        )
+        .await?;
+
     Ok(())
 }
 
@@ -480,46 +484,66 @@ pub async fn execute_request(
 /// Finds the operation from the command hierarchy
 /// Print extended examples for a command
 fn print_extended_examples(operation: &CachedCommand) {
+    // ast-grep-ignore: no-println
     println!("Command: {}\n", to_kebab_case(&operation.operation_id));
 
     if let Some(ref summary) = operation.summary {
+        // ast-grep-ignore: no-println
         println!("Description: {summary}\n");
     }
 
+    // ast-grep-ignore: no-println
     println!("Method: {} {}\n", operation.method, operation.path);
 
     if operation.examples.is_empty() {
+        // ast-grep-ignore: no-println
         println!("No examples available for this command.");
         return;
     }
 
+    // ast-grep-ignore: no-println
     println!("Examples:\n");
     for (i, example) in operation.examples.iter().enumerate() {
+        // ast-grep-ignore: no-println
         println!("{}. {}", i + 1, example.description);
+        // ast-grep-ignore: no-println
         println!("   {}", example.command_line);
         if let Some(ref explanation) = example.explanation {
+            // ast-grep-ignore: no-println
             println!("   {explanation}");
         }
+        // ast-grep-ignore: no-println
         println!();
     }
 
     // Additional helpful information
-    if !operation.parameters.is_empty() {
-        println!("Parameters:");
-        for param in &operation.parameters {
-            let required = if param.required { " (required)" } else { "" };
-            let param_type = param.schema_type.as_deref().unwrap_or("string");
-            println!("  --{}{} [{}]", param.name, required, param_type);
-            if let Some(ref desc) = param.description {
-                println!("      {desc}");
-            }
-        }
-        println!();
+    if operation.parameters.is_empty() {
+        return;
     }
 
+    // ast-grep-ignore: no-println
+    println!("Parameters:");
+    for param in &operation.parameters {
+        let required = if param.required { " (required)" } else { "" };
+        let param_type = param.schema_type.as_deref().unwrap_or("string");
+        // ast-grep-ignore: no-println
+        println!("  --{}{} [{}]", param.name, required, param_type);
+
+        let Some(ref desc) = param.description else {
+            continue;
+        };
+        // ast-grep-ignore: no-println
+        println!("      {desc}");
+    }
+    // ast-grep-ignore: no-println
+    println!();
+
     if operation.request_body.is_some() {
+        // ast-grep-ignore: no-println
         println!("Request Body:");
+        // ast-grep-ignore: no-println
         println!("  --body JSON (required)");
+        // ast-grep-ignore: no-println
         println!("      JSON data to send in the request body");
     }
 }
@@ -540,19 +564,26 @@ fn find_operation<'a>(
 
     // For now, just find the first matching operation
     // In a real implementation, we'd match based on the full path
-    if let Some(operation_name) = subcommand_path.last() {
-        for command in &spec.commands {
-            // Convert operation_id to kebab-case for comparison
-            let kebab_id = to_kebab_case(&command.operation_id);
-            if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
-                return Ok(command);
-            }
+    let Some(operation_name) = subcommand_path.last() else {
+        let operation_name = "unknown".to_string();
+        let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
+        return Err(Error::operation_not_found_with_suggestions(
+            operation_name,
+            &suggestions,
+        ));
+    };
+
+    for command in &spec.commands {
+        // Convert operation_id to kebab-case for comparison
+        let kebab_id = to_kebab_case(&command.operation_id);
+        if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
+            return Ok(command);
         }
     }
 
     let operation_name = subcommand_path
         .last()
-        .map_or("unknown".to_string(), ToString::to_string);
+        .map_or_else(|| "unknown".to_string(), ToString::to_string);
 
     // Generate suggestions for similar operations
     let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
@@ -578,20 +609,27 @@ fn find_operation_with_matches<'a>(
 
     // For now, just find the first matching operation
     // In a real implementation, we'd match based on the full path
-    if let Some(operation_name) = subcommand_path.last() {
-        for command in &spec.commands {
-            // Convert operation_id to kebab-case for comparison
-            let kebab_id = to_kebab_case(&command.operation_id);
-            if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
-                // Return current_matches (the deepest subcommand) which contains the operation's arguments
-                return Ok((command, current_matches));
-            }
+    let Some(operation_name) = subcommand_path.last() else {
+        let operation_name = "unknown".to_string();
+        let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
+        return Err(Error::operation_not_found_with_suggestions(
+            operation_name,
+            &suggestions,
+        ));
+    };
+
+    for command in &spec.commands {
+        // Convert operation_id to kebab-case for comparison
+        let kebab_id = to_kebab_case(&command.operation_id);
+        if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
+            // Return current_matches (the deepest subcommand) which contains the operation's arguments
+            return Ok((command, current_matches));
         }
     }
 
     let operation_name = subcommand_path
         .last()
-        .map_or("unknown".to_string(), ToString::to_string);
+        .map_or_else(|| "unknown".to_string(), ToString::to_string);
 
     // Generate suggestions for similar operations
     let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
@@ -600,6 +638,28 @@ fn find_operation_with_matches<'a>(
         operation_name,
         &suggestions,
     ))
+}
+
+/// Get query parameter value formatted for URL
+/// Returns None if the parameter value should be skipped
+fn get_query_param_value(
+    param: &CachedParameter,
+    current_matches: &ArgMatches,
+    arg_str: &str,
+) -> Option<String> {
+    let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
+
+    if is_boolean {
+        // Boolean parameters are flags - add only if set
+        current_matches
+            .get_flag(arg_str)
+            .then(|| format!("{arg_str}=true"))
+    } else {
+        // Non-boolean parameters have string values
+        current_matches
+            .get_one::<String>(arg_str)
+            .map(|value| format!("{arg_str}={}", urlencoding::encode(value)))
+    }
 }
 
 /// Builds the full URL with path parameters substituted
@@ -625,38 +685,40 @@ fn build_url(
     let mut start = 0;
     while let Some(open) = url[start..].find('{') {
         let open_pos = start + open;
-        if let Some(close) = url[open_pos..].find('}') {
-            let close_pos = open_pos + close;
-            let param_name = &url[open_pos + 1..close_pos];
+        let Some(close) = url[open_pos..].find('}') else {
+            break;
+        };
 
-            // Check if this is a boolean parameter
-            let param = operation.parameters.iter().find(|p| p.name == param_name);
-            let is_boolean = param
-                .and_then(|p| p.schema_type.as_ref())
-                .is_some_and(|t| t == "boolean");
+        let close_pos = open_pos + close;
+        let param_name = &url[open_pos + 1..close_pos];
 
-            let value = if is_boolean {
-                // Boolean path parameters are flags
-                if current_matches.get_flag(param_name) {
-                    "true".to_string()
-                } else {
-                    "false".to_string()
-                }
-            } else if let Some(string_value) = current_matches
+        // Check if this is a boolean parameter
+        let param = operation.parameters.iter().find(|p| p.name == param_name);
+        let is_boolean = param
+            .and_then(|p| p.schema_type.as_ref())
+            .is_some_and(|t| t == "boolean");
+
+        let value = if is_boolean {
+            // Boolean path parameters are flags
+            if current_matches.get_flag(param_name) {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string()
+        } else {
+            match current_matches
                 .try_get_one::<String>(param_name)
                 .ok()
                 .flatten()
             {
-                string_value.clone()
-            } else {
-                return Err(Error::missing_path_parameter(param_name));
-            };
+                Some(string_value) => string_value.clone(),
+                None => return Err(Error::missing_path_parameter(param_name)),
+            }
+        };
 
-            url.replace_range(open_pos..=close_pos, &value);
-            start = open_pos + value.len();
-        } else {
-            break;
-        }
+        url.replace_range(open_pos..=close_pos, &value);
+        start = open_pos + value.len();
     }
 
     // Add query parameters
@@ -669,19 +731,13 @@ fn build_url(
             .iter()
             .find(|p| p.name == arg_str && p.location == "query");
 
-        if let Some(param) = param {
-            // Check if this is a boolean parameter
-            let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
+        let Some(param) = param else {
+            continue;
+        };
 
-            if is_boolean {
-                // Boolean parameters are flags - check if the flag is set
-                if current_matches.get_flag(arg_str) {
-                    query_params.push(format!("{arg_str}=true"));
-                }
-            } else if let Some(value) = current_matches.get_one::<String>(arg_str) {
-                // Non-boolean parameters have string values
-                query_params.push(format!("{arg_str}={}", urlencoding::encode(value)));
-            }
+        // Get query param value using helper (handles boolean vs string params)
+        if let Some(value) = get_query_param_value(param, current_matches, arg_str) {
+            query_params.push(value);
         }
     }
 
@@ -691,6 +747,32 @@ fn build_url(
     }
 
     Ok(url)
+}
+
+/// Get header value for a parameter from CLI matches
+/// Returns None if the parameter value should be skipped
+fn get_header_param_value(
+    param: &CachedParameter,
+    current_matches: &ArgMatches,
+) -> Result<Option<HeaderValue>, Error> {
+    let is_boolean = matches!(param.schema_type.as_deref(), Some("boolean"));
+
+    // Handle boolean and non-boolean parameters separately to avoid
+    // panics from mismatched types (get_flag on string or get_one on bool)
+    if is_boolean {
+        return Ok(current_matches
+            .get_flag(&param.name)
+            .then_some(HeaderValue::from_static("true")));
+    }
+
+    // Non-boolean: get string value
+    current_matches
+        .get_one::<String>(&param.name)
+        .map(|value| {
+            HeaderValue::from_str(value)
+                .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))
+        })
+        .transpose()
 }
 
 /// Builds headers including authentication
@@ -726,24 +808,8 @@ fn build_headers(
         let header_name = HeaderName::from_str(&param.name)
             .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
 
-        // Check if this is a boolean parameter
-        let is_boolean = matches!(param.schema_type.as_deref(), Some("boolean"));
-
-        let header_value = if is_boolean {
-            // Boolean header parameters are flags
-            // Note: Required boolean headers are enforced by clap at parse time via .required(true)
-            if current_matches.get_flag(&param.name) {
-                HeaderValue::from_static("true")
-            } else {
-                // If flag not present and optional, skip adding header
-                continue;
-            }
-        } else if let Some(value) = current_matches.get_one::<String>(&param.name) {
-            // Non-boolean header parameters
-            HeaderValue::from_str(value)
-                .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))?
-        } else {
-            // No value provided for optional non-boolean parameter
+        // Get header value using helper (handles boolean vs string params)
+        let Some(header_value) = get_header_param_value(param, current_matches)? else {
             continue;
         };
 
@@ -752,22 +818,25 @@ fn build_headers(
 
     // Add authentication headers based on security requirements
     for security_scheme_name in &operation.security_requirements {
-        if let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) {
-            add_authentication_header(&mut headers, security_scheme, api_name, global_config)?;
-        }
+        let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) else {
+            continue;
+        };
+        add_authentication_header(&mut headers, security_scheme, api_name, global_config)?;
     }
 
     // Add custom headers from --header/-H flags
     // Use try_get_many to avoid panic when header arg doesn't exist
-    if let Ok(Some(custom_headers)) = current_matches.try_get_many::<String>("header") {
-        for header_str in custom_headers {
-            let (name, value) = parse_custom_header(header_str)?;
-            let header_name = HeaderName::from_str(&name)
-                .map_err(|e| Error::invalid_header_name(&name, e.to_string()))?;
-            let header_value = HeaderValue::from_str(&value)
-                .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
-            headers.insert(header_name, header_value);
-        }
+    let Ok(Some(custom_headers)) = current_matches.try_get_many::<String>("header") else {
+        return Ok(headers);
+    };
+
+    for header_str in custom_headers {
+        let (name, value) = parse_custom_header(header_str)?;
+        let header_name = HeaderName::from_str(&name)
+            .map_err(|e| Error::invalid_header_name(&name, e.to_string()))?;
+        let header_value = HeaderValue::from_str(&value)
+            .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
+        headers.insert(header_name, header_value);
     }
 
     Ok(headers)
@@ -832,6 +901,7 @@ fn add_authentication_header(
 ) -> Result<(), Error> {
     // Debug logging when RUST_LOG is set
     if std::env::var("RUST_LOG").is_ok() {
+        // ast-grep-ignore: no-println
         eprintln!(
             "[DEBUG] Adding authentication header for scheme: {} (type: {})",
             security_scheme.name, security_scheme.scheme_type
@@ -843,19 +913,23 @@ fn add_authentication_header(
         .and_then(|config| config.api_configs.get(api_name))
         .and_then(|api_config| api_config.secrets.get(&security_scheme.name));
 
-    let (secret_value, env_var_name) = if let Some(config_secret) = secret_config {
-        // Use config-based secret
-        let secret_value = std::env::var(&config_secret.name)
-            .map_err(|_| Error::secret_not_set(&security_scheme.name, &config_secret.name))?;
-        (secret_value, config_secret.name.clone())
-    } else if let Some(aperture_secret) = &security_scheme.aperture_secret {
-        // Priority 2: Fall back to x-aperture-secret extension
-        let secret_value = std::env::var(&aperture_secret.name)
-            .map_err(|_| Error::secret_not_set(&security_scheme.name, &aperture_secret.name))?;
-        (secret_value, aperture_secret.name.clone())
-    } else {
-        // No authentication configuration found - skip this scheme
-        return Ok(());
+    let (secret_value, env_var_name) = match (secret_config, &security_scheme.aperture_secret) {
+        (Some(config_secret), _) => {
+            // Use config-based secret
+            let secret_value = std::env::var(&config_secret.name)
+                .map_err(|_| Error::secret_not_set(&security_scheme.name, &config_secret.name))?;
+            (secret_value, config_secret.name.clone())
+        }
+        (None, Some(aperture_secret)) => {
+            // Priority 2: Fall back to x-aperture-secret extension
+            let secret_value = std::env::var(&aperture_secret.name)
+                .map_err(|_| Error::secret_not_set(&security_scheme.name, &aperture_secret.name))?;
+            (secret_value, aperture_secret.name.clone())
+        }
+        (None, None) => {
+            // No authentication configuration found - skip this scheme
+            return Ok(());
+        }
     };
 
     // Debug logging for resolved secret source
@@ -865,6 +939,7 @@ fn add_authentication_header(
         } else {
             "x-aperture-secret"
         };
+        // ast-grep-ignore: no-println
         eprintln!(
             "[DEBUG] Using secret from {source} for scheme '{}': env var '{env_var_name}'",
             security_scheme.name
@@ -893,49 +968,54 @@ fn add_authentication_header(
             // Note: query and cookie locations are handled differently in request building
         }
         "http" => {
-            if let Some(scheme_str) = &security_scheme.scheme {
-                let auth_scheme: AuthScheme = scheme_str.as_str().into();
-                let auth_value = match &auth_scheme {
+            let Some(scheme_str) = &security_scheme.scheme else {
+                return Ok(());
+            };
+
+            let auth_scheme: AuthScheme = scheme_str.as_str().into();
+            let auth_value = match &auth_scheme {
+                AuthScheme::Bearer => {
+                    format!("Bearer {secret_value}")
+                }
+                AuthScheme::Basic => {
+                    // Basic auth expects "username:password" format in the secret
+                    // The secret should contain the raw "username:password" string
+                    // We'll base64 encode it before adding to the header
+                    let encoded = general_purpose::STANDARD.encode(&secret_value);
+                    format!("Basic {encoded}")
+                }
+                AuthScheme::Token
+                | AuthScheme::DSN
+                | AuthScheme::ApiKey
+                | AuthScheme::Custom(_) => {
+                    // Treat any other HTTP scheme as a bearer-like token
+                    // Format: "Authorization: <scheme> <token>"
+                    // This supports Token, ApiKey, DSN, and any custom schemes
+                    format!("{scheme_str} {secret_value}")
+                }
+            };
+
+            let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
+                Error::invalid_header_value(constants::HEADER_AUTHORIZATION, e.to_string())
+            })?;
+            headers.insert(constants::HEADER_AUTHORIZATION, header_value);
+
+            // Debug logging
+            if std::env::var("RUST_LOG").is_ok() {
+                match &auth_scheme {
                     AuthScheme::Bearer => {
-                        format!("Bearer {secret_value}")
+                        // ast-grep-ignore: no-println
+                        eprintln!("[DEBUG] Added Bearer authentication header");
                     }
                     AuthScheme::Basic => {
-                        // Basic auth expects "username:password" format in the secret
-                        // The secret should contain the raw "username:password" string
-                        // We'll base64 encode it before adding to the header
-                        let encoded = general_purpose::STANDARD.encode(&secret_value);
-                        format!("Basic {encoded}")
+                        // ast-grep-ignore: no-println
+                        eprintln!("[DEBUG] Added Basic authentication header (base64 encoded)");
                     }
-                    AuthScheme::Token
-                    | AuthScheme::DSN
-                    | AuthScheme::ApiKey
-                    | AuthScheme::Custom(_) => {
-                        // Treat any other HTTP scheme as a bearer-like token
-                        // Format: "Authorization: <scheme> <token>"
-                        // This supports Token, ApiKey, DSN, and any custom schemes
-                        format!("{scheme_str} {secret_value}")
-                    }
-                };
-
-                let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
-                    Error::invalid_header_value(constants::HEADER_AUTHORIZATION, e.to_string())
-                })?;
-                headers.insert(constants::HEADER_AUTHORIZATION, header_value);
-
-                // Debug logging
-                if std::env::var("RUST_LOG").is_ok() {
-                    match &auth_scheme {
-                        AuthScheme::Bearer => {
-                            eprintln!("[DEBUG] Added Bearer authentication header");
-                        }
-                        AuthScheme::Basic => {
-                            eprintln!("[DEBUG] Added Basic authentication header (base64 encoded)");
-                        }
-                        _ => {
-                            eprintln!(
-                                "[DEBUG] Added custom HTTP auth header with scheme: {scheme_str}"
-                            );
-                        }
+                    _ => {
+                        // ast-grep-ignore: no-println
+                        eprintln!(
+                            "[DEBUG] Added custom HTTP auth header with scheme: {scheme_str}"
+                        );
                     }
                 }
             }
@@ -975,6 +1055,7 @@ fn print_formatted_response(
             if capture_output {
                 return Ok(Some(output));
             }
+            // ast-grep-ignore: no-println
             println!("{output}");
         }
         OutputFormat::Yaml => {
@@ -987,21 +1068,24 @@ fn print_formatted_response(
             if capture_output {
                 return Ok(Some(output));
             }
+            // ast-grep-ignore: no-println
             println!("{output}");
         }
         OutputFormat::Table => {
             // Convert JSON to table format
-            if let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) {
-                let table_output = print_as_table(&json_value, capture_output)?;
-                if capture_output {
-                    return Ok(table_output);
-                }
-            } else {
+            let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) else {
                 // If not JSON, output as-is
                 if capture_output {
                     return Ok(Some(processed_text));
                 }
+                // ast-grep-ignore: no-println
                 println!("{processed_text}");
+                return Ok(None);
+            };
+
+            let table_output = print_as_table(&json_value, capture_output)?;
+            if capture_output {
+                return Ok(table_output);
             }
         }
     }
@@ -1026,107 +1110,108 @@ struct KeyValue {
     value: String,
 }
 
+/// Prints items as a numbered list
+fn print_numbered_list(items: &[Value], capture_output: bool) -> Option<String> {
+    if capture_output {
+        let mut output = String::new();
+        for (i, item) in items.iter().enumerate() {
+            writeln!(&mut output, "{}: {}", i, format_value_for_table(item))
+                .expect("writing to String cannot fail");
+        }
+        return Some(output.trim_end().to_string());
+    }
+
+    for (i, item) in items.iter().enumerate() {
+        // ast-grep-ignore: no-println
+        println!("{}: {}", i, format_value_for_table(item));
+    }
+    None
+}
+
+/// Helper to output or capture a message
+fn output_or_capture(message: &str, capture_output: bool) -> Option<String> {
+    if capture_output {
+        return Some(message.to_string());
+    }
+    // ast-grep-ignore: no-println
+    println!("{message}");
+    None
+}
+
 /// Prints JSON data as a formatted table
 #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<String>, Error> {
     match json_value {
         Value::Array(items) => {
             if items.is_empty() {
-                if capture_output {
-                    return Ok(Some(constants::EMPTY_ARRAY.to_string()));
-                }
-                println!("{}", constants::EMPTY_ARRAY);
-                return Ok(None);
+                return Ok(output_or_capture(constants::EMPTY_ARRAY, capture_output));
             }
 
             // Check if array is too large
             if items.len() > MAX_TABLE_ROWS {
-                let msg1 = format!(
-                    "Array too large: {} items (max {} for table display)",
+                let msg = format!(
+                    "Array too large: {} items (max {} for table display)\nUse --format json or --jq to process the full data",
                     items.len(),
                     MAX_TABLE_ROWS
                 );
-                let msg2 = "Use --format json or --jq to process the full data";
-
-                if capture_output {
-                    return Ok(Some(format!("{msg1}\n{msg2}")));
-                }
-                println!("{msg1}");
-                println!("{msg2}");
-                return Ok(None);
+                return Ok(output_or_capture(&msg, capture_output));
             }
 
             // Try to create a table from array of objects
-            if let Some(Value::Object(_)) = items.first() {
-                // Create table for array of objects
-                let mut table_data: Vec<BTreeMap<String, String>> = Vec::new();
+            let Some(Value::Object(_)) = items.first() else {
+                // Continue to fallback case
+                return Ok(print_numbered_list(items, capture_output));
+            };
 
-                for item in items {
-                    if let Value::Object(obj) = item {
-                        let mut row = BTreeMap::new();
-                        for (key, value) in obj {
-                            row.insert(key.clone(), format_value_for_table(value));
-                        }
-                        table_data.push(row);
-                    }
+            // Create table for array of objects
+            let mut table_data: Vec<BTreeMap<String, String>> = Vec::new();
+
+            for item in items {
+                let Value::Object(obj) = item else {
+                    continue;
+                };
+                let mut row = BTreeMap::new();
+                for (key, value) in obj {
+                    row.insert(key.clone(), format_value_for_table(value));
                 }
+                table_data.push(row);
+            }
 
-                if !table_data.is_empty() {
-                    // For now, use a simple key-value representation
-                    // In the future, we could implement a more sophisticated table structure
-                    let mut rows = Vec::new();
-                    for (i, row) in table_data.iter().enumerate() {
-                        if i > 0 {
-                            rows.push(TableRow {
-                                key: "---".to_string(),
-                                value: "---".to_string(),
-                            });
-                        }
-                        for (key, value) in row {
-                            rows.push(TableRow {
-                                key: key.clone(),
-                                value: value.clone(),
-                            });
-                        }
-                    }
+            if table_data.is_empty() {
+                // Fallback to numbered list
+                return Ok(print_numbered_list(items, capture_output));
+            }
 
-                    let table = Table::new(&rows);
-                    if capture_output {
-                        return Ok(Some(table.to_string()));
-                    }
-                    println!("{table}");
-                    return Ok(None);
+            // For now, use a simple key-value representation
+            // In the future, we could implement a more sophisticated table structure
+            let mut rows = Vec::new();
+            for (i, row) in table_data.iter().enumerate() {
+                if i > 0 {
+                    rows.push(TableRow {
+                        key: "---".to_string(),
+                        value: "---".to_string(),
+                    });
+                }
+                for (key, value) in row {
+                    rows.push(TableRow {
+                        key: key.clone(),
+                        value: value.clone(),
+                    });
                 }
             }
 
-            // Fallback: print array as numbered list
-            if capture_output {
-                let mut output = String::new();
-                for (i, item) in items.iter().enumerate() {
-                    writeln!(&mut output, "{}: {}", i, format_value_for_table(item)).unwrap();
-                }
-                return Ok(Some(output.trim_end().to_string()));
-            }
-            for (i, item) in items.iter().enumerate() {
-                println!("{}: {}", i, format_value_for_table(item));
-            }
+            let table = Table::new(&rows);
+            Ok(output_or_capture(&table.to_string(), capture_output))
         }
         Value::Object(obj) => {
             // Check if object has too many fields
             if obj.len() > MAX_TABLE_ROWS {
-                let msg1 = format!(
-                    "Object too large: {} fields (max {} for table display)",
+                let msg = format!(
+                    "Object too large: {} fields (max {} for table display)\nUse --format json or --jq to process the full data",
                     obj.len(),
                     MAX_TABLE_ROWS
                 );
-                let msg2 = "Use --format json or --jq to process the full data";
-
-                if capture_output {
-                    return Ok(Some(format!("{msg1}\n{msg2}")));
-                }
-                println!("{msg1}");
-                println!("{msg2}");
-                return Ok(None);
+                return Ok(output_or_capture(&msg, capture_output));
             }
 
             // Create a simple key-value table for objects
@@ -1139,22 +1224,14 @@ fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<Str
                 .collect();
 
             let table = Table::new(&rows);
-            if capture_output {
-                return Ok(Some(table.to_string()));
-            }
-            println!("{table}");
+            Ok(output_or_capture(&table.to_string(), capture_output))
         }
         _ => {
             // For primitive values, just print them
             let formatted = format_value_for_table(json_value);
-            if capture_output {
-                return Ok(Some(formatted));
-            }
-            println!("{formatted}");
+            Ok(output_or_capture(&formatted, capture_output))
         }
     }
-
-    Ok(None)
 }
 
 /// Formats a JSON value for display in a table cell
@@ -1265,22 +1342,23 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
         match results {
             Ok(vals) => {
                 if vals.is_empty() {
-                    Ok(constants::NULL_VALUE.to_string())
-                } else if vals.len() == 1 {
+                    return Ok(constants::NULL_VALUE.to_string());
+                }
+
+                if vals.len() == 1 {
                     // Single result - convert back to JSON
                     let json_val = serde_json::Value::from(vals[0].clone());
-                    serde_json::to_string_pretty(&json_val).map_err(|e| {
+                    return serde_json::to_string_pretty(&json_val).map_err(|e| {
                         Error::serialization_error(format!("Failed to serialize result: {e}"))
-                    })
-                } else {
-                    // Multiple results - return as JSON array
-                    let json_vals: Vec<Value> =
-                        vals.into_iter().map(serde_json::Value::from).collect();
-                    let array = Value::Array(json_vals);
-                    serde_json::to_string_pretty(&array).map_err(|e| {
-                        Error::serialization_error(format!("Failed to serialize results: {e}"))
-                    })
+                    });
                 }
+
+                // Multiple results - return as JSON array
+                let json_vals: Vec<Value> = vals.into_iter().map(serde_json::Value::from).collect();
+                let array = Value::Array(json_vals);
+                serde_json::to_string_pretty(&array).map_err(|e| {
+                    Error::serialization_error(format!("Failed to serialize results: {e}"))
+                })
             }
             Err(e) => Err(Error::jq_filter_error(
                 format!("{:?}", filter),
@@ -1310,11 +1388,14 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
         || filter.contains("length");
 
     if uses_advanced_features {
+        // ast-grep-ignore: no-println
         eprintln!(
             "{} Advanced JQ features require building with --features jq",
             crate::constants::MSG_WARNING_PREFIX
         );
+        // ast-grep-ignore: no-println
         eprintln!("         Currently only basic field access is supported (e.g., '.field', '.nested.field')");
+        // ast-grep-ignore: no-println
         eprintln!("         To enable full JQ support: cargo install aperture-cli --features jq");
     }
 
@@ -1386,19 +1467,18 @@ fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
         // Handle array index notation like [0]
         if part.starts_with('[') && part.ends_with(']') {
             let index_str = &part[1..part.len() - 1];
-            if let Ok(index) = index_str.parse::<usize>() {
-                match current {
-                    Value::Array(arr) => {
-                        if let Some(item) = arr.get(index) {
-                            current = item;
-                        } else {
-                            return Value::Null;
-                        }
-                    }
-                    _ => return Value::Null,
-                }
-            } else {
+            let Ok(index) = index_str.parse::<usize>() else {
                 return Value::Null;
+            };
+
+            match current {
+                Value::Array(arr) => {
+                    let Some(item) = arr.get(index) else {
+                        return Value::Null;
+                    };
+                    current = item;
+                }
+                _ => return Value::Null,
             }
             continue;
         }
@@ -1413,15 +1493,14 @@ fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
             }
             Value::Array(arr) => {
                 // Handle numeric string as array index
-                if let Ok(index) = part.parse::<usize>() {
-                    if let Some(item) = arr.get(index) {
-                        current = item;
-                    } else {
-                        return Value::Null;
-                    }
-                } else {
+                let Ok(index) = part.parse::<usize>() else {
                     return Value::Null;
-                }
+                };
+
+                let Some(item) = arr.get(index) else {
+                    return Value::Null;
+                };
+                current = item;
             }
             _ => return Value::Null,
         }

@@ -256,21 +256,20 @@ impl Error {
                 ("FileSystem", io_err.to_string(), context, None)
             }
             Self::Network(req_err) => {
-                let context = if req_err.is_connect() {
-                    Some(Cow::Borrowed(constants::ERR_CONNECTION))
-                } else if req_err.is_timeout() {
-                    Some(Cow::Borrowed(constants::ERR_TIMEOUT))
-                } else if req_err.is_status() {
-                    req_err.status().and_then(|status| match status.as_u16() {
-                        401 => Some(Cow::Borrowed(constants::ERR_API_CREDENTIALS)),
-                        403 => Some(Cow::Borrowed(constants::ERR_PERMISSION_DENIED)),
-                        404 => Some(Cow::Borrowed(constants::ERR_ENDPOINT_NOT_FOUND)),
-                        429 => Some(Cow::Borrowed(constants::ERR_RATE_LIMITED)),
-                        500..=599 => Some(Cow::Borrowed(constants::ERR_SERVER_ERROR)),
-                        _ => None,
-                    })
-                } else {
-                    None
+                let context = match () {
+                    () if req_err.is_connect() => Some(Cow::Borrowed(constants::ERR_CONNECTION)),
+                    () if req_err.is_timeout() => Some(Cow::Borrowed(constants::ERR_TIMEOUT)),
+                    () if req_err.is_status() => {
+                        req_err.status().and_then(|status| match status.as_u16() {
+                            401 => Some(Cow::Borrowed(constants::ERR_API_CREDENTIALS)),
+                            403 => Some(Cow::Borrowed(constants::ERR_PERMISSION_DENIED)),
+                            404 => Some(Cow::Borrowed(constants::ERR_ENDPOINT_NOT_FOUND)),
+                            429 => Some(Cow::Borrowed(constants::ERR_RATE_LIMITED)),
+                            500..=599 => Some(Cow::Borrowed(constants::ERR_SERVER_ERROR)),
+                            _ => None,
+                        })
+                    }
+                    () => None,
                 };
                 ("Network", req_err.to_string(), context, None)
             }
