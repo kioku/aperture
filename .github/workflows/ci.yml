@@ -9,6 +9,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Override target-cpu=native from .cargo/config.toml to prevent SIGILL
+  # when cached artifacts are used on runners with different CPU features
+  CARGO_BUILD_RUSTFLAGS: ""
 
 jobs:
   unit-tests:
