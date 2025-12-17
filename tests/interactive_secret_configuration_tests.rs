@@ -10,7 +10,7 @@ use tempfile::TempDir;
 #[test]
 fn test_interactive_mode_flag_exists() {
     let mut cmd = aperture_cmd();
-    cmd.args(&["config", "set-secret", "--help"])
+    cmd.args(["config", "set-secret", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("--interactive"))
@@ -24,7 +24,7 @@ fn test_interactive_mode_conflicts_with_direct_mode() {
 
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-secret",
             "test-api",
@@ -47,7 +47,7 @@ fn test_interactive_mode_with_nonexistent_api() {
 
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "set-secret", "nonexistent-api", "--interactive"])
+        .args(["config", "set-secret", "nonexistent-api", "--interactive"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -61,7 +61,7 @@ fn test_interactive_mode_with_api_without_security_schemes() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Create a simple OpenAPI spec without security schemes
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -74,7 +74,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -82,7 +82,7 @@ servers:
     // Add the spec first
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "test-api",
@@ -94,7 +94,7 @@ servers:
     // Try interactive mode - should handle gracefully and exit successfully
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "set-secret", "test-api", "--interactive"])
+        .args(["config", "set-secret", "test-api", "--interactive"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -105,7 +105,7 @@ servers:
 #[test]
 fn test_help_text_describes_interactive_workflow() {
     let mut cmd = aperture_cmd();
-    cmd.args(&["config", "set-secret", "--help"])
+    cmd.args(["config", "set-secret", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Configure secrets interactively"))
@@ -122,7 +122,7 @@ fn test_validation_requires_either_direct_or_interactive_mode() {
     // Test missing both modes
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "set-secret", "test-api", "bearerAuth"])
+        .args(["config", "set-secret", "test-api", "bearerAuth"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -136,7 +136,7 @@ fn test_direct_mode_still_works_alongside_interactive_option() {
     let config_dir = temp_dir.path().join(".config").join("aperture");
 
     // Create a simple OpenAPI spec with security schemes
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -156,7 +156,7 @@ paths:
           description: Success
 servers:
   - url: https://api.example.com
-"#;
+";
 
     let spec_file = temp_dir.path().join("test-spec.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -164,7 +164,7 @@ servers:
     // Add the spec first
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "add",
             "test-api",
@@ -176,7 +176,7 @@ servers:
     // Test direct mode still works
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&[
+        .args([
             "config",
             "set-secret",
             "test-api",
@@ -193,7 +193,7 @@ servers:
     // Verify it was set
     let mut cmd = aperture_cmd();
     cmd.env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
-        .args(&["config", "list-secrets", "test-api"])
+        .args(["config", "list-secrets", "test-api"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -204,7 +204,7 @@ servers:
 #[test]
 fn test_cli_help_shows_both_modes() {
     let mut cmd = aperture_cmd();
-    cmd.args(&["config", "set-secret", "--help"])
+    cmd.args(["config", "set-secret", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Examples:"))

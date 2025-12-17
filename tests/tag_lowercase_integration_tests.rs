@@ -4,7 +4,6 @@ mod common;
 
 use common::aperture_cmd;
 use predicates::prelude::*;
-use serde_json;
 use std::fs;
 use tempfile::TempDir;
 
@@ -15,7 +14,7 @@ fn test_uppercase_tag_conversion() {
     let spec_file = temp_dir.path().join("uppercase-tags.yaml");
 
     // Create OpenAPI spec with uppercase tags
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Test API
   version: 1.0.0
@@ -46,7 +45,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -114,7 +113,7 @@ fn test_unicode_tag_names() {
     let spec_file = temp_dir.path().join("unicode-tags.yaml");
 
     // Create OpenAPI spec with Unicode tags
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Unicode Test API
   version: 1.0.0
@@ -137,7 +136,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -185,7 +184,7 @@ fn test_operation_names_with_spaces_in_tags() {
     let spec_file = temp_dir.path().join("spaces-tags.yaml");
 
     // Create OpenAPI spec with operation IDs containing spaces
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Spaces Test API
   version: 1.0.0
@@ -208,7 +207,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -256,7 +255,7 @@ fn test_describe_json_tag_consistency() {
     let spec_file = temp_dir.path().join("consistency-test.yaml");
 
     // Create OpenAPI spec with uppercase tags
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Consistency Test API
   version: 1.0.0
@@ -279,7 +278,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -353,7 +352,7 @@ fn test_tag_case_insensitive_cli() {
     let spec_file = temp_dir.path().join("case-test.yaml");
 
     // Create OpenAPI spec with various case tags
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Case Test API
   version: 1.0.0
@@ -376,7 +375,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 

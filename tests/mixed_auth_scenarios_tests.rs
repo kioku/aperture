@@ -1,3 +1,10 @@
+// These lints are overly pedantic for test code
+#![allow(clippy::default_trait_access)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::significant_drop_tightening)]
+
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::error::Error;
 use aperture_cli::fs::FileSystem;
@@ -13,7 +20,14 @@ pub struct MockFileSystem {
     dirs: Arc<Mutex<HashMap<PathBuf, bool>>>,
 }
 
+impl Default for MockFileSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockFileSystem {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             files: Arc::new(Mutex::new(HashMap::new())),
@@ -144,7 +158,7 @@ fn test_spec_with_mixed_auth_non_strict() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with both supported and unsupported auth schemes
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Mixed Auth API
@@ -206,7 +220,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = PathBuf::from("/tmp/mixed-auth.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -216,8 +230,7 @@ paths:
     let result = manager.add_spec("mixed-auth", &spec_path, false, false);
     assert!(
         result.is_ok(),
-        "Expected success in non-strict mode, got: {:?}",
-        result
+        "Expected success in non-strict mode, got: {result:?}"
     );
 
     // Check that the spec was cached
@@ -269,7 +282,7 @@ fn test_spec_with_mixed_auth_strict() {
     let (manager, fs) = setup_manager();
 
     // Same spec as above
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Mixed Auth API
@@ -298,7 +311,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = PathBuf::from("/tmp/mixed-auth-strict.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -316,11 +329,10 @@ paths:
     {
         assert!(
             msg.contains("OAuth2") || msg.contains("unsupported authentication"),
-            "Expected OAuth2 error, got: {}",
-            msg
+            "Expected OAuth2 error, got: {msg}"
         );
     } else {
-        panic!("Expected Validation error, got: {:?}", result);
+        panic!("Expected Validation error, got: {result:?}");
     }
 }
 
@@ -329,7 +341,7 @@ fn test_operation_with_empty_security_array() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with operations having empty security arrays
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Empty Security API
@@ -363,7 +375,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = PathBuf::from("/tmp/empty-security.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -373,8 +385,7 @@ paths:
     let result = manager.add_spec("empty-security", &spec_path, false, false);
     assert!(
         result.is_ok(),
-        "Expected success in non-strict mode, got: {:?}",
-        result
+        "Expected success in non-strict mode, got: {result:?}"
     );
 
     // Check cached spec
@@ -410,7 +421,7 @@ fn test_invalid_env_var_characters_in_auth() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with basic auth for testing environment variables
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Env Var Test API
@@ -440,7 +451,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = PathBuf::from("/tmp/env-var-test.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -461,11 +472,10 @@ paths:
     {
         assert!(
             msg.contains("Invalid environment variable name"),
-            "Expected invalid env var error, got: {}",
-            msg
+            "Expected invalid env var error, got: {msg}"
         );
     } else {
-        panic!("Expected Validation error, got: {:?}", result);
+        panic!("Expected Validation error, got: {result:?}");
     }
 }
 
@@ -474,7 +484,7 @@ fn test_global_security_with_unsupported_auth() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with global security using unsupported auth
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Global Auth API
@@ -520,7 +530,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = PathBuf::from("/tmp/global-auth.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -530,8 +540,7 @@ paths:
     let result = manager.add_spec("global-auth", &spec_path, false, false);
     assert!(
         result.is_ok(),
-        "Expected success in non-strict mode, got: {:?}",
-        result
+        "Expected success in non-strict mode, got: {result:?}"
     );
 
     // Load the cached spec
@@ -581,7 +590,7 @@ fn test_negotiate_scheme_in_http() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with negotiate HTTP scheme alongside bearer
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Negotiate Auth API
@@ -617,7 +626,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = PathBuf::from("/tmp/negotiate-auth.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -627,8 +636,7 @@ paths:
     let result = manager.add_spec("negotiate-auth", &spec_path, false, false);
     assert!(
         result.is_ok(),
-        "Expected success in non-strict mode, got: {:?}",
-        result
+        "Expected success in non-strict mode, got: {result:?}"
     );
 
     // Load the cached spec
@@ -662,7 +670,7 @@ fn test_openid_connect_scheme() {
     let (manager, fs) = setup_manager();
 
     // Create a spec with OpenID Connect
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: OIDC API
@@ -683,7 +691,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = PathBuf::from("/tmp/oidc-auth.yaml");
     fs.write_all(&spec_path, spec_content.as_bytes())
@@ -693,8 +701,7 @@ paths:
     let result = manager.add_spec("oidc-auth", &spec_path, false, false);
     assert!(
         result.is_ok(),
-        "Expected success in non-strict mode, got: {:?}",
-        result
+        "Expected success in non-strict mode, got: {result:?}"
     );
 
     // Load the cached spec

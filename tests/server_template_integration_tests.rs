@@ -65,14 +65,14 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "test-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Try to execute without providing server variable - should fail with invalid enum value
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&["api", "test-api", "test", "test"])
+        .args(["api", "test-api", "test", "test"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
@@ -86,7 +86,7 @@ fn test_server_url_template_with_defaults_and_override() {
     let (_temp_dir, home_dir) = setup_test_env();
 
     // Create a spec with server URL template with default values
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Regional API
@@ -106,7 +106,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = home_dir.path().join("regional.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -114,14 +114,14 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&["config", "add", "regional", spec_file.to_str().unwrap()])
+        .args(["config", "add", "regional", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Should work with default values using dry-run to avoid network calls
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&["--dry-run", "api", "regional", "health", "get-status"])
+        .args(["--dry-run", "api", "regional", "health", "get-status"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -131,7 +131,7 @@ paths:
     // Should work with explicit server variable
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&[
+        .args([
             "--dry-run",
             "api",
             "regional",
@@ -149,7 +149,7 @@ paths:
     // Test with config override
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&[
+        .args([
             "config",
             "set-url",
             "regional",
@@ -161,7 +161,7 @@ paths:
     // Config override should take precedence (non-template URL)
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&["--dry-run", "api", "regional", "health", "get-status"])
+        .args(["--dry-run", "api", "regional", "health", "get-status"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -174,7 +174,7 @@ fn test_multiple_server_url_template_variables() {
     let (_temp_dir, home_dir) = setup_test_env();
 
     // Create a spec with multiple template variables
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Multi-Region API
@@ -197,7 +197,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = home_dir.path().join("multi.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -205,14 +205,14 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&["config", "add", "multi", spec_file.to_str().unwrap()])
+        .args(["config", "add", "multi", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Should work with default values
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&["--dry-run", "api", "multi", "health", "ping"])
+        .args(["--dry-run", "api", "multi", "health", "ping"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -222,7 +222,7 @@ paths:
     // Should work with explicit server variables
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&[
+        .args([
             "--dry-run",
             "api",
             "multi",
@@ -242,7 +242,7 @@ paths:
     // Should fail with invalid enum value
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(&[
+        .args([
             "api",
             "multi",
             "health",

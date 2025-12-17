@@ -635,6 +635,9 @@ impl Default for SpecValidator {
 }
 
 #[cfg(test)]
+#[allow(clippy::default_trait_access)]
+#[allow(clippy::field_reassign_with_default)]
+#[allow(clippy::too_many_lines)]
 mod tests {
     use super::*;
     use openapiv3::{
@@ -1060,7 +1063,7 @@ mod tests {
 
         for scheme in custom_schemes {
             components.security_schemes.insert(
-                format!("{}_auth", scheme),
+                format!("{scheme}_auth"),
                 ReferenceOr::Item(SecurityScheme::HTTP {
                     scheme: scheme.to_string(),
                     bearer_format: None,

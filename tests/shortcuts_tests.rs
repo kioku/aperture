@@ -1,3 +1,8 @@
+// These lints are overly pedantic for test code
+#![allow(clippy::needless_collect)]
+#![allow(clippy::match_same_arms)]
+#![allow(clippy::equatable_if_let)]
+
 use aperture_cli::cache::models::{CachedCommand, CachedSpec};
 use aperture_cli::shortcuts::{ResolutionResult, ShortcutResolver};
 use std::collections::{BTreeMap, HashMap};
@@ -211,13 +216,10 @@ fn test_not_found() {
     resolver.index_specs(&specs);
 
     // Test completely unrelated term
-    match resolver.resolve_shortcut(&["nonexistent".to_string()]) {
-        ResolutionResult::NotFound => {
-            // Expected
-        }
-        _ => {
-            // Fuzzy matching might still find something, which is okay
-        }
+    if let ResolutionResult::NotFound = resolver.resolve_shortcut(&["nonexistent".to_string()]) {
+        // Expected
+    } else {
+        // Fuzzy matching might still find something, which is okay
     }
 }
 

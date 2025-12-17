@@ -2,7 +2,7 @@
 ///
 /// This test ensures that the executor can properly handle the --show-examples flag
 /// by actually executing a command (not just parsing arguments). This catches bugs
-/// like incorrect Clap API usage or wrong ArgMatches level being passed to executor.
+/// like incorrect Clap API usage or wrong `ArgMatches` level being passed to executor.
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedSpec, CACHE_FORMAT_VERSION,
 };

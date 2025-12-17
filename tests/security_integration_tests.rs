@@ -271,7 +271,7 @@ async fn test_missing_authentication_environment_variable() {
         Ok(_) => panic!("Expected error but got success"),
         Err(e) => {
             let error_msg = e.to_string();
-            assert!(error_msg.contains(&format!("Environment variable '{}'", bearer_env)));
+            assert!(error_msg.contains(&format!("Environment variable '{bearer_env}'")));
             assert!(error_msg.contains("is not set"));
         }
     }
@@ -376,9 +376,9 @@ async fn test_custom_headers_with_environment_variable_expansion() {
         "public",
         "get-public-data",
         "--header",
-        &format!("X-Request-ID: ${{{}}}", request_id_env),
+        &format!("X-Request-ID: ${{{request_id_env}}}"),
         "-H",
-        &format!("X-Client-Version: ${{{}}}", client_version_env),
+        &format!("X-Client-Version: ${{{client_version_env}}}"),
     ]);
 
     let result = execute_request(
@@ -447,7 +447,7 @@ async fn test_authentication_and_custom_headers_combined() {
         "get-user-by-id",
         "999",
         "--header",
-        &format!("X-Trace-ID: ${{{}}}", trace_id_env),
+        &format!("X-Trace-ID: ${{{trace_id_env}}}"),
         "-H",
         "X-Custom: custom-value",
     ]);

@@ -1,3 +1,11 @@
+// These lints are overly pedantic for test code
+#![allow(clippy::default_trait_access)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::used_underscore_binding)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::significant_drop_tightening)]
+
 use aperture_cli::config::manager::{is_url, ConfigManager};
 use aperture_cli::error::{Error, ErrorKind};
 use aperture_cli::fs::FileSystem;
@@ -15,7 +23,14 @@ pub struct MockFileSystem {
     io_error_on_write: Arc<Mutex<bool>>,
 }
 
+impl Default for MockFileSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockFileSystem {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             files: Arc::new(Mutex::new(HashMap::new())),
@@ -48,6 +63,7 @@ impl MockFileSystem {
         self.dirs.lock().unwrap().insert(path.to_path_buf(), true);
     }
 
+    #[must_use]
     pub fn get_file_content(&self, path: &Path) -> Option<String> {
         self.files
             .lock()
@@ -60,10 +76,7 @@ impl MockFileSystem {
 impl FileSystem for MockFileSystem {
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
         if *self.io_error_on_read.lock().unwrap() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Mock I/O error on read",
-            ));
+            return Err(io::Error::other("Mock I/O error on read"));
         }
         self.files
             .lock()
@@ -75,10 +88,7 @@ impl FileSystem for MockFileSystem {
 
     fn write_all(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         if *self.io_error_on_write.lock().unwrap() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Mock I/O error on write",
-            ));
+            return Err(io::Error::other("Mock I/O error on write"));
         }
         self.files
             .lock()
@@ -94,10 +104,7 @@ impl FileSystem for MockFileSystem {
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         if *self.io_error_on_write.lock().unwrap() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Mock I/O error on write",
-            ));
+            return Err(io::Error::other("Mock I/O error on write"));
         }
         self.files
             .lock()
@@ -164,8 +171,8 @@ fn setup_manager() -> (ConfigManager<MockFileSystem>, MockFileSystem) {
     (manager, fs)
 }
 
-fn create_minimal_spec() -> &'static str {
-    r#"
+const fn create_minimal_spec() -> &'static str {
+    r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -176,20 +183,20 @@ paths:
       responses:
         '200':
           description: Success
-"#
+"
 }
 
 #[test]
 fn test_add_spec_new() {
     let (manager, fs) = setup_manager();
     let spec_name = "my-new-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: My New API
   version: 1.0.0
 paths: {}
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/new_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -207,13 +214,13 @@ paths: {}
 fn test_add_spec_exists_no_force() {
     let (manager, fs) = setup_manager();
     let spec_name = "existing-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Existing API
   version: 1.0.0
 paths: {}
-"#;
+";
     let existing_spec_path = PathBuf::from(TEST_CONFIG_DIR)
         .join("specs")
         .join("existing-api.yaml");
@@ -237,7 +244,7 @@ paths: {}
             let Some(details) = &ctx.details else { return };
             assert_eq!(details["spec_name"], spec_name);
         }
-        _ => panic!("Unexpected error type: {:?}", result),
+        _ => panic!("Unexpected error type: {result:?}"),
     }
     // Ensure content was not overwritten
     assert_eq!(
@@ -250,25 +257,25 @@ paths: {}
 fn test_add_spec_exists_with_force() {
     let (manager, fs) = setup_manager();
     let spec_name = "existing-api";
-    let original_content = r#"
+    let original_content = r"
 openapi: 3.0.0
 info:
   title: Existing API
   version: 1.0.0
 paths: {}
-"#;
+";
     let existing_spec_path = PathBuf::from(TEST_CONFIG_DIR)
         .join("specs")
         .join("existing-api.yaml");
     fs.add_file(&existing_spec_path, original_content);
 
-    let updated_content = r#"
+    let updated_content = r"
 openapi: 3.0.0
 info:
   title: Updated API
   version: 2.0.0
 paths: {}
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/updated_api.yaml");
     fs.add_file(&temp_spec_path, updated_content);
 
@@ -294,7 +301,7 @@ fn test_add_spec_invalid_openapi() {
     if let Err(Error::Yaml(err)) = result {
         assert!(err.to_string().contains("invalid type: string"));
     } else {
-        panic!("Unexpected error type: {:?}", result);
+        panic!("Unexpected error type: {result:?}");
     }
 }
 
@@ -311,7 +318,7 @@ fn test_add_spec_io_error_on_read() {
     if let Err(Error::Io(err)) = result {
         assert!(err.to_string().contains("Mock I/O error on read"));
     } else {
-        panic!("Unexpected error type: {:?}", result);
+        panic!("Unexpected error type: {result:?}");
     }
 }
 
@@ -319,13 +326,13 @@ fn test_add_spec_io_error_on_read() {
 fn test_add_spec_io_error_on_write() {
     let (manager, fs) = setup_manager();
     let spec_name = "io-error-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: My New API
   version: 1.0.0
 paths: {}
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/io_error_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
     fs.set_io_error_on_write(true);
@@ -335,7 +342,7 @@ paths: {}
     if let Err(Error::Io(err)) = result {
         assert!(err.to_string().contains("Mock I/O error on write"));
     } else {
-        panic!("Unexpected error type: {:?}", result);
+        panic!("Unexpected error type: {result:?}");
     }
 }
 
@@ -366,7 +373,7 @@ fn test_list_specs_no_specs_dir() {
     let fs = MockFileSystem::new();
     let config_dir = PathBuf::from(TEST_CONFIG_DIR);
     // Do not add specs directory
-    let manager = ConfigManager::with_fs(fs.clone(), config_dir);
+    let manager = ConfigManager::with_fs(fs, config_dir);
 
     let specs = manager.list_specs().unwrap();
     assert!(specs.is_empty());
@@ -411,7 +418,7 @@ fn test_remove_spec_not_found() {
             let Some(details) = &ctx.details else { return };
             assert_eq!(details["spec_name"], spec_name);
         }
-        _ => panic!("Unexpected error type: {:?}", result),
+        _ => panic!("Unexpected error type: {result:?}"),
     }
 }
 
@@ -430,7 +437,7 @@ fn test_remove_spec_io_error() {
     if let Err(Error::Io(err)) = result {
         assert!(err.to_string().contains("Mock I/O error on write"));
     } else {
-        panic!("Unexpected error type: {:?}", result);
+        panic!("Unexpected error type: {result:?}");
     }
 }
 
@@ -440,7 +447,7 @@ fn test_remove_spec_io_error() {
 fn test_add_spec_with_valid_api_key_security() {
     let (manager, fs) = setup_manager();
     let spec_name = "api-key-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: API Key API
@@ -461,7 +468,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/api_key_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -484,7 +491,7 @@ paths:
 fn test_add_spec_with_valid_bearer_token_security() {
     let (manager, fs) = setup_manager();
     let spec_name = "bearer-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Bearer Token API
@@ -510,7 +517,7 @@ paths:
       responses:
         '201':
           description: Created
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/bearer_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -522,7 +529,7 @@ paths:
 fn test_add_spec_rejects_oauth2_security() {
     let (manager, fs) = setup_manager();
     let spec_name = "oauth2-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: OAuth2 API
@@ -544,7 +551,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/oauth2_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -561,11 +568,10 @@ paths:
             msg.contains("oauth2")
                 || msg.contains("OAuth2")
                 || msg.contains("unsupported authentication"),
-            "Got validation message: {}",
-            msg
+            "Got validation message: {msg}"
         );
     } else {
-        panic!("Unexpected error type: {:?}", result);
+        panic!("Unexpected error type: {result:?}");
     }
 }
 
@@ -573,7 +579,7 @@ paths:
 fn test_add_spec_rejects_openid_connect_security() {
     let (manager, fs) = setup_manager();
     let spec_name = "openid-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: OpenID Connect API
@@ -590,7 +596,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/openid_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -607,11 +613,10 @@ paths:
             msg.contains("OpenID Connect")
                 || msg.contains("openidconnect")
                 || msg.contains("unsupported authentication"),
-            "Got validation message: {}",
-            msg
+            "Got validation message: {msg}"
         );
     } else {
-        panic!("Unexpected error type: {:?}", result);
+        panic!("Unexpected error type: {result:?}");
     }
 }
 
@@ -619,7 +624,7 @@ paths:
 fn test_add_spec_rejects_unsupported_http_scheme() {
     let (manager, fs) = setup_manager();
     let spec_name = "negotiate-auth-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Negotiate Auth API
@@ -636,7 +641,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/negotiate_auth_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -651,7 +656,7 @@ paths:
         assert!(msg.contains("HTTP scheme 'negotiate'"));
         assert!(msg.contains("requires complex authentication flows"));
     } else {
-        panic!("Unexpected error type: {:?}", result);
+        panic!("Unexpected error type: {result:?}");
     }
 }
 
@@ -659,7 +664,7 @@ paths:
 fn test_add_spec_rejects_unsupported_request_body_content_type() {
     let (manager, fs) = setup_manager();
     let spec_name = "xml-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: XML API
@@ -677,7 +682,7 @@ paths:
       responses:
         '201':
           description: Created
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/xml_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -692,7 +697,7 @@ paths:
         assert!(msg.contains("Unsupported request body content type 'application/xml'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
-        panic!("Unexpected error type: {:?}", result);
+        panic!("Unexpected error type: {result:?}");
     }
 }
 
@@ -700,7 +705,7 @@ paths:
 fn test_add_spec_requires_json_content_type() {
     let (manager, fs) = setup_manager();
     let spec_name = "no-json-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: No JSON API
@@ -718,7 +723,7 @@ paths:
       responses:
         '201':
           description: Created
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/no_json_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -733,7 +738,7 @@ paths:
         assert!(msg.contains("Unsupported request body content type 'text/plain'"));
         assert!(msg.contains("Only 'application/json' is supported"));
     } else {
-        panic!("Unexpected error type: {:?}", result);
+        panic!("Unexpected error type: {result:?}");
     }
 }
 
@@ -741,7 +746,7 @@ paths:
 fn test_add_spec_caching_creates_correct_structure() {
     let (manager, fs) = setup_manager();
     let spec_name = "caching-test-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Caching Test API
@@ -775,7 +780,7 @@ paths:
           description: Success
         '404':
           description: Not found
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/caching_test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -824,7 +829,7 @@ paths:
 fn test_add_spec_operation_id_fallback_to_method() {
     let (manager, fs) = setup_manager();
     let spec_name = "no-operation-id-api";
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: No Operation ID API
@@ -836,7 +841,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/no_operation_id_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
@@ -938,7 +943,7 @@ fn test_get_url_returns_config() {
     let spec_name = "test-api";
 
     // First add a spec with base URL
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -951,7 +956,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
     let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
     manager
@@ -1061,7 +1066,7 @@ fn test_url_detection_file_paths() {
 async fn test_remote_spec_fetching_success() {
     // Test successful remote spec fetching with valid OpenAPI
     let mock_server = wiremock::MockServer::start().await;
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Remote API
@@ -1073,7 +1078,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/openapi.yaml"))
@@ -1135,7 +1140,7 @@ async fn test_remote_spec_fetching_timeout() {
         }) => {
             assert!(message.contains("timed out"));
         }
-        _ => panic!("Expected Network error with timeout, got: {:?}", result),
+        _ => panic!("Expected Network error with timeout, got: {result:?}"),
     }
 }
 
@@ -1169,7 +1174,7 @@ async fn test_remote_spec_fetching_size_limit() {
         }) => {
             assert!(message.contains("too large"));
         }
-        _ => panic!("Expected Network error for size limit, got: {:?}", result),
+        _ => panic!("Expected Network error for size limit, got: {result:?}"),
     }
 }
 
@@ -1196,7 +1201,7 @@ async fn test_remote_spec_fetching_invalid_url() {
         }) => {
             assert!(message.contains("Failed to connect") || message.contains("Network error"));
         }
-        _ => panic!("Expected Network error for invalid URL, got: {:?}", result),
+        _ => panic!("Expected Network error for invalid URL, got: {result:?}"),
     }
 }
 
@@ -1227,10 +1232,7 @@ async fn test_remote_spec_fetching_http_error() {
         }) => {
             assert!(message.contains("404"));
         }
-        _ => panic!(
-            "Expected RequestFailed error for HTTP 404, got: {:?}",
-            result
-        ),
+        _ => panic!("Expected RequestFailed error for HTTP 404, got: {result:?}"),
     }
 }
 
@@ -1265,7 +1267,7 @@ async fn test_remote_spec_same_validation_as_local() {
     let mock_server = wiremock::MockServer::start().await;
 
     // Spec with unsupported OAuth2 (should be rejected)
-    let invalid_spec = r#"
+    let invalid_spec = r"
 openapi: 3.0.0
 info:
   title: OAuth2 API
@@ -1287,7 +1289,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     wiremock::Mock::given(wiremock::matchers::method("GET"))
         .and(wiremock::matchers::path("/oauth2-spec.yaml"))
@@ -1312,10 +1314,9 @@ paths:
         // Check for any OAuth2-related validation error
         assert!(
             msg.contains("oauth2") || msg.contains("OAuth2"),
-            "Got validation message: {}",
-            msg
+            "Got validation message: {msg}"
         );
     } else {
-        panic!("Expected Validation error for OAuth2, got: {:?}", result);
+        panic!("Expected Validation error for OAuth2, got: {result:?}");
     }
 }

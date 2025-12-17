@@ -1,4 +1,6 @@
 #![cfg(feature = "integration")]
+// These lints are overly pedantic for integration tests
+#![allow(clippy::too_many_lines)]
 
 mod common;
 
@@ -22,7 +24,7 @@ async fn test_custom_http_scheme_token_execution() {
 
     // Create OpenAPI spec with Token auth scheme
     let spec_content = format!(
-        r#"
+        r"
 openapi: 3.0.0
 info:
   title: Token Auth Test API
@@ -50,7 +52,7 @@ paths:
             application/json:
               schema:
                 type: object
-"#,
+",
         mock_server.uri()
     );
 
@@ -60,7 +62,7 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&["config", "add", "token-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "token-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
@@ -80,7 +82,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("TEST_TOKEN", "test-token-123")
-        .args(&["api", "token-api", "default", "get-protected"])
+        .args(["api", "token-api", "default", "get-protected"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"status\": \"success\""));
@@ -93,7 +95,7 @@ async fn test_custom_http_scheme_dsn_execution() {
 
     // Create OpenAPI spec with DSN auth scheme
     let spec_content = format!(
-        r#"
+        r"
 openapi: 3.0.0
 info:
   title: DSN Auth Test API
@@ -123,7 +125,7 @@ paths:
       responses:
         '200':
           description: Event accepted
-"#,
+",
         mock_server.uri()
     );
 
@@ -133,7 +135,7 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&["config", "add", "dsn-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "dsn-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
@@ -153,7 +155,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("SENTRY_DSN", "https://key@sentry.io/123")
-        .args(&[
+        .args([
             "api",
             "dsn-api",
             "default",
@@ -173,7 +175,7 @@ async fn test_custom_http_scheme_proprietary() {
 
     // Create OpenAPI spec with completely custom auth scheme
     let spec_content = format!(
-        r#"
+        r"
 openapi: 3.0.0
 info:
   title: Custom Auth Test API
@@ -197,7 +199,7 @@ paths:
       responses:
         '200':
           description: Success
-"#,
+",
         mock_server.uri()
     );
 
@@ -207,7 +209,7 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&["config", "add", "custom-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "custom-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
@@ -227,7 +229,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("CUSTOM_AUTH_KEY", "secret-key-789")
-        .args(&["api", "custom-api", "default", "get-data"])
+        .args(["api", "custom-api", "default", "get-data"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"data\": \"test\""));
@@ -238,7 +240,7 @@ async fn test_dry_run_shows_custom_auth_header() {
     let (temp_dir, config_dir) = setup_test_env();
 
     // Create OpenAPI spec with Token auth
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Token Auth Dry Run Test
@@ -262,7 +264,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = temp_dir.path().join("dry-run-api.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -270,7 +272,7 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&["config", "add", "dry-run-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "dry-run-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
@@ -278,7 +280,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "my-token-value")
-        .args(&["api", "--dry-run", "dry-run-api", "default", "get-users"])
+        .args(["api", "--dry-run", "dry-run-api", "default", "get-users"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -297,7 +299,7 @@ async fn test_basic_auth_base64_encoding() {
 
     // Create OpenAPI spec with Basic auth
     let spec_content = format!(
-        r#"
+        r"
 openapi: 3.0.0
 info:
   title: Basic Auth Test API
@@ -321,7 +323,7 @@ paths:
       responses:
         '200':
           description: Success
-"#,
+",
         mock_server.uri()
     );
 
@@ -331,7 +333,7 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&["config", "add", "basic-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "basic-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
@@ -352,7 +354,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("BASIC_CREDS", "testuser:testpass")
-        .args(&["api", "basic-api", "default", "get-secure"])
+        .args(["api", "basic-api", "default", "get-secure"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"status\": \"authenticated\""));
@@ -363,7 +365,7 @@ async fn test_header_injection_protection() {
     let (temp_dir, config_dir) = setup_test_env();
 
     // Create a simple OpenAPI spec
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Header Injection Test API
@@ -393,7 +395,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = temp_dir.path().join("injection-api.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -401,7 +403,7 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&[
+        .args([
             "config",
             "add",
             "injection-api",
@@ -414,7 +416,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "valid-token")
-        .args(&[
+        .args([
             "api",
             "injection-api",
             "default",
@@ -430,7 +432,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "valid-token")
-        .args(&[
+        .args([
             "api",
             "injection-api",
             "default",
@@ -446,7 +448,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "valid-token")
-        .args(&[
+        .args([
             "api",
             "--dry-run",
             "injection-api",
@@ -464,7 +466,7 @@ paths:
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_TOKEN", "valid-token")
         .env("MALICIOUS_VAR", "value\nX-Injected: bad")
-        .args(&[
+        .args([
             "api",
             "injection-api",
             "default",
@@ -482,7 +484,7 @@ async fn test_auth_token_injection_protection() {
     let (temp_dir, config_dir) = setup_test_env();
 
     // Create OpenAPI spec
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.0
 info:
   title: Token Injection Test API
@@ -506,7 +508,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = temp_dir.path().join("token-injection-api.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -514,7 +516,7 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&[
+        .args([
             "config",
             "add",
             "token-injection-api",
@@ -527,7 +529,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("BEARER_TOKEN", "token\nX-Injected: malicious")
-        .args(&["api", "token-injection-api", "default", "get-protected"])
+        .args(["api", "token-injection-api", "default", "get-protected"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid control characters"));
@@ -536,7 +538,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("BEARER_TOKEN", "token\rmalicious")
-        .args(&["api", "token-injection-api", "default", "get-protected"])
+        .args(["api", "token-injection-api", "default", "get-protected"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid control characters"));
@@ -547,7 +549,7 @@ async fn test_dry_run_redacts_bearer_auth_header() {
     let (temp_dir, config_dir) = setup_test_env();
 
     // Create a spec with Bearer authentication
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.3
 info:
   title: Bearer Auth API
@@ -571,7 +573,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = temp_dir.path().join("bearer-api.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -579,7 +581,7 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&["config", "add", "bearer-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "bearer-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
@@ -587,7 +589,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("BEARER_TOKEN", "super-secret-bearer-token")
-        .args(&["api", "--dry-run", "bearer-api", "default", "get-protected"])
+        .args(["api", "--dry-run", "bearer-api", "default", "get-protected"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -601,7 +603,7 @@ async fn test_dry_run_redacts_api_key_headers() {
     let (temp_dir, config_dir) = setup_test_env();
 
     // Create a spec with API Key authentication in header
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.3
 info:
   title: API Key Auth API
@@ -626,7 +628,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = temp_dir.path().join("api-key-api.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -634,7 +636,7 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&["config", "add", "api-key-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "api-key-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
@@ -642,7 +644,7 @@ paths:
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .env("API_KEY", "my-secret-api-key-12345")
-        .args(&["api", "--dry-run", "api-key-api", "default", "get-data"])
+        .args(["api", "--dry-run", "api-key-api", "default", "get-data"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"x-api-key\": \"<REDACTED>\""))
@@ -654,7 +656,7 @@ async fn test_dry_run_shows_non_sensitive_headers() {
     let (temp_dir, config_dir) = setup_test_env();
 
     // Create a simple spec without auth to test non-sensitive headers
-    let spec_content = r#"
+    let spec_content = r"
 openapi: 3.0.3
 info:
   title: Simple API
@@ -668,7 +670,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_file = temp_dir.path().join("simple-api.yaml");
     fs::write(&spec_file, spec_content).unwrap();
@@ -676,14 +678,14 @@ paths:
     // Add the spec
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&["config", "add", "simple-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", "simple-api", spec_file.to_str().unwrap()])
         .assert()
         .success();
 
     // Run with --dry-run and verify non-sensitive headers are shown
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config_dir)
-        .args(&["api", "--dry-run", "simple-api", "default", "get-users"])
+        .args(["api", "--dry-run", "simple-api", "default", "get-users"])
         .assert()
         .success()
         .stdout(predicate::str::contains(

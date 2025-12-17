@@ -4,7 +4,6 @@ mod common;
 
 use common::aperture_cmd;
 use predicates::prelude::*;
-use serde_json;
 use std::fs;
 use tempfile::TempDir;
 
@@ -15,7 +14,7 @@ fn test_tags_with_spaces_converted_to_kebab_case() {
     let spec_file = temp_dir.path().join("spaces-tags.yaml");
 
     // Create OpenAPI spec with tags containing spaces
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: OpenProject-like API
   version: 1.0.0
@@ -60,7 +59,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -121,7 +120,7 @@ fn test_tags_with_spaces_in_describe_json() {
     let spec_file = temp_dir.path().join("spaces-tags.yaml");
 
     // Create OpenAPI spec with tags containing spaces
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Test API
   version: 1.0.0
@@ -144,7 +143,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -247,7 +246,7 @@ fn test_mixed_case_tags_with_spaces() {
     let spec_file = temp_dir.path().join("mixed-tags.yaml");
 
     // Create OpenAPI spec with mixed case tags containing spaces
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Mixed Case API
   version: 1.0.0
@@ -278,7 +277,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -339,7 +338,7 @@ fn test_help_shows_kebab_case_tags() {
     let spec_file = temp_dir.path().join("help-test.yaml");
 
     // Create OpenAPI spec with space-containing tags
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Help Test API
   version: 1.0.0
@@ -354,7 +353,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -391,7 +390,7 @@ fn test_parameter_passing_with_space_tags() {
     let spec_file = temp_dir.path().join("param-test.yaml");
 
     // Create OpenAPI spec with parameters and space-containing tags
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Parameter Test API
   version: 1.0.0
@@ -417,7 +416,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -457,7 +456,7 @@ fn test_list_commands_with_space_tags() {
     let spec_file = temp_dir.path().join("list-test.yaml");
 
     // Create OpenAPI spec with tags containing spaces
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: List Test API
   version: 1.0.0
@@ -483,7 +482,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -512,25 +511,21 @@ paths:
     // Verify kebab-case tags are in output (as section headers)
     assert!(
         stdout.contains("work-packages") || stdout.contains("Work Packages"),
-        "Expected tag 'work-packages' or 'Work Packages' in output:\n{}",
-        stdout
+        "Expected tag 'work-packages' or 'Work Packages' in output:\n{stdout}"
     );
     assert!(
         stdout.contains("wiki-pages") || stdout.contains("Wiki Pages"),
-        "Expected tag 'wiki-pages' or 'Wiki Pages' in output:\n{}",
-        stdout
+        "Expected tag 'wiki-pages' or 'Wiki Pages' in output:\n{stdout}"
     );
 
     // Verify operations are listed
     assert!(
         stdout.contains("list-work-packages"),
-        "Expected operation 'list-work-packages' in output:\n{}",
-        stdout
+        "Expected operation 'list-work-packages' in output:\n{stdout}"
     );
     assert!(
         stdout.contains("list-wiki-pages"),
-        "Expected operation 'list-wiki-pages' in output:\n{}",
-        stdout
+        "Expected operation 'list-wiki-pages' in output:\n{stdout}"
     );
 }
 
@@ -541,7 +536,7 @@ fn test_search_with_space_tags() {
     let spec_file = temp_dir.path().join("search-test.yaml");
 
     // Create OpenAPI spec with tags containing spaces
-    let spec_content = r#"openapi: 3.0.0
+    let spec_content = r"openapi: 3.0.0
 info:
   title: Search Test API
   version: 1.0.0
@@ -574,7 +569,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     fs::write(&spec_file, spec_content).unwrap();
 
@@ -605,14 +600,12 @@ paths:
     // Verify search results contain kebab-case tags
     assert!(
         stdout.contains("work-packages"),
-        "Expected kebab-case tag 'work-packages' in search results:\n{}",
-        stdout
+        "Expected kebab-case tag 'work-packages' in search results:\n{stdout}"
     );
 
     // Verify the command paths use kebab-case
     assert!(
         stdout.contains("list-work-packages") || stdout.contains("get-work-package"),
-        "Expected kebab-case operation names in search results:\n{}",
-        stdout
+        "Expected kebab-case operation names in search results:\n{stdout}"
     );
 }

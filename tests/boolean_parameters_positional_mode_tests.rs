@@ -2,7 +2,7 @@
 ///
 /// This test suite verifies that boolean parameters work correctly when --positional-args
 /// flag is used. Boolean parameters must remain as flags even in positional mode to avoid
-/// clap panic when executor reads them via get_flag().
+/// clap panic when executor reads them via `get_flag()`.
 ///
 /// Key behaviors tested:
 /// 1. Boolean path parameters remain as flags (not positional) even with --positional-args

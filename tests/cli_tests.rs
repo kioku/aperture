@@ -142,12 +142,12 @@ fn test_config_list_multiple_specs() {
     let specs_dir = config_dir.join("specs");
     fs::create_dir_all(&specs_dir).unwrap();
     fs::write(
-        &specs_dir.join("api1.yaml"),
+        specs_dir.join("api1.yaml"),
         "openapi: 3.0.0\ninfo:\n  title: API1\n  version: 1.0.0\npaths: {}",
     )
     .unwrap();
     fs::write(
-        &specs_dir.join("api2.yaml"),
+        specs_dir.join("api2.yaml"),
         "openapi: 3.0.0\ninfo:\n  title: API2\n  version: 1.0.0\npaths: {}",
     )
     .unwrap();
@@ -213,11 +213,12 @@ fn test_config_edit_spec_success() {
     )
     .unwrap();
 
-    // Mock the EDITOR environment variable to a simple command that just succeeds
+    // Mock the EDITOR environment variable to a simple command that just succeeds.
     // On Unix-like systems, `true` is a command that always exits with 0.
-    // On Windows, `cmd /c exit 0` can be used.
+    // On Windows, use `cmd.exe /c echo` which accepts a file argument and succeeds.
+    // Note: The edit_spec function now parses EDITOR to support commands with arguments.
     let editor_cmd = if cfg!(windows) {
-        "cmd /c exit 0"
+        "cmd.exe /c echo"
     } else {
         "true"
     };

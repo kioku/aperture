@@ -172,8 +172,8 @@ async fn test_batch_config_default() {
     let config = BatchConfig::default();
     assert_eq!(config.max_concurrency, 5);
     assert_eq!(config.rate_limit, None);
-    assert_eq!(config.continue_on_error, true);
-    assert_eq!(config.show_progress, true);
+    assert!(config.continue_on_error);
+    assert!(config.show_progress);
 }
 
 #[tokio::test]
@@ -188,8 +188,8 @@ async fn test_batch_config_custom() {
 
     assert_eq!(config.max_concurrency, 10);
     assert_eq!(config.rate_limit, Some(100));
-    assert_eq!(config.continue_on_error, true);
-    assert_eq!(config.show_progress, true);
+    assert!(config.continue_on_error);
+    assert!(config.show_progress);
 }
 
 #[tokio::test]

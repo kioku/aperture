@@ -1,3 +1,7 @@
+// These lints are overly pedantic for test code
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::used_underscore_binding)]
+
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, CommandExample,
 };

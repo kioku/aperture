@@ -221,7 +221,7 @@ mod tests {
             name: name.to_string(),
             version: "1.0.0".to_string(),
             commands: vec![],
-            base_url: base_url.map(|s| s.to_string()),
+            base_url: base_url.map(std::string::ToString::to_string),
             servers: base_url.map(|s| vec![s.to_string()]).unwrap_or_default(),
             security_schemes: HashMap::new(),
             skipped_endpoints: vec![],
@@ -256,7 +256,7 @@ mod tests {
             name: name.to_string(),
             version: "1.0.0".to_string(),
             commands: vec![],
-            base_url: base_url.map(|s| s.to_string()),
+            base_url: base_url.map(std::string::ToString::to_string),
             servers: base_url.map(|s| vec![s.to_string()]).unwrap_or_default(),
             security_schemes: HashMap::new(),
             skipped_endpoints: vec![],
@@ -270,7 +270,7 @@ mod tests {
         F: FnOnce() + std::panic::UnwindSafe,
     {
         // Acquire mutex to prevent parallel env var access
-        let _guard = ENV_TEST_MUTEX.lock().unwrap();
+        let guard = ENV_TEST_MUTEX.lock().unwrap();
 
         // Store original value
         let original_value = std::env::var(crate::constants::ENV_APERTURE_BASE_URL).ok();
@@ -289,7 +289,7 @@ mod tests {
         }
 
         // Drop the guard before re-panicking to release the mutex
-        drop(_guard);
+        drop(guard);
 
         // Re-panic if the test failed
         if let Err(panic_info) = result {

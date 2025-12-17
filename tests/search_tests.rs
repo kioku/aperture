@@ -1,4 +1,5 @@
 //! Tests for command search functionality
+#![allow(clippy::needless_collect)]
 
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedSpec, CACHE_FORMAT_VERSION,

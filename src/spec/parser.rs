@@ -333,13 +333,13 @@ mod tests {
 
     #[test]
     fn test_parse_openapi_30() {
-        let spec_30 = r#"
+        let spec_30 = r"
 openapi: 3.0.0
 info:
   title: Test API
   version: 1.0.0
 paths: {}
-"#;
+";
 
         let result = parse_openapi(spec_30);
         assert!(result.is_ok());
@@ -349,13 +349,13 @@ paths: {}
 
     #[test]
     fn test_parse_openapi_31() {
-        let spec_31 = r#"
+        let spec_31 = r"
 openapi: 3.1.0
 info:
   title: Test API
   version: 1.0.0
 paths: {}
-"#;
+";
 
         let result = parse_openapi(spec_31);
 
@@ -396,12 +396,12 @@ paths: {}
     #[test]
     fn test_preprocess_boolean_values() {
         // Test that 0/1 are converted to false/true
-        let input = r#"
+        let input = r"
 deprecated: 0
 required: 1
 readOnly: 0
 writeOnly: 1
-"#;
+";
         let result = preprocess_for_compatibility(input);
         assert!(result.contains("deprecated: false"));
         assert!(result.contains("required: true"));
@@ -412,13 +412,13 @@ writeOnly: 1
     #[test]
     fn test_preprocess_exclusive_min_max() {
         // Test that exclusiveMinimum/Maximum 0/1 are converted but other numbers are preserved
-        let input = r#"
+        let input = r"
 exclusiveMinimum: 0
 exclusiveMaximum: 1
 exclusiveMinimum: 10
 exclusiveMaximum: 18
 exclusiveMinimum: 100
-"#;
+";
         let result = preprocess_for_compatibility(input);
         assert!(result.contains("exclusiveMinimum: false"));
         assert!(result.contains("exclusiveMaximum: true"));
@@ -442,7 +442,7 @@ exclusiveMinimum: 100
     #[test]
     fn test_preprocess_preserves_multi_digit_numbers() {
         // Test that numbers like 10, 18, 100 are not corrupted
-        let input = r#"
+        let input = r"
 paths:
   /test:
     get:
@@ -454,7 +454,7 @@ paths:
             minimum: 10
             maximum: 100
             exclusiveMinimum: 18
-"#;
+";
         let result = preprocess_for_compatibility(input);
         // These should remain unchanged
         assert!(result.contains("minimum: 10"));

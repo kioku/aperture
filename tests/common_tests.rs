@@ -2,6 +2,8 @@ mod common;
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::common::*;
 
     #[test]
@@ -14,7 +16,12 @@ mod tests {
     #[test]
     fn test_aperture_cmd_helper() {
         let cmd = aperture_cmd();
-        // This should not panic and should create a valid command
-        assert!(cmd.get_program().to_string_lossy().ends_with("aperture"));
+        // Extract file stem to handle platform differences (aperture vs aperture.exe)
+        let program = cmd.get_program();
+        let stem = Path::new(program)
+            .file_stem()
+            .expect("binary should have a file stem")
+            .to_string_lossy();
+        assert_eq!(stem, "aperture");
     }
 }

@@ -231,7 +231,7 @@ async fn test_build_url_with_server_template_variables() {
             } => {
                 assert!(message.contains("region"));
             }
-            _ => panic!("Expected Internal ServerVariable error, got: {:?}", e),
+            _ => panic!("Expected Internal ServerVariable error, got: {e:?}"),
         }
     }
 }
@@ -281,7 +281,7 @@ async fn test_execute_request_error_response() {
         // Old format includes JSON in the main message
         // New format has JSON in the context
         let aperture_cli::error::Error::Internal { context, .. } = &e else {
-            panic!("Unexpected error type: {:?}", e);
+            panic!("Unexpected error type: {e:?}");
         };
         let Some(ctx) = context else { return };
         let Some(details) = &ctx.details else { return };
@@ -470,7 +470,7 @@ async fn test_url_with_path_braces_detected_as_template() {
             } => {
                 assert!(message.contains("version"));
             }
-            _ => panic!("Expected Internal ServerVariable error, got: {:?}", e),
+            _ => panic!("Expected Internal ServerVariable error, got: {e:?}"),
         }
     }
 }
@@ -520,7 +520,7 @@ async fn test_url_with_multiple_templates_detected() {
                 // Should fail on the first template variable encountered
                 assert!(message.contains("region"));
             }
-            _ => panic!("Expected Internal ServerVariable error, got: {:?}", e),
+            _ => panic!("Expected Internal ServerVariable error, got: {e:?}"),
         }
     }
 }
@@ -578,8 +578,7 @@ async fn test_url_with_empty_braces_detected_as_invalid_template() {
                 assert!(message.contains("Empty template variable name") || message.contains("{}"));
             }
             _ => panic!(
-                "Expected Validation or ServerVariable error for empty template variable, got: {}",
-                e
+                "Expected Validation or ServerVariable error for empty template variable, got: {e}"
             ),
         }
     }

@@ -1,10 +1,11 @@
 #![cfg(feature = "integration")]
+// These lints are overly pedantic for test code
+#![allow(clippy::too_many_lines)]
 
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::fs::FileSystem;
 mod common;
 
-use assert_cmd::Command;
 use common::aperture_cmd;
 use predicates::prelude::*;
 use std::fs;
@@ -84,7 +85,7 @@ impl FileSystem for TestFS {
 #[test]
 fn test_add_spec_with_parameter_references() {
     let fs = TestFS::new();
-    let spec_with_refs = r#"
+    let spec_with_refs = r"
 openapi: 3.0.0
 info:
   title: Test API with Parameter References
@@ -154,7 +155,7 @@ paths:
                       type: string
                     name:
                       type: string
-"#;
+";
 
     let spec_path = fs.write_spec(spec_with_refs);
     let config_dir = fs.config_dir();
@@ -219,7 +220,7 @@ paths:
 #[test]
 fn test_parameter_references_with_special_characters() {
     let fs = TestFS::new();
-    let spec_with_special_chars = r#"
+    let spec_with_special_chars = r"
 openapi: 3.0.0
 info:
   title: Test API with Special Parameter Names
@@ -275,7 +276,7 @@ paths:
             application/json:
               schema:
                 type: object
-"#;
+";
 
     let spec_path = fs.write_spec(spec_with_special_chars);
     let config_dir = fs.config_dir();
@@ -355,7 +356,7 @@ fn test_cli_with_parameter_references() {
     // Write OpenAPI spec with parameter references
     fs::write(
         &spec_path,
-        r#"
+        r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -382,7 +383,7 @@ paths:
       responses:
         '200':
           description: Pet details
-"#,
+",
     )
     .unwrap();
 
@@ -398,9 +399,7 @@ paths:
 
     assert!(
         output.status.success(),
-        "Command should succeed. stdout: {}, stderr: {}",
-        stdout,
-        stderr
+        "Command should succeed. stdout: {stdout}, stderr: {stderr}"
     );
 
     // Verify the spec was added
@@ -426,25 +425,21 @@ paths:
     // Check that parameter was resolved correctly
     assert!(
         stdout.contains("--pet-id") || stderr.contains("--pet-id"),
-        "Output should contain --pet-id parameter. stdout: {}, stderr: {}",
-        stdout,
-        stderr
+        "Output should contain --pet-id parameter. stdout: {stdout}, stderr: {stderr}"
     );
     assert!(
         stdout.contains("ID of the pet")
             || stderr.contains("ID of the pet")
             || stdout.contains("Path parameter: petId")
             || stderr.contains("Path parameter: petId"),
-        "Output should contain parameter description. stdout: {}, stderr: {}",
-        stdout,
-        stderr
+        "Output should contain parameter description. stdout: {stdout}, stderr: {stderr}"
     );
 }
 
 #[test]
 fn test_invalid_parameter_reference_rejected() {
     let fs = TestFS::new();
-    let invalid_spec = r#"
+    let invalid_spec = r"
 openapi: 3.0.0
 info:
   title: Test API
@@ -460,7 +455,7 @@ paths:
       responses:
         '200':
           description: Success
-"#;
+";
 
     let spec_path = fs.write_spec(invalid_spec);
     let config_dir = fs.config_dir();
@@ -481,8 +476,7 @@ paths:
         } => {
             assert!(
                 msg.contains("not found in components") || msg.contains("no components section"),
-                "Error should mention missing parameter. Actual error: {}",
-                msg
+                "Error should mention missing parameter. Actual error: {msg}"
             );
         }
         _ => panic!("Expected Validation error"),
@@ -498,7 +492,7 @@ fn test_cli_with_special_character_parameters() {
     // Write OpenAPI spec with special character parameters
     fs::write(
         &spec_path,
-        r#"
+        r"
 openapi: 3.0.0
 info:
   title: Test API Special Chars
@@ -531,7 +525,7 @@ paths:
       responses:
         '200':
           description: User details
-"#,
+",
     )
     .unwrap();
 
@@ -553,7 +547,7 @@ paths:
     // Help might be in stdout or stderr
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{}{}", stdout, stderr);
+    let combined = format!("{stdout}{stderr}");
 
     assert!(
         combined.contains("--user-id") && combined.contains("--include-fields"),
@@ -580,7 +574,7 @@ paths:
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        panic!("Command failed with stderr: {}", stderr);
+        panic!("Command failed with stderr: {stderr}");
     }
 
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -588,14 +582,12 @@ paths:
     // The URL might have the parameter in the path
     assert!(
         stdout.contains("https://api.example.com/users/123"),
-        "Should contain the URL with path parameter. Actual output: {}",
-        stdout
+        "Should contain the URL with path parameter. Actual output: {stdout}"
     );
 
     // Query parameters might be shown separately or URL-encoded
     assert!(
         stdout.contains("include.fields") || stdout.contains("include%2Efields"),
-        "Should contain the query parameter. Actual output: {}",
-        stdout
+        "Should contain the query parameter. Actual output: {stdout}"
     );
 }

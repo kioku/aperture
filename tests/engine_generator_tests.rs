@@ -176,15 +176,12 @@ fn test_server_var_flag_present() {
 
     // Check that the --server-var global flag is present
     // Try to parse with the --server-var flag to see if it's accepted
-    let result =
-        command
-            .clone()
-            .try_get_matches_from(vec!["api", "--server-var", "region=us", "--help"]);
+    let result = command.try_get_matches_from(vec!["api", "--server-var", "region=us", "--help"]);
 
     // Should not fail due to unknown argument
     match result {
         Err(e) if e.kind() == clap::error::ErrorKind::UnknownArgument => {
-            panic!("--server-var flag not recognized: {}", e);
+            panic!("--server-var flag not recognized: {e}");
         }
         _ => {
             // Expected: either success or help display, but not unknown argument error

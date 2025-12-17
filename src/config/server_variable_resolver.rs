@@ -258,6 +258,13 @@ impl<'a> ServerVariableResolver<'a> {
     }
 }
 
+/// Finds the next template variable boundaries (opening and closing braces)
+fn find_next_template(s: &str, start: usize) -> Option<(usize, usize)> {
+    let open_pos = s[start..].find('{').map(|pos| start + pos)?;
+    let close_pos = s[open_pos..].find('}').map(|pos| open_pos + pos)?;
+    Some((open_pos, close_pos))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,7 +566,7 @@ mod tests {
         server_variables.insert(
             "prefix".to_string(),
             ServerVariable {
-                default: Some("".to_string()),
+                default: Some(String::new()),
                 enum_values: vec![],
                 description: Some("Optional prefix".to_string()),
             },
@@ -581,7 +588,7 @@ mod tests {
 
         // Test with no args - should use empty string default
         let result = resolver.resolve_variables(&[]).unwrap();
-        assert_eq!(result.get("prefix"), Some(&"".to_string()));
+        assert_eq!(result.get("prefix"), Some(&String::new()));
 
         // Test substitution with empty string default
         let url = resolver
@@ -659,11 +666,4 @@ mod tests {
         // Query and anchor characters should be encoded
         assert_eq!(url, "https://example.com/test%3Fquery%3D1%23anchor");
     }
-}
-
-/// Finds the next template variable boundaries (opening and closing braces)
-fn find_next_template(s: &str, start: usize) -> Option<(usize, usize)> {
-    let open_pos = s[start..].find('{').map(|pos| start + pos)?;
-    let close_pos = s[open_pos..].find('}').map(|pos| open_pos + pos)?;
-    Some((open_pos, close_pos))
 }
