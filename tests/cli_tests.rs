@@ -213,11 +213,12 @@ fn test_config_edit_spec_success() {
     )
     .unwrap();
 
-    // Mock the EDITOR environment variable to a simple command that just succeeds
+    // Mock the EDITOR environment variable to a simple command that just succeeds.
     // On Unix-like systems, `true` is a command that always exits with 0.
-    // On Windows, `cmd /c exit 0` can be used.
+    // On Windows, use `cmd.exe /c echo` which accepts a file argument and succeeds.
+    // Note: The edit_spec function now parses EDITOR to support commands with arguments.
     let editor_cmd = if cfg!(windows) {
-        "cmd /c exit 0"
+        "cmd.exe /c echo"
     } else {
         "true"
     };

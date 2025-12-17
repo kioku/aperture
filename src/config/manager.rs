@@ -432,7 +432,13 @@ impl<F: FileSystem> ConfigManager<F> {
 
         let editor = std::env::var("EDITOR").map_err(|_| Error::editor_not_set())?;
 
-        Command::new(editor)
+        // Parse the editor command to handle commands with arguments (e.g., "code --wait")
+        let mut parts = editor.split_whitespace();
+        let program = parts.next().ok_or_else(Error::editor_not_set)?;
+        let args: Vec<&str> = parts.collect();
+
+        Command::new(program)
+            .args(&args)
             .arg(&spec_path)
             .status()
             .map_err(|e| Error::io_error(format!("Failed to get editor process status: {e}")))?
