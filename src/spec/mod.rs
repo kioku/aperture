@@ -67,6 +67,10 @@ pub fn resolve_parameter_reference(spec: &OpenAPI, reference: &str) -> Result<Pa
 
 /// Resolves a schema reference to its actual schema definition
 ///
+/// This function resolves top-level `$ref` references to schemas defined in
+/// `#/components/schemas/`. It handles chained references (schema A references
+/// schema B which references schema C) with circular reference detection.
+///
 /// # Arguments
 /// * `spec` - The `OpenAPI` specification containing the components
 /// * `reference` - The reference string (e.g., "#/components/schemas/User")
@@ -81,6 +85,27 @@ pub fn resolve_parameter_reference(spec: &OpenAPI, reference: &str) -> Result<Pa
 /// - The referenced schema doesn't exist
 /// - Circular references are detected
 /// - Maximum reference depth is exceeded
+///
+/// # Limitations
+///
+/// **Nested references are not resolved**: This function only resolves the
+/// top-level schema reference. If the resolved schema contains nested `$ref`
+/// within its properties, those remain unresolved. For example:
+///
+/// ```json
+/// // #/components/schemas/Order resolves to:
+/// {
+///   "type": "object",
+///   "properties": {
+///     "customer": { "$ref": "#/components/schemas/Customer" }  // NOT resolved
+///   }
+/// }
+/// ```
+///
+/// Implementing recursive resolution of nested references would require
+/// traversing the entire schema tree, which adds complexity and risk of
+/// infinite loops with self-referential schemas (e.g., a `User` with a
+/// `friends: User[]` property).
 pub fn resolve_schema_reference(
     spec: &OpenAPI,
     reference: &str,

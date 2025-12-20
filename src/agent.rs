@@ -124,11 +124,35 @@ pub struct RequestBodyInfo {
 }
 
 /// Response schema information for successful responses (200/201/204)
+///
+/// This struct provides schema information extracted from `OpenAPI` response definitions,
+/// enabling AI agents to understand the expected response structure before execution.
+///
+/// # Current Limitations
+///
+/// 1. **Response references not resolved**: If a response is defined as a reference
+///    (e.g., `$ref: '#/components/responses/UserResponse'`), the schema will not be
+///    extracted. Only inline response definitions are processed.
+///
+/// 2. **Nested schema references not resolved**: While top-level schema references
+///    (e.g., `$ref: '#/components/schemas/User'`) are resolved, nested references
+///    within object properties remain as `$ref` objects in the output. For example:
+///    ```json
+///    {
+///      "type": "object",
+///      "properties": {
+///        "user": { "$ref": "#/components/schemas/User" }  // Not resolved
+///      }
+///    }
+///    ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseSchemaInfo {
     /// Content type (e.g., "application/json")
     pub content_type: String,
     /// JSON Schema representation of the response body
+    ///
+    /// Note: This schema may contain unresolved `$ref` objects for nested references.
+    /// Only the top-level schema reference is resolved.
     pub schema: serde_json::Value,
     /// Example response if available from the spec
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -612,10 +636,24 @@ fn extract_response_schema_from_operation(
 }
 
 /// Extracts response schema from a single response reference
+///
+/// # Limitations
+///
+/// - **Response references are not resolved**: If `response_ref` is a `$ref` to
+///   `#/components/responses/...`, this function returns `None`. Only inline
+///   response definitions are processed. This is a known limitation that may
+///   be addressed in a future version.
+///
+/// - **Nested schema references**: While top-level schema references within the
+///   response content are resolved, any nested `$ref` within the schema's
+///   properties remain unresolved. See [`ResponseSchemaInfo`] for details.
 fn extract_response_schema_from_response(
     response_ref: &ReferenceOr<openapiv3::Response>,
     spec: &OpenAPI,
 ) -> Option<ResponseSchemaInfo> {
+    // Note: Response references ($ref to #/components/responses/...) are not
+    // currently resolved. This would require implementing resolve_response_reference()
+    // similar to resolve_schema_reference().
     let ReferenceOr::Item(response) = response_ref else {
         return None;
     };
