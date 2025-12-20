@@ -65,7 +65,8 @@ pub struct SkippedEndpoint {
 ///
 /// Version 2: Added `skipped_endpoints` field to track endpoints skipped during validation
 /// Version 3: Added `server_variables` field to support `OpenAPI` server URL template variables
-pub const CACHE_FORMAT_VERSION: u32 = 3;
+/// Version 4: Added `example` field to `CachedResponse` for response schema examples
+pub const CACHE_FORMAT_VERSION: u32 = 4;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -147,6 +148,9 @@ pub struct CachedResponse {
     pub description: Option<String>,
     pub content_type: Option<String>,
     pub schema: Option<String>,
+    /// Example response value (JSON-serialized)
+    #[serde(default)]
+    pub example: Option<String>,
 }
 
 /// Cached representation of a security scheme with x-aperture-secret mapping

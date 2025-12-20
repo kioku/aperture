@@ -403,6 +403,25 @@ aperture api my-api --idempotency-key "unique-key" users create --name "Test"
 aperture api my-api --dry-run users get-user-by-id --id 123
 ```
 
+The `--describe-json` manifest includes response schema information for each command, enabling agents to understand API response structure before execution:
+
+```json
+{
+  "commands": {
+    "users": [{
+      "name": "get-user",
+      "response_schema": {
+        "content_type": "application/json",
+        "schema": { "type": "object", "properties": {"id": {"type": "integer"}} },
+        "example": { "id": 123, "name": "Alice" }
+      }
+    }]
+  }
+}
+```
+
+**Note:** Response schemas are extracted from 200/201/204 responses. Schema `$ref` references are resolved, but response references (`$ref` to `#/components/responses/...`) are not currently resolved.
+
 ### Advanced Output Formatting
 
 Aperture supports multiple output formats and data filtering:

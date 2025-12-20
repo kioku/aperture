@@ -44,6 +44,7 @@ macro_rules! cached_response {
             description: None,
             content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
             schema: Some(r#"{"type": "object"}"#.to_string()),
+            example: None,
         }
     };
 }

@@ -5,7 +5,7 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
 use crate::error::Error;
-use crate::spec::resolve_parameter_reference;
+use crate::spec::{resolve_parameter_reference, resolve_schema_reference};
 use crate::utils::to_kebab_case;
 use openapiv3::{OpenAPI, Operation, Parameter as OpenApiParameter, ReferenceOr, SecurityScheme};
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,9 @@ pub struct CommandInfo {
     /// External documentation URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_docs_url: Option<String>,
+    /// Response schema for successful responses (200/201/204)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_schema: Option<ResponseSchemaInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -118,6 +121,42 @@ pub struct RequestBodyInfo {
     /// Example of the request body
     #[serde(skip_serializing_if = "Option::is_none")]
     pub example: Option<String>,
+}
+
+/// Response schema information for successful responses (200/201/204)
+///
+/// This struct provides schema information extracted from `OpenAPI` response definitions,
+/// enabling AI agents to understand the expected response structure before execution.
+///
+/// # Current Limitations
+///
+/// 1. **Response references not resolved**: If a response is defined as a reference
+///    (e.g., `$ref: '#/components/responses/UserResponse'`), the schema will not be
+///    extracted. Only inline response definitions are processed.
+///
+/// 2. **Nested schema references not resolved**: While top-level schema references
+///    (e.g., `$ref: '#/components/schemas/User'`) are resolved, nested references
+///    within object properties remain as `$ref` objects in the output. For example:
+///    ```json
+///    {
+///      "type": "object",
+///      "properties": {
+///        "user": { "$ref": "#/components/schemas/User" }  // Not resolved
+///      }
+///    }
+///    ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseSchemaInfo {
+    /// Content type (e.g., "application/json")
+    pub content_type: String,
+    /// JSON Schema representation of the response body
+    ///
+    /// Note: This schema may contain unresolved `$ref` objects for nested references.
+    /// Only the top-level schema reference is resolved.
+    pub schema: serde_json::Value,
+    /// Example response if available from the spec
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub example: Option<serde_json::Value>,
 }
 
 /// Detailed, parsable security scheme description
@@ -339,6 +378,9 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
         .as_ref()
         .map(convert_cached_request_body_to_info);
 
+    // Extract response schema from cached responses
+    let response_schema = extract_response_schema_from_cached(&cached_command.responses);
+
     CommandInfo {
         name: command_name,
         method: cached_command.method.clone(),
@@ -357,6 +399,7 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
         original_tags: cached_command.tags.clone(),
         deprecated: cached_command.deprecated,
         external_docs_url: cached_command.external_docs_url.clone(),
+        response_schema,
     }
 }
 
@@ -386,6 +429,36 @@ fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> Reque
         description: cached_body.description.clone(),
         example: cached_body.example.clone(),
     }
+}
+
+/// Extracts response schema from cached responses
+///
+/// Looks for successful response codes (200, 201, 204) in priority order.
+/// If a response exists but lacks `content_type` or schema, falls through to
+/// check the next status code.
+fn extract_response_schema_from_cached(
+    responses: &[crate::cache::models::CachedResponse],
+) -> Option<ResponseSchemaInfo> {
+    constants::SUCCESS_STATUS_CODES.iter().find_map(|code| {
+        responses
+            .iter()
+            .find(|r| r.status_code == *code)
+            .and_then(|response| {
+                let content_type = response.content_type.as_ref()?;
+                let schema_str = response.schema.as_ref()?;
+                let schema = serde_json::from_str(schema_str).ok()?;
+                let example = response
+                    .example
+                    .as_ref()
+                    .and_then(|ex| serde_json::from_str(ex).ok());
+
+                Some(ResponseSchemaInfo {
+                    content_type: content_type.clone(),
+                    schema,
+                    example,
+                })
+            })
+    })
 }
 
 /// Extracts security schemes from the cached spec for the capability manifest
@@ -511,6 +584,9 @@ fn convert_openapi_operation_to_info(
         },
     );
 
+    // Extract response schema from successful responses (200, 201, 204)
+    let response_schema = extract_response_schema_from_operation(operation, spec);
+
     CommandInfo {
         name: command_name,
         method: method.to_uppercase(),
@@ -528,7 +604,83 @@ fn convert_openapi_operation_to_info(
             .external_docs
             .as_ref()
             .map(|docs| docs.url.clone()),
+        response_schema,
     }
+}
+
+/// Extracts response schema from an operation's responses
+///
+/// Looks for successful response codes (200, 201, 204) in priority order
+/// and extracts the schema for the first one found with application/json content.
+fn extract_response_schema_from_operation(
+    operation: &Operation,
+    spec: &OpenAPI,
+) -> Option<ResponseSchemaInfo> {
+    constants::SUCCESS_STATUS_CODES.iter().find_map(|code| {
+        operation
+            .responses
+            .responses
+            .get(&openapiv3::StatusCode::Code(
+                code.parse().expect("valid status code"),
+            ))
+            .and_then(|response_ref| extract_response_schema_from_response(response_ref, spec))
+    })
+}
+
+/// Extracts response schema from a single response reference
+///
+/// # Limitations
+///
+/// - **Response references are not resolved**: If `response_ref` is a `$ref` to
+///   `#/components/responses/...`, this function returns `None`. Only inline
+///   response definitions are processed. This is a known limitation that may
+///   be addressed in a future version.
+///
+/// - **Nested schema references**: While top-level schema references within the
+///   response content are resolved, any nested `$ref` within the schema's
+///   properties remain unresolved. See [`ResponseSchemaInfo`] for details.
+fn extract_response_schema_from_response(
+    response_ref: &ReferenceOr<openapiv3::Response>,
+    spec: &OpenAPI,
+) -> Option<ResponseSchemaInfo> {
+    // Note: Response references ($ref to #/components/responses/...) are not
+    // currently resolved. This would require implementing resolve_response_reference()
+    // similar to resolve_schema_reference().
+    let ReferenceOr::Item(response) = response_ref else {
+        return None;
+    };
+
+    // Prefer application/json content type
+    let content_type = if response.content.contains_key(constants::CONTENT_TYPE_JSON) {
+        constants::CONTENT_TYPE_JSON
+    } else {
+        // Fall back to first available content type
+        response.content.keys().next().map(String::as_str)?
+    };
+
+    let media_type = response.content.get(content_type)?;
+    let schema_ref = media_type.schema.as_ref()?;
+
+    // Resolve schema reference if necessary
+    let schema_value = match schema_ref {
+        ReferenceOr::Item(schema) => serde_json::to_value(schema).ok()?,
+        ReferenceOr::Reference { reference } => {
+            let resolved = resolve_schema_reference(spec, reference).ok()?;
+            serde_json::to_value(&resolved).ok()?
+        }
+    };
+
+    // Extract example if available
+    let example = media_type
+        .example
+        .as_ref()
+        .and_then(|ex| serde_json::to_value(ex).ok());
+
+    Some(ResponseSchemaInfo {
+        content_type: content_type.to_string(),
+        schema: schema_value,
+        example,
+    })
 }
 
 /// Extracts schema information from a parameter format

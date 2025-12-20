@@ -15,10 +15,10 @@ use aperture_cli::config::models::{ApiConfig, GlobalConfig};
 use aperture_cli::constants;
 use indexmap::IndexMap;
 use openapiv3::{
-    APIKeyLocation, BooleanType, Components, ExternalDocumentation, Info, MediaType, OpenAPI,
-    Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem, Paths, QueryStyle,
-    ReferenceOr, RequestBody, Responses, Schema, SchemaData, SchemaKind, SecurityRequirement,
-    SecurityScheme, Server, StringType, Type,
+    APIKeyLocation, BooleanType, Components, ExternalDocumentation, Info, IntegerType, MediaType,
+    ObjectType, OpenAPI, Operation, Parameter, ParameterData, ParameterSchemaOrContent, PathItem,
+    Paths, QueryStyle, ReferenceOr, RequestBody, Responses, Schema, SchemaData, SchemaKind,
+    SecurityRequirement, SecurityScheme, Server, StringType, Type,
 };
 use std::collections::HashMap;
 
@@ -119,12 +119,14 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                     description: Some("Successful response with user data".to_string()),
                     content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
                     schema: Some(r#"{"type": "object", "properties": {"id": {"type": "integer"}, "name": {"type": "string"}}}"#.to_string()),
+                    example: None,
                 },
                 CachedResponse {
                     status_code: "404".to_string(),
                     description: Some("User not found".to_string()),
                     content_type: None,
                     schema: None,
+                    example: None,
                 },
             ],
             security_requirements: vec!["bearerAuth".to_string()],
@@ -154,6 +156,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 description: Some("User created successfully".to_string()),
                 content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
                 schema: None,
+                example: None,
             }],
             security_requirements: vec!["apiKeyAuth".to_string()],
             tags: vec!["users".to_string()],
@@ -176,6 +179,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 description: Some("API is healthy".to_string()),
                 content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
                 schema: Some(r#"{"type": "object", "properties": {"status": {"type": "string"}}}"#.to_string()),
+                example: None,
             }],
             security_requirements: vec![],
             tags: vec!["health".to_string()],
@@ -726,4 +730,516 @@ fn test_manifest_with_parameter_references() {
     assert_eq!(include_param["param_type"], "boolean");
     assert_eq!(include_param["description"], "Include detailed information");
     assert_eq!(include_param["default_value"], "false");
+}
+
+#[test]
+fn test_manifest_with_response_schema() {
+    use openapiv3::{MediaType, Response};
+
+    // Create OpenAPI spec with response schema
+    let mut responses = Responses::default();
+    let mut content = IndexMap::new();
+    content.insert(
+        constants::CONTENT_TYPE_JSON.to_string(),
+        MediaType {
+            schema: Some(ReferenceOr::Item(Schema {
+                schema_kind: SchemaKind::Type(Type::Object(ObjectType {
+                    properties: {
+                        let mut props = IndexMap::new();
+                        props.insert(
+                            "id".to_string(),
+                            ReferenceOr::Item(Box::new(Schema {
+                                schema_kind: SchemaKind::Type(
+                                    Type::Integer(IntegerType::default()),
+                                ),
+                                schema_data: SchemaData::default(),
+                            })),
+                        );
+                        props.insert(
+                            "name".to_string(),
+                            ReferenceOr::Item(Box::new(Schema {
+                                schema_kind: SchemaKind::Type(Type::String(StringType::default())),
+                                schema_data: SchemaData::default(),
+                            })),
+                        );
+                        props
+                    },
+                    ..Default::default()
+                })),
+                schema_data: SchemaData::default(),
+            })),
+            example: Some(serde_json::json!({"id": 123, "name": "Alice"})),
+            ..Default::default()
+        },
+    );
+    responses.responses.insert(
+        openapiv3::StatusCode::Code(200),
+        ReferenceOr::Item(Response {
+            description: "Successful response".to_string(),
+            content,
+            ..Default::default()
+        }),
+    );
+
+    let spec = OpenAPI {
+        openapi: "3.0.0".to_string(),
+        info: Info {
+            title: "Test API with Response Schema".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        },
+        servers: vec![Server {
+            url: "https://api.example.com".to_string(),
+            ..Default::default()
+        }],
+        paths: {
+            let mut paths = Paths::default();
+            let mut path_item = PathItem::default();
+            path_item.get = Some(Operation {
+                operation_id: Some("getUser".to_string()),
+                tags: vec!["users".to_string()],
+                responses,
+                ..Default::default()
+            });
+            paths
+                .paths
+                .insert("/users/{id}".to_string(), ReferenceOr::Item(path_item));
+            paths
+        },
+        ..Default::default()
+    };
+
+    // Generate manifest
+    let manifest_json = generate_capability_manifest_from_openapi("test-response", &spec, None)
+        .expect("Failed to generate manifest");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
+
+    // Verify response schema is present
+    let command = &manifest["commands"]["users"][0];
+    assert!(
+        command["response_schema"].is_object(),
+        "response_schema should be present"
+    );
+
+    let response_schema = &command["response_schema"];
+    assert_eq!(
+        response_schema["content_type"],
+        constants::CONTENT_TYPE_JSON
+    );
+
+    // Verify schema structure - the openapiv3 schema uses snake_case in JSON
+    let schema = &response_schema["schema"];
+    assert!(schema.is_object(), "schema should be an object");
+
+    // Verify example is included
+    assert!(
+        response_schema["example"].is_object(),
+        "example should be present"
+    );
+    assert_eq!(response_schema["example"]["id"], 123);
+    assert_eq!(response_schema["example"]["name"], "Alice");
+}
+
+#[test]
+fn test_manifest_with_response_schema_ref() {
+    use openapiv3::{MediaType, Response};
+
+    // Create OpenAPI spec with response schema using $ref
+    let mut responses = Responses::default();
+    let mut content = IndexMap::new();
+    content.insert(
+        constants::CONTENT_TYPE_JSON.to_string(),
+        MediaType {
+            schema: Some(ReferenceOr::Reference {
+                reference: "#/components/schemas/User".to_string(),
+            }),
+            ..Default::default()
+        },
+    );
+    responses.responses.insert(
+        openapiv3::StatusCode::Code(200),
+        ReferenceOr::Item(Response {
+            description: "Successful response".to_string(),
+            content,
+            ..Default::default()
+        }),
+    );
+
+    let mut components = Components::default();
+    components.schemas.insert(
+        "User".to_string(),
+        ReferenceOr::Item(Schema {
+            schema_kind: SchemaKind::Type(Type::Object(ObjectType {
+                properties: {
+                    let mut props = IndexMap::new();
+                    props.insert(
+                        "id".to_string(),
+                        ReferenceOr::Item(Box::new(Schema {
+                            schema_kind: SchemaKind::Type(Type::Integer(IntegerType::default())),
+                            schema_data: SchemaData::default(),
+                        })),
+                    );
+                    props.insert(
+                        "email".to_string(),
+                        ReferenceOr::Item(Box::new(Schema {
+                            schema_kind: SchemaKind::Type(Type::String(StringType::default())),
+                            schema_data: SchemaData::default(),
+                        })),
+                    );
+                    props
+                },
+                ..Default::default()
+            })),
+            schema_data: SchemaData::default(),
+        }),
+    );
+
+    let spec = OpenAPI {
+        openapi: "3.0.0".to_string(),
+        info: Info {
+            title: "Test API with Schema Ref".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        },
+        servers: vec![Server {
+            url: "https://api.example.com".to_string(),
+            ..Default::default()
+        }],
+        paths: {
+            let mut paths = Paths::default();
+            let mut path_item = PathItem::default();
+            path_item.get = Some(Operation {
+                operation_id: Some("getUser".to_string()),
+                tags: vec!["users".to_string()],
+                responses,
+                ..Default::default()
+            });
+            paths
+                .paths
+                .insert("/users/{id}".to_string(), ReferenceOr::Item(path_item));
+            paths
+        },
+        components: Some(components),
+        ..Default::default()
+    };
+
+    // Generate manifest
+    let manifest_json = generate_capability_manifest_from_openapi("test-ref-response", &spec, None)
+        .expect("Failed to generate manifest");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
+
+    // Verify response schema is resolved from $ref
+    let command = &manifest["commands"]["users"][0];
+    assert!(
+        command["response_schema"].is_object(),
+        "response_schema should be present after $ref resolution"
+    );
+
+    let response_schema = &command["response_schema"];
+    assert_eq!(
+        response_schema["content_type"],
+        constants::CONTENT_TYPE_JSON
+    );
+
+    // Verify the resolved schema has the User properties (schema is resolved from $ref)
+    let schema = &response_schema["schema"];
+    assert!(schema.is_object(), "schema should be an object");
+    // The schema uses "type" directly when serialized
+    assert_eq!(
+        schema["type"], "object",
+        "resolved schema should have type: object"
+    );
+}
+
+#[test]
+fn test_manifest_from_cached_with_response_schema() {
+    // Create a cached spec with response schema
+    let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "Test API".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "users".to_string(),
+            description: Some("Get user by ID".to_string()),
+            summary: None,
+            operation_id: "getUserById".to_string(),
+            method: "GET".to_string(),
+            path: "/users/{id}".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![CachedResponse {
+                status_code: "200".to_string(),
+                description: Some("Success".to_string()),
+                content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
+                schema: Some(r#"{"type": "object", "properties": {"id": {"type": "integer"}, "name": {"type": "string"}}}"#.to_string()),
+                example: Some(r#"{"id": 42, "name": "Bob"}"#.to_string()),
+            }],
+            security_requirements: vec![],
+            tags: vec!["users".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    };
+
+    // Generate manifest from cached spec
+    let manifest_json =
+        generate_capability_manifest(&spec, None).expect("Failed to generate manifest");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_json).expect("Failed to parse manifest");
+
+    // Verify response schema is extracted from cached responses
+    let command = &manifest["commands"]["users"][0];
+    assert!(
+        command["response_schema"].is_object(),
+        "response_schema should be extracted from cached responses"
+    );
+
+    let response_schema = &command["response_schema"];
+    assert_eq!(
+        response_schema["content_type"],
+        constants::CONTENT_TYPE_JSON
+    );
+    assert_eq!(response_schema["schema"]["type"], "object");
+
+    // Verify example is parsed from cached string
+    assert!(
+        response_schema["example"].is_object(),
+        "example should be parsed"
+    );
+    assert_eq!(response_schema["example"]["id"], 42);
+    assert_eq!(response_schema["example"]["name"], "Bob");
+}
+
+#[test]
+fn test_manifest_no_response_schema_when_empty() {
+    use openapiv3::Response;
+
+    // Create OpenAPI spec with no content in response
+    let mut responses = Responses::default();
+    responses.responses.insert(
+        openapiv3::StatusCode::Code(204),
+        ReferenceOr::Item(Response {
+            description: "No content".to_string(),
+            content: IndexMap::new(), // Empty content
+            ..Default::default()
+        }),
+    );
+
+    let spec = OpenAPI {
+        openapi: "3.0.0".to_string(),
+        info: Info {
+            title: "Test API No Response".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        },
+        servers: vec![Server {
+            url: "https://api.example.com".to_string(),
+            ..Default::default()
+        }],
+        paths: {
+            let mut paths = Paths::default();
+            let mut path_item = PathItem::default();
+            path_item.delete = Some(Operation {
+                operation_id: Some("deleteUser".to_string()),
+                tags: vec!["users".to_string()],
+                responses,
+                ..Default::default()
+            });
+            paths
+                .paths
+                .insert("/users/{id}".to_string(), ReferenceOr::Item(path_item));
+            paths
+        },
+        ..Default::default()
+    };
+
+    // Generate manifest
+    let manifest_json = generate_capability_manifest_from_openapi("test-no-response", &spec, None)
+        .expect("Failed to generate manifest");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
+
+    // Verify response_schema is not present (skipped)
+    let command = &manifest["commands"]["users"][0];
+    assert!(
+        command.get("response_schema").is_none() || command["response_schema"].is_null(),
+        "response_schema should not be present when there's no response content"
+    );
+}
+
+#[test]
+fn test_manifest_cached_status_code_fallback() {
+    // Test that when 200 has no schema, we correctly fall back to 201
+    let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "Test API".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "users".to_string(),
+            description: Some("Create user".to_string()),
+            summary: None,
+            operation_id: "createUser".to_string(),
+            method: "POST".to_string(),
+            path: "/users".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![
+                // 200 response exists but has no schema (e.g., redirect or legacy endpoint)
+                CachedResponse {
+                    status_code: "200".to_string(),
+                    description: Some("Legacy response".to_string()),
+                    content_type: None, // No content type
+                    schema: None,       // No schema
+                    example: None,
+                },
+                // 201 response has full schema - should be used as fallback
+                CachedResponse {
+                    status_code: "201".to_string(),
+                    description: Some("Created".to_string()),
+                    content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
+                    schema: Some(
+                        r#"{"type": "object", "properties": {"id": {"type": "integer"}}}"#
+                            .to_string(),
+                    ),
+                    example: Some(r#"{"id": 1}"#.to_string()),
+                },
+            ],
+            security_requirements: vec![],
+            tags: vec!["users".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    };
+
+    // Generate manifest from cached spec
+    let manifest_json =
+        generate_capability_manifest(&spec, None).expect("Failed to generate manifest");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_json).expect("Failed to parse manifest");
+
+    // Verify that we got the 201 response schema (fallback worked)
+    let command = &manifest["commands"]["users"][0];
+    assert!(
+        command["response_schema"].is_object(),
+        "response_schema should fall back to 201 when 200 has no schema"
+    );
+
+    let response_schema = &command["response_schema"];
+    assert_eq!(
+        response_schema["content_type"],
+        constants::CONTENT_TYPE_JSON
+    );
+    assert_eq!(response_schema["schema"]["type"], "object");
+    assert_eq!(response_schema["example"]["id"], 1);
+}
+
+#[test]
+fn test_manifest_response_reference_not_resolved() {
+    use openapiv3::Response;
+
+    // Create OpenAPI spec with a response reference ($ref to #/components/responses/...)
+    // This tests the documented limitation that response references are not resolved
+    let mut responses = Responses::default();
+
+    // Use a reference to a response in components
+    responses.responses.insert(
+        openapiv3::StatusCode::Code(200),
+        ReferenceOr::Reference {
+            reference: "#/components/responses/UserResponse".to_string(),
+        },
+    );
+
+    // Define the response in components
+    let mut components = Components::default();
+    let mut response_content = IndexMap::new();
+    response_content.insert(
+        constants::CONTENT_TYPE_JSON.to_string(),
+        MediaType {
+            schema: Some(ReferenceOr::Item(Schema {
+                schema_kind: SchemaKind::Type(Type::Object(ObjectType {
+                    properties: {
+                        let mut props = IndexMap::new();
+                        props.insert(
+                            "id".to_string(),
+                            ReferenceOr::Item(Box::new(Schema {
+                                schema_kind: SchemaKind::Type(
+                                    Type::Integer(IntegerType::default()),
+                                ),
+                                schema_data: SchemaData::default(),
+                            })),
+                        );
+                        props
+                    },
+                    ..Default::default()
+                })),
+                schema_data: SchemaData::default(),
+            })),
+            ..Default::default()
+        },
+    );
+    components.responses.insert(
+        "UserResponse".to_string(),
+        ReferenceOr::Item(Response {
+            description: "User response".to_string(),
+            content: response_content,
+            ..Default::default()
+        }),
+    );
+
+    let spec = OpenAPI {
+        openapi: "3.0.0".to_string(),
+        info: Info {
+            title: "Test API with Response Ref".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        },
+        servers: vec![Server {
+            url: "https://api.example.com".to_string(),
+            ..Default::default()
+        }],
+        paths: {
+            let mut paths = Paths::default();
+            let mut path_item = PathItem::default();
+            path_item.get = Some(Operation {
+                operation_id: Some("getUser".to_string()),
+                tags: vec!["users".to_string()],
+                responses,
+                ..Default::default()
+            });
+            paths
+                .paths
+                .insert("/users/{id}".to_string(), ReferenceOr::Item(path_item));
+            paths
+        },
+        components: Some(components),
+        ..Default::default()
+    };
+
+    // Generate manifest
+    let manifest_json = generate_capability_manifest_from_openapi("test-response-ref", &spec, None)
+        .expect("Failed to generate manifest");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
+
+    // Verify response_schema is NOT present because response references are not resolved
+    // This is a documented limitation
+    let command = &manifest["commands"]["users"][0];
+    assert!(
+        command.get("response_schema").is_none() || command["response_schema"].is_null(),
+        "response_schema should not be present when response is a $ref (documented limitation)"
+    );
 }

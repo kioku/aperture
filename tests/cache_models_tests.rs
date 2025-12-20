@@ -44,6 +44,7 @@ fn test_cached_spec_serialization_deserialization() {
                     description: None,
                     content_type: None,
                     schema: None,
+                    example: None,
                 }],
                 security_requirements: vec![],
                 tags: vec!["create-user".to_string()],
