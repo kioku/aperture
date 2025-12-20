@@ -17,10 +17,19 @@ For comprehensive development guidance, please refer to [CLAUDE.md](CLAUDE.md), 
 Aperture is designed with an "agent-first" philosophy, making it particularly suitable for autonomous AI development:
 
 ### Agent-Friendly Features
-- **Structured Output**: `--describe-json` provides machine-readable API capability manifests
+- **Structured Output**: `--describe-json` provides machine-readable API capability manifests with response schemas
 - **Error Handling**: `--json-errors` outputs structured error information
 - **Safe Testing**: `--dry-run` allows request inspection without execution
 - **Idempotency**: `--idempotency-key` enables safe automated retries
+
+### Response Schema Information
+
+The `--describe-json` manifest includes `response_schema` for each command:
+- `content_type`: Expected response content type (e.g., "application/json")
+- `schema`: JSON Schema representation of the response body
+- `example`: Example response if available from the OpenAPI spec
+
+This enables agents to understand API response structure before execution, reducing hallucinations in data extraction.
 
 ### Development Workflow for Agents
 1. Follow the Test-Driven Development approach outlined in CLAUDE.md
