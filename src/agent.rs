@@ -433,37 +433,35 @@ fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> Reque
 
 /// Extracts response schema from cached responses
 ///
-/// Looks for successful response codes (200, 201, 204) in priority order
+/// Looks for successful response codes (200, 201, 204) in priority order.
+/// If a response exists but lacks `content_type` or schema, falls through to
+/// check the next status code.
 fn extract_response_schema_from_cached(
     responses: &[crate::cache::models::CachedResponse],
 ) -> Option<ResponseSchemaInfo> {
     // Priority order for successful status codes
     let success_codes = ["200", "201", "204"];
 
-    for code in &success_codes {
-        if let Some(response) = responses.iter().find(|r| r.status_code == *code) {
-            // Only process if we have a content type and schema
-            let content_type = response.content_type.as_ref()?;
-            let schema_str = response.schema.as_ref()?;
+    success_codes.iter().find_map(|code| {
+        responses
+            .iter()
+            .find(|r| r.status_code == *code)
+            .and_then(|response| {
+                let content_type = response.content_type.as_ref()?;
+                let schema_str = response.schema.as_ref()?;
+                let schema = serde_json::from_str(schema_str).ok()?;
+                let example = response
+                    .example
+                    .as_ref()
+                    .and_then(|ex| serde_json::from_str(ex).ok());
 
-            // Parse the cached schema JSON string
-            let schema: serde_json::Value = serde_json::from_str(schema_str).ok()?;
-
-            // Parse the cached example if present
-            let example = response
-                .example
-                .as_ref()
-                .and_then(|ex| serde_json::from_str(ex).ok());
-
-            return Some(ResponseSchemaInfo {
-                content_type: content_type.clone(),
-                schema,
-                example,
-            });
-        }
-    }
-
-    None
+                Some(ResponseSchemaInfo {
+                    content_type: content_type.clone(),
+                    schema,
+                    example,
+                })
+            })
+    })
 }
 
 /// Extracts security schemes from the cached spec for the capability manifest
