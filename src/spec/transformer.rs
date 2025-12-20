@@ -315,45 +315,7 @@ impl SpecTransformer {
             .responses
             .iter()
             .map(|(code, response_ref)| {
-                match response_ref {
-                    ReferenceOr::Item(response) => {
-                        // Get description
-                        let description = if response.description.is_empty() {
-                            None
-                        } else {
-                            Some(response.description.clone())
-                        };
-
-                        // Get first content type and schema if available
-                        let (content_type, schema) =
-                            if let Some((ct, media_type)) = response.content.iter().next() {
-                                let schema = media_type.schema.as_ref().and_then(|schema_ref| {
-                                    match schema_ref {
-                                        ReferenceOr::Item(schema) => {
-                                            serde_json::to_string(schema).ok()
-                                        }
-                                        ReferenceOr::Reference { .. } => None,
-                                    }
-                                });
-                                (Some(ct.clone()), schema)
-                            } else {
-                                (None, None)
-                            };
-
-                        CachedResponse {
-                            status_code: code.to_string(),
-                            description,
-                            content_type,
-                            schema,
-                        }
-                    }
-                    ReferenceOr::Reference { .. } => CachedResponse {
-                        status_code: code.to_string(),
-                        description: None,
-                        content_type: None,
-                        schema: None,
-                    },
-                }
+                Self::transform_response(spec, code.to_string(), response_ref)
             })
             .collect();
 
@@ -580,6 +542,81 @@ impl SpecTransformer {
         match format {
             openapiv3::VariantOrUnknownOrEmpty::Item(fmt) => Some(format!("{fmt:?}")),
             _ => None,
+        }
+    }
+
+    /// Transforms a response into cached format with schema reference resolution
+    fn transform_response(
+        spec: &OpenAPI,
+        status_code: String,
+        response_ref: &ReferenceOr<openapiv3::Response>,
+    ) -> CachedResponse {
+        let ReferenceOr::Item(response) = response_ref else {
+            return CachedResponse {
+                status_code,
+                description: None,
+                content_type: None,
+                schema: None,
+                example: None,
+            };
+        };
+
+        // Get description
+        let description = if response.description.is_empty() {
+            None
+        } else {
+            Some(response.description.clone())
+        };
+
+        // Prefer application/json content type, otherwise use first available
+        let preferred_content_type = if response.content.contains_key(constants::CONTENT_TYPE_JSON)
+        {
+            Some(constants::CONTENT_TYPE_JSON)
+        } else {
+            response.content.keys().next().map(String::as_str)
+        };
+
+        let (content_type, schema, example) =
+            preferred_content_type.map_or((None, None, None), |ct| {
+                let media_type = response.content.get(ct);
+                let schema = media_type.and_then(|mt| {
+                    mt.schema
+                        .as_ref()
+                        .and_then(|schema_ref| Self::resolve_and_serialize_schema(spec, schema_ref))
+                });
+
+                // Extract example from media type
+                let example = media_type.and_then(|mt| {
+                    mt.example
+                        .as_ref()
+                        .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()))
+                });
+
+                (Some(ct.to_string()), schema, example)
+            });
+
+        CachedResponse {
+            status_code,
+            description,
+            content_type,
+            schema,
+            example,
+        }
+    }
+
+    /// Resolves a schema reference (if applicable) and serializes to JSON string
+    fn resolve_and_serialize_schema(
+        spec: &OpenAPI,
+        schema_ref: &ReferenceOr<openapiv3::Schema>,
+    ) -> Option<String> {
+        match schema_ref {
+            ReferenceOr::Item(schema) => serde_json::to_string(schema).ok(),
+            ReferenceOr::Reference { reference } => {
+                // Attempt to resolve the reference
+                crate::spec::resolve_schema_reference(spec, reference)
+                    .ok()
+                    .and_then(|schema| serde_json::to_string(&schema).ok())
+            }
         }
     }
 

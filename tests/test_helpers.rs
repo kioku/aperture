@@ -27,6 +27,7 @@ pub fn test_response(status_code: &str) -> CachedResponse {
         description: None,
         content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
         schema: Some(r#"{"type": "object"}"#.to_string()),
+        example: None,
     }
 }
 

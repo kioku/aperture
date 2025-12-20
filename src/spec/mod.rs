@@ -65,6 +65,85 @@ pub fn resolve_parameter_reference(spec: &OpenAPI, reference: &str) -> Result<Pa
     resolve_parameter_reference_with_visited(spec, reference, &mut visited, 0)
 }
 
+/// Resolves a schema reference to its actual schema definition
+///
+/// # Arguments
+/// * `spec` - The `OpenAPI` specification containing the components
+/// * `reference` - The reference string (e.g., "#/components/schemas/User")
+///
+/// # Returns
+/// * `Ok(Schema)` - The resolved schema
+/// * `Err(Error)` - If resolution fails
+///
+/// # Errors
+/// Returns an error if:
+/// - The reference format is invalid
+/// - The referenced schema doesn't exist
+/// - Circular references are detected
+/// - Maximum reference depth is exceeded
+pub fn resolve_schema_reference(
+    spec: &OpenAPI,
+    reference: &str,
+) -> Result<openapiv3::Schema, Error> {
+    let mut visited = HashSet::new();
+    resolve_schema_reference_with_visited(spec, reference, &mut visited, 0)
+}
+
+/// Internal method that resolves schema references with circular reference detection
+fn resolve_schema_reference_with_visited(
+    spec: &OpenAPI,
+    reference: &str,
+    visited: &mut HashSet<String>,
+    depth: usize,
+) -> Result<openapiv3::Schema, Error> {
+    // Check depth limit
+    if depth >= MAX_REFERENCE_DEPTH {
+        return Err(Error::validation_error(format!(
+            "Maximum reference depth ({MAX_REFERENCE_DEPTH}) exceeded while resolving '{reference}'"
+        )));
+    }
+
+    // Check for circular references
+    if !visited.insert(reference.to_string()) {
+        return Err(Error::validation_error(format!(
+            "Circular reference detected: '{reference}' is part of a reference cycle"
+        )));
+    }
+
+    // Parse the reference path
+    // Expected format: #/components/schemas/{schema_name}
+    if !reference.starts_with("#/components/schemas/") {
+        return Err(Error::validation_error(format!(
+            "Invalid schema reference format: '{reference}'. Expected format: #/components/schemas/{{name}}"
+        )));
+    }
+
+    let schema_name = reference
+        .strip_prefix("#/components/schemas/")
+        .ok_or_else(|| {
+            Error::validation_error(format!("Invalid schema reference: '{reference}'"))
+        })?;
+
+    // Look up the schema in components
+    let components = spec.components.as_ref().ok_or_else(|| {
+        Error::validation_error(
+            "Cannot resolve schema reference: OpenAPI spec has no components section".to_string(),
+        )
+    })?;
+
+    let schema_ref = components.schemas.get(schema_name).ok_or_else(|| {
+        Error::validation_error(format!("Schema '{schema_name}' not found in components"))
+    })?;
+
+    // Handle nested references (reference pointing to another reference)
+    match schema_ref {
+        ReferenceOr::Item(schema) => Ok(schema.clone()),
+        ReferenceOr::Reference {
+            reference: nested_ref,
+        } => resolve_schema_reference_with_visited(spec, nested_ref, visited, depth + 1),
+    }
+}
+
 /// Internal method that resolves parameter references with circular reference detection
 fn resolve_parameter_reference_with_visited(
     spec: &OpenAPI,

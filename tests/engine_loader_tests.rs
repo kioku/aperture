@@ -36,6 +36,7 @@ fn create_test_cached_spec() -> CachedSpec {
                 description: None,
                 content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
                 schema: Some(r#"{"type": "array"}"#.to_string()),
+                example: None,
             }],
             security_requirements: vec![],
             tags: vec!["users".to_string()],
