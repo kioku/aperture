@@ -100,6 +100,10 @@ pub const DEFAULT_GROUP: &str = "default";
 pub const DEFAULT_CACHE_TTL: u64 = 300;
 pub const DEFAULT_OPERATION_NAME: &str = "unnamed";
 
+// HTTP Status Codes for Response Schema Extraction
+// Priority order for successful responses when extracting schemas
+pub const SUCCESS_STATUS_CODES: [&str; 3] = ["200", "201", "204"];
+
 // Context identifiers
 pub const CONTEXT_BATCH: &str = "batch";
 

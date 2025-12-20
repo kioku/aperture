@@ -439,10 +439,7 @@ fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> Reque
 fn extract_response_schema_from_cached(
     responses: &[crate::cache::models::CachedResponse],
 ) -> Option<ResponseSchemaInfo> {
-    // Priority order for successful status codes
-    let success_codes = ["200", "201", "204"];
-
-    success_codes.iter().find_map(|code| {
+    constants::SUCCESS_STATUS_CODES.iter().find_map(|code| {
         responses
             .iter()
             .find(|r| r.status_code == *code)
@@ -619,10 +616,7 @@ fn extract_response_schema_from_operation(
     operation: &Operation,
     spec: &OpenAPI,
 ) -> Option<ResponseSchemaInfo> {
-    // Priority order for successful status codes
-    let success_codes = ["200", "201", "204"];
-
-    success_codes.iter().find_map(|code| {
+    constants::SUCCESS_STATUS_CODES.iter().find_map(|code| {
         operation
             .responses
             .responses
