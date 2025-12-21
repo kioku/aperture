@@ -1,8 +1,8 @@
 # Aperture
 
-A high-performance API execution runtime for autonomous agents.
+A CLI that generates commands from OpenAPI specifications.
 
-Aperture consumes OpenAPI 3.x specifications and generates a CLI interface optimized for programmatic use. It's designed for scenarios where AI agents, automation scripts, or CI/CD pipelines need to invoke REST APIs reliably at scale.
+Aperture parses OpenAPI 3.x specs once, caches them, and exposes every operation as a CLI command with structured JSON output. Built for automation: AI agents, scripts, CI/CD pipelines.
 
 ## Why Aperture?
 
