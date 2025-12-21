@@ -119,7 +119,7 @@ aperture api my-api --json-errors users get-user-by-id --id 123
 | `Authentication` | Missing secrets, invalid credentials |
 | `Validation` | Invalid input parameters |
 | `Network` | Connection failures, DNS errors, timeouts |
-| `HttpRequest` | HTTP 4xx/5xx responses |
+| `HttpError` | HTTP 4xx/5xx responses |
 | `Headers` | Invalid header names or values |
 | `ServerVariable` | Template variable resolution errors |
 | `Runtime` | General operational errors |
@@ -194,13 +194,13 @@ aperture api my-api --batch-file operations.json --json-errors
     "total_operations": 3,
     "successful_operations": 2,
     "failed_operations": 1,
-    "execution_time_ms": 450
-  },
-  "results": [
-    {"id": "user-1", "status": "success", "response": {...}},
-    {"id": "user-2", "status": "success", "response": {...}},
-    {"id": "user-3", "status": "error", "error": {...}}
-  ]
+    "total_duration_seconds": 0.45,
+    "operations": [
+      {"operation_id": "user-1", "args": ["users", "get-user-by-id", "--id", "123"], "success": true, "duration_seconds": 0.12, "error": null},
+      {"operation_id": "user-2", "args": ["users", "get-user-by-id", "--id", "456"], "success": true, "duration_seconds": 0.15, "error": null},
+      {"operation_id": "user-3", "args": ["users", "get-user-by-id", "--id", "789"], "success": false, "duration_seconds": 0.18, "error": "HTTP 404: User not found"}
+    ]
+  }
 }
 ```
 

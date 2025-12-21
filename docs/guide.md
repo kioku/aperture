@@ -182,6 +182,38 @@ aperture exec GET /users/123
 aperture exec users list
 ```
 
+## API Exploration
+
+### Overview
+
+Get a quick summary of an API with statistics and example commands:
+
+```bash
+# Overview of a specific API
+aperture overview my-api
+
+# Overview of all registered APIs
+aperture overview --all
+```
+
+### Interactive Documentation
+
+Browse detailed documentation for APIs and operations:
+
+```bash
+# Interactive help menu
+aperture docs
+
+# API overview
+aperture docs my-api
+
+# Detailed command help with parameters and examples
+aperture docs my-api users get-user
+
+# Enhanced formatting with tips
+aperture docs my-api users get-user --enhanced
+```
+
 ## Exit Codes
 
 | Code | Meaning |
