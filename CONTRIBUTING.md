@@ -67,6 +67,7 @@ This project uses pre-commit hooks to ensure code quality. The hooks will run au
 
 - Document all public APIs with rustdoc comments
 - Update README.md for user-facing changes
+- Update relevant docs in `docs/` (guide.md, security.md, configuration.md, agent-integration.md)
 - Create ADRs (Architecture Decision Records) for significant design decisions
 - Update CHANGELOG.md following [Keep a Changelog](https://keepachangelog.com/) format
 
