@@ -51,7 +51,7 @@ aperture config remove my-api
 Rebuild all cached specifications:
 
 ```bash
-aperture config reinit
+aperture config reinit --all
 ```
 
 ## Base URL Management
@@ -162,7 +162,10 @@ aperture config clear-cache my-api
 
 ```bash
 # Rebuild all spec caches
-aperture config reinit
+aperture config reinit --all
+
+# Rebuild specific spec cache
+aperture config reinit my-api
 
 # Remove and re-add specific spec
 aperture config remove my-api
@@ -259,7 +262,8 @@ Without the feature, 3.1 specs produce an error with instructions to enable it.
 | `config add --strict <name> <path>` | Add with strict validation |
 | `config list` | List registered specs |
 | `config remove <name>` | Remove specification |
-| `config reinit` | Rebuild all caches |
+| `config reinit --all` | Rebuild all caches |
+| `config reinit <name>` | Rebuild specific cache |
 
 ### URL Management
 

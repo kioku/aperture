@@ -316,5 +316,8 @@ aperture config add --strict my-api ./openapi.yaml
 aperture config clear-cache my-api
 
 # Reinitialize all cached specs
-aperture config reinit
+aperture config reinit --all
+
+# Reinitialize specific spec
+aperture config reinit my-api
 ```
