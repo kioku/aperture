@@ -68,6 +68,8 @@ aperture api my-api --describe-json
 }
 ```
 
+*Note: This shows core fields. Actual output may include additional metadata such as `deprecated`, `external_docs_url`, `original_tags` on commands, and `description`, `x-aperture-secret` on security schemes.*
+
 ### Response Schema Limitations
 
 The `response_schema` field provides schema information for successful responses (200/201/204), but has limitations:
@@ -171,7 +173,10 @@ For high-volume automation, batch processing executes multiple operations with c
 }
 ```
 
-The `metadata` field is optional and used for documentation purposes. Only `operations` is required.
+**Field requirements:**
+- `operations` is the only required field
+- `metadata` is optional, used for documentation
+- `id` within each operation is optional but recommended for tracking results
 
 **Execution:**
 
@@ -281,7 +286,7 @@ EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then
     # Extract failed operations for retry
-    FAILED=$(echo "$RESULT" | jq '[.results[] | select(.status == "error")]')
+    FAILED=$(echo "$RESULT" | jq '[.batch_execution_summary.operations[] | select(.success == false)]')
     # Handle failures...
 fi
 ```
