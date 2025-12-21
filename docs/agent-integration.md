@@ -50,7 +50,12 @@ aperture api my-api --describe-json
         ],
         "request_body": null,
         "security_requirements": ["bearerAuth"],
-        "tags": ["users"]
+        "tags": ["users"],
+        "response_schema": {
+          "content_type": "application/json",
+          "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
+          "example": {"id": 123, "name": "Alice"}
+        }
       }
     ]
   },
@@ -62,6 +67,14 @@ aperture api my-api --describe-json
   }
 }
 ```
+
+### Response Schema Limitations
+
+The `response_schema` field provides schema information for successful responses (200/201/204), but has limitations:
+
+- **Schema `$ref` references are resolved**: Top-level references like `$ref: '#/components/schemas/User'` are expanded inline.
+- **Response references are NOT resolved**: If a response is defined as `$ref: '#/components/responses/UserResponse'`, the schema will not be extracted.
+- **Nested references remain as-is**: References within object properties are not recursively resolved.
 
 **Usage patterns:**
 
@@ -157,6 +170,8 @@ For high-volume automation, batch processing executes multiple operations with c
   ]
 }
 ```
+
+The `metadata` field is optional and used for documentation purposes. Only `operations` is required.
 
 **Execution:**
 
@@ -291,7 +306,7 @@ Aperture is optimized for agent invocation patterns:
 |--------|-------|--------|
 | Startup time | ~8ms | Low latency per invocation |
 | Binary size | 3.7MB | Fast container deployment |
-| Memory (simple) | ~3.4MB | Low resource footprint |
+| Memory (typical) | 3-5 MB | Low resource footprint |
 | Spec loading | O(1) | Pre-parsed binary cache |
 
 For high-frequency usage, the binary cache strategy ensures consistent latency regardless of spec complexity—the OpenAPI spec is parsed once during `config add`, not on every invocation.
