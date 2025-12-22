@@ -129,9 +129,58 @@ fn test_global_flags_hidden_from_dynamic_command_tree() {
         .assert()
         .success();
 
-    // Check help for the tag group (users) - this is dynamic command tree help
-    // The --help at this level triggers validation error, but we can check via describe-json
-    // that the dynamic commands are properly hidden
+    // Check help at the operation level - this is the dynamic command tree help
+    // Note: Due to how clap handles dynamic commands, --help outputs to stderr
+    // and returns a non-zero exit code, but the help content is still shown
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["api", "test-api", "users", "list-users", "--help"])
+        .output()
+        .expect("Failed to execute command");
+
+    // The help is output to stderr in this case
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Verify we got some help output (contains Options section)
+    assert!(
+        stderr.contains("Options:") || stderr.contains("-h, --help"),
+        "Expected help output to contain Options section"
+    );
+
+    // The hidden flags should NOT appear in the dynamic command help
+    assert!(
+        !stderr.contains("--jq"),
+        "Expected --jq to be hidden from dynamic command help"
+    );
+    assert!(
+        !stderr.contains("--format ") && !stderr.contains("--format\n"),
+        "Expected --format to be hidden from dynamic command help"
+    );
+    assert!(
+        !stderr.contains("--server-var"),
+        "Expected --server-var to be hidden from dynamic command help"
+    );
+}
+
+#[test]
+fn test_hidden_flags_work_at_operation_level() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_minimal_spec(&temp_dir);
+
+    // Add spec first
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "add",
+            "test-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Verify the command structure via describe-json
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", temp_dir.path())
         .args(["api", "test-api", "--describe-json"])
@@ -142,8 +191,5 @@ fn test_global_flags_hidden_from_dynamic_command_tree() {
 
     // The describe-json should work - proving the command structure is correct
     assert!(stdout.contains("listUsers") || stdout.contains("list-users"));
-
-    // The hidden flags are still functional even if hidden from help
-    // This test just verifies the API structure is correctly generated
     assert!(stdout.contains("commands"));
 }

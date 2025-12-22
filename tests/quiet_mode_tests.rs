@@ -120,7 +120,7 @@ fn test_quiet_flag_suppresses_remove_success_message() {
 }
 
 #[test]
-fn test_quiet_flag_suppresses_list_output() {
+fn test_quiet_flag_suppresses_list_header_but_shows_data() {
     let temp_dir = TempDir::new().unwrap();
     let spec_file = create_minimal_spec(&temp_dir);
 
@@ -137,21 +137,33 @@ fn test_quiet_flag_suppresses_list_output() {
         .assert()
         .success();
 
-    // Without --quiet: should see listing
-    aperture_cmd()
+    // Without --quiet: should see header and listing
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", temp_dir.path())
         .args(["config", "list"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("test-api"));
+        .success();
 
-    // With --quiet: should NOT see listing
-    aperture_cmd()
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(stdout.contains("Registered API specifications:"));
+    assert!(stdout.contains("test-api"));
+
+    // With --quiet: should see listing (data) but NOT header
+    let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", temp_dir.path())
         .args(["--quiet", "config", "list"])
         .assert()
-        .success()
-        .stdout(predicate::str::is_empty());
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(
+        !stdout.contains("Registered API specifications:"),
+        "Header should be suppressed in quiet mode"
+    );
+    assert!(
+        stdout.contains("test-api"),
+        "Data (spec names) should still be shown in quiet mode"
+    );
 }
 
 #[test]
@@ -225,4 +237,145 @@ fn test_quiet_flag_suppresses_tips_in_list_commands() {
     assert!(stdout.contains("users") || stdout.contains("list-users"));
     // But tips should not appear
     assert!(!stdout.contains("aperture docs"));
+}
+
+#[test]
+fn test_quiet_flag_suppresses_header_in_cache_stats() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_minimal_spec(&temp_dir);
+
+    // Add spec first
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "add",
+            "test-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Without --quiet: should see header and stats
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "cache-stats", "test-api"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(stdout.contains("Cache statistics for API"));
+    assert!(stdout.contains("Total entries:"));
+
+    // With --quiet: should see stats (data) but NOT header
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["--quiet", "config", "cache-stats", "test-api"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(
+        !stdout.contains("Cache statistics for API"),
+        "Header should be suppressed in quiet mode"
+    );
+    assert!(
+        stdout.contains("Total entries:"),
+        "Stats data should still be shown in quiet mode"
+    );
+}
+
+#[test]
+fn test_quiet_flag_suppresses_tips_in_overview() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_minimal_spec(&temp_dir);
+
+    // Add spec first
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "add",
+            "test-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Without --quiet: should see tip
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["overview", "--all"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(stdout.contains("Use 'aperture overview"));
+    assert!(stdout.contains("All APIs Overview"));
+
+    // With --quiet: should NOT see tip but still see overview data
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["--quiet", "overview", "--all"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(
+        !stdout.contains("Use 'aperture overview"),
+        "Tip should be suppressed in quiet mode"
+    );
+    assert!(
+        stdout.contains("All APIs Overview"),
+        "Overview data should still be shown in quiet mode"
+    );
+}
+
+#[test]
+fn test_quiet_flag_shows_data_in_config_get_url() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_minimal_spec(&temp_dir);
+
+    // Add spec first
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "add",
+            "test-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Without --quiet: should see header and URL info
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "get-url", "test-api"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(stdout.contains("Base URL configuration for"));
+    assert!(stdout.contains("Resolved URL"));
+
+    // With --quiet: should see URL data but NOT header
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["--quiet", "config", "get-url", "test-api"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(
+        !stdout.contains("Base URL configuration for"),
+        "Header should be suppressed in quiet mode"
+    );
+    assert!(
+        stdout.contains("Resolved URL"),
+        "URL data should still be shown in quiet mode"
+    );
 }

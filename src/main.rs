@@ -90,7 +90,13 @@ async fn run_command(
             }
             ConfigCommands::GetUrl { name } => {
                 let (base_override, env_urls, resolved) = manager.get_url(&name)?;
-                print_url_configuration(&name, base_override.as_deref(), &env_urls, &resolved);
+                print_url_configuration(
+                    &name,
+                    base_override.as_deref(),
+                    &env_urls,
+                    &resolved,
+                    output,
+                );
             }
             ConfigCommands::ListUrls {} => {
                 let all_urls = manager.list_urls()?;
@@ -212,7 +218,7 @@ async fn run_command(
             ref api,
             verbose,
         } => {
-            execute_search_command(manager, query, api.as_deref(), verbose)?;
+            execute_search_command(manager, query, api.as_deref(), verbose, output)?;
         }
         Commands::Exec { ref args } => {
             execute_shortcut_command(manager, args.clone(), &cli).await?;
@@ -229,10 +235,11 @@ async fn run_command(
                 tag.as_deref(),
                 operation.as_deref(),
                 enhanced,
+                output,
             )?;
         }
         Commands::Overview { ref api, all } => {
-            execute_overview_command(manager, api.as_deref(), all)?;
+            execute_overview_command(manager, api.as_deref(), all, output)?;
         }
     }
 
@@ -283,8 +290,12 @@ fn print_url_configuration(
     base_override: Option<&str>,
     env_urls: &std::collections::HashMap<String, String>,
     resolved: &str,
+    output: &Output,
 ) {
-    println!("Base URL configuration for '{name}':");
+    // Header is informational
+    output.info(format!("Base URL configuration for '{name}':"));
+
+    // URL data is always shown
     if let Some(base) = base_override {
         println!("  Base override: {base}");
     } else {
@@ -300,8 +311,9 @@ fn print_url_configuration(
 
     println!("\nResolved URL (current): {resolved}");
 
+    // Environment context is informational
     if let Ok(current_env) = std::env::var(constants::ENV_APERTURE_ENV) {
-        println!("(Using APERTURE_ENV={current_env})");
+        output.info(format!("(Using APERTURE_ENV={current_env})"));
     }
 }
 
@@ -310,12 +322,13 @@ fn execute_search_command(
     query: &str,
     api_filter: Option<&str>,
     verbose: bool,
+    output: &Output,
 ) -> Result<(), Error> {
     // Get all registered APIs
     let specs = manager.list_specs()?;
 
     if specs.is_empty() {
-        println!("No API specifications found. Use 'aperture config add' to register APIs.");
+        output.info("No API specifications found. Use 'aperture config add' to register APIs.");
         return Ok(());
     }
 
@@ -341,8 +354,10 @@ fn execute_search_command(
 
     if all_specs.is_empty() {
         match api_filter {
-            Some(filter) => println!("API '{filter}' not found or could not be loaded."),
-            None => println!("No API specifications could be loaded."),
+            Some(filter) => {
+                output.info(format!("API '{filter}' not found or could not be loaded."));
+            }
+            None => output.info("No API specifications could be loaded."),
         }
         return Ok(());
     }
@@ -351,9 +366,9 @@ fn execute_search_command(
     let searcher = CommandSearcher::new();
     let results = searcher.search(&all_specs, query, api_filter)?;
 
-    // Format and display results
-    let output = format_search_results(&results, verbose);
-    for line in output {
+    // Format and display results - search results are data output
+    let formatted_results = format_search_results(&results, verbose);
+    for line in formatted_results {
         println!("{line}");
     }
 
@@ -464,7 +479,8 @@ fn list_specs_with_details(
     let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
 
     for spec_name in specs {
-        output.info(format!("- {spec_name}"));
+        // Spec names are data output - always shown
+        println!("- {spec_name}");
 
         if !verbose {
             continue;
@@ -698,6 +714,9 @@ async fn execute_batch_operations(
         )
         .await?;
 
+    // Create output handler for consistent quiet mode behavior
+    let output = Output::new(cli.quiet, cli.json_errors);
+
     // Print batch results summary
     if cli.json_errors {
         // Output structured JSON summary
@@ -718,7 +737,7 @@ async fn execute_batch_operations(
         });
 
         // Apply JQ filter if provided
-        let output = match &cli.jq {
+        let json_output = match &cli.jq {
             Some(jq_filter) => {
                 let summary_json = serde_json::to_string(&summary)
                     .expect("JSON serialization of valid structure cannot fail");
@@ -728,7 +747,7 @@ async fn execute_batch_operations(
                 .expect("JSON serialization of valid structure cannot fail"),
         };
 
-        println!("{output}");
+        println!("{json_output}");
         // Exit with error code if any operations failed
         // ast-grep-ignore: no-nested-if
         if result.failure_count > 0 {
@@ -738,7 +757,8 @@ async fn execute_batch_operations(
     }
 
     // Output human-readable summary
-    println!("\n=== Batch Execution Summary ===");
+    // Header is informational, stats are data
+    output.info("\n=== Batch Execution Summary ===");
     println!("Total operations: {}", result.results.len());
     println!("Successful: {}", result.success_count);
     println!("Failed: {}", result.failure_count);
@@ -748,11 +768,12 @@ async fn execute_batch_operations(
         return Ok(());
     }
 
-    println!("\nFailed operations:");
+    output.info("\nFailed operations:");
     for (i, op_result) in result.results.iter().enumerate() {
         if op_result.success {
             continue;
         }
+        // Failed operation details are data output
         println!(
             "  {} - {}: {}",
             i + 1,
@@ -857,25 +878,27 @@ async fn show_cache_stats(
     let cache = ResponseCache::new(cache_config)?;
     let stats = cache.get_stats(api_name).await?;
 
+    // Header is informational
     if let Some(api) = api_name {
         output.info(format!("Cache statistics for API '{api}':"));
     } else {
         output.info("Cache statistics for all APIs:");
     }
 
-    output.info(format!("  Total entries: {}", stats.total_entries));
-    output.info(format!("  Valid entries: {}", stats.valid_entries));
-    output.info(format!("  Expired entries: {}", stats.expired_entries));
+    // Stats are data output - always shown
+    println!("  Total entries: {}", stats.total_entries);
+    println!("  Valid entries: {}", stats.valid_entries);
+    println!("  Expired entries: {}", stats.expired_entries);
     #[allow(clippy::cast_precision_loss)]
     let size_mb = stats.total_size_bytes as f64 / 1024.0 / 1024.0;
-    output.info(format!("  Total size: {size_mb:.2} MB"));
+    println!("  Total size: {size_mb:.2} MB");
 
     if stats.total_entries == 0 {
         // No entries, skip hit rate calculation
     } else {
         #[allow(clippy::cast_precision_loss)]
         let hit_rate = stats.valid_entries as f64 / stats.total_entries as f64 * 100.0;
-        output.info(format!("  Hit rate: {hit_rate:.1}%"));
+        println!("  Hit rate: {hit_rate:.1}%");
     }
 
     Ok(())
@@ -996,6 +1019,9 @@ async fn execute_shortcut_command(
     args: Vec<String>,
     cli: &Cli,
 ) -> Result<(), Error> {
+    // Create output handler for consistent quiet mode behavior
+    let output = Output::new(cli.quiet, cli.json_errors);
+
     if args.is_empty() {
         eprintln!("Error: No command specified");
         eprintln!("Usage: aperture exec <shortcut> [args...]");
@@ -1009,7 +1035,7 @@ async fn execute_shortcut_command(
     // Load all available specs for resolution
     let specs = manager.list_specs()?;
     if specs.is_empty() {
-        println!("No API specifications found. Use 'aperture config add' to register APIs.");
+        output.info("No API specifications found. Use 'aperture config add' to register APIs.");
         return Ok(());
     }
 
@@ -1029,7 +1055,7 @@ async fn execute_shortcut_command(
     }
 
     if all_specs.is_empty() {
-        println!("No valid API specifications found.");
+        output.info("No valid API specifications found.");
         return Ok(());
     }
 
@@ -1040,11 +1066,11 @@ async fn execute_shortcut_command(
     // Try to resolve the shortcut
     match resolver.resolve_shortcut(&args) {
         ResolutionResult::Resolved(shortcut) => {
-            // Found a unique match - execute it
-            println!(
+            // Found a unique match - show resolution info (informational)
+            output.info(format!(
                 "Resolved shortcut to: aperture {}",
                 shortcut.full_command.join(" ")
-            );
+            ));
 
             // Extract the context (API name) and remaining args
             let context = &shortcut.full_command[1]; // Skip "api"
@@ -1106,12 +1132,14 @@ fn execute_help_command(
     tag: Option<&str>,
     operation: Option<&str>,
     enhanced: bool,
+    output: &Output,
 ) -> Result<(), Error> {
     match (api_name, tag, operation) {
         // No arguments - show interactive help menu
         (None, None, None) => {
             let specs = load_all_specs(manager)?;
             let doc_gen = DocumentationGenerator::new(specs);
+            // Interactive menu is data output
             println!("{}", doc_gen.generate_interactive_menu());
         }
         // API specified - show API overview or specific command help
@@ -1123,17 +1151,20 @@ fn execute_help_command(
                 // Just API name - show API overview
                 (None, None) => {
                     let overview = doc_gen.generate_api_overview(api)?;
+                    // API overview is data output
                     println!("{overview}");
                 }
                 // API and tag and operation - show detailed command help
                 (Some(tag), Some(op)) => {
                     let help = doc_gen.generate_command_help(api, tag, op)?;
                     if enhanced {
+                        // Full help is data output
                         println!("{help}");
                     } else {
-                        // Show simplified help
+                        // Simplified help is data output
                         println!("{}", help.lines().take(20).collect::<Vec<_>>().join("\n"));
-                        println!("\n💡 Use --enhanced for full documentation with examples");
+                        // Tip about enhanced mode
+                        output.tip("Use --enhanced for full documentation with examples");
                     }
                 }
                 // Invalid combination
@@ -1161,6 +1192,7 @@ fn execute_overview_command(
     manager: &ConfigManager<OsFileSystem>,
     api_name: Option<&str>,
     all: bool,
+    output: &Output,
 ) -> Result<(), Error> {
     if !all {
         let Some(api) = api_name else {
@@ -1174,22 +1206,24 @@ fn execute_overview_command(
         let specs = load_all_specs(manager)?;
         let doc_gen = DocumentationGenerator::new(specs);
         let overview = doc_gen.generate_api_overview(api)?;
+        // Overview is data output
         println!("{overview}");
         return Ok(());
     }
 
     let specs = load_all_specs(manager)?;
     if specs.is_empty() {
-        println!("No API specifications configured.");
-        println!("Use 'aperture config add <name> <spec-file>' to get started.");
+        output.info("No API specifications configured.");
+        output.info("Use 'aperture config add <name> <spec-file>' to get started.");
         return Ok(());
     }
 
-    println!("📊 All APIs Overview\n");
-    println!("{}", "═".repeat(60));
+    // Overview data is always shown
+    println!("All APIs Overview\n");
+    println!("{}", "=".repeat(60));
 
     for (api_name, spec) in &specs {
-        println!("\n🔗 **{}** (v{})", spec.name, spec.version);
+        println!("\n** {} ** (v{})", spec.name, spec.version);
 
         if let Some(ref base_url) = spec.base_url {
             println!("   Base URL: {base_url}");
@@ -1213,8 +1247,9 @@ fn execute_overview_command(
         println!("   Quick start: aperture list-commands {api_name}");
     }
 
-    println!("\n{}", "═".repeat(60));
-    println!("💡 Use 'aperture overview <api>' for detailed information about a specific API");
+    println!("\n{}", "=".repeat(60));
+    // Tip is suppressed in quiet mode
+    output.tip("Use 'aperture overview <api>' for detailed information about a specific API");
 
     Ok(())
 }
