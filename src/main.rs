@@ -10,6 +10,7 @@ use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
 use aperture_cli::interactive::confirm;
+use aperture_cli::output::Output;
 use aperture_cli::response_cache::{CacheConfig, ResponseCache};
 use aperture_cli::search::{format_search_results, CommandSearcher};
 use aperture_cli::shortcuts::{ResolutionResult, ShortcutResolver};
@@ -22,6 +23,7 @@ use std::time::Duration;
 async fn main() {
     let cli = Cli::parse();
     let json_errors = cli.json_errors;
+    let output = Output::new(cli.quiet, cli.json_errors);
 
     let manager = std::env::var(constants::ENV_APERTURE_CONFIG_DIR).map_or_else(
         |_| match ConfigManager::new() {
@@ -34,14 +36,18 @@ async fn main() {
         |config_dir| ConfigManager::with_fs(OsFileSystem, PathBuf::from(config_dir)),
     );
 
-    if let Err(e) = run_command(cli, &manager).await {
+    if let Err(e) = run_command(cli, &manager, &output).await {
         print_error_with_json(&e, json_errors);
         std::process::exit(1);
     }
 }
 
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
-async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
+async fn run_command(
+    cli: Cli,
+    manager: &ConfigManager<OsFileSystem>,
+    output: &Output,
+) -> Result<(), Error> {
     match cli.command {
         Commands::Config { command } => match command {
             ConfigCommands::Add {
@@ -53,31 +59,33 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 manager
                     .add_spec_auto(&name, &file_or_url, force, strict)
                     .await?;
-                println!("Spec '{name}' added successfully.");
+                output.success(format!("Spec '{name}' added successfully."));
             }
             ConfigCommands::List { verbose } => {
                 let specs = manager.list_specs()?;
                 if specs.is_empty() {
-                    println!("No API specifications found.");
+                    output.info("No API specifications found.");
                 } else {
-                    println!("Registered API specifications:");
-                    list_specs_with_details(manager, specs, verbose);
+                    output.info("Registered API specifications:");
+                    list_specs_with_details(manager, specs, verbose, output);
                 }
             }
             ConfigCommands::Remove { name } => {
                 manager.remove_spec(&name)?;
-                println!("Spec '{name}' removed successfully.");
+                output.success(format!("Spec '{name}' removed successfully."));
             }
             ConfigCommands::Edit { name } => {
                 manager.edit_spec(&name)?;
-                println!("Opened spec '{name}' in editor.");
+                output.success(format!("Opened spec '{name}' in editor."));
             }
             ConfigCommands::SetUrl { name, url, env } => {
                 manager.set_url(&name, &url, env.as_deref())?;
                 if let Some(environment) = env {
-                    println!("Set base URL for '{name}' in environment '{environment}': {url}");
+                    output.success(format!(
+                        "Set base URL for '{name}' in environment '{environment}': {url}"
+                    ));
                 } else {
-                    println!("Set base URL for '{name}': {url}");
+                    output.success(format!("Set base URL for '{name}': {url}"));
                 }
             }
             ConfigCommands::GetUrl { name } => {
@@ -88,18 +96,18 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 let all_urls = manager.list_urls()?;
 
                 if all_urls.is_empty() {
-                    println!("No base URLs configured.");
+                    output.info("No base URLs configured.");
                     return Ok(());
                 }
 
-                println!("Configured base URLs:");
+                output.info("Configured base URLs:");
                 for (api_name, (base_override, env_urls)) in all_urls {
-                    print_api_url_entry(&api_name, base_override.as_deref(), &env_urls);
+                    print_api_url_entry(&api_name, base_override.as_deref(), &env_urls, output);
                 }
             }
             ConfigCommands::Reinit { context, all } => {
                 if all {
-                    reinit_all_specs(manager)?;
+                    reinit_all_specs(manager, output)?;
                     return Ok(());
                 }
 
@@ -108,13 +116,13 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                     std::process::exit(1);
                 };
 
-                reinit_spec(manager, &spec_name)?;
+                reinit_spec(manager, &spec_name, output)?;
             }
             ConfigCommands::ClearCache { api_name, all } => {
-                clear_response_cache(manager, api_name.as_deref(), all).await?;
+                clear_response_cache(manager, api_name.as_deref(), all, output).await?;
             }
             ConfigCommands::CacheStats { api_name } => {
-                show_cache_stats(manager, api_name.as_deref()).await?;
+                show_cache_stats(manager, api_name.as_deref(), output).await?;
             }
             ConfigCommands::SetSecret {
                 api_name,
@@ -134,14 +142,16 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 };
 
                 manager.set_secret(&api_name, &scheme, &env_var)?;
-                println!("Set secret for scheme '{scheme}' in API '{api_name}' to use environment variable '{env_var}'");
+                output.success(format!(
+                    "Set secret for scheme '{scheme}' in API '{api_name}' to use environment variable '{env_var}'"
+                ));
             }
             ConfigCommands::ListSecrets { api_name } => {
                 let secrets = manager.list_secrets(&api_name)?;
                 if secrets.is_empty() {
-                    println!("No secrets configured for API '{api_name}'");
+                    output.info(format!("No secrets configured for API '{api_name}'"));
                 } else {
-                    print_secrets_list(&api_name, secrets);
+                    print_secrets_list(&api_name, secrets, output);
                 }
             }
             ConfigCommands::RemoveSecret {
@@ -149,43 +159,47 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
                 scheme_name,
             } => {
                 manager.remove_secret(&api_name, &scheme_name)?;
-                println!(
+                output.success(format!(
                     "Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'"
-                );
+                ));
             }
             ConfigCommands::ClearSecrets { api_name, force } => {
                 // Check if API exists and has secrets
                 let secrets = manager.list_secrets(&api_name)?;
                 if secrets.is_empty() {
-                    println!("No secrets configured for API '{api_name}'");
+                    output.info(format!("No secrets configured for API '{api_name}'"));
                     return Ok(());
                 }
 
                 // Confirm operation unless --force is used
                 if force {
                     manager.clear_secrets(&api_name)?;
-                    println!("Cleared all secret configurations for API '{api_name}'");
+                    output.success(format!(
+                        "Cleared all secret configurations for API '{api_name}'"
+                    ));
                     return Ok(());
                 }
 
-                println!(
+                output.info(format!(
                     "This will remove all {} secret configuration(s) for API '{api_name}':",
                     secrets.len()
-                );
+                ));
                 for scheme_name in secrets.keys() {
-                    println!("  - {scheme_name}");
+                    output.info(format!("  - {scheme_name}"));
                 }
                 if !confirm("Are you sure you want to continue?")? {
-                    println!("Operation cancelled");
+                    output.info("Operation cancelled");
                     return Ok(());
                 }
 
                 manager.clear_secrets(&api_name)?;
-                println!("Cleared all secret configurations for API '{api_name}'");
+                output.success(format!(
+                    "Cleared all secret configurations for API '{api_name}'"
+                ));
             }
         },
         Commands::ListCommands { ref context } => {
-            list_commands(context)?;
+            list_commands(context, output)?;
         }
         Commands::Api {
             ref context,
@@ -229,12 +243,16 @@ async fn run_command(cli: Cli, manager: &ConfigManager<OsFileSystem>) -> Result<
 fn print_secrets_list(
     api_name: &str,
     secrets: std::collections::HashMap<String, aperture_cli::config::models::ApertureSecret>,
+    output: &Output,
 ) {
-    println!("Configured secrets for API '{api_name}':");
+    output.info(format!("Configured secrets for API '{api_name}':"));
     for (scheme_name, secret) in secrets {
         match secret.source {
             SecretSource::Env => {
-                println!("  {scheme_name}: environment variable '{}'", secret.name);
+                output.info(format!(
+                    "  {scheme_name}: environment variable '{}'",
+                    secret.name
+                ));
             }
         }
     }
@@ -245,15 +263,16 @@ fn print_api_url_entry(
     api_name: &str,
     base_override: Option<&str>,
     env_urls: &std::collections::HashMap<String, String>,
+    output: &Output,
 ) {
-    println!("\n{api_name}:");
+    output.info(format!("\n{api_name}:"));
     if let Some(base) = base_override {
-        println!("  Base override: {base}");
+        output.info(format!("  Base override: {base}"));
     }
     if !env_urls.is_empty() {
-        println!("  Environment URLs:");
+        output.info("  Environment URLs:");
         for (env, url) in env_urls {
-            println!("    {env}: {url}");
+            output.info(format!("    {env}: {url}"));
         }
     }
 }
@@ -341,7 +360,7 @@ fn execute_search_command(
     Ok(())
 }
 
-fn list_commands(context: &str) -> Result<(), Error> {
+fn list_commands(context: &str, output: &Output) -> Result<(), Error> {
     // Get the cache directory - respecting APERTURE_CONFIG_DIR if set
     let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
@@ -360,17 +379,24 @@ fn list_commands(context: &str) -> Result<(), Error> {
     let formatted_output = HelpFormatter::format_command_list(&spec);
     println!("{formatted_output}");
 
-    // Add helpful tips at the end
-    println!("💡 **Tips**:");
-    println!("   • Use 'aperture docs {context}' for detailed API documentation");
-    println!("   • Use 'aperture search <term> --api {context}' to find specific operations");
-    println!("   • Use shortcuts: 'aperture exec <operation-id> --help'");
+    // Add helpful tips at the end (suppressed in quiet mode)
+    output.tip(format!(
+        "Use 'aperture docs {context}' for detailed API documentation"
+    ));
+    output.tip(format!(
+        "Use 'aperture search <term> --api {context}' to find specific operations"
+    ));
+    output.tip("Use shortcuts: 'aperture exec <operation-id> --help'");
 
     Ok(())
 }
 
-fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result<(), Error> {
-    println!("Reinitializing cached specification: {spec_name}");
+fn reinit_spec(
+    manager: &ConfigManager<OsFileSystem>,
+    spec_name: &str,
+    output: &Output,
+) -> Result<(), Error> {
+    output.info(format!("Reinitializing cached specification: {spec_name}"));
 
     // Check if the spec exists
     let specs = manager.list_specs()?;
@@ -395,24 +421,29 @@ fn reinit_spec(manager: &ConfigManager<OsFileSystem>, spec_name: &str) -> Result
     // Re-add the spec with force to regenerate the cache using original strict preference
     manager.add_spec(spec_name, &spec_path, true, strict)?;
 
-    println!("Successfully reinitialized cache for '{spec_name}'");
+    output.success(format!(
+        "Successfully reinitialized cache for '{spec_name}'"
+    ));
     Ok(())
 }
 
-fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
+fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>, output: &Output) -> Result<(), Error> {
     let specs = manager.list_specs()?;
 
     if specs.is_empty() {
-        println!("No API specifications found to reinitialize.");
+        output.info("No API specifications found to reinitialize.");
         return Ok(());
     }
 
-    println!("Reinitializing {} cached specification(s)...", specs.len());
+    output.info(format!(
+        "Reinitializing {} cached specification(s)...",
+        specs.len()
+    ));
 
     for spec_name in &specs {
-        match reinit_spec(manager, spec_name) {
+        match reinit_spec(manager, spec_name, output) {
             Ok(()) => {
-                println!("  {spec_name}");
+                output.info(format!("  {spec_name}"));
             }
             Err(e) => {
                 eprintln!("  {spec_name}: {e}");
@@ -420,7 +451,7 @@ fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> 
         }
     }
 
-    println!("Reinitialization complete.");
+    output.success("Reinitialization complete.");
     Ok(())
 }
 
@@ -428,11 +459,12 @@ fn list_specs_with_details(
     manager: &ConfigManager<OsFileSystem>,
     specs: Vec<String>,
     verbose: bool,
+    output: &Output,
 ) {
     let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
 
     for spec_name in specs {
-        println!("- {spec_name}");
+        output.info(format!("- {spec_name}"));
 
         if !verbose {
             continue;
@@ -449,11 +481,14 @@ fn list_specs_with_details(
             continue;
         }
 
-        display_skipped_endpoints_info(&cached_spec);
+        display_skipped_endpoints_info(&cached_spec, output);
     }
 }
 
-fn display_skipped_endpoints_info(cached_spec: &aperture_cli::cache::models::CachedSpec) {
+fn display_skipped_endpoints_info(
+    cached_spec: &aperture_cli::cache::models::CachedSpec,
+    output: &Output,
+) {
     // Convert to warnings for consistent display
     let warnings = ConfigManager::<OsFileSystem>::skipped_endpoints_to_warnings(
         &cached_spec.skipped_endpoints,
@@ -471,7 +506,7 @@ fn display_skipped_endpoints_info(cached_spec: &aperture_cli::cache::models::Cac
     );
 
     for line in lines {
-        println!("{line}");
+        output.info(line);
     }
 }
 
@@ -638,11 +673,12 @@ async fn execute_batch_operations(
         BatchProcessor::parse_batch_file(std::path::Path::new(batch_file_path)).await?;
 
     // Create batch configuration from CLI options
+    // Quiet mode (--quiet or --json-errors) suppresses progress output
     let batch_config = BatchConfig {
         max_concurrency: cli.batch_concurrency,
         rate_limit: cli.batch_rate_limit,
         continue_on_error: true, // Default to continuing on error for batch operations
-        show_progress: !cli.json_errors, // Disable progress when using JSON output
+        show_progress: !cli.quiet && !cli.json_errors, // Disable progress in quiet mode
         suppress_output: cli.json_errors, // Suppress individual outputs when using JSON output
     };
 
@@ -755,6 +791,7 @@ async fn clear_response_cache(
     _manager: &ConfigManager<OsFileSystem>,
     api_name: Option<&str>,
     all: bool,
+    output: &Output,
 ) -> Result<(), Error> {
     let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
@@ -782,13 +819,17 @@ async fn clear_response_cache(
     };
 
     if all {
-        println!("Cleared {cleared_count} cached responses for all APIs");
+        output.success(format!(
+            "Cleared {cleared_count} cached responses for all APIs"
+        ));
     } else {
         let Some(api) = api_name else {
             // This should never be reached due to the earlier check, but keeping for symmetry
             unreachable!("API name must be Some if not all");
         };
-        println!("Cleared {cleared_count} cached responses for API '{api}'");
+        output.success(format!(
+            "Cleared {cleared_count} cached responses for API '{api}'"
+        ));
     }
 
     Ok(())
@@ -798,6 +839,7 @@ async fn clear_response_cache(
 async fn show_cache_stats(
     _manager: &ConfigManager<OsFileSystem>,
     api_name: Option<&str>,
+    output: &Output,
 ) -> Result<(), Error> {
     let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
@@ -816,24 +858,24 @@ async fn show_cache_stats(
     let stats = cache.get_stats(api_name).await?;
 
     if let Some(api) = api_name {
-        println!("Cache statistics for API '{api}':");
+        output.info(format!("Cache statistics for API '{api}':"));
     } else {
-        println!("Cache statistics for all APIs:");
+        output.info("Cache statistics for all APIs:");
     }
 
-    println!("  Total entries: {}", stats.total_entries);
-    println!("  Valid entries: {}", stats.valid_entries);
-    println!("  Expired entries: {}", stats.expired_entries);
+    output.info(format!("  Total entries: {}", stats.total_entries));
+    output.info(format!("  Valid entries: {}", stats.valid_entries));
+    output.info(format!("  Expired entries: {}", stats.expired_entries));
     #[allow(clippy::cast_precision_loss)]
     let size_mb = stats.total_size_bytes as f64 / 1024.0 / 1024.0;
-    println!("  Total size: {size_mb:.2} MB");
+    output.info(format!("  Total size: {size_mb:.2} MB"));
 
     if stats.total_entries == 0 {
         // No entries, skip hit rate calculation
     } else {
         #[allow(clippy::cast_precision_loss)]
         let hit_rate = stats.valid_entries as f64 / stats.total_entries as f64 * 100.0;
-        println!("  Hit rate: {hit_rate:.1}%");
+        output.info(format!("  Hit rate: {hit_rate:.1}%"));
     }
 
     Ok(())
