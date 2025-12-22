@@ -58,15 +58,51 @@ This project uses pre-commit hooks to ensure code quality. The hooks will run au
 
 ### Testing
 
-- **Unit tests**: Place in the same file as the code being tested
-- **Integration tests**: Place in the `tests/` directory
+- **Unit tests**: In `tests/` directory with `_tests.rs` suffix (~0.2s runtime)
+- **Integration tests**: Full end-to-end testing using `assert_cmd` and `wiremock` (~9s runtime)
 - **Test coverage**: Aim for high test coverage of new code
 - **Test isolation**: Ensure tests can run in parallel safely
+
+#### Running Tests
+
+```bash
+# Run all tests (unit + integration)
+cargo test
+
+# Run unit tests only (fastest)
+cargo test --no-default-features
+
+# Run all tests including integration
+cargo test --features integration
+
+# Run specific test file
+cargo test --features integration --test integration_tests
+```
+
+#### Optimized Test Execution
+
+For faster local development, use `cargo-nextest`:
+
+```bash
+# Install nextest
+cargo install cargo-nextest --locked
+
+# Run with optimized profiles
+cargo nextest run --profile fast        # Fast local development
+cargo nextest run --profile default     # Standard configuration
+cargo nextest run --profile ci          # CI optimized
+
+# Or use the provided script
+./scripts/test-fast.sh
+```
+
+See [ADR-007](docs/adr/007-test-suite-performance-optimization.md) for test performance optimizations and metrics.
 
 ### Documentation
 
 - Document all public APIs with rustdoc comments
 - Update README.md for user-facing changes
+- Update relevant docs in `docs/` (guide.md, security.md, configuration.md, agent-integration.md)
 - Create ADRs (Architecture Decision Records) for significant design decisions
 - Update CHANGELOG.md following [Keep a Changelog](https://keepachangelog.com/) format
 
@@ -170,4 +206,4 @@ By contributing to Aperture, you agree that your contributions will be licensed 
 
 ---
 
-Thank you for contributing to Aperture! 🚀
+Thank you for contributing to Aperture!
