@@ -309,7 +309,7 @@ Aperture is optimized for agent invocation patterns:
 
 | Metric | Value | Impact |
 |--------|-------|--------|
-| Startup time | ~8ms | Low latency per invocation |
+| Startup time | < 10ms | Low latency per invocation |
 | Binary size | 3.7MB | Fast container deployment |
 | Memory (typical) | 3-5 MB | Low resource footprint |
 | Spec loading | O(1) | Pre-parsed binary cache |

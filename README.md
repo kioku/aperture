@@ -21,7 +21,7 @@ Aperture parses OpenAPI 3.x specs once, caches them, and exposes every operation
 | Metric | Value |
 |--------|-------|
 | Binary size | 3.7 MB |
-| Startup time | ~8 ms |
+| Startup time | < 10 ms |
 | Memory (typical) | 3-5 MB |
 | Spec loading | O(1) from binary cache |
 
