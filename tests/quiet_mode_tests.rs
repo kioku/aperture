@@ -541,3 +541,71 @@ fn test_quiet_flag_shows_data_in_list_urls() {
         "URL should still be shown in quiet mode"
     );
 }
+
+#[test]
+fn test_quiet_flag_suppresses_batch_summary_header() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_minimal_spec(&temp_dir);
+
+    // Add spec first
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "add",
+            "test-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Create an empty batch file (no operations = no network requests needed)
+    let batch_file = temp_dir.path().join("batch.json");
+    fs::write(&batch_file, r#"{"operations": []}"#).unwrap();
+
+    // Without --quiet: should see the summary header
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(
+        stdout.contains("Batch Execution Summary"),
+        "Summary header should be visible without quiet mode"
+    );
+    assert!(
+        stdout.contains("Total operations:"),
+        "Stats should be visible without quiet mode"
+    );
+
+    // With --quiet: should see stats but NOT the header
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "api",
+            "test-api",
+            "--batch-file",
+            batch_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(
+        !stdout.contains("Batch Execution Summary"),
+        "Summary header should be suppressed in quiet mode"
+    );
+    assert!(
+        stdout.contains("Total operations:"),
+        "Stats data should still be shown in quiet mode"
+    );
+}
