@@ -379,3 +379,165 @@ fn test_quiet_flag_shows_data_in_config_get_url() {
         "URL data should still be shown in quiet mode"
     );
 }
+
+fn create_spec_with_security(temp_dir: &TempDir) -> std::path::PathBuf {
+    let spec_content = r#"
+openapi: "3.0.0"
+info:
+  title: "Test API"
+  version: "1.0.0"
+components:
+  securitySchemes:
+    api_key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      summary: List all users
+      tags:
+        - users
+      security:
+        - api_key: []
+      responses:
+        "200":
+          description: Success
+"#;
+    let spec_file = temp_dir.path().join("spec.yaml");
+    fs::write(&spec_file, spec_content).unwrap();
+    spec_file
+}
+
+#[test]
+fn test_quiet_flag_shows_data_in_list_secrets() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_spec_with_security(&temp_dir);
+
+    // Add spec first
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "add",
+            "test-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Configure a secret
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "set-secret",
+            "test-api",
+            "api_key",
+            "--env",
+            "MY_API_KEY",
+        ])
+        .assert()
+        .success();
+
+    // Without --quiet: should see header and secret info
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "list-secrets", "test-api"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(stdout.contains("Configured secrets for API"));
+    assert!(stdout.contains("api_key"));
+    assert!(stdout.contains("MY_API_KEY"));
+
+    // With --quiet: should see secret data but NOT header
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["--quiet", "config", "list-secrets", "test-api"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(
+        !stdout.contains("Configured secrets for API"),
+        "Header should be suppressed in quiet mode"
+    );
+    assert!(
+        stdout.contains("api_key"),
+        "Secret scheme name should still be shown in quiet mode"
+    );
+    assert!(
+        stdout.contains("MY_API_KEY"),
+        "Secret env var should still be shown in quiet mode"
+    );
+}
+
+#[test]
+fn test_quiet_flag_shows_data_in_list_urls() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_minimal_spec(&temp_dir);
+
+    // Add spec first
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "add",
+            "test-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // Set a URL override
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "set-url",
+            "test-api",
+            "https://api.example.com",
+        ])
+        .assert()
+        .success();
+
+    // Without --quiet: should see header and URL info
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "list-urls"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(stdout.contains("Configured base URLs:"));
+    assert!(stdout.contains("test-api"));
+    assert!(stdout.contains("https://api.example.com"));
+
+    // With --quiet: should see URL data but NOT header
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["--quiet", "config", "list-urls"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+    assert!(
+        !stdout.contains("Configured base URLs:"),
+        "Header should be suppressed in quiet mode"
+    );
+    assert!(
+        stdout.contains("test-api"),
+        "API name should still be shown in quiet mode"
+    );
+    assert!(
+        stdout.contains("https://api.example.com"),
+        "URL should still be shown in quiet mode"
+    );
+}

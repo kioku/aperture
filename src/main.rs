@@ -252,14 +252,13 @@ fn print_secrets_list(
     secrets: std::collections::HashMap<String, aperture_cli::config::models::ApertureSecret>,
     output: &Output,
 ) {
+    // Header is informational
     output.info(format!("Configured secrets for API '{api_name}':"));
+    // Secret configurations are data - always shown
     for (scheme_name, secret) in secrets {
         match secret.source {
             SecretSource::Env => {
-                output.info(format!(
-                    "  {scheme_name}: environment variable '{}'",
-                    secret.name
-                ));
+                println!("  {scheme_name}: environment variable '{}'", secret.name);
             }
         }
     }
@@ -272,14 +271,18 @@ fn print_api_url_entry(
     env_urls: &std::collections::HashMap<String, String>,
     output: &Output,
 ) {
-    output.info(format!("\n{api_name}:"));
+    // API name is data - always shown
+    println!("\n{api_name}:");
     if let Some(base) = base_override {
-        output.info(format!("  Base override: {base}"));
+        // URL data - always shown
+        println!("  Base override: {base}");
     }
     if !env_urls.is_empty() {
+        // Sub-header is informational
         output.info("  Environment URLs:");
+        // URL data - always shown
         for (env, url) in env_urls {
-            output.info(format!("    {env}: {url}"));
+            println!("    {env}: {url}");
         }
     }
 }
