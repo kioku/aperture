@@ -43,6 +43,16 @@ pub struct Cli {
     #[arg(long, global = true, help = "Output errors in JSON format")]
     pub json_errors: bool,
 
+    /// Suppress non-essential output (success messages, tips, hints)
+    /// Only outputs requested data and errors
+    #[arg(
+        long,
+        short = 'q',
+        global = true,
+        help = "Suppress informational output"
+    )]
+    pub quiet: bool,
+
     /// Show the HTTP request that would be made without executing it
     #[arg(long, global = true, help = "Show request details without executing")]
     pub dry_run: bool,

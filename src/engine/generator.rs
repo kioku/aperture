@@ -72,10 +72,12 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
         .version(to_static_str(spec.version.clone()))
         .about(format!("CLI for {} API", spec.name))
         // Add global flags that should be available to all operations
+        // These are hidden from subcommand help to reduce noise - they're documented in `aperture --help`
         .arg(
             Arg::new("jq")
                 .long("jq")
                 .global(true)
+                .hide(true)
                 .help("Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')")
                 .value_name("FILTER")
                 .action(ArgAction::Set),
@@ -84,6 +86,7 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
             Arg::new("format")
                 .long("format")
                 .global(true)
+                .hide(true)
                 .help("Output format for response data")
                 .value_name("FORMAT")
                 .value_parser(["json", "yaml", "table"])
@@ -94,6 +97,7 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
             Arg::new("server-var")
                 .long("server-var")
                 .global(true)
+                .hide(true)
                 .help("Set server template variable (e.g., --server-var region=us --server-var env=prod)")
                 .value_name("KEY=VALUE")
                 .action(ArgAction::Append),
