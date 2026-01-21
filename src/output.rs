@@ -32,6 +32,8 @@ impl Output {
     /// Use for general status messages like "Registered API specifications:".
     pub fn info(&self, msg: impl std::fmt::Display) {
         if !self.quiet {
+            // Intentional CLI output, not debug logging
+            // ast-grep-ignore: no-println
             println!("{msg}");
         }
     }
@@ -41,6 +43,8 @@ impl Output {
     /// Use for confirmation messages like "Spec 'foo' added successfully".
     pub fn success(&self, msg: impl std::fmt::Display) {
         if !self.quiet {
+            // Intentional CLI output, not debug logging
+            // ast-grep-ignore: no-println
             println!("{msg}");
         }
     }
@@ -50,6 +54,8 @@ impl Output {
     /// Use for helpful suggestions like usage tips after commands.
     pub fn tip(&self, msg: impl std::fmt::Display) {
         if !self.quiet {
+            // Intentional CLI output, not debug logging
+            // ast-grep-ignore: no-println
             println!("{msg}");
         }
     }
