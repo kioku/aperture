@@ -196,3 +196,100 @@ jobs:
         run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download release assets and compute SHAs
+        id: sha
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BASE_URL="https://github.com/kioku/aperture/releases/download/${VERSION}"
+
+          # Download and compute SHA256 for each platform
+          for target in x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            FILE="aperture-${VERSION}-${target}.tar.gz"
+            curl -sL "${BASE_URL}/${FILE}" -o "${FILE}"
+            SHA=$(sha256sum "${FILE}" | cut -d' ' -f1)
+            echo "${target}=${SHA}" >> $GITHUB_OUTPUT
+            echo "${target}: ${SHA}"
+          done
+
+      - name: Clone homebrew-tap
+        run: |
+          git clone https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/kioku/homebrew-tap.git
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update formula
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_NUM="${VERSION#v}"
+
+          cat > homebrew-tap/Formula/aperture.rb << 'FORMULA'
+          class Aperture < Formula
+            desc "Dynamic CLI generator for OpenAPI specifications"
+            homepage "https://github.com/kioku/aperture"
+            version "VERSION_PLACEHOLDER"
+            license "MIT"
+
+            on_macos do
+              on_intel do
+                url "https://github.com/kioku/aperture/releases/download/vVERSION_PLACEHOLDER/aperture-vVERSION_PLACEHOLDER-x86_64-apple-darwin.tar.gz"
+                sha256 "SHA_INTEL_MAC"
+              end
+              on_arm do
+                url "https://github.com/kioku/aperture/releases/download/vVERSION_PLACEHOLDER/aperture-vVERSION_PLACEHOLDER-aarch64-apple-darwin.tar.gz"
+                sha256 "SHA_ARM_MAC"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/kioku/aperture/releases/download/vVERSION_PLACEHOLDER/aperture-vVERSION_PLACEHOLDER-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA_INTEL_LINUX"
+              end
+              on_arm do
+                url "https://github.com/kioku/aperture/releases/download/vVERSION_PLACEHOLDER/aperture-vVERSION_PLACEHOLDER-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA_ARM_LINUX"
+              end
+            end
+
+            def install
+              bin.install "aperture"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/aperture --version")
+            end
+          end
+          FORMULA
+
+          # Replace placeholders
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION_NUM}/g" homebrew-tap/Formula/aperture.rb
+          sed -i "s/SHA_INTEL_MAC/${{ steps.sha.outputs.x86_64-apple-darwin }}/g" homebrew-tap/Formula/aperture.rb
+          sed -i "s/SHA_ARM_MAC/${{ steps.sha.outputs.aarch64-apple-darwin }}/g" homebrew-tap/Formula/aperture.rb
+          sed -i "s/SHA_INTEL_LINUX/${{ steps.sha.outputs.x86_64-unknown-linux-gnu }}/g" homebrew-tap/Formula/aperture.rb
+          sed -i "s/SHA_ARM_LINUX/${{ steps.sha.outputs.aarch64-unknown-linux-gnu }}/g" homebrew-tap/Formula/aperture.rb
+
+          cat homebrew-tap/Formula/aperture.rb
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git add Formula/aperture.rb
+          git commit -m "feat: update aperture to ${{ steps.version.outputs.version }}"
+          git push
