@@ -4,8 +4,18 @@ name: CI
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - '.github/workflows/**'
+      - 'LICENSE'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - '.github/workflows/**'
+      - 'LICENSE'
 
 env:
   CARGO_TERM_COLOR: always
