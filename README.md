@@ -8,7 +8,7 @@ Aperture parses OpenAPI 3.x specs once, caches them, and exposes every operation
 
 **Fast**: Sub-10ms startup time. Binary-cached specs eliminate parsing overhead.
 
-**Small**: 3.7MB static binary. No runtime dependencies.
+**Small**: 4.0MB static binary. No runtime dependencies.
 
 **Correct**: Structured JSON output. Machine-readable errors. Predictable exit codes.
 
@@ -20,7 +20,7 @@ Aperture parses OpenAPI 3.x specs once, caches them, and exposes every operation
 
 | Metric | Value |
 |--------|-------|
-| Binary size | 3.7 MB |
+| Binary size | 4.0 MB |
 | Startup time | < 10 ms |
 | Memory (typical) | 3-5 MB |
 | Spec loading | O(1) from binary cache |
