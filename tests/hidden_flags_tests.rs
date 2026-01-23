@@ -15,6 +15,7 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+#[allow(deprecated)] // TODO: Migrate to cargo_bin! macro
 fn aperture_cmd() -> Command {
     Command::cargo_bin("aperture").unwrap()
 }

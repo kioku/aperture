@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 /// Cached binary path for the aperture CLI to avoid repeated compilation
+#[allow(deprecated)] // TODO: Migrate to cargo_bin! macro when LazyLock-compatible
 pub static APERTURE_BIN: std::sync::LazyLock<PathBuf> =
     std::sync::LazyLock::new(|| assert_cmd::cargo::cargo_bin("aperture"));
 

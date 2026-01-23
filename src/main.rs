@@ -22,10 +22,8 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() {
     // Install the aws-lc-rs crypto provider for rustls.
-    // Required because we use rustls-tls-native-roots-no-provider for cross-compilation.
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install crypto provider");
+    // Ensures the provider is initialized before any TLS operations.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let cli = Cli::parse();
     let json_errors = cli.json_errors;
