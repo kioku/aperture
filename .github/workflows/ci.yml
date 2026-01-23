@@ -91,7 +91,7 @@ jobs:
         run: cargo build --verbose
 
       - name: Install cargo-nextest
-        run: cargo install cargo-nextest --locked
+        run: cargo install cargo-nextest --locked --force
         if: steps.cache.outputs.cache-hit != 'true'
 
       - name: Run integration tests  
