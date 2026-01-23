@@ -1,3 +1,5 @@
+mod test_helpers;
+
 /// Integration test to verify --show-examples flag works through full execution path
 ///
 /// This test ensures that the executor can properly handle the --show-examples flag

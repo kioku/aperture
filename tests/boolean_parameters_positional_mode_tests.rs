@@ -1,3 +1,5 @@
+mod test_helpers;
+
 /// Integration tests for boolean parameter handling in positional args mode
 ///
 /// This test suite verifies that boolean parameters work correctly when --positional-args

@@ -1,8 +1,16 @@
 #![allow(dead_code)]
+
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
 };
 use aperture_cli::constants;
+
+/// Initialize the rustls crypto provider before any tests run.
+/// This runs once per test binary when `test_helpers` is included.
+#[ctor::ctor]
+fn init_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
 
 #[must_use]
 pub fn test_parameter(name: &str, location: &str, required: bool) -> CachedParameter {

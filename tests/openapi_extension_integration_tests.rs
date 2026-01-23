@@ -5,6 +5,8 @@
 #![allow(clippy::significant_drop_tightening)]
 #![allow(clippy::used_underscore_binding)]
 
+mod test_helpers;
+
 use aperture_cli::cache::models::CachedApertureSecret;
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::config::manager::ConfigManager;

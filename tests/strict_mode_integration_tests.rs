@@ -3,10 +3,12 @@
 #![allow(clippy::used_underscore_binding)]
 #![allow(clippy::significant_drop_tightening)]
 
+mod common;
+mod test_helpers;
+
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::fs::OsFileSystem;
-mod common;
 
 use common::aperture_cmd;
 use predicates::prelude::*;

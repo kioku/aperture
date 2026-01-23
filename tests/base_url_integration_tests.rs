@@ -3,6 +3,7 @@
 #![allow(clippy::too_many_lines)]
 
 mod common;
+mod test_helpers;
 
 use common::aperture_cmd;
 use predicates::prelude::*;

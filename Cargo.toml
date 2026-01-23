@@ -55,6 +55,7 @@ integration = []
 
 [dev-dependencies]
 assert_cmd = "2.0.17"
+ctor = "0.2"
 wiremock = "0.6.4"
 aperture-cli = { path = "." }
 predicates = "3.1.3"

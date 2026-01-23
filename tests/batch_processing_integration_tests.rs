@@ -1,3 +1,5 @@
+mod test_helpers;
+
 use aperture_cli::batch::{BatchConfig, BatchFile, BatchMetadata, BatchOperation, BatchProcessor};
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use aperture_cli::cli::OutputFormat;

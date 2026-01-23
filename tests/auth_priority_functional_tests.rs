@@ -1,3 +1,5 @@
+mod test_helpers;
+
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
     CACHE_FORMAT_VERSION,

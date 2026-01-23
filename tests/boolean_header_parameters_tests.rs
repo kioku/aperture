@@ -1,6 +1,8 @@
 // These lints are overly pedantic for test code
 #![allow(clippy::too_many_lines)]
 
+mod test_helpers;
+
 /// Integration tests for boolean header parameter handling
 ///
 /// Verifies that boolean header parameters:

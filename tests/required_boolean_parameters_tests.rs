@@ -1,3 +1,5 @@
+mod test_helpers;
+
 /// Tests for boolean parameter handling with required/optional semantics
 ///
 /// Boolean parameters have special handling:

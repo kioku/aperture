@@ -6,6 +6,8 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::significant_drop_tightening)]
 
+mod test_helpers;
+
 use aperture_cli::config::manager::{is_url, ConfigManager};
 use aperture_cli::error::{Error, ErrorKind};
 use aperture_cli::fs::FileSystem;
