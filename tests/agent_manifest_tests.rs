@@ -22,6 +22,22 @@ use openapiv3::{
 };
 use std::collections::HashMap;
 
+/// Creates an empty cached spec for `OpenAPI` manifest tests
+/// Statistics will show 0/0/0 since there are no commands or skipped endpoints
+fn create_empty_cached_spec(name: &str) -> CachedSpec {
+    CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: name.to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![],
+        base_url: None,
+        servers: vec![],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    }
+}
+
 /// Creates a comprehensive test spec with various security schemes and operations
 fn create_comprehensive_test_spec() -> CachedSpec {
     let mut security_schemes = HashMap::new();
@@ -527,7 +543,9 @@ fn test_manifest_from_openapi() {
     };
 
     // Generate manifest from OpenAPI
-    let manifest_json = generate_capability_manifest_from_openapi("test-api", &spec, None).unwrap();
+    let cached_spec = create_empty_cached_spec("test-api");
+    let manifest_json =
+        generate_capability_manifest_from_openapi("test-api", &spec, &cached_spec, None).unwrap();
     let manifest: ApiCapabilityManifest = serde_json::from_str(&manifest_json).unwrap();
 
     // Verify API info preserves all metadata
@@ -694,8 +712,10 @@ fn test_manifest_with_parameter_references() {
     };
 
     // Generate manifest
-    let manifest_json = generate_capability_manifest_from_openapi("test-ref", &spec, None)
-        .expect("Failed to generate manifest");
+    let cached_spec = create_empty_cached_spec("test-ref");
+    let manifest_json =
+        generate_capability_manifest_from_openapi("test-ref", &spec, &cached_spec, None)
+            .expect("Failed to generate manifest");
     let manifest: serde_json::Value =
         serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
 
@@ -810,8 +830,10 @@ fn test_manifest_with_response_schema() {
     };
 
     // Generate manifest
-    let manifest_json = generate_capability_manifest_from_openapi("test-response", &spec, None)
-        .expect("Failed to generate manifest");
+    let cached_spec = create_empty_cached_spec("test-response");
+    let manifest_json =
+        generate_capability_manifest_from_openapi("test-response", &spec, &cached_spec, None)
+            .expect("Failed to generate manifest");
     let manifest: serde_json::Value =
         serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
 
@@ -925,8 +947,10 @@ fn test_manifest_with_response_schema_ref() {
     };
 
     // Generate manifest
-    let manifest_json = generate_capability_manifest_from_openapi("test-ref-response", &spec, None)
-        .expect("Failed to generate manifest");
+    let cached_spec = create_empty_cached_spec("test-ref-response");
+    let manifest_json =
+        generate_capability_manifest_from_openapi("test-ref-response", &spec, &cached_spec, None)
+            .expect("Failed to generate manifest");
     let manifest: serde_json::Value =
         serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
 
@@ -1062,8 +1086,10 @@ fn test_manifest_no_response_schema_when_empty() {
     };
 
     // Generate manifest
-    let manifest_json = generate_capability_manifest_from_openapi("test-no-response", &spec, None)
-        .expect("Failed to generate manifest");
+    let cached_spec = create_empty_cached_spec("test-no-response");
+    let manifest_json =
+        generate_capability_manifest_from_openapi("test-no-response", &spec, &cached_spec, None)
+            .expect("Failed to generate manifest");
     let manifest: serde_json::Value =
         serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
 
@@ -1230,8 +1256,10 @@ fn test_manifest_response_reference_not_resolved() {
     };
 
     // Generate manifest
-    let manifest_json = generate_capability_manifest_from_openapi("test-response-ref", &spec, None)
-        .expect("Failed to generate manifest");
+    let cached_spec = create_empty_cached_spec("test-response-ref");
+    let manifest_json =
+        generate_capability_manifest_from_openapi("test-response-ref", &spec, &cached_spec, None)
+            .expect("Failed to generate manifest");
     let manifest: serde_json::Value =
         serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
 

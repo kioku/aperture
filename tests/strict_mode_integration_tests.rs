@@ -550,3 +550,100 @@ paths:
         .success()
         .stderr(predicate::str::contains("Warning: Skipping 1 endpoints"));
 }
+
+#[test]
+fn test_describe_json_includes_endpoint_statistics() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().join(".aperture");
+    let spec_path = Path::new("tests/fixtures/openapi/spec-with-multipart.yaml")
+        .canonicalize()
+        .unwrap();
+
+    // Add spec in non-strict mode (some endpoints will be skipped)
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(["config", "add", "test-api", spec_path.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Get the --describe-json output
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(["api", "test-api", "--describe-json"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse the JSON output
+    let manifest: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    // Verify endpoint statistics field is present
+    assert!(
+        manifest["endpoints"].is_object(),
+        "endpoints field should be present in --describe-json output"
+    );
+
+    // The spec-with-multipart.yaml has 5 total endpoints: 3 JSON + 2 multipart
+    // 3 are available (getUsers, getUserById, generateReport)
+    // 2 are skipped (uploadUserAvatar, uploadDocument)
+    let endpoints = &manifest["endpoints"];
+    assert_eq!(
+        endpoints["total"].as_u64().unwrap(),
+        5,
+        "total should be 5 (all endpoints in spec)"
+    );
+    assert_eq!(
+        endpoints["available"].as_u64().unwrap(),
+        3,
+        "available should be 3 (JSON-only endpoints)"
+    );
+    assert_eq!(
+        endpoints["skipped"].as_u64().unwrap(),
+        2,
+        "skipped should be 2 (multipart endpoints)"
+    );
+}
+
+#[test]
+fn test_config_list_verbose_shows_endpoint_statistics() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().join(".aperture");
+    let spec_path = Path::new("tests/fixtures/openapi/spec-with-multipart.yaml")
+        .canonicalize()
+        .unwrap();
+
+    // Add spec in non-strict mode
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(["config", "add", "test-api", spec_path.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Get verbose list output
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args(["config", "list", "--verbose"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+
+    // Verify the new format shows endpoint statistics
+    assert!(
+        combined.contains("Endpoints: 3 of 5 available (2 skipped)"),
+        "Should show endpoint statistics in verbose output. Got: {combined}"
+    );
+    assert!(
+        combined.contains("Version:"),
+        "Should show version in verbose output. Got: {combined}"
+    );
+    assert!(
+        combined.contains("Skipped endpoints:"),
+        "Should show skipped endpoints section. Got: {combined}"
+    );
+}

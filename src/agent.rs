@@ -27,6 +27,8 @@ type ParameterSchemaInfo = (
 pub struct ApiCapabilityManifest {
     /// Basic API metadata
     pub api: ApiInfo,
+    /// Endpoint availability statistics
+    pub endpoints: EndpointStatistics,
     /// Available command groups organized by tags
     pub commands: HashMap<String, Vec<CommandInfo>>,
     /// Security schemes available for this API
@@ -43,6 +45,17 @@ pub struct ApiInfo {
     pub description: Option<String>,
     /// Base URL for the API
     pub base_url: String,
+}
+
+/// Statistics about endpoint availability
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EndpointStatistics {
+    /// Total number of endpoints in the `OpenAPI` spec
+    pub total: usize,
+    /// Number of endpoints available for use
+    pub available: usize,
+    /// Number of endpoints skipped due to unsupported features
+    pub skipped: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -220,6 +233,7 @@ pub enum SecuritySchemeDetails {
 pub fn generate_capability_manifest_from_openapi(
     api_name: &str,
     spec: &OpenAPI,
+    cached_spec: &CachedSpec,
     global_config: Option<&GlobalConfig>,
 ) -> Result<String, Error> {
     // First, convert the OpenAPI spec to a temporary CachedSpec for URL resolution
@@ -280,6 +294,11 @@ pub fn generate_capability_manifest_from_openapi(
     // Extract security schemes directly from OpenAPI
     let security_schemes = extract_security_schemes_from_openapi(spec);
 
+    // Compute endpoint statistics from the cached spec
+    let skipped = cached_spec.skipped_endpoints.len();
+    let available = cached_spec.commands.len();
+    let total = available + skipped;
+
     // Create the manifest
     let manifest = ApiCapabilityManifest {
         api: ApiInfo {
@@ -287,6 +306,11 @@ pub fn generate_capability_manifest_from_openapi(
             version: spec.info.version.clone(),
             description: spec.info.description.clone(),
             base_url: resolved_base_url,
+        },
+        endpoints: EndpointStatistics {
+            total,
+            available,
+            skipped,
         },
         commands: command_groups,
         security_schemes,
@@ -342,6 +366,11 @@ pub fn generate_capability_manifest(
     };
     let base_url = resolver.resolve(None);
 
+    // Compute endpoint statistics
+    let skipped = spec.skipped_endpoints.len();
+    let available = spec.commands.len();
+    let total = available + skipped;
+
     // Create the manifest
     let manifest = ApiCapabilityManifest {
         api: ApiInfo {
@@ -349,6 +378,11 @@ pub fn generate_capability_manifest(
             version: spec.version.clone(),
             description: None, // Not available in cached spec
             base_url,
+        },
+        endpoints: EndpointStatistics {
+            total,
+            available,
+            skipped,
         },
         commands: command_groups,
         security_schemes: extract_security_schemes(spec),

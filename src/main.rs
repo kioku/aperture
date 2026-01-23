@@ -486,25 +486,40 @@ fn list_specs_with_details(
     let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
 
     for spec_name in specs {
-        // Spec names are data output - always shown
-        println!("- {spec_name}");
-
         if !verbose {
+            // Simple output - just show spec name
+            println!("- {spec_name}");
             continue;
         }
 
-        // Try to load cached spec for verbose details
+        // Verbose output - try to load cached spec for details
         let Ok(cached_spec) =
             aperture_cli::engine::loader::load_cached_spec(&cache_dir, &spec_name)
         else {
+            // Fallback to simple output if cache can't be loaded
+            println!("- {spec_name}");
             continue;
         };
 
-        if cached_spec.skipped_endpoints.is_empty() {
-            continue;
-        }
+        // Show spec name with colon for verbose format
+        println!("- {spec_name}:");
 
-        display_skipped_endpoints_info(&cached_spec, output);
+        // Show version
+        output.info(format!("  Version: {}", cached_spec.version));
+
+        // Show endpoint statistics
+        let available = cached_spec.commands.len();
+        let skipped = cached_spec.skipped_endpoints.len();
+        let total = available + skipped;
+
+        if skipped > 0 {
+            output.info(format!(
+                "  Endpoints: {available} of {total} available ({skipped} skipped)"
+            ));
+            display_skipped_endpoints_info(&cached_spec, output);
+        } else {
+            output.info(format!("  Endpoints: {available} available"));
+        }
     }
 }
 
@@ -512,24 +527,13 @@ fn display_skipped_endpoints_info(
     cached_spec: &aperture_cli::cache::models::CachedSpec,
     output: &Output,
 ) {
-    // Convert to warnings for consistent display
-    let warnings = ConfigManager::<OsFileSystem>::skipped_endpoints_to_warnings(
-        &cached_spec.skipped_endpoints,
-    );
+    output.info("  Skipped endpoints:");
 
-    // Count total operations including all skipped ones
-    let skipped_count = warnings.len();
-    let total_operations = cached_spec.commands.len() + skipped_count;
-
-    // Format and display warnings
-    let lines = ConfigManager::<OsFileSystem>::format_validation_warnings(
-        &warnings,
-        Some(total_operations),
-        "  ",
-    );
-
-    for line in lines {
-        output.info(line);
+    for endpoint in &cached_spec.skipped_endpoints {
+        output.info(format!(
+            "    - {} {} - {} not supported",
+            endpoint.method, endpoint.path, endpoint.content_type
+        ));
     }
 }
 
@@ -570,9 +574,11 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
             .map_err(|e| Error::invalid_config(format!("Failed to parse OpenAPI spec: {e}")))?;
 
         // Generate manifest from the original spec with all metadata
+        // Pass the cached spec for endpoint statistics (available vs skipped)
         let manifest = agent::generate_capability_manifest_from_openapi(
             context,
             &openapi_spec,
+            &spec,
             global_config.as_ref(),
         )?;
 
