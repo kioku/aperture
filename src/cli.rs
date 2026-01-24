@@ -488,4 +488,50 @@ pub enum ConfigCommands {
         /// Name of the API specification to show stats for (omit for all APIs)
         api_name: Option<String>,
     },
+    /// Set a global configuration setting
+    #[command(long_about = "Set a global configuration setting value.\n\n\
+                      Supports dot-notation for nested settings and type-safe validation.\n\
+                      The configuration file comments and formatting are preserved.\n\n\
+                      Available settings:\n  \
+                      default_timeout_secs         (integer)  - Default timeout for API requests\n  \
+                      agent_defaults.json_errors   (boolean)  - Output errors as JSON by default\n\n\
+                      Examples:\n  \
+                      aperture config set default_timeout_secs 60\n  \
+                      aperture config set agent_defaults.json_errors true")]
+    Set {
+        /// Setting key (e.g., `default_timeout_secs` or `agent_defaults.json_errors`)
+        key: String,
+        /// Value to set (validated against expected type)
+        value: String,
+    },
+    /// Get a global configuration setting value
+    #[command(
+        long_about = "Get the current value of a global configuration setting.\n\n\
+                      Supports dot-notation for nested settings.\n\n\
+                      Examples:\n  \
+                      aperture config get default_timeout_secs\n  \
+                      aperture config get agent_defaults.json_errors\n  \
+                      aperture config get default_timeout_secs --json"
+    )]
+    Get {
+        /// Setting key to retrieve
+        key: String,
+        /// Output as JSON
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+    },
+    /// List all available configuration settings
+    #[command(
+        long_about = "Display all available configuration settings and their current values.\n\n\
+                      Shows the key name, current value, type, and description for each\n\
+                      setting. Use this to discover available settings and their defaults.\n\n\
+                      Examples:\n  \
+                      aperture config settings\n  \
+                      aperture config settings --json"
+    )]
+    Settings {
+        /// Output as JSON
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+    },
 }

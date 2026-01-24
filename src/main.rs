@@ -207,6 +207,15 @@ async fn run_command(
                     "Cleared all secret configurations for API '{api_name}'"
                 ));
             }
+            ConfigCommands::Set { key, value } => {
+                todo!("Implement config set: key={key}, value={value}")
+            }
+            ConfigCommands::Get { key, json } => {
+                todo!("Implement config get: key={key}, json={json}")
+            }
+            ConfigCommands::Settings { json } => {
+                todo!("Implement config settings: json={json}")
+            }
         },
         Commands::ListCommands { ref context } => {
             list_commands(context, output)?;
