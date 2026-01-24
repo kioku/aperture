@@ -618,6 +618,19 @@ fn test_describe_json_includes_endpoint_statistics() {
         2,
         "skipped should be 2 (multipart endpoints)"
     );
+
+    // Verify actual command count matches the available count
+    let total_commands: usize = manifest["commands"]
+        .as_object()
+        .expect("commands should be an object")
+        .values()
+        .map(|v| v.as_array().expect("command group should be array").len())
+        .sum();
+    assert_eq!(
+        total_commands as u64,
+        endpoints["available"].as_u64().unwrap(),
+        "actual command count should match endpoints.available"
+    );
 }
 
 #[test]
