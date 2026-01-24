@@ -59,6 +59,15 @@ impl SettingKey {
             Self::AgentDefaultsJsonErrors => "false",
         }
     }
+
+    /// Extracts the current value for this setting from a `GlobalConfig`.
+    #[must_use]
+    pub const fn value_from_config(&self, config: &super::models::GlobalConfig) -> SettingValue {
+        match self {
+            Self::DefaultTimeoutSecs => SettingValue::U64(config.default_timeout_secs),
+            Self::AgentDefaultsJsonErrors => SettingValue::Bool(config.agent_defaults.json_errors),
+        }
+    }
 }
 
 impl fmt::Display for SettingKey {

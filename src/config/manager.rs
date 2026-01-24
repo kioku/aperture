@@ -559,18 +559,8 @@ impl<F: FileSystem> ConfigManager<F> {
         &self,
         key: &crate::config::settings::SettingKey,
     ) -> Result<crate::config::settings::SettingValue, Error> {
-        use crate::config::settings::{SettingKey, SettingValue};
-
         let config = self.load_global_config()?;
-
-        let value = match key {
-            SettingKey::DefaultTimeoutSecs => SettingValue::U64(config.default_timeout_secs),
-            SettingKey::AgentDefaultsJsonErrors => {
-                SettingValue::Bool(config.agent_defaults.json_errors)
-            }
-        };
-
-        Ok(value)
+        Ok(key.value_from_config(&config))
     }
 
     /// Lists all available configuration settings with their current values.
@@ -582,19 +572,10 @@ impl<F: FileSystem> ConfigManager<F> {
         use crate::config::settings::{SettingInfo, SettingKey};
 
         let config = self.load_global_config()?;
-        let mut settings = Vec::new();
-
-        for key in SettingKey::ALL {
-            let value = match key {
-                SettingKey::DefaultTimeoutSecs => {
-                    crate::config::settings::SettingValue::U64(config.default_timeout_secs)
-                }
-                SettingKey::AgentDefaultsJsonErrors => {
-                    crate::config::settings::SettingValue::Bool(config.agent_defaults.json_errors)
-                }
-            };
-            settings.push(SettingInfo::new(*key, &value));
-        }
+        let settings = SettingKey::ALL
+            .iter()
+            .map(|key| SettingInfo::new(*key, &key.value_from_config(&config)))
+            .collect();
 
         Ok(settings)
     }
