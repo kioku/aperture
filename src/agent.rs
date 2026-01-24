@@ -261,8 +261,15 @@ pub fn generate_capability_manifest_from_openapi(
     };
     let resolved_base_url = resolver.resolve(None);
 
-    // Extract commands directly from OpenAPI spec
+    // Extract commands directly from OpenAPI spec, excluding skipped endpoints
     let mut command_groups: HashMap<String, Vec<CommandInfo>> = HashMap::new();
+
+    // Build a set of skipped (path, method) pairs for efficient lookup
+    let skipped_set: std::collections::HashSet<(&str, &str)> = cached_spec
+        .skipped_endpoints
+        .iter()
+        .map(|ep| (ep.path.as_str(), ep.method.as_str()))
+        .collect();
 
     for (path, path_item) in &spec.paths.paths {
         let ReferenceOr::Item(item) = path_item else {
@@ -274,6 +281,11 @@ pub fn generate_capability_manifest_from_openapi(
             let Some(op) = operation else {
                 continue;
             };
+
+            // Skip endpoints that were filtered out during caching
+            if skipped_set.contains(&(path.as_str(), method.to_uppercase().as_str())) {
+                continue;
+            }
 
             let command_info =
                 convert_openapi_operation_to_info(method, path, op, spec, spec.security.as_ref());

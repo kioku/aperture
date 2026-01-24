@@ -394,15 +394,29 @@ fn test_cli_list_verbose_shows_skipped_endpoints() {
         .unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
 
     assert!(output.status.success());
-    assert!(stdout.contains("test-api"));
-    assert!(stdout.contains("Skipping 2 endpoints with unsupported content types"));
-    // Check for the new format where multiple unsupported types are shown together
-    assert!(stdout.contains("POST /users/{userId}/avatar"));
-    assert!(stdout.contains("POST /documents"));
-    assert!(stdout.contains("multipart/form-data (file uploads are not supported)"));
-    assert!(stdout.contains("endpoint has no supported content types"));
+    assert!(combined.contains("test-api"));
+    // New format shows endpoint statistics summary
+    assert!(
+        combined.contains("Endpoints: 3 of 5 available (2 skipped)"),
+        "Should show endpoint statistics. Got: {combined}"
+    );
+    // Skipped endpoints are listed in simplified format
+    assert!(
+        combined.contains("Skipped endpoints:"),
+        "Should show skipped endpoints section. Got: {combined}"
+    );
+    assert!(
+        combined.contains("POST /users/{userId}/avatar"),
+        "Should list skipped avatar endpoint. Got: {combined}"
+    );
+    assert!(
+        combined.contains("POST /documents"),
+        "Should list skipped documents endpoint. Got: {combined}"
+    );
 }
 
 #[test]
