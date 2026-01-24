@@ -94,7 +94,15 @@ jobs:
         run: cargo install cargo-nextest --locked --force
         if: steps.cache.outputs.cache-hit != 'true'
 
-      - name: Run integration tests  
+      - name: Ensure cargo-nextest is available
+        shell: bash
+        run: |
+          if ! command -v cargo-nextest &> /dev/null; then
+            echo "cargo-nextest not found, installing..."
+            cargo install cargo-nextest --locked --force
+          fi
+
+      - name: Run integration tests
         run: cargo nextest run --profile ci --features integration --verbose
 
   msrv:
