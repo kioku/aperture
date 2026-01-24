@@ -12,6 +12,25 @@ use std::str::FromStr;
 ///
 /// Each variant maps to a specific path in the configuration file,
 /// with dot-notation used for nested values (e.g., `agent_defaults.json_errors`).
+///
+/// # Adding a New Setting
+///
+/// When adding a new setting, update the following locations:
+///
+/// 1. **This enum** - Add a new variant with doc comment
+/// 2. **`SettingKey::ALL`** - Add the variant to the array
+/// 3. **`SettingKey::as_str()`** - Return the dot-notation key string
+/// 4. **`SettingKey::type_name()`** - Return the type name for display
+/// 5. **`SettingKey::description()`** - Return a human-readable description
+/// 6. **`SettingKey::default_value_str()`** - Return the default value as string
+/// 7. **`SettingKey::value_from_config()`** - Extract value from `GlobalConfig`
+/// 8. **`FromStr for SettingKey`** - Parse the key string to variant
+/// 9. **`SettingValue`** - Add type variant if needed (e.g., `String`, `Vec`)
+/// 10. **`SettingValue::parse_for_key()`** - Parse string to value with validation
+/// 11. **`ConfigManager::set_setting()`** - Apply value to TOML document
+/// 12. **`GlobalConfig`** (models.rs) - Add the field to the config struct
+/// 13. **CLI help text** (cli.rs) - Update `config set` command's `long_about`
+/// 14. **Tests** - Add unit and integration tests for the new setting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SettingKey {
     /// Default timeout for API requests in seconds (`default_timeout_secs`)
