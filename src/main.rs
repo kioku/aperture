@@ -208,13 +208,49 @@ async fn run_command(
                 ));
             }
             ConfigCommands::Set { key, value } => {
-                todo!("Implement config set: key={key}, value={value}")
+                use aperture_cli::config::settings::{SettingKey, SettingValue};
+
+                let setting_key: SettingKey = key.parse()?;
+                let setting_value = SettingValue::parse_for_key(setting_key, &value)?;
+                manager.set_setting(&setting_key, &setting_value)?;
+                output.success(format!("Set {key} = {value}"));
             }
             ConfigCommands::Get { key, json } => {
-                todo!("Implement config get: key={key}, json={json}")
+                use aperture_cli::config::settings::SettingKey;
+
+                let setting_key: SettingKey = key.parse()?;
+                let value = manager.get_setting(&setting_key)?;
+
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "key": key,
+                            "value": value.to_string()
+                        })
+                    );
+                } else {
+                    println!("{value}");
+                }
             }
             ConfigCommands::Settings { json } => {
-                todo!("Implement config settings: json={json}")
+                let settings = manager.list_settings()?;
+
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&settings)?);
+                } else {
+                    output.info("Available configuration settings:");
+                    println!();
+                    for setting in settings {
+                        println!("  {} = {}", setting.key, setting.value);
+                        println!(
+                            "    Type: {}  Default: {}",
+                            setting.type_name, setting.default
+                        );
+                        println!("    {}", setting.description);
+                        println!();
+                    }
+                }
             }
         },
         Commands::ListCommands { ref context } => {
