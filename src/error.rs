@@ -1084,4 +1084,29 @@ impl Error {
             )),
         }
     }
+
+    /// Create a setting value out of range error
+    pub fn setting_value_out_of_range(
+        key: crate::config::settings::SettingKey,
+        value: impl Into<String>,
+        reason: &str,
+    ) -> Self {
+        let value = value.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!(
+                "Value '{value}' out of range for '{key}': {reason}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({
+                    "key": key.as_str(),
+                    "value": value,
+                    "reason": reason
+                })),
+                Some(Cow::Owned(format!(
+                    "Provide a value within the valid range: {reason}"
+                ))),
+            )),
+        }
+    }
 }

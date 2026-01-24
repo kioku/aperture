@@ -97,18 +97,40 @@ pub enum SettingValue {
     Bool(bool),
 }
 
+/// Maximum allowed timeout value (1 year in seconds).
+/// This prevents overflow when converting to i64 and catches obviously wrong values.
+const MAX_TIMEOUT_SECS: u64 = 365 * 24 * 60 * 60;
+
 impl SettingValue {
     /// Parse a string value into the appropriate type for the given key.
     ///
     /// # Errors
     ///
-    /// Returns an error if the value cannot be parsed as the expected type.
+    /// Returns an error if the value cannot be parsed as the expected type,
+    /// or if the value is outside the allowed range for the setting.
     pub fn parse_for_key(key: SettingKey, value: &str) -> Result<Self, Error> {
         match key {
             SettingKey::DefaultTimeoutSecs => {
                 let parsed = value
                     .parse::<u64>()
                     .map_err(|_| Error::invalid_setting_value(key, value))?;
+
+                // Validate range: must be > 0 and <= MAX_TIMEOUT_SECS
+                if parsed == 0 {
+                    return Err(Error::setting_value_out_of_range(
+                        key,
+                        value,
+                        "timeout must be greater than 0",
+                    ));
+                }
+                if parsed > MAX_TIMEOUT_SECS {
+                    return Err(Error::setting_value_out_of_range(
+                        key,
+                        value,
+                        &format!("timeout cannot exceed {MAX_TIMEOUT_SECS} seconds (1 year)"),
+                    ));
+                }
+
                 Ok(Self::U64(parsed))
             }
             SettingKey::AgentDefaultsJsonErrors => {
@@ -276,5 +298,30 @@ mod tests {
         assert_eq!(info.value, "60");
         assert_eq!(info.type_name, "integer");
         assert_eq!(info.default, "30");
+    }
+
+    #[test]
+    fn test_setting_value_parse_timeout_zero_rejected() {
+        let result = SettingValue::parse_for_key(SettingKey::DefaultTimeoutSecs, "0");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_setting_value_parse_timeout_max_boundary() {
+        // 1 year in seconds should be accepted
+        let result = SettingValue::parse_for_key(
+            SettingKey::DefaultTimeoutSecs,
+            &super::MAX_TIMEOUT_SECS.to_string(),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_setting_value_parse_timeout_over_max_rejected() {
+        // 1 year + 1 second should be rejected
+        let over_max = super::MAX_TIMEOUT_SECS + 1;
+        let result =
+            SettingValue::parse_for_key(SettingKey::DefaultTimeoutSecs, &over_max.to_string());
+        assert!(result.is_err());
     }
 }
