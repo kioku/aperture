@@ -515,21 +515,26 @@ impl<F: FileSystem> ConfigManager<F> {
             .map_err(|e| Error::invalid_config(format!("Failed to parse config: {e}")))?;
 
         // Apply the setting based on key
-        match key {
-            SettingKey::DefaultTimeoutSecs => {
-                if let SettingValue::U64(v) = value {
-                    doc["default_timeout_secs"] =
-                        toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
-                }
+        // Note: Type mismatches indicate a programming error since parse_for_key
+        // should always produce the correct type for each key.
+        match (key, value) {
+            (SettingKey::DefaultTimeoutSecs, SettingValue::U64(v)) => {
+                doc["default_timeout_secs"] =
+                    toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
             }
-            SettingKey::AgentDefaultsJsonErrors => {
-                if let SettingValue::Bool(v) = value {
-                    // Ensure agent_defaults table exists
-                    if doc.get("agent_defaults").is_none() {
-                        doc["agent_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
-                    }
-                    doc["agent_defaults"]["json_errors"] = toml_edit::value(*v);
+            (SettingKey::AgentDefaultsJsonErrors, SettingValue::Bool(v)) => {
+                // Ensure agent_defaults table exists
+                if doc.get("agent_defaults").is_none() {
+                    doc["agent_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
                 }
+                doc["agent_defaults"]["json_errors"] = toml_edit::value(*v);
+            }
+            // Type mismatches are programming errors - parse_for_key guarantees correct types
+            (SettingKey::DefaultTimeoutSecs, _) => {
+                debug_assert!(false, "DefaultTimeoutSecs requires U64 value");
+            }
+            (SettingKey::AgentDefaultsJsonErrors, _) => {
+                debug_assert!(false, "AgentDefaultsJsonErrors requires Bool value");
             }
         }
 
