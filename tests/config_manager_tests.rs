@@ -1477,3 +1477,51 @@ fn test_list_settings_with_modified_values() {
     // Default should still show original default
     assert_eq!(timeout_setting.default, "30");
 }
+
+#[test]
+fn test_set_setting_preserves_comments() {
+    use aperture_cli::config::settings::{SettingKey, SettingValue};
+
+    let (manager, fs) = setup_manager();
+
+    // Create a config file with comments
+    let config_with_comments = r"# This is a comment about timeout
+default_timeout_secs = 30
+
+# Agent configuration section
+[agent_defaults]
+# Enable JSON error output for programmatic use
+json_errors = false
+";
+
+    let config_path = manager.config_dir().join("config.toml");
+    fs.add_file(&config_path, config_with_comments);
+
+    // Modify a setting
+    manager
+        .set_setting(&SettingKey::DefaultTimeoutSecs, &SettingValue::U64(60))
+        .unwrap();
+
+    // Read the config file content back
+    let content = fs.get_file_content(&config_path).unwrap();
+
+    // Verify comments are preserved
+    assert!(
+        content.contains("# This is a comment about timeout"),
+        "Comment about timeout should be preserved. Got:\n{content}"
+    );
+    assert!(
+        content.contains("# Agent configuration section"),
+        "Section comment should be preserved. Got:\n{content}"
+    );
+    assert!(
+        content.contains("# Enable JSON error output"),
+        "Inline comment should be preserved. Got:\n{content}"
+    );
+
+    // Verify the value was actually changed
+    assert!(
+        content.contains("60"),
+        "New timeout value should be present. Got:\n{content}"
+    );
+}
