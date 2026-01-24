@@ -495,6 +495,27 @@ paths:
     assert_eq!(manifest["api"]["version"].as_str().unwrap(), "1.0.0");
     assert!(manifest["commands"]["users"].is_array());
 
+    // Verify endpoint statistics are present
+    assert!(
+        manifest["endpoints"].is_object(),
+        "endpoints field should be present"
+    );
+    assert_eq!(
+        manifest["endpoints"]["total"].as_u64().unwrap(),
+        1,
+        "total should match spec operation count"
+    );
+    assert_eq!(
+        manifest["endpoints"]["available"].as_u64().unwrap(),
+        1,
+        "available should match cached commands count"
+    );
+    assert_eq!(
+        manifest["endpoints"]["skipped"].as_u64().unwrap(),
+        0,
+        "skipped should be 0 for this spec"
+    );
+
     let users_commands = manifest["commands"]["users"].as_array().unwrap();
     assert_eq!(users_commands.len(), 1);
     assert_eq!(
