@@ -480,6 +480,120 @@ impl<F: FileSystem> ConfigManager<F> {
         Ok(())
     }
 
+    // ---- Settings Management ----
+
+    /// Sets a global configuration setting value.
+    ///
+    /// Uses `toml_edit` to preserve comments and formatting in the config file.
+    ///
+    /// # Arguments
+    /// * `key` - The setting key to modify
+    /// * `value` - The value to set
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file cannot be read, parsed, or written.
+    pub fn set_setting(
+        &self,
+        key: &crate::config::settings::SettingKey,
+        value: &crate::config::settings::SettingValue,
+    ) -> Result<(), Error> {
+        use crate::config::settings::{SettingKey, SettingValue};
+        use toml_edit::DocumentMut;
+
+        let config_path = self.config_dir.join(crate::constants::CONFIG_FILENAME);
+
+        // Load existing document or create new one
+        let content = if self.fs.exists(&config_path) {
+            self.fs.read_to_string(&config_path)?
+        } else {
+            String::new()
+        };
+
+        let mut doc: DocumentMut = content
+            .parse()
+            .map_err(|e| Error::invalid_config(format!("Failed to parse config: {e}")))?;
+
+        // Apply the setting based on key
+        match key {
+            SettingKey::DefaultTimeoutSecs => {
+                if let SettingValue::U64(v) = value {
+                    doc["default_timeout_secs"] =
+                        toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
+                }
+            }
+            SettingKey::AgentDefaultsJsonErrors => {
+                if let SettingValue::Bool(v) = value {
+                    // Ensure agent_defaults table exists
+                    if doc.get("agent_defaults").is_none() {
+                        doc["agent_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
+                    }
+                    doc["agent_defaults"]["json_errors"] = toml_edit::value(*v);
+                }
+            }
+        }
+
+        // Ensure config directory exists
+        self.fs.create_dir_all(&self.config_dir)?;
+
+        // Write back preserving formatting
+        self.fs
+            .write_all(&config_path, doc.to_string().as_bytes())?;
+        Ok(())
+    }
+
+    /// Gets a global configuration setting value.
+    ///
+    /// # Arguments
+    /// * `key` - The setting key to retrieve
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file cannot be read or parsed.
+    pub fn get_setting(
+        &self,
+        key: &crate::config::settings::SettingKey,
+    ) -> Result<crate::config::settings::SettingValue, Error> {
+        use crate::config::settings::{SettingKey, SettingValue};
+
+        let config = self.load_global_config()?;
+
+        let value = match key {
+            SettingKey::DefaultTimeoutSecs => SettingValue::U64(config.default_timeout_secs),
+            SettingKey::AgentDefaultsJsonErrors => {
+                SettingValue::Bool(config.agent_defaults.json_errors)
+            }
+        };
+
+        Ok(value)
+    }
+
+    /// Lists all available configuration settings with their current values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file cannot be read or parsed.
+    pub fn list_settings(&self) -> Result<Vec<crate::config::settings::SettingInfo>, Error> {
+        use crate::config::settings::{SettingInfo, SettingKey};
+
+        let config = self.load_global_config()?;
+        let mut settings = Vec::new();
+
+        for key in SettingKey::ALL {
+            let value = match key {
+                SettingKey::DefaultTimeoutSecs => {
+                    crate::config::settings::SettingValue::U64(config.default_timeout_secs)
+                }
+                SettingKey::AgentDefaultsJsonErrors => {
+                    crate::config::settings::SettingValue::Bool(config.agent_defaults.json_errors)
+                }
+            };
+            settings.push(SettingInfo::new(*key, &value));
+        }
+
+        Ok(settings)
+    }
+
     /// Sets the base URL for an API specification.
     ///
     /// # Arguments
