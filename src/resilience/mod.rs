@@ -544,4 +544,73 @@ mod tests {
         assert_eq!(result.retry_history.len(), 1);
         assert_eq!(result.total_attempts, 2);
     }
+
+    #[test]
+    fn test_is_retryable_status_408_request_timeout() {
+        assert!(is_retryable_status(408));
+    }
+
+    #[test]
+    fn test_is_retryable_status_429_too_many_requests() {
+        assert!(is_retryable_status(429));
+    }
+
+    #[test]
+    fn test_is_retryable_status_500_internal_server_error() {
+        assert!(is_retryable_status(500));
+    }
+
+    #[test]
+    fn test_is_retryable_status_502_bad_gateway() {
+        assert!(is_retryable_status(502));
+    }
+
+    #[test]
+    fn test_is_retryable_status_503_service_unavailable() {
+        assert!(is_retryable_status(503));
+    }
+
+    #[test]
+    fn test_is_retryable_status_504_gateway_timeout() {
+        assert!(is_retryable_status(504));
+    }
+
+    #[test]
+    fn test_is_retryable_status_501_not_implemented_not_retryable() {
+        // 501 Not Implemented should not be retryable
+        assert!(!is_retryable_status(501));
+    }
+
+    #[test]
+    fn test_is_retryable_status_505_http_version_not_supported_not_retryable() {
+        // 505 HTTP Version Not Supported should not be retryable
+        assert!(!is_retryable_status(505));
+    }
+
+    #[test]
+    fn test_is_retryable_status_4xx_not_retryable() {
+        // Most 4xx errors should not be retryable
+        assert!(!is_retryable_status(400)); // Bad Request
+        assert!(!is_retryable_status(401)); // Unauthorized
+        assert!(!is_retryable_status(403)); // Forbidden
+        assert!(!is_retryable_status(404)); // Not Found
+        assert!(!is_retryable_status(405)); // Method Not Allowed
+        assert!(!is_retryable_status(422)); // Unprocessable Entity
+    }
+
+    #[test]
+    fn test_is_retryable_status_2xx_not_retryable() {
+        // 2xx success codes should not be retryable
+        assert!(!is_retryable_status(200));
+        assert!(!is_retryable_status(201));
+        assert!(!is_retryable_status(204));
+    }
+
+    #[test]
+    fn test_is_retryable_status_3xx_not_retryable() {
+        // 3xx redirect codes should not be retryable
+        assert!(!is_retryable_status(301));
+        assert!(!is_retryable_status(302));
+        assert!(!is_retryable_status(304));
+    }
 }
