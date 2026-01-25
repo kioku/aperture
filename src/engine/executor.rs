@@ -691,6 +691,13 @@ pub async fn execute_request(
         return Ok(None);
     }
 
+    // Build retry context with method information
+    let retry_ctx = retry_context.map(|ctx| {
+        let mut ctx = ctx.clone();
+        ctx.method = Some(method.to_string());
+        ctx
+    });
+
     // Send request with retry support
     let (status, response_headers, response_text) = send_request_with_retry(
         &client,
@@ -698,7 +705,7 @@ pub async fn execute_request(
         &url,
         headers,
         request_body.clone(),
-        retry_context,
+        retry_ctx.as_ref(),
         operation,
     )
     .await?;

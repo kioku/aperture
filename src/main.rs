@@ -6,6 +6,8 @@ use aperture_cli::config::manager::{get_config_dir, ConfigManager};
 use aperture_cli::config::models::{GlobalConfig, SecretSource};
 use aperture_cli::constants;
 use aperture_cli::docs::{DocumentationGenerator, HelpFormatter};
+use aperture_cli::duration::parse_duration;
+use aperture_cli::engine::executor::RetryContext;
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
@@ -710,6 +712,9 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         })
     };
 
+    // Build retry configuration from CLI flags and global config defaults
+    let retry_context = build_retry_context(cli, global_config.as_ref())?;
+
     // Execute the request with agent flags
     executor::execute_request(
         &spec,
@@ -722,7 +727,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         jq_filter,
         cache_config.as_ref(),
         false, // capture_output
-        None,  // retry_context - will be populated in Task 8
+        retry_context.as_ref(),
     )
     .await
     .map_err(|e| {
@@ -1342,4 +1347,55 @@ fn load_all_specs(
     }
 
     Ok(all_specs)
+}
+
+/// Builds a `RetryContext` from CLI flags and global configuration.
+///
+/// CLI flags take precedence over global config defaults.
+#[allow(clippy::cast_possible_truncation)]
+fn build_retry_context(
+    cli: &Cli,
+    global_config: Option<&GlobalConfig>,
+) -> Result<Option<RetryContext>, Error> {
+    // Get retry defaults from global config
+    let defaults = global_config.map(|c| &c.retry_defaults);
+
+    // Determine max_attempts: CLI > global config > 0 (disabled)
+    let max_attempts = cli
+        .retry
+        .or_else(|| defaults.map(|d| d.max_attempts))
+        .unwrap_or(0);
+
+    // If retries are disabled, return None
+    if max_attempts == 0 {
+        return Ok(None);
+    }
+
+    // Determine initial_delay_ms: CLI > global config > 500ms default
+    // Truncation is safe: delay values in practice are well under u64::MAX milliseconds
+    let initial_delay_ms = if let Some(ref delay_str) = cli.retry_delay {
+        parse_duration(delay_str)?.as_millis() as u64
+    } else {
+        defaults.map_or(500, |d| d.initial_delay_ms)
+    };
+
+    // Determine max_delay_ms: CLI > global config > 30000ms default
+    // Truncation is safe: delay values in practice are well under u64::MAX milliseconds
+    let max_delay_ms = if let Some(ref delay_str) = cli.retry_max_delay {
+        parse_duration(delay_str)?.as_millis() as u64
+    } else {
+        defaults.map_or(30_000, |d| d.max_delay_ms)
+    };
+
+    // Check for idempotency key
+    let has_idempotency_key = cli.idempotency_key.is_some();
+
+    Ok(Some(RetryContext {
+        max_attempts,
+        initial_delay_ms,
+        max_delay_ms,
+        force_retry: cli.force_retry,
+        method: None, // Will be determined in executor
+        has_idempotency_key,
+    }))
 }
