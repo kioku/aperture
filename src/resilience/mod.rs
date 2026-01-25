@@ -41,6 +41,48 @@ impl Default for TimeoutConfig {
     }
 }
 
+/// Information about a single retry attempt for logging and error reporting.
+#[derive(Debug, Clone)]
+pub struct RetryInfo {
+    /// The retry attempt number (1-indexed)
+    pub attempt: u32,
+    /// The HTTP status code that triggered the retry, if available
+    pub status_code: Option<u16>,
+    /// The delay in milliseconds before this retry
+    pub delay_ms: u64,
+    /// Human-readable reason for the retry
+    pub reason: String,
+}
+
+impl RetryInfo {
+    /// Creates a new `RetryInfo` instance.
+    #[must_use]
+    pub fn new(
+        attempt: u32,
+        status_code: Option<u16>,
+        delay_ms: u64,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            attempt,
+            status_code,
+            delay_ms,
+            reason: reason.into(),
+        }
+    }
+}
+
+/// Result of a retry operation, including retry history for diagnostics.
+#[derive(Debug)]
+pub struct RetryResult<T> {
+    /// The successful result, if any
+    pub result: Result<T, Error>,
+    /// History of retry attempts (empty if succeeded on first try)
+    pub retry_history: Vec<RetryInfo>,
+    /// Total number of attempts made (including the final one)
+    pub total_attempts: u32,
+}
+
 /// Parses the `Retry-After` HTTP header and returns the delay duration.
 ///
 /// The `Retry-After` header can be specified in two formats:
@@ -201,6 +243,82 @@ where
         config.max_attempts.try_into().unwrap_or(u32::MAX),
         last_error.unwrap_or_else(|| "Unknown error".to_string()),
     ))
+}
+
+/// Executes a future with retry logic, tracking all retry attempts for diagnostics.
+///
+/// Unlike `execute_with_retry`, this function returns a `RetryResult` that includes
+/// the full retry history, useful for logging and structured error reporting.
+#[allow(clippy::cast_possible_truncation)]
+pub async fn execute_with_retry_tracking<F, Fut, T>(
+    config: &RetryConfig,
+    operation_name: &str,
+    mut operation: F,
+) -> RetryResult<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, reqwest::Error>>,
+{
+    let mut retry_history = Vec::new();
+    let mut last_error = None;
+
+    for attempt in 0..config.max_attempts {
+        match operation().await {
+            Ok(result) => {
+                return RetryResult {
+                    result: Ok(result),
+                    retry_history,
+                    total_attempts: (attempt + 1) as u32,
+                };
+            }
+            Err(error) => {
+                let is_last_attempt = attempt + 1 >= config.max_attempts;
+                let is_retryable = is_retryable_error(&error);
+                let status_code = error.status().map(|s| s.as_u16());
+                let error_message = error.to_string();
+
+                // Handle non-retryable errors immediately
+                if !is_retryable {
+                    return RetryResult {
+                        result: Err(Error::transient_network_error(error_message, false)),
+                        retry_history,
+                        total_attempts: (attempt + 1) as u32,
+                    };
+                }
+
+                // Handle last attempt
+                if is_last_attempt {
+                    last_error = Some(error_message);
+                    break;
+                }
+
+                // Calculate delay
+                let delay = calculate_retry_delay(config, attempt);
+                let delay_ms = delay.as_millis() as u64;
+
+                // Record retry info
+                retry_history.push(RetryInfo::new(
+                    (attempt + 1) as u32,
+                    status_code,
+                    delay_ms,
+                    format!("{operation_name}: {error_message}"),
+                ));
+
+                // Sleep before retry
+                sleep(delay).await;
+                last_error = Some(error_message);
+            }
+        }
+    }
+
+    RetryResult {
+        result: Err(Error::retry_limit_exceeded(
+            config.max_attempts.try_into().unwrap_or(u32::MAX),
+            last_error.unwrap_or_else(|| "Unknown error".to_string()),
+        )),
+        retry_history,
+        total_attempts: config.max_attempts as u32,
+    }
 }
 
 /// Creates a resilient HTTP client with timeout configuration
@@ -370,5 +488,47 @@ mod tests {
         let retry_after = Some(Duration::from_secs(60));
         let delay = calculate_retry_delay_with_header(&config, 0, retry_after);
         assert_eq!(delay.as_millis(), 5000);
+    }
+
+    #[test]
+    fn test_retry_info_new() {
+        let info = RetryInfo::new(1, Some(429), 500, "Rate limited");
+        assert_eq!(info.attempt, 1);
+        assert_eq!(info.status_code, Some(429));
+        assert_eq!(info.delay_ms, 500);
+        assert_eq!(info.reason, "Rate limited");
+    }
+
+    #[test]
+    fn test_retry_info_without_status_code() {
+        let info = RetryInfo::new(2, None, 1000, "Connection refused");
+        assert_eq!(info.attempt, 2);
+        assert_eq!(info.status_code, None);
+        assert_eq!(info.delay_ms, 1000);
+        assert_eq!(info.reason, "Connection refused");
+    }
+
+    #[test]
+    fn test_retry_result_success_no_retries() {
+        let result: RetryResult<i32> = RetryResult {
+            result: Ok(42),
+            retry_history: vec![],
+            total_attempts: 1,
+        };
+        assert!(result.result.is_ok());
+        assert!(result.retry_history.is_empty());
+        assert_eq!(result.total_attempts, 1);
+    }
+
+    #[test]
+    fn test_retry_result_success_after_retries() {
+        let result: RetryResult<i32> = RetryResult {
+            result: Ok(42),
+            retry_history: vec![RetryInfo::new(1, Some(503), 100, "Service unavailable")],
+            total_attempts: 2,
+        };
+        assert!(result.result.is_ok());
+        assert_eq!(result.retry_history.len(), 1);
+        assert_eq!(result.total_attempts, 2);
     }
 }
