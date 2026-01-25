@@ -16,7 +16,14 @@ repos:
 
     -   id: cargo-test
         name: cargo test
-        entry: cargo test
+        entry: cargo test --features integration
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+    -   id: ast-grep
+        name: ast-grep
+        entry: sg scan
         language: system
         types: [rust]
         pass_filenames: false
