@@ -94,7 +94,19 @@ pub struct RetryResult<T> {
 pub fn parse_retry_after_header(headers: &HeaderMap) -> Option<Duration> {
     let retry_after = headers.get("retry-after")?;
     let value = retry_after.to_str().ok()?;
+    parse_retry_after_value(value)
+}
 
+/// Parses a `Retry-After` header value string and returns the delay duration.
+///
+/// This is the core parsing logic that can be used with any string source.
+/// Supports two formats:
+/// - Delay in seconds: `"120"`
+/// - HTTP-date: `"Wed, 21 Oct 2015 07:28:00 GMT"`
+///
+/// Returns `None` if the value is malformed or represents a time in the past.
+#[must_use]
+pub fn parse_retry_after_value(value: &str) -> Option<Duration> {
     // Try parsing as seconds first (most common)
     if let Ok(seconds) = value.parse::<u64>() {
         return Some(Duration::from_secs(seconds));

@@ -4,7 +4,9 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
 use crate::error::Error;
-use crate::resilience::{calculate_retry_delay_with_header, is_retryable_status};
+use crate::resilience::{
+    calculate_retry_delay_with_header, is_retryable_status, parse_retry_after_value,
+};
 use crate::response_cache::{
     CacheConfig, CacheKey, CachedRequestInfo, CachedResponse, ResponseCache,
 };
@@ -18,7 +20,6 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 use std::str::FromStr;
-use std::time::Duration;
 use tabled::Table;
 use tokio::time::sleep;
 
@@ -95,11 +96,11 @@ impl RetryContext {
             return true;
         }
 
-        // GET, HEAD, OPTIONS, TRACE are idempotent
+        // GET, HEAD, PUT, OPTIONS, TRACE are idempotent per HTTP semantics
         self.method.as_ref().is_some_and(|m| {
             matches!(
                 m.to_uppercase().as_str(),
-                "GET" | "HEAD" | "OPTIONS" | "TRACE"
+                "GET" | "HEAD" | "PUT" | "OPTIONS" | "TRACE"
             )
         })
     }
@@ -303,20 +304,10 @@ async fn send_request_with_retry(
                     return Ok((status, response_headers, response_text));
                 }
 
-                // Parse Retry-After header if present (convert to HeaderMap for parsing)
-                let retry_after = response_headers.get("retry-after").and_then(|v| {
-                    // Parse as seconds first
-                    if let Ok(seconds) = v.parse::<u64>() {
-                        return Some(Duration::from_secs(seconds));
-                    }
-                    // Try parsing as HTTP-date
-                    if let Ok(date) = httpdate::parse_http_date(v) {
-                        if let Ok(duration) = date.duration_since(std::time::SystemTime::now()) {
-                            return Some(duration);
-                        }
-                    }
-                    None
-                });
+                // Parse Retry-After header if present
+                let retry_after = response_headers
+                    .get("retry-after")
+                    .and_then(|v| parse_retry_after_value(v));
 
                 // Calculate delay using the retry config
                 let delay = calculate_retry_delay_with_header(
