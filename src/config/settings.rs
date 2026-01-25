@@ -37,11 +37,23 @@ pub enum SettingKey {
     DefaultTimeoutSecs,
     /// Whether to output errors as JSON by default (`agent_defaults.json_errors`)
     AgentDefaultsJsonErrors,
+    /// Maximum number of retry attempts (`retry_defaults.max_attempts`)
+    RetryDefaultsMaxAttempts,
+    /// Initial delay between retries in milliseconds (`retry_defaults.initial_delay_ms`)
+    RetryDefaultsInitialDelayMs,
+    /// Maximum delay cap in milliseconds (`retry_defaults.max_delay_ms`)
+    RetryDefaultsMaxDelayMs,
 }
 
 impl SettingKey {
     /// All available setting keys for enumeration.
-    pub const ALL: &'static [Self] = &[Self::DefaultTimeoutSecs, Self::AgentDefaultsJsonErrors];
+    pub const ALL: &'static [Self] = &[
+        Self::DefaultTimeoutSecs,
+        Self::AgentDefaultsJsonErrors,
+        Self::RetryDefaultsMaxAttempts,
+        Self::RetryDefaultsInitialDelayMs,
+        Self::RetryDefaultsMaxDelayMs,
+    ];
 
     /// Returns the dot-notation key string for this setting.
     #[must_use]
@@ -49,6 +61,9 @@ impl SettingKey {
         match self {
             Self::DefaultTimeoutSecs => "default_timeout_secs",
             Self::AgentDefaultsJsonErrors => "agent_defaults.json_errors",
+            Self::RetryDefaultsMaxAttempts => "retry_defaults.max_attempts",
+            Self::RetryDefaultsInitialDelayMs => "retry_defaults.initial_delay_ms",
+            Self::RetryDefaultsMaxDelayMs => "retry_defaults.max_delay_ms",
         }
     }
 
@@ -56,7 +71,10 @@ impl SettingKey {
     #[must_use]
     pub const fn type_name(&self) -> &'static str {
         match self {
-            Self::DefaultTimeoutSecs => "integer",
+            Self::DefaultTimeoutSecs
+            | Self::RetryDefaultsMaxAttempts
+            | Self::RetryDefaultsInitialDelayMs
+            | Self::RetryDefaultsMaxDelayMs => "integer",
             Self::AgentDefaultsJsonErrors => "boolean",
         }
     }
@@ -67,6 +85,9 @@ impl SettingKey {
         match self {
             Self::DefaultTimeoutSecs => "Default timeout for API requests in seconds",
             Self::AgentDefaultsJsonErrors => "Output errors as JSON by default",
+            Self::RetryDefaultsMaxAttempts => "Maximum retry attempts (0 = disabled)",
+            Self::RetryDefaultsInitialDelayMs => "Initial delay between retries in milliseconds",
+            Self::RetryDefaultsMaxDelayMs => "Maximum delay cap in milliseconds",
         }
     }
 
@@ -76,6 +97,9 @@ impl SettingKey {
         match self {
             Self::DefaultTimeoutSecs => "30",
             Self::AgentDefaultsJsonErrors => "false",
+            Self::RetryDefaultsMaxAttempts => "0",
+            Self::RetryDefaultsInitialDelayMs => "500",
+            Self::RetryDefaultsMaxDelayMs => "30000",
         }
     }
 
@@ -85,6 +109,13 @@ impl SettingKey {
         match self {
             Self::DefaultTimeoutSecs => SettingValue::U64(config.default_timeout_secs),
             Self::AgentDefaultsJsonErrors => SettingValue::Bool(config.agent_defaults.json_errors),
+            Self::RetryDefaultsMaxAttempts => {
+                SettingValue::U64(config.retry_defaults.max_attempts as u64)
+            }
+            Self::RetryDefaultsInitialDelayMs => {
+                SettingValue::U64(config.retry_defaults.initial_delay_ms)
+            }
+            Self::RetryDefaultsMaxDelayMs => SettingValue::U64(config.retry_defaults.max_delay_ms),
         }
     }
 }
@@ -102,6 +133,9 @@ impl FromStr for SettingKey {
         match s {
             "default_timeout_secs" => Ok(Self::DefaultTimeoutSecs),
             "agent_defaults.json_errors" => Ok(Self::AgentDefaultsJsonErrors),
+            "retry_defaults.max_attempts" => Ok(Self::RetryDefaultsMaxAttempts),
+            "retry_defaults.initial_delay_ms" => Ok(Self::RetryDefaultsInitialDelayMs),
+            "retry_defaults.max_delay_ms" => Ok(Self::RetryDefaultsMaxDelayMs),
             _ => Err(Error::unknown_setting_key(s)),
         }
     }
@@ -119,6 +153,15 @@ pub enum SettingValue {
 /// Maximum allowed timeout value (1 year in seconds).
 /// This prevents overflow when converting to i64 and catches obviously wrong values.
 const MAX_TIMEOUT_SECS: u64 = 365 * 24 * 60 * 60;
+
+/// Maximum retry attempts (reasonable upper bound).
+const MAX_RETRY_ATTEMPTS: u64 = 10;
+
+/// Maximum initial delay in milliseconds (1 minute).
+const MAX_INITIAL_DELAY_MS: u64 = 60_000;
+
+/// Maximum delay cap in milliseconds (5 minutes).
+const MAX_DELAY_CAP_MS: u64 = 300_000;
 
 impl SettingValue {
     /// Parse a string value into the appropriate type for the given key.
@@ -159,6 +202,67 @@ impl SettingValue {
                     _ => return Err(Error::invalid_setting_value(key, value)),
                 };
                 Ok(Self::Bool(parsed))
+            }
+            SettingKey::RetryDefaultsMaxAttempts => {
+                let parsed = value
+                    .parse::<u64>()
+                    .map_err(|_| Error::invalid_setting_value(key, value))?;
+
+                if parsed > MAX_RETRY_ATTEMPTS {
+                    return Err(Error::setting_value_out_of_range(
+                        key,
+                        value,
+                        &format!("max_attempts cannot exceed {MAX_RETRY_ATTEMPTS}"),
+                    ));
+                }
+
+                Ok(Self::U64(parsed))
+            }
+            SettingKey::RetryDefaultsInitialDelayMs => {
+                let parsed = value
+                    .parse::<u64>()
+                    .map_err(|_| Error::invalid_setting_value(key, value))?;
+
+                if parsed == 0 {
+                    return Err(Error::setting_value_out_of_range(
+                        key,
+                        value,
+                        "initial_delay_ms must be greater than 0",
+                    ));
+                }
+                if parsed > MAX_INITIAL_DELAY_MS {
+                    return Err(Error::setting_value_out_of_range(
+                        key,
+                        value,
+                        &format!(
+                            "initial_delay_ms cannot exceed {MAX_INITIAL_DELAY_MS}ms (1 minute)"
+                        ),
+                    ));
+                }
+
+                Ok(Self::U64(parsed))
+            }
+            SettingKey::RetryDefaultsMaxDelayMs => {
+                let parsed = value
+                    .parse::<u64>()
+                    .map_err(|_| Error::invalid_setting_value(key, value))?;
+
+                if parsed == 0 {
+                    return Err(Error::setting_value_out_of_range(
+                        key,
+                        value,
+                        "max_delay_ms must be greater than 0",
+                    ));
+                }
+                if parsed > MAX_DELAY_CAP_MS {
+                    return Err(Error::setting_value_out_of_range(
+                        key,
+                        value,
+                        &format!("max_delay_ms cannot exceed {MAX_DELAY_CAP_MS}ms (5 minutes)"),
+                    ));
+                }
+
+                Ok(Self::U64(parsed))
             }
         }
     }
@@ -342,5 +446,112 @@ mod tests {
         let result =
             SettingValue::parse_for_key(SettingKey::DefaultTimeoutSecs, &over_max.to_string());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_retry_settings_from_str() {
+        assert_eq!(
+            "retry_defaults.max_attempts".parse::<SettingKey>().unwrap(),
+            SettingKey::RetryDefaultsMaxAttempts
+        );
+        assert_eq!(
+            "retry_defaults.initial_delay_ms"
+                .parse::<SettingKey>()
+                .unwrap(),
+            SettingKey::RetryDefaultsInitialDelayMs
+        );
+        assert_eq!(
+            "retry_defaults.max_delay_ms".parse::<SettingKey>().unwrap(),
+            SettingKey::RetryDefaultsMaxDelayMs
+        );
+    }
+
+    #[test]
+    fn test_retry_max_attempts_valid_range() {
+        // 0 is valid (disabled)
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsMaxAttempts, "0");
+        assert_eq!(result.unwrap(), SettingValue::U64(0));
+
+        // 3 is valid
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsMaxAttempts, "3");
+        assert_eq!(result.unwrap(), SettingValue::U64(3));
+
+        // 10 is valid (max)
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsMaxAttempts, "10");
+        assert_eq!(result.unwrap(), SettingValue::U64(10));
+
+        // 11 is invalid (over max)
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsMaxAttempts, "11");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_retry_initial_delay_ms_valid_range() {
+        // 0 is invalid
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsInitialDelayMs, "0");
+        assert!(result.is_err());
+
+        // 100 is valid
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsInitialDelayMs, "100");
+        assert_eq!(result.unwrap(), SettingValue::U64(100));
+
+        // 60000 is valid (max)
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsInitialDelayMs, "60000");
+        assert_eq!(result.unwrap(), SettingValue::U64(60000));
+
+        // 60001 is invalid (over max)
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsInitialDelayMs, "60001");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_retry_max_delay_ms_valid_range() {
+        // 0 is invalid
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsMaxDelayMs, "0");
+        assert!(result.is_err());
+
+        // 1000 is valid
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsMaxDelayMs, "1000");
+        assert_eq!(result.unwrap(), SettingValue::U64(1000));
+
+        // 300000 is valid (max)
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsMaxDelayMs, "300000");
+        assert_eq!(result.unwrap(), SettingValue::U64(300_000));
+
+        // 300001 is invalid (over max)
+        let result = SettingValue::parse_for_key(SettingKey::RetryDefaultsMaxDelayMs, "300001");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_retry_settings_descriptions() {
+        assert_eq!(
+            SettingKey::RetryDefaultsMaxAttempts.description(),
+            "Maximum retry attempts (0 = disabled)"
+        );
+        assert_eq!(
+            SettingKey::RetryDefaultsInitialDelayMs.description(),
+            "Initial delay between retries in milliseconds"
+        );
+        assert_eq!(
+            SettingKey::RetryDefaultsMaxDelayMs.description(),
+            "Maximum delay cap in milliseconds"
+        );
+    }
+
+    #[test]
+    fn test_retry_settings_defaults() {
+        assert_eq!(
+            SettingKey::RetryDefaultsMaxAttempts.default_value_str(),
+            "0"
+        );
+        assert_eq!(
+            SettingKey::RetryDefaultsInitialDelayMs.default_value_str(),
+            "500"
+        );
+        assert_eq!(
+            SettingKey::RetryDefaultsMaxDelayMs.default_value_str(),
+            "30000"
+        );
     }
 }
