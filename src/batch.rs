@@ -1,5 +1,7 @@
 use crate::cache::models::CachedSpec;
 use crate::config::models::GlobalConfig;
+use crate::duration::parse_duration;
+use crate::engine::executor::RetryContext;
 use crate::engine::generator;
 use crate::error::Error;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
@@ -358,6 +360,9 @@ impl BatchProcessor {
             None
         };
 
+        // Build retry context from operation settings and global config defaults
+        let retry_context = build_batch_retry_context(operation, global_config)?;
+
         // When suppressing output, capture it and return early
         if suppress_output {
             let output = crate::engine::executor::execute_request(
@@ -371,7 +376,7 @@ impl BatchProcessor {
                 jq_filter,
                 cache_config.as_ref(),
                 true, // capture_output
-                None, // retry_context - will be integrated in Task 10
+                retry_context.as_ref(),
             )
             .await?;
 
@@ -393,7 +398,7 @@ impl BatchProcessor {
                 jq_filter,
                 cache_config.as_ref(),
                 false, // capture_output
-                None,  // retry_context - will be integrated in Task 10
+                retry_context.as_ref(),
             )
             .await?;
 
@@ -417,7 +422,7 @@ impl BatchProcessor {
             jq_filter,
             cache_config.as_ref(),
             false, // capture_output
-            None,  // retry_context - will be integrated in Task 10
+            retry_context.as_ref(),
         )
         .await?;
 
@@ -430,6 +435,54 @@ impl BatchProcessor {
                 .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME)
         ))
     }
+}
+
+/// Builds a `RetryContext` from batch operation settings and global configuration.
+///
+/// Operation-level settings take precedence over global config defaults.
+#[allow(clippy::cast_possible_truncation)]
+fn build_batch_retry_context(
+    operation: &BatchOperation,
+    global_config: Option<&GlobalConfig>,
+) -> Result<Option<RetryContext>, Error> {
+    // Get retry defaults from global config
+    let defaults = global_config.map(|c| &c.retry_defaults);
+
+    // Determine max_attempts: operation > global config > 0 (disabled)
+    let max_attempts = operation
+        .retry
+        .or_else(|| defaults.map(|d| d.max_attempts))
+        .unwrap_or(0);
+
+    // If retries are disabled, return None
+    if max_attempts == 0 {
+        return Ok(None);
+    }
+
+    // Determine initial_delay_ms: operation > global config > 500ms default
+    // Truncation is safe: delay values in practice are well under u64::MAX milliseconds
+    let initial_delay_ms = if let Some(ref delay_str) = operation.retry_delay {
+        parse_duration(delay_str)?.as_millis() as u64
+    } else {
+        defaults.map_or(500, |d| d.initial_delay_ms)
+    };
+
+    // Determine max_delay_ms: operation > global config > 30000ms default
+    // Truncation is safe: delay values in practice are well under u64::MAX milliseconds
+    let max_delay_ms = if let Some(ref delay_str) = operation.retry_max_delay {
+        parse_duration(delay_str)?.as_millis() as u64
+    } else {
+        defaults.map_or(30_000, |d| d.max_delay_ms)
+    };
+
+    Ok(Some(RetryContext {
+        max_attempts,
+        initial_delay_ms,
+        max_delay_ms,
+        force_retry: operation.force_retry,
+        method: None,               // Will be determined in executor
+        has_idempotency_key: false, // Batch operations don't support idempotency keys yet
+    }))
 }
 
 #[cfg(test)]
