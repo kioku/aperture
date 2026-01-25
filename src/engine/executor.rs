@@ -385,18 +385,33 @@ async fn send_request_with_retry(
         return Ok((status, headers, text));
     }
 
-    // Return last error if we have one
+    // Return detailed retry error if we have a last error
     if let Some(e) = last_error {
         eprintln!(
             "Retry exhausted: {} {} failed after {} attempts",
             method, operation.operation_id, max_attempts
         );
-        return Err(e);
+        // Return detailed retry error with full context
+        return Err(Error::retry_limit_exceeded_detailed(
+            max_attempts,
+            attempt,
+            e.to_string(),
+            ctx.initial_delay_ms,
+            ctx.max_delay_ms,
+            None,
+            &operation.operation_id,
+        ));
     }
 
     // Should not happen, but handle gracefully
-    Err(Error::network_request_failed(
-        "Request failed with no response".to_string(),
+    Err(Error::retry_limit_exceeded_detailed(
+        max_attempts,
+        attempt,
+        "Request failed with no response",
+        ctx.initial_delay_ms,
+        ctx.max_delay_ms,
+        None,
+        &operation.operation_id,
     ))
 }
 
