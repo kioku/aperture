@@ -1322,3 +1322,206 @@ paths:
         panic!("Expected Validation error for OAuth2, got: {result:?}");
     }
 }
+
+// ============================================================================
+// Settings Management Tests
+// ============================================================================
+
+#[test]
+fn test_set_setting_timeout() {
+    use aperture_cli::config::settings::{SettingKey, SettingValue};
+
+    let (manager, _fs) = setup_manager();
+
+    // Set timeout to 60 seconds
+    let result = manager.set_setting(&SettingKey::DefaultTimeoutSecs, &SettingValue::U64(60));
+    assert!(result.is_ok());
+
+    // Verify the value was set
+    let value = manager
+        .get_setting(&SettingKey::DefaultTimeoutSecs)
+        .unwrap();
+    assert_eq!(value, SettingValue::U64(60));
+}
+
+#[test]
+fn test_set_setting_json_errors() {
+    use aperture_cli::config::settings::{SettingKey, SettingValue};
+
+    let (manager, _fs) = setup_manager();
+
+    // Set json_errors to true
+    let result = manager.set_setting(
+        &SettingKey::AgentDefaultsJsonErrors,
+        &SettingValue::Bool(true),
+    );
+    assert!(result.is_ok());
+
+    // Verify the value was set
+    let value = manager
+        .get_setting(&SettingKey::AgentDefaultsJsonErrors)
+        .unwrap();
+    assert_eq!(value, SettingValue::Bool(true));
+}
+
+#[test]
+fn test_get_setting_default_timeout() {
+    use aperture_cli::config::settings::{SettingKey, SettingValue};
+
+    let (manager, _fs) = setup_manager();
+
+    // Default timeout should be 30
+    let value = manager
+        .get_setting(&SettingKey::DefaultTimeoutSecs)
+        .unwrap();
+    assert_eq!(value, SettingValue::U64(30));
+}
+
+#[test]
+fn test_get_setting_default_json_errors() {
+    use aperture_cli::config::settings::{SettingKey, SettingValue};
+
+    let (manager, _fs) = setup_manager();
+
+    // Default json_errors should be false
+    let value = manager
+        .get_setting(&SettingKey::AgentDefaultsJsonErrors)
+        .unwrap();
+    assert_eq!(value, SettingValue::Bool(false));
+}
+
+#[test]
+fn test_list_settings() {
+    let (manager, _fs) = setup_manager();
+
+    let settings = manager.list_settings().unwrap();
+
+    // Should have 2 settings
+    assert_eq!(settings.len(), 2);
+
+    // Check setting keys are present
+    let keys: Vec<_> = settings.iter().map(|s| s.key.as_str()).collect();
+    assert!(keys.contains(&"default_timeout_secs"));
+    assert!(keys.contains(&"agent_defaults.json_errors"));
+}
+
+#[test]
+fn test_set_setting_preserves_existing_config() {
+    use aperture_cli::config::settings::{SettingKey, SettingValue};
+
+    let (manager, fs) = setup_manager();
+
+    // First, add a spec to create some config
+    let spec_content = r#"
+openapi: "3.0.0"
+info:
+  title: Test API
+  version: "1.0"
+paths:
+  /test:
+    get:
+      operationId: testOp
+      responses:
+        "200":
+          description: OK
+"#;
+    let spec_path = manager.config_dir().join("specs").join("test-api.yaml");
+    fs.add_file(&spec_path, spec_content);
+
+    // Set a timeout value
+    manager
+        .set_setting(&SettingKey::DefaultTimeoutSecs, &SettingValue::U64(45))
+        .unwrap();
+
+    // Set json_errors
+    manager
+        .set_setting(
+            &SettingKey::AgentDefaultsJsonErrors,
+            &SettingValue::Bool(true),
+        )
+        .unwrap();
+
+    // Verify both settings are preserved
+    let timeout = manager
+        .get_setting(&SettingKey::DefaultTimeoutSecs)
+        .unwrap();
+    assert_eq!(timeout, SettingValue::U64(45));
+
+    let json_errors = manager
+        .get_setting(&SettingKey::AgentDefaultsJsonErrors)
+        .unwrap();
+    assert_eq!(json_errors, SettingValue::Bool(true));
+}
+
+#[test]
+fn test_list_settings_with_modified_values() {
+    use aperture_cli::config::settings::{SettingKey, SettingValue};
+
+    let (manager, _fs) = setup_manager();
+
+    // Modify the timeout
+    manager
+        .set_setting(&SettingKey::DefaultTimeoutSecs, &SettingValue::U64(120))
+        .unwrap();
+
+    let settings = manager.list_settings().unwrap();
+
+    // Find the timeout setting
+    let timeout_setting = settings
+        .iter()
+        .find(|s| s.key == "default_timeout_secs")
+        .unwrap();
+
+    // Value should be the modified value
+    assert_eq!(timeout_setting.value, "120");
+    // Default should still show original default
+    assert_eq!(timeout_setting.default, "30");
+}
+
+#[test]
+fn test_set_setting_preserves_comments() {
+    use aperture_cli::config::settings::{SettingKey, SettingValue};
+
+    let (manager, fs) = setup_manager();
+
+    // Create a config file with comments
+    let config_with_comments = r"# This is a comment about timeout
+default_timeout_secs = 30
+
+# Agent configuration section
+[agent_defaults]
+# Enable JSON error output for programmatic use
+json_errors = false
+";
+
+    let config_path = manager.config_dir().join("config.toml");
+    fs.add_file(&config_path, config_with_comments);
+
+    // Modify a setting
+    manager
+        .set_setting(&SettingKey::DefaultTimeoutSecs, &SettingValue::U64(60))
+        .unwrap();
+
+    // Read the config file content back
+    let content = fs.get_file_content(&config_path).unwrap();
+
+    // Verify comments are preserved
+    assert!(
+        content.contains("# This is a comment about timeout"),
+        "Comment about timeout should be preserved. Got:\n{content}"
+    );
+    assert!(
+        content.contains("# Agent configuration section"),
+        "Section comment should be preserved. Got:\n{content}"
+    );
+    assert!(
+        content.contains("# Enable JSON error output"),
+        "Inline comment should be preserved. Got:\n{content}"
+    );
+
+    // Verify the value was actually changed
+    assert!(
+        content.contains("60"),
+        "New timeout value should be present. Got:\n{content}"
+    );
+}

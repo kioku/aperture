@@ -1042,4 +1042,71 @@ impl Error {
             )),
         }
     }
+
+    // ---- Settings Errors ----
+
+    /// Create an unknown setting key error
+    pub fn unknown_setting_key(key: impl Into<String>) -> Self {
+        let key = key.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Unknown setting key: '{key}'")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "key": key })),
+                Some(Cow::Borrowed(
+                    "Run 'aperture config settings' to see available settings.",
+                )),
+            )),
+        }
+    }
+
+    /// Create an invalid setting value error
+    pub fn invalid_setting_value(
+        key: crate::config::settings::SettingKey,
+        value: impl Into<String>,
+    ) -> Self {
+        let value = value.into();
+        let expected_type = key.type_name();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!(
+                "Invalid value for '{key}': expected {expected_type}, got '{value}'"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({
+                    "key": key.as_str(),
+                    "value": value,
+                    "expected_type": expected_type
+                })),
+                Some(Cow::Owned(format!(
+                    "Provide a valid {expected_type} value for this setting."
+                ))),
+            )),
+        }
+    }
+
+    /// Create a setting value out of range error
+    pub fn setting_value_out_of_range(
+        key: crate::config::settings::SettingKey,
+        value: impl Into<String>,
+        reason: &str,
+    ) -> Self {
+        let value = value.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!(
+                "Value '{value}' out of range for '{key}': {reason}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({
+                    "key": key.as_str(),
+                    "value": value,
+                    "reason": reason
+                })),
+                Some(Cow::Owned(format!(
+                    "Provide a value within the valid range: {reason}"
+                ))),
+            )),
+        }
+    }
 }

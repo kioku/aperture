@@ -480,6 +480,106 @@ impl<F: FileSystem> ConfigManager<F> {
         Ok(())
     }
 
+    // ---- Settings Management ----
+
+    /// Sets a global configuration setting value.
+    ///
+    /// Uses `toml_edit` to preserve comments and formatting in the config file.
+    ///
+    /// # Arguments
+    /// * `key` - The setting key to modify
+    /// * `value` - The value to set
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file cannot be read, parsed, or written.
+    pub fn set_setting(
+        &self,
+        key: &crate::config::settings::SettingKey,
+        value: &crate::config::settings::SettingValue,
+    ) -> Result<(), Error> {
+        use crate::config::settings::{SettingKey, SettingValue};
+        use toml_edit::DocumentMut;
+
+        let config_path = self.config_dir.join(crate::constants::CONFIG_FILENAME);
+
+        // Load existing document or create new one
+        let content = if self.fs.exists(&config_path) {
+            self.fs.read_to_string(&config_path)?
+        } else {
+            String::new()
+        };
+
+        let mut doc: DocumentMut = content
+            .parse()
+            .map_err(|e| Error::invalid_config(format!("Failed to parse config: {e}")))?;
+
+        // Apply the setting based on key
+        // Note: Type mismatches indicate a programming error since parse_for_key
+        // should always produce the correct type for each key.
+        match (key, value) {
+            (SettingKey::DefaultTimeoutSecs, SettingValue::U64(v)) => {
+                doc["default_timeout_secs"] =
+                    toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
+            }
+            (SettingKey::AgentDefaultsJsonErrors, SettingValue::Bool(v)) => {
+                // Ensure agent_defaults table exists
+                if doc.get("agent_defaults").is_none() {
+                    doc["agent_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
+                }
+                doc["agent_defaults"]["json_errors"] = toml_edit::value(*v);
+            }
+            // Type mismatches are programming errors - parse_for_key guarantees correct types
+            (SettingKey::DefaultTimeoutSecs, _) => {
+                debug_assert!(false, "DefaultTimeoutSecs requires U64 value");
+            }
+            (SettingKey::AgentDefaultsJsonErrors, _) => {
+                debug_assert!(false, "AgentDefaultsJsonErrors requires Bool value");
+            }
+        }
+
+        // Ensure config directory exists
+        self.fs.create_dir_all(&self.config_dir)?;
+
+        // Write back preserving formatting
+        self.fs
+            .write_all(&config_path, doc.to_string().as_bytes())?;
+        Ok(())
+    }
+
+    /// Gets a global configuration setting value.
+    ///
+    /// # Arguments
+    /// * `key` - The setting key to retrieve
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file cannot be read or parsed.
+    pub fn get_setting(
+        &self,
+        key: &crate::config::settings::SettingKey,
+    ) -> Result<crate::config::settings::SettingValue, Error> {
+        let config = self.load_global_config()?;
+        Ok(key.value_from_config(&config))
+    }
+
+    /// Lists all available configuration settings with their current values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file cannot be read or parsed.
+    pub fn list_settings(&self) -> Result<Vec<crate::config::settings::SettingInfo>, Error> {
+        use crate::config::settings::{SettingInfo, SettingKey};
+
+        let config = self.load_global_config()?;
+        let settings = SettingKey::ALL
+            .iter()
+            .map(|key| SettingInfo::new(*key, &key.value_from_config(&config)))
+            .collect();
+
+        Ok(settings)
+    }
+
     /// Sets the base URL for an API specification.
     ///
     /// # Arguments
