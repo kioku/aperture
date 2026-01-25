@@ -1,5 +1,6 @@
 use crate::error::Error;
-use std::time::{Duration, Instant};
+use reqwest::header::HeaderMap;
+use std::time::{Duration, Instant, SystemTime};
 use tokio::time::sleep;
 
 /// Configuration for retry behavior
@@ -38,6 +39,64 @@ impl Default for TimeoutConfig {
             request_timeout_ms: 30_000, // 30 seconds
         }
     }
+}
+
+/// Parses the `Retry-After` HTTP header and returns the delay duration.
+///
+/// The `Retry-After` header can be specified in two formats:
+/// - Delay in seconds: `Retry-After: 120`
+/// - HTTP-date: `Retry-After: Wed, 21 Oct 2015 07:28:00 GMT`
+///
+/// Returns `None` if the header is absent, malformed, or represents a time in the past.
+#[must_use]
+pub fn parse_retry_after_header(headers: &HeaderMap) -> Option<Duration> {
+    let retry_after = headers.get("retry-after")?;
+    let value = retry_after.to_str().ok()?;
+
+    // Try parsing as seconds first (most common)
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+
+    // Try parsing as HTTP-date (RFC 7231 format)
+    // Format: "Wed, 21 Oct 2015 07:28:00 GMT"
+    if let Ok(date) = httpdate::parse_http_date(value) {
+        let now = SystemTime::now();
+        if let Ok(duration) = date.duration_since(now) {
+            return Some(duration);
+        }
+        // Date is in the past, return None
+        return None;
+    }
+
+    None
+}
+
+/// Calculates the retry delay, respecting an optional `Retry-After` header value.
+///
+/// If `retry_after` is provided and greater than the calculated exponential backoff delay,
+/// the `retry_after` value is used instead (still capped at `max_delay_ms`).
+#[must_use]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap
+)]
+pub fn calculate_retry_delay_with_header(
+    config: &RetryConfig,
+    attempt: usize,
+    retry_after: Option<Duration>,
+) -> Duration {
+    let calculated_delay = calculate_retry_delay(config, attempt);
+
+    retry_after.map_or(calculated_delay, |server_delay| {
+        // Use server-specified delay if it's longer than our calculated delay
+        let delay = calculated_delay.max(server_delay);
+        // But cap it at max_delay_ms
+        let max_delay = Duration::from_millis(config.max_delay_ms);
+        delay.min(max_delay)
+    })
 }
 
 /// Determines if an error is retryable based on its characteristics
@@ -213,5 +272,103 @@ mod tests {
         let timeout_config = TimeoutConfig::default();
         assert_eq!(timeout_config.connect_timeout_ms, 10_000);
         assert_eq!(timeout_config.request_timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn test_parse_retry_after_header_seconds() {
+        let mut headers = HeaderMap::new();
+        headers.insert("retry-after", "120".parse().unwrap());
+
+        let duration = parse_retry_after_header(&headers);
+        assert_eq!(duration, Some(Duration::from_secs(120)));
+    }
+
+    #[test]
+    fn test_parse_retry_after_header_zero() {
+        let mut headers = HeaderMap::new();
+        headers.insert("retry-after", "0".parse().unwrap());
+
+        let duration = parse_retry_after_header(&headers);
+        assert_eq!(duration, Some(Duration::from_secs(0)));
+    }
+
+    #[test]
+    fn test_parse_retry_after_header_missing() {
+        let headers = HeaderMap::new();
+
+        let duration = parse_retry_after_header(&headers);
+        assert_eq!(duration, None);
+    }
+
+    #[test]
+    fn test_parse_retry_after_header_invalid() {
+        let mut headers = HeaderMap::new();
+        headers.insert("retry-after", "not-a-number".parse().unwrap());
+
+        let duration = parse_retry_after_header(&headers);
+        // Invalid format that's neither a number nor valid HTTP-date
+        assert_eq!(duration, None);
+    }
+
+    #[test]
+    fn test_calculate_retry_delay_with_header_none() {
+        let config = RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: 5000,
+            backoff_multiplier: 2.0,
+            jitter: false,
+        };
+
+        let delay = calculate_retry_delay_with_header(&config, 0, None);
+        assert_eq!(delay.as_millis(), 100);
+    }
+
+    #[test]
+    fn test_calculate_retry_delay_with_header_uses_server_delay_when_larger() {
+        let config = RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: 5000,
+            backoff_multiplier: 2.0,
+            jitter: false,
+        };
+
+        // Server says wait 3 seconds, which is more than our 100ms
+        let retry_after = Some(Duration::from_secs(3));
+        let delay = calculate_retry_delay_with_header(&config, 0, retry_after);
+        assert_eq!(delay.as_secs(), 3);
+    }
+
+    #[test]
+    fn test_calculate_retry_delay_with_header_uses_calculated_when_larger() {
+        let config = RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 5000,
+            max_delay_ms: 30_000,
+            backoff_multiplier: 2.0,
+            jitter: false,
+        };
+
+        // Server says wait 1 second, but our calculated delay is 5 seconds
+        let retry_after = Some(Duration::from_secs(1));
+        let delay = calculate_retry_delay_with_header(&config, 0, retry_after);
+        assert_eq!(delay.as_millis(), 5000);
+    }
+
+    #[test]
+    fn test_calculate_retry_delay_with_header_caps_at_max() {
+        let config = RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 100,
+            max_delay_ms: 5000,
+            backoff_multiplier: 2.0,
+            jitter: false,
+        };
+
+        // Server says wait 60 seconds, but we cap at 5 seconds
+        let retry_after = Some(Duration::from_secs(60));
+        let delay = calculate_retry_delay_with_header(&config, 0, retry_after);
+        assert_eq!(delay.as_millis(), 5000);
     }
 }
