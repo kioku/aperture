@@ -151,6 +151,7 @@ fn create_global_config_with_secrets(
         api_configs,
         default_timeout_secs: 30,
         agent_defaults: aperture_cli::config::models::AgentDefaults::default(),
+        ..Default::default()
     }
 }
 
@@ -259,6 +260,7 @@ async fn test_aperture_secret_used_when_no_config() {
         api_configs: HashMap::new(),
         default_timeout_secs: 30,
         agent_defaults: aperture_cli::config::models::AgentDefaults::default(),
+        ..Default::default()
     };
 
     // Mock should expect spec values
@@ -391,6 +393,7 @@ async fn test_missing_spec_secret_env_var_error() {
         api_configs: HashMap::new(),
         default_timeout_secs: 30,
         agent_defaults: aperture_cli::config::models::AgentDefaults::default(),
+        ..Default::default()
     };
 
     // No mock expectations - the request should fail before reaching the server
@@ -484,6 +487,7 @@ async fn test_partial_config_override() {
         api_configs,
         default_timeout_secs: 30,
         agent_defaults: aperture_cli::config::models::AgentDefaults::default(),
+        ..Default::default()
     };
 
     // Mock should expect config bearer token but spec api key
@@ -596,6 +600,7 @@ async fn test_no_authentication_configured() {
         api_configs: HashMap::new(),
         default_timeout_secs: 30,
         agent_defaults: aperture_cli::config::models::AgentDefaults::default(),
+        ..Default::default()
     };
 
     // Create clap matches for the command
