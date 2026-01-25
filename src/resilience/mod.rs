@@ -114,16 +114,10 @@ pub fn parse_retry_after_value(value: &str) -> Option<Duration> {
 
     // Try parsing as HTTP-date (RFC 7231 format)
     // Format: "Wed, 21 Oct 2015 07:28:00 GMT"
-    if let Ok(date) = httpdate::parse_http_date(value) {
-        let now = SystemTime::now();
-        if let Ok(duration) = date.duration_since(now) {
-            return Some(duration);
-        }
-        // Date is in the past, return None
-        return None;
-    }
-
-    None
+    // Returns None if parsing fails or date is in the past
+    httpdate::parse_http_date(value)
+        .ok()
+        .and_then(|date| date.duration_since(SystemTime::now()).ok())
 }
 
 /// Calculates the retry delay, respecting an optional `Retry-After` header value.

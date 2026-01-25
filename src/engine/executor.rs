@@ -258,11 +258,13 @@ async fn send_request_with_retry(
 
     // Check if safe to retry non-GET requests
     if !ctx.is_safe_to_retry() {
+        // ast-grep-ignore: no-println
         eprintln!(
             "Warning: Retries disabled for {} {} - method is not idempotent and no --idempotency-key provided",
             method,
             operation.operation_id
         );
+        // ast-grep-ignore: no-println
         eprintln!(
             "         Use --force-retry to enable retries anyway, or provide --idempotency-key"
         );
@@ -318,6 +320,7 @@ async fn send_request_with_retry(
 
                 // Check if we have more attempts
                 if attempt < max_attempts {
+                    // ast-grep-ignore: no-println
                     eprintln!(
                         "Retry {}/{}: {} {} returned {} - retrying in {}ms",
                         attempt,
@@ -348,6 +351,7 @@ async fn send_request_with_retry(
                     calculate_retry_delay_with_header(&retry_config, (attempt - 1) as usize, None);
 
                 if attempt < max_attempts {
+                    // ast-grep-ignore: no-println
                     eprintln!(
                         "Retry {}/{}: {} {} failed - retrying in {}ms: {}",
                         attempt,
@@ -369,6 +373,7 @@ async fn send_request_with_retry(
     if let (Some(status), Some(headers), Some(text)) =
         (last_status, last_response_headers, last_response_text)
     {
+        // ast-grep-ignore: no-println
         eprintln!(
             "Retry exhausted: {} {} failed after {} attempts",
             method, operation.operation_id, max_attempts
@@ -378,6 +383,7 @@ async fn send_request_with_retry(
 
     // Return detailed retry error if we have a last error
     if let Some(e) = last_error {
+        // ast-grep-ignore: no-println
         eprintln!(
             "Retry exhausted: {} {} failed after {} attempts",
             method, operation.operation_id, max_attempts
@@ -415,10 +421,8 @@ fn build_request(
     body: Option<String>,
 ) -> reqwest::RequestBuilder {
     let mut request = client.request(method, url).headers(headers);
-    if let Some(body_str) = body {
-        if let Ok(json_body) = serde_json::from_str::<Value>(&body_str) {
-            request = request.json(&json_body);
-        }
+    if let Some(json_body) = body.and_then(|s| serde_json::from_str::<Value>(&s).ok()) {
+        request = request.json(&json_body);
     }
     request
 }
