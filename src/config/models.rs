@@ -29,6 +29,9 @@ pub struct AgentDefaults {
 ///
 /// These settings control automatic retry behavior for transient failures.
 /// Set `max_attempts` to 0 to disable retries (the default).
+///
+/// Retryable status codes are determined by the `is_retryable_status` function
+/// in the resilience module (408, 429, 500-504 excluding 501/505).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RetryDefaults {
     /// Maximum number of retry attempts (0 = disabled, 1-10 recommended)
@@ -40,9 +43,6 @@ pub struct RetryDefaults {
     /// Maximum delay cap in milliseconds (default: 30000ms = 30s)
     #[serde(default = "default_max_delay_ms")]
     pub max_delay_ms: u64,
-    /// HTTP status codes that trigger retries (default: [429, 503, 504])
-    #[serde(default = "default_retry_status_codes")]
-    pub retry_status_codes: Vec<u16>,
 }
 
 const fn default_initial_delay_ms() -> u64 {
@@ -53,17 +53,12 @@ const fn default_max_delay_ms() -> u64 {
     30_000
 }
 
-fn default_retry_status_codes() -> Vec<u16> {
-    vec![429, 503, 504]
-}
-
 impl Default for RetryDefaults {
     fn default() -> Self {
         Self {
             max_attempts: 0, // Disabled by default
             initial_delay_ms: default_initial_delay_ms(),
             max_delay_ms: default_max_delay_ms(),
-            retry_status_codes: default_retry_status_codes(),
         }
     }
 }
