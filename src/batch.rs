@@ -37,7 +37,7 @@ impl Default for BatchConfig {
 }
 
 /// A single batch operation definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BatchOperation {
     /// Unique identifier for this operation (optional)
     pub id: Option<String>,
@@ -50,6 +50,18 @@ pub struct BatchOperation {
     pub headers: std::collections::HashMap<String, String>,
     /// Whether to use cache for this operation (overrides global cache setting)
     pub use_cache: Option<bool>,
+    /// Maximum number of retry attempts for this operation (overrides global retry setting)
+    #[serde(default)]
+    pub retry: Option<u32>,
+    /// Initial delay between retries (e.g., "500ms", "1s")
+    #[serde(default)]
+    pub retry_delay: Option<String>,
+    /// Maximum delay cap between retries (e.g., "30s", "1m")
+    #[serde(default)]
+    pub retry_max_delay: Option<String>,
+    /// Force retry on non-idempotent requests without an idempotency key
+    #[serde(default)]
+    pub force_retry: bool,
 }
 
 /// Batch file format containing multiple operations
