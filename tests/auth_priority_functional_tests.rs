@@ -220,6 +220,7 @@ async fn test_config_secret_overrides_aperture_secret() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -295,6 +296,7 @@ async fn test_aperture_secret_used_when_no_config() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -353,6 +355,7 @@ async fn test_missing_config_secret_env_var_error() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -417,6 +420,7 @@ async fn test_missing_spec_secret_env_var_error() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -522,6 +526,7 @@ async fn test_partial_config_override() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -621,6 +626,7 @@ async fn test_no_authentication_configured() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -695,6 +701,7 @@ async fn test_different_api_configs() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 

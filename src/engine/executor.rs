@@ -4,6 +4,7 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
 use crate::error::Error;
+use crate::resilience::{calculate_retry_delay_with_header, is_retryable_status};
 use crate::response_cache::{
     CacheConfig, CacheKey, CachedRequestInfo, CachedResponse, ResponseCache,
 };
@@ -17,7 +18,9 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 use std::str::FromStr;
+use std::time::Duration;
 use tabled::Table;
+use tokio::time::sleep;
 
 #[cfg(feature = "jq")]
 use jaq_core::{Ctx, RcIter};
@@ -45,6 +48,60 @@ impl From<&str> for AuthScheme {
             constants::AUTH_SCHEME_APIKEY => Self::ApiKey,
             _ => Self::Custom(s.to_string()),
         }
+    }
+}
+
+/// Configuration for request retry behavior.
+#[derive(Debug, Clone)]
+pub struct RetryContext {
+    /// Maximum number of retry attempts (0 = disabled)
+    pub max_attempts: u32,
+    /// Initial delay between retries in milliseconds
+    pub initial_delay_ms: u64,
+    /// Maximum delay cap in milliseconds
+    pub max_delay_ms: u64,
+    /// Whether to force retry on non-idempotent requests without idempotency key
+    pub force_retry: bool,
+    /// HTTP method (used to check idempotency)
+    pub method: Option<String>,
+    /// Whether an idempotency key is set
+    pub has_idempotency_key: bool,
+}
+
+impl Default for RetryContext {
+    fn default() -> Self {
+        Self {
+            max_attempts: 0, // Disabled by default
+            initial_delay_ms: 500,
+            max_delay_ms: 30_000,
+            force_retry: false,
+            method: None,
+            has_idempotency_key: false,
+        }
+    }
+}
+
+impl RetryContext {
+    /// Returns true if retries are enabled.
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
+        self.max_attempts > 0
+    }
+
+    /// Returns true if the request method is safe to retry (idempotent or has key).
+    #[must_use]
+    pub fn is_safe_to_retry(&self) -> bool {
+        if self.force_retry || self.has_idempotency_key {
+            return true;
+        }
+
+        // GET, HEAD, OPTIONS, TRACE are idempotent
+        self.method.as_ref().is_some_and(|m| {
+            matches!(
+                m.to_uppercase().as_str(),
+                "GET" | "HEAD" | "OPTIONS" | "TRACE"
+            )
+        })
     }
 }
 
@@ -171,6 +228,193 @@ async fn send_request(
         .map_err(|e| Error::response_read_error(e.to_string()))?;
 
     Ok((status, response_headers, response_text))
+}
+
+/// Send HTTP request with retry logic
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
+async fn send_request_with_retry(
+    client: &reqwest::Client,
+    method: Method,
+    url: &str,
+    headers: HeaderMap,
+    body: Option<String>,
+    retry_context: Option<&RetryContext>,
+    operation: &CachedCommand,
+) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+    use crate::resilience::RetryConfig;
+
+    // If no retry context or retries disabled, just send once
+    let Some(ctx) = retry_context else {
+        let request = build_request(client, method, url, headers, body);
+        return send_request(request).await;
+    };
+
+    if !ctx.is_enabled() {
+        let request = build_request(client, method, url, headers, body);
+        return send_request(request).await;
+    }
+
+    // Check if safe to retry non-GET requests
+    if !ctx.is_safe_to_retry() {
+        eprintln!(
+            "Warning: Retries disabled for {} {} - method is not idempotent and no --idempotency-key provided",
+            method,
+            operation.operation_id
+        );
+        eprintln!(
+            "         Use --force-retry to enable retries anyway, or provide --idempotency-key"
+        );
+        let request = build_request(client, method.clone(), url, headers, body);
+        return send_request(request).await;
+    }
+
+    // Create a RetryConfig from the RetryContext
+    let retry_config = RetryConfig {
+        max_attempts: ctx.max_attempts as usize,
+        initial_delay_ms: ctx.initial_delay_ms,
+        max_delay_ms: ctx.max_delay_ms,
+        backoff_multiplier: 2.0,
+        jitter: true,
+    };
+
+    let max_attempts = ctx.max_attempts;
+    let mut attempt: u32 = 0;
+    let mut last_error: Option<Error> = None;
+    let mut last_status: Option<reqwest::StatusCode> = None;
+    let mut last_response_headers: Option<HashMap<String, String>> = None;
+    let mut last_response_text: Option<String> = None;
+
+    while attempt < max_attempts {
+        attempt += 1;
+
+        let request = build_request(client, method.clone(), url, headers.clone(), body.clone());
+        let result = send_request(request).await;
+
+        match result {
+            Ok((status, response_headers, response_text)) => {
+                // Success - return immediately
+                if status.is_success() {
+                    return Ok((status, response_headers, response_text));
+                }
+
+                // Check if we should retry this status code
+                if !is_retryable_status(status.as_u16()) {
+                    return Ok((status, response_headers, response_text));
+                }
+
+                // Parse Retry-After header if present (convert to HeaderMap for parsing)
+                let retry_after = response_headers.get("retry-after").and_then(|v| {
+                    // Parse as seconds first
+                    if let Ok(seconds) = v.parse::<u64>() {
+                        return Some(Duration::from_secs(seconds));
+                    }
+                    // Try parsing as HTTP-date
+                    if let Ok(date) = httpdate::parse_http_date(v) {
+                        if let Ok(duration) = date.duration_since(std::time::SystemTime::now()) {
+                            return Some(duration);
+                        }
+                    }
+                    None
+                });
+
+                // Calculate delay using the retry config
+                let delay = calculate_retry_delay_with_header(
+                    &retry_config,
+                    (attempt - 1) as usize, // 0-indexed for delay calculation
+                    retry_after,
+                );
+
+                // Check if we have more attempts
+                if attempt < max_attempts {
+                    eprintln!(
+                        "Retry {}/{}: {} {} returned {} - retrying in {}ms",
+                        attempt,
+                        max_attempts,
+                        method,
+                        operation.operation_id,
+                        status.as_u16(),
+                        delay.as_millis()
+                    );
+                    sleep(delay).await;
+                }
+
+                // Save for potential final error
+                last_status = Some(status);
+                last_response_headers = Some(response_headers);
+                last_response_text = Some(response_text);
+            }
+            Err(e) => {
+                // Network error - check if we should retry
+                let should_retry = matches!(&e, Error::Network(_));
+
+                if !should_retry {
+                    return Err(e);
+                }
+
+                // Calculate delay
+                let delay =
+                    calculate_retry_delay_with_header(&retry_config, (attempt - 1) as usize, None);
+
+                if attempt < max_attempts {
+                    eprintln!(
+                        "Retry {}/{}: {} {} failed - retrying in {}ms: {}",
+                        attempt,
+                        max_attempts,
+                        method,
+                        operation.operation_id,
+                        delay.as_millis(),
+                        e
+                    );
+                    sleep(delay).await;
+                }
+
+                last_error = Some(e);
+            }
+        }
+    }
+
+    // All retries exhausted - return last result
+    if let (Some(status), Some(headers), Some(text)) =
+        (last_status, last_response_headers, last_response_text)
+    {
+        eprintln!(
+            "Retry exhausted: {} {} failed after {} attempts",
+            method, operation.operation_id, max_attempts
+        );
+        return Ok((status, headers, text));
+    }
+
+    // Return last error if we have one
+    if let Some(e) = last_error {
+        eprintln!(
+            "Retry exhausted: {} {} failed after {} attempts",
+            method, operation.operation_id, max_attempts
+        );
+        return Err(e);
+    }
+
+    // Should not happen, but handle gracefully
+    Err(Error::network_request_failed(
+        "Request failed with no response".to_string(),
+    ))
+}
+
+/// Build a request from components
+fn build_request(
+    client: &reqwest::Client,
+    method: Method,
+    url: &str,
+    headers: HeaderMap,
+    body: Option<String>,
+) -> reqwest::RequestBuilder {
+    let mut request = client.request(method, url).headers(headers);
+    if let Some(body_str) = body {
+        if let Ok(json_body) = serde_json::from_str::<Value>(&body_str) {
+            request = request.json(&json_body);
+        }
+    }
+    request
 }
 
 /// Handle HTTP error responses
@@ -323,6 +567,7 @@ async fn store_in_cache(
 /// * `jq_filter` - Optional JQ filter expression to apply to response
 /// * `cache_config` - Optional cache configuration for response caching
 /// * `capture_output` - If true, captures output and returns it instead of printing to stdout
+/// * `retry_context` - Optional retry configuration for automatic request retries
 ///
 /// # Returns
 /// * `Ok(Option<String>)` - Request executed successfully. Returns Some(output) if `capture_output` is true
@@ -348,6 +593,7 @@ pub async fn execute_request(
     jq_filter: Option<&str>,
     cache_config: Option<&CacheConfig>,
     capture_output: bool,
+    retry_context: Option<&RetryContext>,
 ) -> Result<Option<String>, Error> {
     // Find the operation from the command hierarchy (also returns the operation's ArgMatches)
     let (operation, operation_matches) = find_operation_with_matches(spec, matches)?;
@@ -403,15 +649,9 @@ pub async fn execute_request(
         .map_err(|_| Error::invalid_http_method(&operation.method))?;
 
     let headers_clone = headers.clone(); // For dry-run output
-    let mut request = client.request(method.clone(), &url).headers(headers);
 
     // Extract request body
     let request_body = extract_request_body(operation, operation_matches)?;
-    if let Some(ref body) = request_body {
-        let json_body: Value = serde_json::from_str(body)
-            .expect("JSON body was validated in extract_request_body, parsing should succeed");
-        request = request.json(&json_body);
-    }
 
     // Prepare cache context
     let cache_context = prepare_cache_context(
@@ -451,8 +691,17 @@ pub async fn execute_request(
         return Ok(None);
     }
 
-    // Send request and get response
-    let (status, response_headers, response_text) = send_request(request).await?;
+    // Send request with retry support
+    let (status, response_headers, response_text) = send_request_with_retry(
+        &client,
+        method.clone(),
+        &url,
+        headers,
+        request_body.clone(),
+        retry_context,
+        operation,
+    )
+    .await?;
 
     // Check if request was successful
     if !status.is_success() {

@@ -99,6 +99,7 @@ async fn test_response_caching_enabled() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -115,6 +116,7 @@ async fn test_response_caching_enabled() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());
@@ -163,6 +165,7 @@ async fn test_response_caching_disabled() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -178,6 +181,7 @@ async fn test_response_caching_disabled() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());
@@ -225,6 +229,7 @@ async fn test_response_cache_expiration() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -244,6 +249,7 @@ async fn test_response_cache_expiration() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());
@@ -293,6 +299,7 @@ async fn test_response_cache_different_parameters() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -314,6 +321,7 @@ async fn test_response_cache_different_parameters() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());
@@ -360,6 +368,7 @@ async fn test_response_cache_no_config() {
         None,
         None,  // No cache config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -375,6 +384,7 @@ async fn test_response_cache_no_config() {
         None,
         None,  // No cache config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());

@@ -126,6 +126,7 @@ async fn test_optional_boolean_header_present() {
         None,  // jq_filter
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 
@@ -170,6 +171,7 @@ async fn test_optional_boolean_header_absent() {
         None,  // jq_filter
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 
@@ -218,6 +220,7 @@ async fn test_required_boolean_header_present() {
         None,  // jq_filter
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 
@@ -313,6 +316,7 @@ async fn test_mixed_boolean_and_string_headers() {
         None,  // jq_filter
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 
@@ -397,6 +401,7 @@ async fn test_kebab_case_boolean_header_conversion() {
         None,  // jq_filter
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 
@@ -511,6 +516,7 @@ async fn test_boolean_header_with_query_and_path_params() {
         None,  // jq_filter
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 
@@ -624,6 +630,7 @@ async fn test_multiple_boolean_headers() {
         None,  // jq_filter
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 

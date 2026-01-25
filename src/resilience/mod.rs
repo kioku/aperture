@@ -155,15 +155,28 @@ pub fn is_retryable_error(error: &reqwest::Error) -> bool {
     }
 
     // Check HTTP status codes
-    error.status().is_none_or(|status| match status.as_u16() {
+    error
+        .status()
+        .is_none_or(|status| is_retryable_status(status.as_u16()))
+}
+
+/// Determines if an HTTP status code is retryable.
+///
+/// Retryable status codes:
+/// - 408 Request Timeout
+/// - 429 Too Many Requests
+/// - 500-599 Server errors (except 501 Not Implemented, 505 HTTP Version Not Supported)
+#[must_use]
+pub const fn is_retryable_status(status: u16) -> bool {
+    match status {
         // Client errors (4xx) are generally not retryable except for specific cases
         408 | 429 => true, // Request Timeout, Too Many Requests
 
         // Server errors (5xx) are generally retryable except for specific cases
-        500..=599 => !matches!(status.as_u16(), 501 | 505), // Exclude Not Implemented, HTTP Version not supported
+        500..=599 => !matches!(status, 501 | 505), // Exclude Not Implemented, HTTP Version not supported
 
         _ => false, // All other codes (1xx, 2xx, 3xx, 4xx except 408/429) are not retryable
-    })
+    }
 }
 
 /// Calculates the delay for a given retry attempt with exponential backoff

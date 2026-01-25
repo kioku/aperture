@@ -722,6 +722,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         jq_filter,
         cache_config.as_ref(),
         false, // capture_output
+        None,  // retry_context - will be populated in Task 8
     )
     .await
     .map_err(|e| {

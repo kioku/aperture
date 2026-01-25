@@ -218,6 +218,7 @@ async fn test_end_to_end_authentication_with_parsed_extensions() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());

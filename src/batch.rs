@@ -359,6 +359,7 @@ impl BatchProcessor {
                 jq_filter,
                 cache_config.as_ref(),
                 true, // capture_output
+                None, // retry_context - will be integrated in Task 10
             )
             .await?;
 
@@ -380,6 +381,7 @@ impl BatchProcessor {
                 jq_filter,
                 cache_config.as_ref(),
                 false, // capture_output
+                None,  // retry_context - will be integrated in Task 10
             )
             .await?;
 
@@ -403,6 +405,7 @@ impl BatchProcessor {
             jq_filter,
             cache_config.as_ref(),
             false, // capture_output
+            None,  // retry_context - will be integrated in Task 10
         )
         .await?;
 
