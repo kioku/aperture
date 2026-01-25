@@ -235,22 +235,7 @@ async fn run_command(
             }
             ConfigCommands::Settings { json } => {
                 let settings = manager.list_settings()?;
-
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&settings)?);
-                } else {
-                    output.info("Available configuration settings:");
-                    println!();
-                    for setting in settings {
-                        println!("  {} = {}", setting.key, setting.value);
-                        println!(
-                            "    Type: {}  Default: {}",
-                            setting.type_name, setting.default
-                        );
-                        println!("    {}", setting.description);
-                        println!();
-                    }
-                }
+                print_settings_list(settings, json, output)?;
             }
         },
         Commands::ListCommands { ref context } => {
@@ -580,6 +565,30 @@ fn display_skipped_endpoints_info(
             endpoint.method, endpoint.path, endpoint.content_type
         ));
     }
+}
+
+fn print_settings_list(
+    settings: Vec<aperture_cli::config::settings::SettingInfo>,
+    json: bool,
+    output: &Output,
+) -> Result<(), Error> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(&settings)?);
+        return Ok(());
+    }
+
+    output.info("Available configuration settings:");
+    println!();
+    for setting in settings {
+        println!("  {} = {}", setting.key, setting.value);
+        println!(
+            "    Type: {}  Default: {}",
+            setting.type_name, setting.default
+        );
+        println!("    {}", setting.description);
+        println!();
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
