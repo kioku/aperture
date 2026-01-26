@@ -1,6 +1,6 @@
 [package]
 name = "aperture-cli"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Dynamic CLI generator for OpenAPI specifications"
 license = "MIT"
