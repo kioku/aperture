@@ -180,22 +180,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-crates:
-    name: Publish to crates.io
-    needs: release
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Publish
-        run: cargo publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+  # Note: crates.io publishing is handled by local `cargo release` command
+  # The release script (scripts/release.sh) runs `cargo release --execute`
+  # which publishes to crates.io before pushing the tag that triggers this workflow
 
   update-homebrew:
     name: Update Homebrew Formula
