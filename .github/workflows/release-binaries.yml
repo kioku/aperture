@@ -1,7 +1,15 @@
-# Build and publish pre-built binaries for multiple platforms
+# Complete release workflow: verify, publish, build binaries, create release, update homebrew
 # Triggered on version tags (v*) or manual dispatch
+#
+# Local workflow:
+#   1. Update version in Cargo.toml
+#   2. Commit: git commit -am "chore: bump version to 0.1.8"
+#   3. Tag: git tag v0.1.8
+#   4. Push: git push && git push --tags
+#
+# CI handles everything else: changelog, crates.io, binaries, GitHub release, Homebrew
 
-name: Release Binaries
+name: Release
 
 on:
   push:
@@ -10,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to build (e.g., v0.1.7)'
+        description: 'Tag to build (e.g., v0.1.8)'
         required: true
 
 env:
@@ -18,8 +26,64 @@ env:
   BINARY_NAME: aperture
 
 jobs:
+  verify:
+    name: Verify Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      version_num: ${{ steps.version.outputs.version_num }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git-cliff
+
+      - name: Get version from tag
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION_NUM="${VERSION#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "version_num=${VERSION_NUM}" >> $GITHUB_OUTPUT
+          echo "Tag version: ${VERSION} (${VERSION_NUM})"
+
+      - name: Verify Cargo.toml version matches tag
+        run: |
+          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${{ steps.version.outputs.version_num }}"
+          echo "Cargo.toml version: ${CARGO_VERSION}"
+          echo "Tag version: ${TAG_VERSION}"
+          if [ "${CARGO_VERSION}" != "${TAG_VERSION}" ]; then
+            echo "::error::Version mismatch! Cargo.toml has ${CARGO_VERSION} but tag is v${TAG_VERSION}"
+            exit 1
+          fi
+          echo "Version verified: ${CARGO_VERSION}"
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
   build:
     name: Build ${{ matrix.target }}
+    needs: verify
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -78,21 +142,12 @@ jobs:
         if: "!matrix.cross"
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Get version
-        id: version
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
-          ARCHIVE_NAME="${{ env.BINARY_NAME }}-${{ steps.version.outputs.version }}-${{ matrix.target }}"
+          VERSION="${{ needs.verify.outputs.version }}"
+          ARCHIVE_NAME="${{ env.BINARY_NAME }}-${VERSION}-${{ matrix.target }}"
           mkdir -p "$ARCHIVE_NAME"
           cp "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}" "$ARCHIVE_NAME/"
           cp README.md LICENSE "$ARCHIVE_NAME/" 2>/dev/null || true
@@ -103,7 +158,8 @@ jobs:
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          $ARCHIVE_NAME = "${{ env.BINARY_NAME }}-${{ steps.version.outputs.version }}-${{ matrix.target }}"
+          $VERSION = "${{ needs.verify.outputs.version }}"
+          $ARCHIVE_NAME = "${{ env.BINARY_NAME }}-${VERSION}-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $ARCHIVE_NAME
           Copy-Item "target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe" -Destination "$ARCHIVE_NAME/"
           Copy-Item "README.md", "LICENSE" -Destination "$ARCHIVE_NAME/" -ErrorAction SilentlyContinue
@@ -118,8 +174,8 @@ jobs:
           retention-days: 1
 
   release:
-    name: Create Release
-    needs: build
+    name: Create GitHub Release
+    needs: [verify, build, publish-crates]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -127,15 +183,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git-cliff
 
-      - name: Get version
-        id: version
+      - name: Install git-cliff
+        run: cargo install git-cliff --locked
+
+      - name: Generate changelog
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          VERSION="${{ needs.verify.outputs.version }}"
+          # Generate changelog for this version only
+          git-cliff --current --strip header > release_notes.md
+
+          # Fallback if empty
+          if [ ! -s release_notes.md ]; then
+            echo "Release ${VERSION}" > release_notes.md
           fi
+
+          echo "=== Release Notes ==="
+          cat release_notes.md
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -154,25 +220,11 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Extract changelog for version
-        id: changelog
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          VERSION_NUM="${VERSION#v}"
-
-          # Extract section for this version from CHANGELOG.md
-          awk "/^## \[${VERSION_NUM}\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md > release_notes.md
-
-          # If empty, use a default message
-          if [ ! -s release_notes.md ]; then
-            echo "Release ${VERSION}" > release_notes.md
-          fi
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: ${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.verify.outputs.version }}
+          name: ${{ needs.verify.outputs.version }}
           body_path: release_notes.md
           files: release/*
           draft: false
@@ -180,29 +232,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Note: crates.io publishing is handled by local `cargo release` command
-  # The release script (scripts/release.sh) runs `cargo release --execute`
-  # which publishes to crates.io before pushing the tag that triggers this workflow
-
   update-homebrew:
     name: Update Homebrew Formula
-    needs: release
+    needs: [verify, release]
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Download release assets and compute SHAs
         id: sha
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.verify.outputs.version }}"
           BASE_URL="https://github.com/kioku/aperture/releases/download/${VERSION}"
 
           # Download and compute SHA256 for each platform
@@ -223,8 +262,8 @@ jobs:
 
       - name: Update formula
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          VERSION_NUM="${VERSION#v}"
+          VERSION="${{ needs.verify.outputs.version }}"
+          VERSION_NUM="${{ needs.verify.outputs.version_num }}"
 
           cat > homebrew-tap/Formula/aperture.rb << 'FORMULA'
           class Aperture < Formula
@@ -278,5 +317,5 @@ jobs:
         run: |
           cd homebrew-tap
           git add Formula/aperture.rb
-          git commit -m "feat: update aperture to ${{ steps.version.outputs.version }}"
+          git commit -m "feat: update aperture to ${{ needs.verify.outputs.version }}"
           git push

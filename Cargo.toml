@@ -96,14 +96,7 @@ panic = "abort"
 pedantic = "warn"
 nursery = "warn"
 
-# Simple release configuration
-[package.metadata.release]
-# Publish to crates.io
-publish = true
-# Create and push git tags
-tag = true
-push = true
-
+# cargo-binstall configuration for pre-built binary downloads
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/aperture-v{ version }-{ target }.tar.gz"
 pkg-fmt = "tgz"
