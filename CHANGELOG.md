@@ -2,6 +2,98 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.7] - 2026-01-26
+
+### ⚙️ Miscellaneous Tasks
+
+- Add ast-grep configuration with custom Rust linting rules
+- Suppress no-println warnings with ast-grep-ignore comments
+- Exclude files with test modules from no-unwrap rule
+- Update slab to 0.4.11 to fix RUSTSEC-2025-0047
+- Suppress ast-grep no-println warnings in output module
+- Update dependencies to latest versions
+- Upgrade toml from 0.8 to 0.9
+- Upgrade reqwest from 0.12 to 0.13
+- Improve pre-commit hooks for better local testing
+
+### 🎨 Styling
+
+- Fix ast-grep linting issues
+
+### 🐛 Bug Fixes
+
+- Use sibling relationship for #[cfg(test)] module exclusion
+- Resolve clippy warnings in test files and align pre-commit with CI
+- Parse EDITOR env var to support commands with arguments
+- **ci:** Override target-cpu=native to prevent SIGILL on cached builds
+- **test:** Handle Windows .exe extension in binary name assertion
+- Make quiet mode behavior consistent across all commands
+- Show data in quiet mode for list-secrets and list-urls
+- Switch from native-tls to rustls for cross-compilation support
+- Use aws-lc-rs crypto backend instead of ring for Apple Silicon support
+- Initialize rustls crypto provider for test compatibility
+- **ci:** Add --force to cargo-nextest install for cache consistency
+- **ci:** Add fallback check for cargo-nextest availability
+- Filter skipped endpoints from --describe-json manifest
+- **config:** Add debug assertions for type mismatches in set_setting
+- Commit changelog before cargo release
+
+### 📚 Documentation
+
+- Restructure README and split into focused documentation (#61)
+- Update binary size to 4.0MB (aws-lc-rs crypto backend)
+- **config:** Add checklist for adding new settings
+- Add documentation for v0.1.7 features
+
+### 🚀 Features
+
+- **agent:** Expose response schemas in describe manifest (#60)
+- Add quiet mode for agent-friendly output suppression
+- Hide global flags from dynamic command help
+- Add multi-platform release workflow with cargo-binstall support
+- Auto-update homebrew formula on release
+- Add endpoint statistics showing X of Y endpoints available
+- Add toml_edit for comment-preserving config edits
+- Add SettingKey enum and validation for config settings
+- Add Set, Get, Settings subcommands to config
+- Implement ConfigManager methods for settings
+- Implement command handlers for set/get/settings
+- **config:** Add timeout range validation
+- Add Retry-After header parsing support
+- Add RetryInfo and RetryResult for retry tracking
+- Add RetryDefaults configuration struct
+- Add retry settings to settings system
+- Add retry-related command line flags
+- Thread retry configuration through executor
+- Wire retry configuration from CLI to executor
+- Add retry fields to BatchOperation
+- Integrate retry logic into batch execution
+- Enhance JSON error output with detailed retry info
+
+### 🚜 Refactor
+
+- Replace .unwrap() with .expect() in production code
+- Eliminate all nested if statements (138 violations)
+- Eliminate all max-nesting-depth violations (21 errors)
+- Refine no-nested-if rule to reduce false positives
+- Fix remaining no-nested-if violations after rule refinement
+- Consolidate bonus score helpers into single generic function
+- **config:** Extract value_from_config helper to reduce duplication
+- Extract print_settings_list to reduce nesting depth
+- Improve retry logic code quality
+- Remove unused retry_status_codes config field
+
+### 🧪 Testing
+
+- Add batch operations quiet mode integration test
+- Add assertion verifying command count matches available endpoints
+- Add unit tests for ConfigManager settings methods
+- Add integration tests for config set/get/settings commands
+- Add test verifying TOML comments are preserved by set_setting
+- Add comprehensive unit tests for is_retryable_status
+- Add integration tests for retry behavior
+- Update settings count expectation for retry config
+
 ## [0.1.6] - 2025-11-12
 
 ### ⚙️ Miscellaneous Tasks
