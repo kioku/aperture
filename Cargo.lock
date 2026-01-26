@@ -112,6 +112,7 @@ dependencies = [
  "fastrand",
  "fuzzy-matcher",
  "governor",
+ "httpdate",
  "indexmap",
  "jaq-core",
  "jaq-json",

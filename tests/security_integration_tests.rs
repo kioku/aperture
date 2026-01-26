@@ -182,6 +182,7 @@ async fn test_bearer_token_authentication() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());
@@ -228,6 +229,7 @@ async fn test_api_key_authentication() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());
@@ -266,6 +268,7 @@ async fn test_missing_authentication_environment_variable() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 
@@ -331,6 +334,7 @@ async fn test_custom_headers_with_literal_values() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());
@@ -394,6 +398,7 @@ async fn test_custom_headers_with_environment_variable_expansion() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());
@@ -465,6 +470,7 @@ async fn test_authentication_and_custom_headers_combined() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());
@@ -509,6 +515,7 @@ async fn test_invalid_custom_header_format() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 
@@ -553,6 +560,7 @@ async fn test_empty_header_name() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 

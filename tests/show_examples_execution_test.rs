@@ -119,6 +119,7 @@ async fn test_show_examples_flag_through_executor() {
         None,
         None,
         true, // capture_output = true so we don't make actual HTTP requests
+        None, // retry_context
     )
     .await;
 
@@ -158,6 +159,7 @@ async fn test_normal_execution_without_show_examples() {
         None,
         None,
         true, // capture_output = true so we don't make actual HTTP requests
+        None, // retry_context
     )
     .await;
 
@@ -197,6 +199,7 @@ async fn test_boolean_parameter_with_show_examples() {
         None,
         None,
         true,
+        None, // retry_context
     )
     .await;
 
@@ -243,6 +246,7 @@ async fn test_command_with_multiple_parameters_and_show_examples() {
         None,
         None,
         true,
+        None, // retry_context
     )
     .await;
 

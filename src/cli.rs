@@ -147,6 +147,41 @@ pub struct Cli {
     )]
     pub positional_args: bool,
 
+    /// Maximum number of retry attempts for failed requests
+    #[arg(
+        long,
+        global = true,
+        value_name = "N",
+        help = "Maximum retry attempts (0 = disabled, overrides config)"
+    )]
+    pub retry: Option<u32>,
+
+    /// Initial delay between retries (e.g., "500ms", "1s")
+    #[arg(
+        long,
+        global = true,
+        value_name = "DURATION",
+        help = "Initial retry delay (e.g., '500ms', '1s', '2s')"
+    )]
+    pub retry_delay: Option<String>,
+
+    /// Maximum delay cap between retries (e.g., "30s", "1m")
+    #[arg(
+        long,
+        global = true,
+        value_name = "DURATION",
+        help = "Maximum retry delay cap (e.g., '30s', '1m')"
+    )]
+    pub retry_max_delay: Option<String>,
+
+    /// Force retry on non-idempotent requests without an idempotency key
+    #[arg(
+        long,
+        global = true,
+        help = "Allow retrying non-idempotent requests without idempotency key"
+    )]
+    pub force_retry: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }

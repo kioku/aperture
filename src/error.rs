@@ -958,6 +958,43 @@ impl Error {
         }
     }
 
+    /// Create a retry limit exceeded error with detailed retry information
+    #[allow(clippy::too_many_arguments)]
+    pub fn retry_limit_exceeded_detailed(
+        max_attempts: u32,
+        attempts_made: u32,
+        last_error: impl Into<String>,
+        initial_delay_ms: u64,
+        max_delay_ms: u64,
+        last_status_code: Option<u16>,
+        operation_id: impl Into<String>,
+    ) -> Self {
+        let last_error = last_error.into();
+        let operation_id = operation_id.into();
+        Self::Internal {
+            kind: ErrorKind::Network,
+            message: Cow::Owned(format!(
+                "Retry limit exceeded after {attempts_made}/{max_attempts} attempts for {operation_id}: {last_error}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(serde_json::json!({
+                    "retry_info": {
+                        "max_attempts": max_attempts,
+                        "attempts_made": attempts_made,
+                        "initial_delay_ms": initial_delay_ms,
+                        "max_delay_ms": max_delay_ms,
+                        "last_status_code": last_status_code,
+                        "operation_id": operation_id
+                    },
+                    "last_error": last_error
+                })),
+                Some(Cow::Borrowed(
+                    "Consider checking network connectivity, API availability, or increasing retry limits",
+                )),
+            )),
+        }
+    }
+
     /// Create a request timeout error
     #[must_use]
     pub fn request_timeout(timeout_seconds: u64) -> Self {

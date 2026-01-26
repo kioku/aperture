@@ -222,6 +222,7 @@ async fn test_batch_operation_serialization() {
         description: None,
         headers: std::collections::HashMap::new(),
         use_cache: None,
+        ..Default::default()
     };
 
     let serialized = serde_json::to_string(&operation).unwrap();
@@ -250,6 +251,7 @@ async fn test_batch_file_serialization() {
                 description: None,
                 headers: std::collections::HashMap::new(),
                 use_cache: None,
+                ..Default::default()
             },
             BatchOperation {
                 id: Some("op2".to_string()),
@@ -262,6 +264,7 @@ async fn test_batch_file_serialization() {
                 description: None,
                 headers: std::collections::HashMap::new(),
                 use_cache: None,
+                ..Default::default()
             },
         ],
     };
@@ -293,6 +296,7 @@ async fn test_batch_dry_run_execution() {
             description: None,
             headers: std::collections::HashMap::new(),
             use_cache: None,
+            ..Default::default()
         }],
     };
 
@@ -430,6 +434,7 @@ async fn test_batch_real_execution_with_mock_server() {
                 description: Some("Get user 123".to_string()),
                 headers: std::collections::HashMap::new(),
                 use_cache: Some(false),
+                ..Default::default()
             },
             BatchOperation {
                 id: Some("get-user-456".to_string()),
@@ -442,6 +447,7 @@ async fn test_batch_real_execution_with_mock_server() {
                 description: Some("Get user 456".to_string()),
                 headers: std::collections::HashMap::new(),
                 use_cache: Some(false),
+                ..Default::default()
             },
         ],
     };
@@ -528,6 +534,7 @@ async fn test_batch_execution_with_error_handling() {
                 description: Some("Get user 123".to_string()),
                 headers: std::collections::HashMap::new(),
                 use_cache: Some(false),
+                ..Default::default()
             },
             BatchOperation {
                 id: Some("get-user-999".to_string()),
@@ -540,6 +547,7 @@ async fn test_batch_execution_with_error_handling() {
                 description: Some("Get non-existent user".to_string()),
                 headers: std::collections::HashMap::new(),
                 use_cache: Some(false),
+                ..Default::default()
             },
         ],
     };

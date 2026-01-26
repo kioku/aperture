@@ -109,6 +109,7 @@ async fn test_execute_request_basic_get() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());
@@ -164,6 +165,7 @@ async fn test_execute_request_with_query_params() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());
@@ -220,6 +222,7 @@ async fn test_build_url_with_server_template_variables() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 
@@ -270,6 +273,7 @@ async fn test_execute_request_error_response() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_err());
@@ -369,6 +373,7 @@ async fn test_execute_request_with_global_config_base_url() {
         None,
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());
@@ -421,6 +426,7 @@ async fn test_url_with_json_query_params_not_detected_as_template() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -459,6 +465,7 @@ async fn test_url_with_path_braces_detected_as_template() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -508,6 +515,7 @@ async fn test_url_with_multiple_templates_detected() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -558,6 +566,7 @@ async fn test_url_with_empty_braces_detected_as_invalid_template() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 

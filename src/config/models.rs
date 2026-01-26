@@ -7,6 +7,9 @@ pub struct GlobalConfig {
     pub default_timeout_secs: u64,
     #[serde(default)]
     pub agent_defaults: AgentDefaults,
+    /// Default retry configuration for transient failures
+    #[serde(default)]
+    pub retry_defaults: RetryDefaults,
     /// Per-API configuration overrides
     #[serde(default)]
     pub api_configs: HashMap<String, ApiConfig>,
@@ -22,11 +25,50 @@ pub struct AgentDefaults {
     pub json_errors: bool,
 }
 
+/// Default retry configuration for API requests.
+///
+/// These settings control automatic retry behavior for transient failures.
+/// Set `max_attempts` to 0 to disable retries (the default).
+///
+/// Retryable status codes are determined by the `is_retryable_status` function
+/// in the resilience module (408, 429, 500-504 excluding 501/505).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RetryDefaults {
+    /// Maximum number of retry attempts (0 = disabled, 1-10 recommended)
+    #[serde(default)]
+    pub max_attempts: u32,
+    /// Initial delay between retries in milliseconds (default: 500ms)
+    #[serde(default = "default_initial_delay_ms")]
+    pub initial_delay_ms: u64,
+    /// Maximum delay cap in milliseconds (default: 30000ms = 30s)
+    #[serde(default = "default_max_delay_ms")]
+    pub max_delay_ms: u64,
+}
+
+const fn default_initial_delay_ms() -> u64 {
+    500
+}
+
+const fn default_max_delay_ms() -> u64 {
+    30_000
+}
+
+impl Default for RetryDefaults {
+    fn default() -> Self {
+        Self {
+            max_attempts: 0, // Disabled by default
+            initial_delay_ms: default_initial_delay_ms(),
+            max_delay_ms: default_max_delay_ms(),
+        }
+    }
+}
+
 impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
             default_timeout_secs: 30,
             agent_defaults: AgentDefaults::default(),
+            retry_defaults: RetryDefaults::default(),
             api_configs: HashMap::new(),
         }
     }

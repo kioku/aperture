@@ -171,6 +171,7 @@ async fn test_flag_based_syntax_with_caching() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -187,6 +188,7 @@ async fn test_flag_based_syntax_with_caching() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());
@@ -244,6 +246,7 @@ async fn test_legacy_positional_syntax_with_caching() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -260,6 +263,7 @@ async fn test_legacy_positional_syntax_with_caching() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());
@@ -327,6 +331,7 @@ async fn test_different_parameter_combinations_cache_separately() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -348,6 +353,7 @@ async fn test_different_parameter_combinations_cache_separately() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());
@@ -403,6 +409,7 @@ async fn test_post_request_with_body_and_caching() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -419,6 +426,7 @@ async fn test_post_request_with_body_and_caching() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());
@@ -469,6 +477,7 @@ async fn test_dry_run_with_flag_based_syntax() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result.is_ok());
@@ -515,6 +524,7 @@ async fn test_cache_with_custom_ttl() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result1.is_ok());
@@ -540,6 +550,7 @@ async fn test_cache_with_custom_ttl() {
         None,
         Some(&cache_config),
         false, // capture_output
+        None,  // retry_context
     )
     .await;
     assert!(result2.is_ok());

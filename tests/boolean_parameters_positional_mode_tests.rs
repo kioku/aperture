@@ -227,6 +227,7 @@ async fn test_boolean_path_param_url_substitution_in_positional_mode() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -263,6 +264,7 @@ async fn test_boolean_path_param_url_substitution_in_positional_mode() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -336,6 +338,7 @@ async fn test_boolean_query_param_adds_to_query_string_in_positional_mode() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -565,6 +568,7 @@ async fn test_mixed_boolean_flags_url_substitution_positional_mode() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 

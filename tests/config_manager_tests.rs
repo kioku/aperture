@@ -1396,13 +1396,16 @@ fn test_list_settings() {
 
     let settings = manager.list_settings().unwrap();
 
-    // Should have 2 settings
-    assert_eq!(settings.len(), 2);
+    // Should have 5 settings (timeout, json_errors, and 3 retry settings)
+    assert_eq!(settings.len(), 5);
 
     // Check setting keys are present
     let keys: Vec<_> = settings.iter().map(|s| s.key.as_str()).collect();
     assert!(keys.contains(&"default_timeout_secs"));
     assert!(keys.contains(&"agent_defaults.json_errors"));
+    assert!(keys.contains(&"retry_defaults.max_attempts"));
+    assert!(keys.contains(&"retry_defaults.initial_delay_ms"));
+    assert!(keys.contains(&"retry_defaults.max_delay_ms"));
 }
 
 #[test]

@@ -170,6 +170,7 @@ async fn test_kebab_case_parameters_work_end_to_end() {
         None,  // jq_filter
         None,  // cache_config
         false, // capture_output
+        None,  // retry_context
     )
     .await;
 

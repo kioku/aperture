@@ -369,6 +369,7 @@ async fn test_required_boolean_path_param_url_substitution() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -405,6 +406,7 @@ async fn test_required_boolean_path_param_url_substitution() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 
@@ -449,6 +451,7 @@ async fn test_required_boolean_query_param_adds_to_query_string() {
         None,
         None,
         false,
+        None, // retry_context
     )
     .await;
 

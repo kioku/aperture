@@ -529,9 +529,39 @@ impl<F: FileSystem> ConfigManager<F> {
                 }
                 doc["agent_defaults"]["json_errors"] = toml_edit::value(*v);
             }
+            (SettingKey::RetryDefaultsMaxAttempts, SettingValue::U64(v)) => {
+                // Ensure retry_defaults table exists
+                if doc.get("retry_defaults").is_none() {
+                    doc["retry_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
+                }
+                doc["retry_defaults"]["max_attempts"] =
+                    toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
+            }
+            (SettingKey::RetryDefaultsInitialDelayMs, SettingValue::U64(v)) => {
+                // Ensure retry_defaults table exists
+                if doc.get("retry_defaults").is_none() {
+                    doc["retry_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
+                }
+                doc["retry_defaults"]["initial_delay_ms"] =
+                    toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
+            }
+            (SettingKey::RetryDefaultsMaxDelayMs, SettingValue::U64(v)) => {
+                // Ensure retry_defaults table exists
+                if doc.get("retry_defaults").is_none() {
+                    doc["retry_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
+                }
+                doc["retry_defaults"]["max_delay_ms"] =
+                    toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
+            }
             // Type mismatches are programming errors - parse_for_key guarantees correct types
-            (SettingKey::DefaultTimeoutSecs, _) => {
-                debug_assert!(false, "DefaultTimeoutSecs requires U64 value");
+            (
+                SettingKey::DefaultTimeoutSecs
+                | SettingKey::RetryDefaultsMaxAttempts
+                | SettingKey::RetryDefaultsInitialDelayMs
+                | SettingKey::RetryDefaultsMaxDelayMs,
+                _,
+            ) => {
+                debug_assert!(false, "Integer settings require U64 value");
             }
             (SettingKey::AgentDefaultsJsonErrors, _) => {
                 debug_assert!(false, "AgentDefaultsJsonErrors requires Bool value");

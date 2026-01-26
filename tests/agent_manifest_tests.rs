@@ -396,6 +396,7 @@ fn test_manifest_with_global_config() {
         default_timeout_secs: 30,
         agent_defaults: Default::default(),
         api_configs,
+        ..Default::default()
     };
 
     let manifest_json = generate_capability_manifest(&spec, Some(&global_config)).unwrap();

@@ -42,8 +42,8 @@ fn test_config_settings_json_output() {
     assert!(parsed.is_array());
     let settings = parsed.as_array().unwrap();
 
-    // Should have 2 settings
-    assert_eq!(settings.len(), 2);
+    // Should have 5 settings (default_timeout_secs, json_errors, and 3 retry_defaults)
+    assert_eq!(settings.len(), 5);
 
     // Check structure of first setting
     let first = &settings[0];
