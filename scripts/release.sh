@@ -34,12 +34,13 @@ if [[ $CONFIRM != "y" ]]; then
   exit 1
 fi
 
-# Stage the changelog
+# Stage and commit the changelog
 git add CHANGELOG.md
+git commit -m "docs: update changelog for v${VERSION}"
 
 # Run existing checks
 cargo test
 cargo clippy
 
-# Release
+# Release (bumps version, commits, tags, pushes)
 cargo release "${VERSION}" --execute
