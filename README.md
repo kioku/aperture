@@ -66,6 +66,18 @@ See [Agent Integration Guide](docs/agent-integration.md) for patterns and exampl
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew install kioku/tap/aperture
+```
+
+### cargo-binstall (Pre-built Binaries)
+
+```bash
+cargo binstall aperture-cli
+```
+
 ### From crates.io
 
 ```bash
