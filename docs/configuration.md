@@ -172,6 +172,69 @@ aperture config remove my-api
 aperture config add my-api ./openapi.yaml
 ```
 
+## Global Settings Management
+
+Aperture provides commands to view and modify global settings without manually editing the config file.
+
+### List All Settings
+
+```bash
+aperture config settings
+```
+
+**Output:**
+```
+Available configuration settings:
+
+  default_timeout_secs = 30
+    Type: integer  Default: 30
+    Default timeout for API requests in seconds
+
+  agent_defaults.json_errors = false
+    Type: boolean  Default: false
+    Output errors as JSON by default
+
+  retry_defaults.max_attempts = 0
+    Type: integer  Default: 0
+    Maximum retry attempts (0 = disabled)
+
+  retry_defaults.initial_delay_ms = 500
+    Type: integer  Default: 500
+    Initial delay between retries in milliseconds
+
+  retry_defaults.max_delay_ms = 30000
+    Type: integer  Default: 30000
+    Maximum delay cap in milliseconds
+```
+
+### Get a Setting
+
+```bash
+aperture config get default_timeout_secs
+# Output: 30
+
+aperture config get retry_defaults.max_attempts
+# Output: 0
+```
+
+### Set a Setting
+
+```bash
+# Set request timeout to 60 seconds
+aperture config set default_timeout_secs 60
+
+# Enable JSON errors by default
+aperture config set agent_defaults.json_errors true
+
+# Enable automatic retries (3 attempts)
+aperture config set retry_defaults.max_attempts 3
+
+# Set initial retry delay to 1 second
+aperture config set retry_defaults.initial_delay_ms 1000
+```
+
+Settings are validated against their expected types. Comments and formatting in `config.toml` are preserved.
+
 ## Global Configuration File
 
 `~/.config/aperture/config.toml` stores global settings:
@@ -183,6 +246,12 @@ default_timeout_secs = 30
 [agent_defaults]
 # Default settings for agent mode
 json_errors = false
+
+[retry_defaults]
+# Automatic retry configuration
+max_attempts = 3           # 0 = disabled
+initial_delay_ms = 500     # Starting delay for exponential backoff
+max_delay_ms = 30000       # Maximum delay cap (30 seconds)
 
 [api_configs.my-api]
 # Per-API base URL override
@@ -288,3 +357,12 @@ Without the feature, 3.1 specs produce an error with instructions to enable it.
 |---------|-------------|
 | `config cache-stats <name>` | Show cache stats |
 | `config clear-cache <name>` | Clear response cache |
+
+### Settings Management
+
+| Command | Description |
+|---------|-------------|
+| `config settings` | List all settings with values |
+| `config settings --json` | List settings as JSON |
+| `config get <key>` | Get a setting value |
+| `config set <key> <value>` | Set a setting value |

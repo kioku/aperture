@@ -126,6 +126,28 @@ aperture api my-api --json-errors users get-user-by-id --id 123
 | `ServerVariable` | Template variable resolution errors |
 | `Runtime` | General operational errors |
 
+## Quiet Mode
+
+The `-q` or `--quiet` flag suppresses informational messages, outputting only data. Essential for clean JSON pipelines in agent workflows.
+
+```bash
+# Without quiet mode
+aperture api my-api users list
+# Output includes: "Fetching users..." and other status messages
+
+# With quiet mode - only JSON data
+aperture api my-api --quiet users list
+# Output: {"users": [...]}
+
+# Combine with jq for clean pipelines
+aperture api my-api -q users list | jq '.users[].id'
+```
+
+**Behavior by command:**
+- API operations: Suppresses progress/status messages, outputs only response data
+- Config commands: Suppresses confirmation messages, outputs only requested data
+- Batch operations: Suppresses per-operation progress, outputs only final summary
+
 ## Dry Run Mode
 
 The `--dry-run` flag shows the HTTP request that would be made without executing it. Useful for validation and debugging.
@@ -204,6 +226,113 @@ aperture api my-api --batch-file operations.json --json-errors
       {"operation_id": "user-1", "args": ["users", "get-user-by-id", "--id", "123"], "success": true, "duration_seconds": 0.12, "error": null},
       {"operation_id": "user-2", "args": ["users", "get-user-by-id", "--id", "456"], "success": true, "duration_seconds": 0.15, "error": null},
       {"operation_id": "user-3", "args": ["users", "get-user-by-id", "--id", "789"], "success": false, "duration_seconds": 0.18, "error": "HTTP 404: User not found"}
+    ]
+  }
+}
+```
+
+## Automatic Retry with Exponential Backoff
+
+Aperture supports automatic retries for transient failures, with exponential backoff and jitter. This is essential for reliable agent workflows interacting with rate-limited or occasionally unavailable APIs.
+
+### CLI Flags
+
+```bash
+# Retry up to 3 times with default delays
+aperture api my-api --retry 3 users list
+
+# Custom initial delay (default: 500ms)
+aperture api my-api --retry 3 --retry-delay 1s users list
+
+# Custom maximum delay cap (default: 30s)
+aperture api my-api --retry 3 --retry-max-delay 60s users list
+
+# Force retry on non-idempotent requests (use with caution)
+aperture api my-api --retry 3 --force-retry users create --name "Test"
+```
+
+### Persistent Configuration
+
+Configure default retry behavior in `config.toml`:
+
+```bash
+# Enable retries globally (3 attempts)
+aperture config set retry_defaults.max_attempts 3
+
+# Set initial delay to 1 second
+aperture config set retry_defaults.initial_delay_ms 1000
+
+# Set maximum delay to 60 seconds
+aperture config set retry_defaults.max_delay_ms 60000
+```
+
+CLI flags override configured defaults.
+
+### Retry Behavior
+
+**Retryable conditions:**
+- HTTP 429 (Too Many Requests)
+- HTTP 503 (Service Unavailable)
+- HTTP 5xx (Server Errors)
+- Network timeouts and connection errors
+
+**Exponential backoff:**
+- Delay doubles after each attempt: 500ms → 1s → 2s → 4s...
+- Jitter added to prevent thundering herd
+- Capped at `max_delay` (default 30s)
+
+**Retry-After header:**
+- If the server returns a `Retry-After` header, Aperture respects it
+- The header value overrides calculated backoff for that attempt
+
+### Safety for Non-Idempotent Requests
+
+By default, Aperture only retries **idempotent** HTTP methods (GET, HEAD, OPTIONS, PUT, DELETE). For non-idempotent methods (POST, PATCH):
+
+```bash
+# Safe: Use idempotency key for POST requests
+aperture api my-api --retry 3 --idempotency-key "order-123" orders create --item "widget"
+
+# Override safety check (use only when you understand the risks)
+aperture api my-api --retry 3 --force-retry orders create --item "widget"
+```
+
+### Retry Information in JSON Errors
+
+With `--json-errors`, failed requests include retry details:
+
+```json
+{
+  "error_type": "HttpError",
+  "message": "HTTP 503: Service Unavailable",
+  "retry_info": {
+    "attempts": 3,
+    "total_delay_ms": 3500,
+    "final_status": 503,
+    "retryable": true
+  }
+}
+```
+
+### Batch Operations with Retries
+
+Retries apply per-operation in batch mode:
+
+```bash
+aperture api my-api --batch-file ops.json --retry 3 --json-errors
+```
+
+Each operation in the batch is retried independently. The batch summary includes retry statistics:
+
+```json
+{
+  "batch_execution_summary": {
+    "operations": [
+      {
+        "operation_id": "op-1",
+        "success": true,
+        "retry_info": {"attempts": 2, "total_delay_ms": 500}
+      }
     ]
   }
 }
@@ -310,7 +439,7 @@ Aperture is optimized for agent invocation patterns:
 | Metric | Value | Impact |
 |--------|-------|--------|
 | Startup time | < 10ms | Low latency per invocation |
-| Binary size | 3.7MB | Fast container deployment |
+| Binary size | ~4.0MB | Fast container deployment |
 | Memory (typical) | 3-5 MB | Low resource footprint |
 | Spec loading | O(1) | Pre-parsed binary cache |
 

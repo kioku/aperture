@@ -528,13 +528,17 @@ pub enum ConfigCommands {
                       Supports dot-notation for nested settings and type-safe validation.\n\
                       The configuration file comments and formatting are preserved.\n\n\
                       Available settings:\n  \
-                      default_timeout_secs         (integer)  - Default timeout for API requests\n  \
-                      agent_defaults.json_errors   (boolean)  - Output errors as JSON by default\n\n\
+                      default_timeout_secs              (integer)  - Default timeout for API requests\n  \
+                      agent_defaults.json_errors        (boolean)  - Output errors as JSON by default\n  \
+                      retry_defaults.max_attempts       (integer)  - Max retry attempts (0 = disabled)\n  \
+                      retry_defaults.initial_delay_ms   (integer)  - Initial retry delay in ms\n  \
+                      retry_defaults.max_delay_ms       (integer)  - Maximum retry delay cap in ms\n\n\
                       Examples:\n  \
                       aperture config set default_timeout_secs 60\n  \
-                      aperture config set agent_defaults.json_errors true")]
+                      aperture config set agent_defaults.json_errors true\n  \
+                      aperture config set retry_defaults.max_attempts 3")]
     Set {
-        /// Setting key (e.g., `default_timeout_secs` or `agent_defaults.json_errors`)
+        /// Setting key (use `config settings` to see all available keys)
         key: String,
         /// Value to set (validated against expected type)
         value: String,
@@ -542,14 +546,15 @@ pub enum ConfigCommands {
     /// Get a global configuration setting value
     #[command(
         long_about = "Get the current value of a global configuration setting.\n\n\
-                      Supports dot-notation for nested settings.\n\n\
+                      Supports dot-notation for nested settings.\n\
+                      Use `config settings` to see all available keys.\n\n\
                       Examples:\n  \
                       aperture config get default_timeout_secs\n  \
-                      aperture config get agent_defaults.json_errors\n  \
+                      aperture config get retry_defaults.max_attempts\n  \
                       aperture config get default_timeout_secs --json"
     )]
     Get {
-        /// Setting key to retrieve
+        /// Setting key to retrieve (use `config settings` to see all available keys)
         key: String,
         /// Output as JSON
         #[arg(long, help = "Output as JSON")]
