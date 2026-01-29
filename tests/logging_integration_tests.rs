@@ -3,56 +3,58 @@
 use aperture_cli::logging::{get_max_body_len, redact_sensitive_value, should_redact_header};
 use std::env;
 
+/// Combined test for all logging environment variables.
+/// These are combined into a single test to avoid race conditions when tests
+/// run in parallel, since environment variables are global state.
 #[test]
-fn test_aperture_log_env_var_support() {
-    // Verify that APERTURE_LOG environment variable can be set
-    // (Actual value would be used by tracing-subscriber initialization)
-    let original = env::var("APERTURE_LOG").ok();
+fn test_logging_environment_variables() {
+    // Save original values
+    let original_log = env::var("APERTURE_LOG").ok();
+    let original_format = env::var("APERTURE_LOG_FORMAT").ok();
+    let original_max_body = env::var("APERTURE_LOG_MAX_BODY").ok();
 
+    // Test APERTURE_LOG
     env::set_var("APERTURE_LOG", "debug");
-    assert_eq!(env::var("APERTURE_LOG").ok(), Some("debug".to_string()));
+    assert_eq!(
+        env::var("APERTURE_LOG").ok(),
+        Some("debug".to_string()),
+        "APERTURE_LOG should be settable"
+    );
 
-    if let Some(val) = original {
+    // Test APERTURE_LOG_FORMAT
+    env::set_var("APERTURE_LOG_FORMAT", "json");
+    assert_eq!(
+        env::var("APERTURE_LOG_FORMAT").ok(),
+        Some("json".to_string()),
+        "APERTURE_LOG_FORMAT should be settable"
+    );
+
+    // Test APERTURE_LOG_MAX_BODY default
+    env::remove_var("APERTURE_LOG_MAX_BODY");
+    assert_eq!(get_max_body_len(), 1000, "Default max body should be 1000");
+
+    // Test APERTURE_LOG_MAX_BODY custom value
+    env::set_var("APERTURE_LOG_MAX_BODY", "2000");
+    assert_eq!(
+        get_max_body_len(),
+        2000,
+        "Custom max body value should be respected"
+    );
+
+    // Restore original values
+    if let Some(val) = original_log {
         env::set_var("APERTURE_LOG", val);
     } else {
         env::remove_var("APERTURE_LOG");
     }
-}
 
-#[test]
-fn test_aperture_log_format_env_var_support() {
-    // Verify that APERTURE_LOG_FORMAT environment variable can be set
-    let original = env::var("APERTURE_LOG_FORMAT").ok();
-
-    env::set_var("APERTURE_LOG_FORMAT", "json");
-    assert_eq!(
-        env::var("APERTURE_LOG_FORMAT").ok(),
-        Some("json".to_string())
-    );
-
-    if let Some(val) = original {
+    if let Some(val) = original_format {
         env::set_var("APERTURE_LOG_FORMAT", val);
     } else {
         env::remove_var("APERTURE_LOG_FORMAT");
     }
-}
 
-#[test]
-fn test_aperture_log_max_body() {
-    // Test both default and custom max body length
-    // Combined into single test to avoid race conditions with parallel execution
-    let original = env::var("APERTURE_LOG_MAX_BODY").ok();
-
-    // Test default (env var not set)
-    env::remove_var("APERTURE_LOG_MAX_BODY");
-    assert_eq!(get_max_body_len(), 1000, "Default should be 1000");
-
-    // Test custom value
-    env::set_var("APERTURE_LOG_MAX_BODY", "2000");
-    assert_eq!(get_max_body_len(), 2000, "Custom value should be respected");
-
-    // Restore original value
-    if let Some(val) = original {
+    if let Some(val) = original_max_body {
         env::set_var("APERTURE_LOG_MAX_BODY", val);
     } else {
         env::remove_var("APERTURE_LOG_MAX_BODY");
@@ -97,17 +99,4 @@ fn test_cli_verbose_flag_parsing() {
     assert_eq!(verbosity_default, 0);
     assert_eq!(verbosity_v, 1);
     assert_eq!(verbosity_vv, 2);
-}
-
-#[test]
-fn test_logging_environment_variables_isolation() {
-    // Ensure tests don't interfere with each other
-    env::remove_var("APERTURE_LOG");
-    env::remove_var("APERTURE_LOG_FORMAT");
-    env::remove_var("APERTURE_LOG_MAX_BODY");
-
-    // Verify they're not set
-    assert!(env::var("APERTURE_LOG").is_err());
-    assert!(env::var("APERTURE_LOG_FORMAT").is_err());
-    assert!(env::var("APERTURE_LOG_MAX_BODY").is_err());
 }
