@@ -211,6 +211,7 @@ fn handle_dry_run(
 /// Send HTTP request and get response
 async fn send_request(
     request: reqwest::RequestBuilder,
+    secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
     let start_time = std::time::Instant::now();
 
@@ -239,13 +240,14 @@ async fn send_request(
         .await
         .map_err(|e| Error::response_read_error(e.to_string()))?;
 
-    // Log response with appropriate level based on status
+    // Log response with secret redaction
     logging::log_response(
         status.as_u16(),
         duration_ms,
         Some(&response_headers_map),
         Some(&response_text),
         logging::get_max_body_len(),
+        secret_ctx,
     );
 
     Ok((status, response_headers, response_text))
@@ -262,21 +264,28 @@ async fn send_request_with_retry(
     body: Option<String>,
     retry_context: Option<&RetryContext>,
     operation: &CachedCommand,
+    secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
     use crate::resilience::RetryConfig;
 
-    // Log the request
-    logging::log_request(method.as_str(), url, Some(&headers), body.as_deref());
+    // Log the request with secret redaction
+    logging::log_request(
+        method.as_str(),
+        url,
+        Some(&headers),
+        body.as_deref(),
+        secret_ctx,
+    );
 
     // If no retry context or retries disabled, just send once
     let Some(ctx) = retry_context else {
         let request = build_request(client, method, url, headers, body);
-        return send_request(request).await;
+        return send_request(request, secret_ctx).await;
     };
 
     if !ctx.is_enabled() {
         let request = build_request(client, method, url, headers, body);
-        return send_request(request).await;
+        return send_request(request, secret_ctx).await;
     }
 
     // Check if safe to retry non-GET requests
@@ -292,7 +301,7 @@ async fn send_request_with_retry(
             "         Use --force-retry to enable retries anyway, or provide --idempotency-key"
         );
         let request = build_request(client, method.clone(), url, headers, body);
-        return send_request(request).await;
+        return send_request(request, secret_ctx).await;
     }
 
     // Create a RetryConfig from the RetryContext
@@ -315,7 +324,7 @@ async fn send_request_with_retry(
         attempt += 1;
 
         let request = build_request(client, method.clone(), url, headers.clone(), body.clone());
-        let result = send_request(request).await;
+        let result = send_request(request, secret_ctx).await;
 
         match result {
             Ok((status, response_headers, response_text)) => {
@@ -731,6 +740,9 @@ pub async fn execute_request(
         ctx
     });
 
+    // Build secret context for dynamic secret redaction in logs
+    let secret_ctx = logging::SecretContext::from_spec_and_config(spec, &spec.name, global_config);
+
     // Send request with retry support
     let (status, response_headers, response_text) = send_request_with_retry(
         &client,
@@ -740,6 +752,7 @@ pub async fn execute_request(
         request_body.clone(),
         retry_ctx.as_ref(),
         operation,
+        Some(&secret_ctx),
     )
     .await?;
 

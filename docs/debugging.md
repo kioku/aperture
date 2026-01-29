@@ -165,6 +165,14 @@ Sensitive query parameters in URLs are automatically redacted:
 - `password`, `passwd`, `pwd` → `?password=[REDACTED]`
 - `signature`, `sig` → `?signature=[REDACTED]`
 
+### Dynamic Secret Redaction
+In addition to the static header and query parameter lists above, Aperture dynamically redacts secrets configured via `x-aperture-secret` extensions in your OpenAPI spec or config-based secrets. These values are:
+
+- **Redacted in header values**: If any header value exactly matches a configured secret
+- **Redacted in request/response bodies**: If the secret appears anywhere in the body (only for secrets 8+ characters to avoid false positives)
+
+This means your API keys and tokens configured in environment variables will never appear in logs, even if they're echoed back in error responses.
+
 ### Body Truncation
 Response bodies are truncated at 1000 characters by default to avoid logging excessively large payloads. You can increase this with `APERTURE_LOG_MAX_BODY`.
 

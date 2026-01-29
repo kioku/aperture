@@ -6,7 +6,127 @@
 //! - API keys in query parameters
 //! - Values matching configured `x-aperture-secret` environment variables
 
+use crate::cache::models::CachedSpec;
+use crate::config::models::GlobalConfig;
 use tracing::{debug, info, trace};
+
+/// Minimum length for a secret to be redacted in body content.
+/// Shorter secrets might cause false positives in legitimate content.
+const MIN_SECRET_LENGTH_FOR_BODY_REDACTION: usize = 8;
+
+/// Context containing resolved secret values for dynamic redaction.
+///
+/// This struct collects actual secret values from environment variables
+/// referenced by `x-aperture-secret` extensions and config-based secrets,
+/// allowing them to be redacted from logs wherever they appear.
+#[derive(Debug, Default, Clone)]
+pub struct SecretContext {
+    /// Resolved secret values that should be redacted
+    secrets: Vec<String>,
+}
+
+/// Collects non-empty secret values from spec's security schemes.
+fn collect_secrets_from_spec(spec: &CachedSpec, secrets: &mut Vec<String>) {
+    for scheme in spec.security_schemes.values() {
+        let Some(ref aperture_secret) = scheme.aperture_secret else {
+            continue;
+        };
+        let Ok(value) = std::env::var(&aperture_secret.name) else {
+            continue;
+        };
+        if !value.is_empty() {
+            secrets.push(value);
+        }
+    }
+}
+
+/// Collects non-empty secret values from config-based secrets.
+fn collect_secrets_from_config(
+    global_config: Option<&GlobalConfig>,
+    api_name: &str,
+    secrets: &mut Vec<String>,
+) {
+    let Some(config) = global_config else {
+        return;
+    };
+    let Some(api_config) = config.api_configs.get(api_name) else {
+        return;
+    };
+    for secret in api_config.secrets.values() {
+        let Ok(value) = std::env::var(&secret.name) else {
+            continue;
+        };
+        if !value.is_empty() {
+            secrets.push(value);
+        }
+    }
+}
+
+impl SecretContext {
+    /// Creates an empty `SecretContext` with no secrets to redact.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Creates a `SecretContext` by collecting secrets from the spec and config.
+    ///
+    /// This resolves environment variables referenced by:
+    /// 1. `x-aperture-secret` extensions in the `OpenAPI` spec's security schemes
+    /// 2. Config-based secrets in the global configuration
+    ///
+    /// # Arguments
+    /// * `spec` - The cached API specification containing security schemes
+    /// * `api_name` - The name of the API (used to look up config-based secrets)
+    /// * `global_config` - Optional global configuration with config-based secrets
+    #[must_use]
+    pub fn from_spec_and_config(
+        spec: &CachedSpec,
+        api_name: &str,
+        global_config: Option<&GlobalConfig>,
+    ) -> Self {
+        let mut secrets = Vec::new();
+
+        // Collect secrets from x-aperture-secret extensions in security schemes
+        collect_secrets_from_spec(spec, &mut secrets);
+
+        // Collect secrets from config-based secrets
+        collect_secrets_from_config(global_config, api_name, &mut secrets);
+
+        // Remove duplicates while preserving order
+        secrets.sort();
+        secrets.dedup();
+
+        Self { secrets }
+    }
+
+    /// Checks if a value exactly matches any of the secrets.
+    #[must_use]
+    pub fn is_secret(&self, value: &str) -> bool {
+        self.secrets.iter().any(|s| s == value)
+    }
+
+    /// Redacts all occurrences of secrets in the given text.
+    ///
+    /// Only redacts secrets that are at least `MIN_SECRET_LENGTH_FOR_BODY_REDACTION`
+    /// characters long to avoid false positives with short values.
+    #[must_use]
+    pub fn redact_secrets_in_text(&self, text: &str) -> String {
+        let mut result = text.to_string();
+        for secret in &self.secrets {
+            if secret.len() >= MIN_SECRET_LENGTH_FOR_BODY_REDACTION {
+                result = result.replace(secret, "[REDACTED]");
+            }
+        }
+        result
+    }
+
+    /// Returns true if this context has any secrets to redact.
+    #[must_use]
+    pub const fn has_secrets(&self) -> bool {
+        !self.secrets.is_empty()
+    }
+}
 
 /// Returns the canonical status text for an HTTP status code
 #[must_use]
@@ -184,11 +304,19 @@ pub fn redact_url_query_params(url: &str) -> String {
 }
 
 /// Logs an HTTP request with optional headers and body
+///
+/// # Arguments
+/// * `method` - HTTP method (GET, POST, etc.)
+/// * `url` - Request URL (sensitive query params will be redacted)
+/// * `headers` - Optional request headers (sensitive headers will be redacted)
+/// * `body` - Optional request body
+/// * `secret_ctx` - Optional context for dynamic secret redaction
 pub fn log_request(
     method: &str,
     url: &str,
     headers: Option<&reqwest::header::HeaderMap>,
     body: Option<&str>,
+    secret_ctx: Option<&SecretContext>,
 ) {
     // Redact sensitive query parameters from URL before logging
     let redacted_url = redact_url_query_params(url);
@@ -204,10 +332,14 @@ pub fn log_request(
     // Log headers at debug level
     let Some(header_map) = headers else {
         if let Some(body_content) = body {
+            let redacted_body = secret_ctx.map_or_else(
+                || body_content.to_string(),
+                |ctx| ctx.redact_secrets_in_text(body_content),
+            );
             trace!(
                 target: "aperture::executor",
                 "Request body: {}",
-                body_content
+                redacted_body
             );
         }
         return;
@@ -219,11 +351,8 @@ pub fn log_request(
     );
     for (name, value) in header_map {
         let header_str = name.as_str();
-        let display_value = if should_redact_header(header_str) {
-            "[REDACTED]".to_string()
-        } else {
-            String::from_utf8_lossy(value.as_bytes()).to_string()
-        };
+        let raw_value = String::from_utf8_lossy(value.as_bytes()).to_string();
+        let display_value = redact_header_value(header_str, &raw_value, secret_ctx);
         debug!(
             target: "aperture::executor",
             "  {}: {}",
@@ -234,21 +363,54 @@ pub fn log_request(
 
     // Log body at trace level
     if let Some(body_content) = body {
+        let redacted_body = secret_ctx.map_or_else(
+            || body_content.to_string(),
+            |ctx| ctx.redact_secrets_in_text(body_content),
+        );
         trace!(
             target: "aperture::executor",
             "Request body: {}",
-            body_content
+            redacted_body
         );
     }
 }
 
+/// Redacts a header value based on static rules and dynamic secret context.
+fn redact_header_value(
+    header_name: &str,
+    value: &str,
+    secret_ctx: Option<&SecretContext>,
+) -> String {
+    // Always redact known sensitive headers
+    if should_redact_header(header_name) {
+        return "[REDACTED]".to_string();
+    }
+
+    // Check if the value matches a dynamic secret
+    let is_dynamic_secret = secret_ctx.is_some_and(|ctx| ctx.is_secret(value));
+    if is_dynamic_secret {
+        return "[REDACTED]".to_string();
+    }
+
+    value.to_string()
+}
+
 /// Logs an HTTP response with optional headers and body
+///
+/// # Arguments
+/// * `status` - HTTP status code
+/// * `duration_ms` - Request duration in milliseconds
+/// * `headers` - Optional response headers (sensitive headers will be redacted)
+/// * `body` - Optional response body
+/// * `max_body_len` - Maximum body length to log before truncation
+/// * `secret_ctx` - Optional context for dynamic secret redaction
 pub fn log_response(
     status: u16,
     duration_ms: u128,
     headers: Option<&reqwest::header::HeaderMap>,
     body: Option<&str>,
     max_body_len: usize,
+    secret_ctx: Option<&SecretContext>,
 ) {
     // Log at info level: status and duration
     let status_text = http_status_text(status);
@@ -262,7 +424,7 @@ pub fn log_response(
 
     // Log headers at debug level
     let Some(header_map) = headers else {
-        log_response_body(body, max_body_len);
+        log_response_body(body, max_body_len, secret_ctx);
         return;
     };
 
@@ -272,11 +434,8 @@ pub fn log_response(
     );
     for (name, value) in header_map {
         let header_str = name.as_str();
-        let display_value = if should_redact_header(header_str) {
-            "[REDACTED]".to_string()
-        } else {
-            String::from_utf8_lossy(value.as_bytes()).to_string()
-        };
+        let raw_value = String::from_utf8_lossy(value.as_bytes()).to_string();
+        let display_value = redact_header_value(header_str, &raw_value, secret_ctx);
         debug!(
             target: "aperture::executor",
             "  {}: {}",
@@ -286,27 +445,33 @@ pub fn log_response(
     }
 
     // Log body at trace level with truncation
-    log_response_body(body, max_body_len);
+    log_response_body(body, max_body_len, secret_ctx);
 }
 
 /// Helper function to log response body with truncation
-fn log_response_body(body: Option<&str>, max_body_len: usize) {
+fn log_response_body(body: Option<&str>, max_body_len: usize, secret_ctx: Option<&SecretContext>) {
     let Some(body_content) = body else {
         return;
     };
 
-    if body_content.len() > max_body_len {
+    // Redact secrets in body before logging
+    let redacted_body = secret_ctx.map_or_else(
+        || body_content.to_string(),
+        |ctx| ctx.redact_secrets_in_text(body_content),
+    );
+
+    if redacted_body.len() > max_body_len {
         trace!(
             target: "aperture::executor",
             "Response body: {} (truncated at {} chars)",
-            &body_content[..max_body_len],
+            &redacted_body[..max_body_len],
             max_body_len
         );
     } else {
         trace!(
             target: "aperture::executor",
             "Response body: {}",
-            body_content
+            redacted_body
         );
     }
 }
@@ -385,28 +550,9 @@ mod tests {
         assert_eq!(redact_sensitive_value(""), "");
     }
 
-    #[test]
-    fn test_get_max_body_len_default() {
-        // If APERTURE_LOG_MAX_BODY is not set, should return 1000
-        std::env::remove_var("APERTURE_LOG_MAX_BODY");
-        assert_eq!(get_max_body_len(), 1000);
-    }
-
-    #[test]
-    fn test_get_max_body_len_custom() {
-        // Set custom value and verify it's used
-        std::env::set_var("APERTURE_LOG_MAX_BODY", "5000");
-        assert_eq!(get_max_body_len(), 5000);
-        std::env::remove_var("APERTURE_LOG_MAX_BODY");
-    }
-
-    #[test]
-    fn test_get_max_body_len_invalid_value() {
-        // If the value is invalid, should return default 1000
-        std::env::set_var("APERTURE_LOG_MAX_BODY", "invalid");
-        assert_eq!(get_max_body_len(), 1000);
-        std::env::remove_var("APERTURE_LOG_MAX_BODY");
-    }
+    // Note: Environment variable tests for get_max_body_len have been moved
+    // to logging_integration_tests.rs to avoid race conditions when tests
+    // run in parallel. Unit tests here should not depend on env vars.
 
     #[test]
     fn test_http_status_text() {
@@ -510,5 +656,84 @@ mod tests {
         let url = "https://api.example.com/users?page=1&limit=10";
         let redacted = redact_url_query_params(url);
         assert_eq!(redacted, "https://api.example.com/users?page=1&limit=10");
+    }
+
+    // SecretContext tests
+
+    #[test]
+    fn test_secret_context_empty() {
+        let ctx = SecretContext::empty();
+        assert!(!ctx.has_secrets());
+        assert!(!ctx.is_secret("any_value"));
+    }
+
+    #[test]
+    fn test_secret_context_is_secret() {
+        let mut ctx = SecretContext::empty();
+        ctx.secrets = vec!["my_secret_token".to_string()];
+
+        assert!(ctx.has_secrets());
+        assert!(ctx.is_secret("my_secret_token"));
+        assert!(!ctx.is_secret("other_value"));
+    }
+
+    #[test]
+    fn test_secret_context_redact_secrets_in_text() {
+        let mut ctx = SecretContext::empty();
+        ctx.secrets = vec!["secret123abc".to_string()]; // 12 chars, above minimum
+
+        let text = "The token is secret123abc and should be hidden";
+        let redacted = ctx.redact_secrets_in_text(text);
+        assert_eq!(redacted, "The token is [REDACTED] and should be hidden");
+    }
+
+    #[test]
+    fn test_secret_context_short_secrets_not_redacted_in_body() {
+        let mut ctx = SecretContext::empty();
+        ctx.secrets = vec!["short".to_string()]; // 5 chars, below minimum
+
+        let text = "This text contains short word";
+        let redacted = ctx.redact_secrets_in_text(text);
+        // Short secrets should not be redacted in body to avoid false positives
+        assert_eq!(redacted, "This text contains short word");
+    }
+
+    #[test]
+    fn test_secret_context_multiple_secrets() {
+        let mut ctx = SecretContext::empty();
+        ctx.secrets = vec![
+            "first_secret_value".to_string(),
+            "second_secret_val".to_string(),
+        ];
+
+        let text = "first_secret_value and second_secret_val are both here";
+        let redacted = ctx.redact_secrets_in_text(text);
+        assert_eq!(redacted, "[REDACTED] and [REDACTED] are both here");
+    }
+
+    #[test]
+    fn test_redact_header_value_known_header() {
+        // Known sensitive headers are always redacted regardless of context
+        let result = redact_header_value("Authorization", "Bearer token123", None);
+        assert_eq!(result, "[REDACTED]");
+    }
+
+    #[test]
+    fn test_redact_header_value_dynamic_secret() {
+        let mut ctx = SecretContext::empty();
+        ctx.secrets = vec!["my_api_key_12345".to_string()];
+
+        // Unknown header but value matches a dynamic secret
+        let result = redact_header_value("X-Custom-Header", "my_api_key_12345", Some(&ctx));
+        assert_eq!(result, "[REDACTED]");
+    }
+
+    #[test]
+    fn test_redact_header_value_no_match() {
+        let ctx = SecretContext::empty();
+
+        // Unknown header, no secret match
+        let result = redact_header_value("X-Custom-Header", "some_value", Some(&ctx));
+        assert_eq!(result, "some_value");
     }
 }
