@@ -448,6 +448,15 @@ pub fn log_response(
     log_response_body(body, max_body_len, secret_ctx);
 }
 
+/// Truncates a string to at most `max_chars` characters, ensuring we don't
+/// split in the middle of a multi-byte UTF-8 character.
+fn truncate_string(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((byte_idx, _)) => &s[..byte_idx],
+        None => s, // String is shorter than max_chars
+    }
+}
+
 /// Helper function to log response body with truncation
 fn log_response_body(body: Option<&str>, max_body_len: usize, secret_ctx: Option<&SecretContext>) {
     let Some(body_content) = body else {
@@ -460,11 +469,14 @@ fn log_response_body(body: Option<&str>, max_body_len: usize, secret_ctx: Option
         |ctx| ctx.redact_secrets_in_text(body_content),
     );
 
-    if redacted_body.len() > max_body_len {
+    // Check character count, not byte length, for truncation
+    let char_count = redacted_body.chars().count();
+    if char_count > max_body_len {
+        let truncated = truncate_string(&redacted_body, max_body_len);
         trace!(
             target: "aperture::executor",
             "Response body: {} (truncated at {} chars)",
-            &redacted_body[..max_body_len],
+            truncated,
             max_body_len
         );
     } else {
@@ -735,5 +747,31 @@ mod tests {
         // Unknown header, no secret match
         let result = redact_header_value("X-Custom-Header", "some_value", Some(&ctx));
         assert_eq!(result, "some_value");
+    }
+
+    #[test]
+    fn test_truncate_string_ascii() {
+        let text = "Hello, World!";
+        assert_eq!(truncate_string(text, 5), "Hello");
+        assert_eq!(truncate_string(text, 100), "Hello, World!");
+        assert_eq!(truncate_string(text, 0), "");
+    }
+
+    #[test]
+    fn test_truncate_string_unicode() {
+        // Japanese text: "こんにちは世界" (7 characters, 21 bytes)
+        let text = "こんにちは世界";
+        assert_eq!(truncate_string(text, 3), "こんに");
+        assert_eq!(truncate_string(text, 7), "こんにちは世界");
+        assert_eq!(truncate_string(text, 100), "こんにちは世界");
+    }
+
+    #[test]
+    fn test_truncate_string_emoji() {
+        // Emoji can be multiple bytes
+        let text = "Hello 👋🌍!";
+        assert_eq!(truncate_string(text, 6), "Hello ");
+        assert_eq!(truncate_string(text, 7), "Hello 👋");
+        assert_eq!(truncate_string(text, 8), "Hello 👋🌍");
     }
 }
