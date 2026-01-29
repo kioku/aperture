@@ -177,7 +177,7 @@ fn handle_dry_run(
     let headers_map: HashMap<String, String> = headers
         .iter()
         .map(|(k, v)| {
-            let value = if is_sensitive_header(k.as_str()) {
+            let value = if logging::should_redact_header(k.as_str()) {
                 "<REDACTED>".to_string()
             } else {
                 v.to_str().unwrap_or("<binary>").to_string()
@@ -1169,15 +1169,6 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
     validate_header_value(name, &expanded_value)?;
 
     Ok((name.to_string(), expanded_value))
-}
-
-/// Checks if a header name contains sensitive authentication information
-fn is_sensitive_header(header_name: &str) -> bool {
-    let name_lower = header_name.to_lowercase();
-    matches!(
-        name_lower.as_str(),
-        "authorization" | "proxy-authorization" | "x-api-key" | "x-api-token" | "x-auth-token"
-    )
 }
 
 /// Adds an authentication header based on a security scheme

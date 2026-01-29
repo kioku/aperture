@@ -38,27 +38,20 @@ fn test_aperture_log_format_env_var_support() {
 }
 
 #[test]
-fn test_aperture_log_max_body_default() {
-    // Default max body length should be 1000
-    // Save original value and restore it after test
+fn test_aperture_log_max_body() {
+    // Test both default and custom max body length
+    // Combined into single test to avoid race conditions with parallel execution
     let original = env::var("APERTURE_LOG_MAX_BODY").ok();
+
+    // Test default (env var not set)
     env::remove_var("APERTURE_LOG_MAX_BODY");
+    assert_eq!(get_max_body_len(), 1000, "Default should be 1000");
 
-    assert_eq!(get_max_body_len(), 1000);
-
-    if let Some(val) = original {
-        env::set_var("APERTURE_LOG_MAX_BODY", val);
-    }
-}
-
-#[test]
-fn test_aperture_log_max_body_custom() {
-    // Custom max body length - save and restore original value
-    let original = env::var("APERTURE_LOG_MAX_BODY").ok();
-
+    // Test custom value
     env::set_var("APERTURE_LOG_MAX_BODY", "2000");
-    assert_eq!(get_max_body_len(), 2000);
+    assert_eq!(get_max_body_len(), 2000, "Custom value should be respected");
 
+    // Restore original value
     if let Some(val) = original {
         env::set_var("APERTURE_LOG_MAX_BODY", val);
     } else {
