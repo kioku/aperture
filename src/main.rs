@@ -916,6 +916,13 @@ fn init_tracing(verbosity: u8) {
     let log_format = std::env::var("APERTURE_LOG_FORMAT")
         .map_or_else(|_| "text".to_string(), |s| s.to_lowercase());
 
+    // Warn if an unrecognized log format is provided
+    if log_format != "json" && log_format != "text" {
+        eprintln!(
+            "Warning: Unrecognized APERTURE_LOG_FORMAT '{log_format}'. Valid values: 'json', 'text'. Using 'text'."
+        );
+    }
+
     // Check for file output via APERTURE_LOG_FILE
     let writer = std::env::var("APERTURE_LOG_FILE").ok().map_or_else(
         || FileOrStderr { file: None },
