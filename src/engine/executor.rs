@@ -4,6 +4,7 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
 use crate::error::Error;
+use crate::logging;
 use crate::resilience::{
     calculate_retry_delay_with_header, is_retryable_status, parse_retry_after_value,
 };
@@ -211,12 +212,22 @@ fn handle_dry_run(
 async fn send_request(
     request: reqwest::RequestBuilder,
 ) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+    let start_time = std::time::Instant::now();
+
     let response = request
         .send()
         .await
         .map_err(|e| Error::network_request_failed(e.to_string()))?;
 
     let status = response.status();
+    let duration_ms = start_time.elapsed().as_millis();
+
+    // Copy headers before consuming response
+    let mut response_headers_map = reqwest::header::HeaderMap::new();
+    for (name, value) in response.headers() {
+        response_headers_map.insert(name.clone(), value.clone());
+    }
+
     let response_headers: HashMap<String, String> = response
         .headers()
         .iter()
@@ -227,6 +238,15 @@ async fn send_request(
         .text()
         .await
         .map_err(|e| Error::response_read_error(e.to_string()))?;
+
+    // Log response with appropriate level based on status
+    logging::log_response(
+        status.as_u16(),
+        duration_ms,
+        Some(&response_headers_map),
+        Some(&response_text),
+        logging::get_max_body_len(),
+    );
 
     Ok((status, response_headers, response_text))
 }
@@ -244,6 +264,9 @@ async fn send_request_with_retry(
     operation: &CachedCommand,
 ) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
     use crate::resilience::RetryConfig;
+
+    // Log the request
+    logging::log_request(method.as_str(), url, Some(&headers), body.as_deref());
 
     // If no retry context or retries disabled, just send once
     let Some(ctx) = retry_context else {
