@@ -127,20 +127,43 @@ Configures the maximum number of characters to include in request/response body 
 APERTURE_LOG_MAX_BODY=5000 aperture -vv api myapi users get-user --id 123
 ```
 
+### `APERTURE_LOG_FILE`
+Writes logs to a file instead of stderr. The file is created if it doesn't exist and logs are appended.
+
+```bash
+APERTURE_LOG=debug APERTURE_LOG_FILE=/tmp/aperture-debug.log aperture api myapi users get-user --id 123
+```
+
+This is useful for:
+- Capturing logs for later analysis
+- Keeping the terminal clean while debugging
+- Automated testing where you need to parse logs
+
+If the file cannot be opened (permission denied, invalid path, etc.), a warning is printed and logs fall back to stderr.
+
 ## Security Considerations
 
 Aperture automatically redacts sensitive information in logs:
 
 ### Redacted Headers
 The following headers are automatically redacted:
-- `Authorization` → `Bearer [REDACTED]`
-- `X-API-Key` → `[REDACTED]`
-- `X-Auth-Token` → `[REDACTED]`
-- `X-Access-Token` → `[REDACTED]`
-- `API-Key` → `[REDACTED]`
-- `Token` → `[REDACTED]`
-- `X-Secret-Token` → `[REDACTED]`
-- `Password` → `[REDACTED]`
+- `Authorization` / `Proxy-Authorization` → `[REDACTED]`
+- `X-API-Key` / `X-API-Token` / `API-Key` → `[REDACTED]`
+- `X-Auth-Token` / `X-Access-Token` / `X-Secret-Token` → `[REDACTED]`
+- `Token` / `Secret` / `Password` → `[REDACTED]`
+- `X-Webhook-Secret` → `[REDACTED]`
+- `Cookie` / `Set-Cookie` → `[REDACTED]`
+- `X-CSRF-Token` / `X-XSRF-Token` → `[REDACTED]`
+- `X-Amz-Security-Token` → `[REDACTED]`
+- `Private-Token` → `[REDACTED]`
+
+### Redacted Query Parameters
+Sensitive query parameters in URLs are automatically redacted:
+- `api_key`, `apikey`, `key` → `?api_key=[REDACTED]`
+- `token`, `access_token`, `auth_token` → `?token=[REDACTED]`
+- `secret`, `client_secret`, `api_secret` → `?secret=[REDACTED]`
+- `password`, `passwd`, `pwd` → `?password=[REDACTED]`
+- `signature`, `sig` → `?signature=[REDACTED]`
 
 ### Body Truncation
 Response bodies are truncated at 1000 characters by default to avoid logging excessively large payloads. You can increase this with `APERTURE_LOG_MAX_BODY`.
@@ -206,6 +229,23 @@ Logs are written to `stderr` by default, leaving `stdout` clean for piping outpu
 aperture -v api myapi users list | jq '.[] | select(.active)'
 ```
 
+### File Output
+
+Use `APERTURE_LOG_FILE` to write logs to a file:
+
+```bash
+# Write debug logs to a file
+APERTURE_LOG=debug APERTURE_LOG_FILE=/tmp/aperture.log aperture api myapi users get-user --id 123
+
+# View the logs
+cat /tmp/aperture.log
+```
+
+File output is especially useful for:
+- Long-running batch operations
+- CI/CD pipelines where you need to preserve logs
+- Debugging issues that require reviewing multiple requests
+
 ## Examples
 
 ### Debug a Complete API Flow
@@ -217,6 +257,11 @@ APERTURE_LOG=debug aperture api myapi posts create-post \
 
 ### Capture Logs for Later Analysis
 ```bash
+# Using APERTURE_LOG_FILE (recommended)
+APERTURE_LOG=debug APERTURE_LOG_FORMAT=json APERTURE_LOG_FILE=debug.log \
+  aperture api myapi users get-user --id 123
+
+# Or using shell redirection
 APERTURE_LOG=debug APERTURE_LOG_FORMAT=json aperture api myapi users get-user \
   --id 123 2> debug.log
 ```
