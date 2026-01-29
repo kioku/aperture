@@ -178,7 +178,7 @@ fn handle_dry_run(
         .iter()
         .map(|(k, v)| {
             let value = if logging::should_redact_header(k.as_str()) {
-                "<REDACTED>".to_string()
+                "[REDACTED]".to_string()
             } else {
                 v.to_str().unwrap_or("<binary>").to_string()
             };
