@@ -20,12 +20,16 @@ use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
     // Install the aws-lc-rs crypto provider for rustls.
     // Ensures the provider is initialized before any TLS operations.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    // Initialize tracing-subscriber for request/response logging
+    init_tracing();
 
     let cli = Cli::parse();
     let json_errors = cli.json_errors;
@@ -861,6 +865,49 @@ async fn execute_batch_operations(
     }
 
     Ok(())
+}
+
+/// Initialize tracing-subscriber for request/response logging
+fn init_tracing() {
+    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    // Get log level from APERTURE_LOG environment variable (defaults to "error")
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("error"))
+        .unwrap_or_else(|_| EnvFilter::new("error"));
+
+    // Get log format from APERTURE_LOG_FORMAT environment variable (defaults to "text")
+    let log_format = std::env::var("APERTURE_LOG_FORMAT")
+        .map_or_else(|_| "text".to_string(), |s| s.to_lowercase());
+
+    if log_format == "json" {
+        let json_layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_span_list(false)
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_line_number(true);
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(json_layer)
+            .init();
+    } else {
+        // Default text format
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .pretty()
+            .with_span_events(FmtSpan::CLOSE)
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_line_number(false);
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt_layer)
+            .init();
+    }
 }
 
 /// Prints an error message, either as JSON or user-friendly format
