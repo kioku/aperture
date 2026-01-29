@@ -28,10 +28,11 @@ async fn main() {
     // Ensures the provider is initialized before any TLS operations.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    // Initialize tracing-subscriber for request/response logging
-    init_tracing();
-
+    // Parse CLI early to get verbosity level
     let cli = Cli::parse();
+
+    // Initialize tracing-subscriber for request/response logging
+    init_tracing(cli.verbosity);
     let json_errors = cli.json_errors;
     let output = Output::new(cli.quiet, cli.json_errors);
 
@@ -868,13 +869,24 @@ async fn execute_batch_operations(
 }
 
 /// Initialize tracing-subscriber for request/response logging
-fn init_tracing() {
+fn init_tracing(verbosity: u8) {
     use tracing_subscriber::fmt::format::FmtSpan;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    // Get log level from APERTURE_LOG environment variable (defaults to "error")
-    let env_filter = EnvFilter::try_from_default_env()
+    // Determine log level from CLI flags or APERTURE_LOG environment variable
+    let log_level_str = if verbosity > 0 {
+        // -v = debug, -vv+ = trace
+        match verbosity {
+            1 => "debug".to_string(),
+            _ => "trace".to_string(),
+        }
+    } else {
+        // Check environment variable or use default
+        std::env::var("APERTURE_LOG").unwrap_or_else(|_| "error".to_string())
+    };
+
+    let env_filter = EnvFilter::try_new(&log_level_str)
         .or_else(|_| EnvFilter::try_new("error"))
         .unwrap_or_else(|_| EnvFilter::new("error"));
 
