@@ -4,6 +4,7 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
 use crate::error::Error;
+use crate::logging;
 use crate::resilience::{
     calculate_retry_delay_with_header, is_retryable_status, parse_retry_after_value,
 };
@@ -176,8 +177,8 @@ fn handle_dry_run(
     let headers_map: HashMap<String, String> = headers
         .iter()
         .map(|(k, v)| {
-            let value = if is_sensitive_header(k.as_str()) {
-                "<REDACTED>".to_string()
+            let value = if logging::should_redact_header(k.as_str()) {
+                "[REDACTED]".to_string()
             } else {
                 v.to_str().unwrap_or("<binary>").to_string()
             };
@@ -210,13 +211,24 @@ fn handle_dry_run(
 /// Send HTTP request and get response
 async fn send_request(
     request: reqwest::RequestBuilder,
+    secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+    let start_time = std::time::Instant::now();
+
     let response = request
         .send()
         .await
         .map_err(|e| Error::network_request_failed(e.to_string()))?;
 
     let status = response.status();
+    let duration_ms = start_time.elapsed().as_millis();
+
+    // Copy headers before consuming response
+    let mut response_headers_map = reqwest::header::HeaderMap::new();
+    for (name, value) in response.headers() {
+        response_headers_map.insert(name.clone(), value.clone());
+    }
+
     let response_headers: HashMap<String, String> = response
         .headers()
         .iter()
@@ -227,6 +239,16 @@ async fn send_request(
         .text()
         .await
         .map_err(|e| Error::response_read_error(e.to_string()))?;
+
+    // Log response with secret redaction
+    logging::log_response(
+        status.as_u16(),
+        duration_ms,
+        Some(&response_headers_map),
+        Some(&response_text),
+        logging::get_max_body_len(),
+        secret_ctx,
+    );
 
     Ok((status, response_headers, response_text))
 }
@@ -242,18 +264,28 @@ async fn send_request_with_retry(
     body: Option<String>,
     retry_context: Option<&RetryContext>,
     operation: &CachedCommand,
+    secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
     use crate::resilience::RetryConfig;
+
+    // Log the request with secret redaction
+    logging::log_request(
+        method.as_str(),
+        url,
+        Some(&headers),
+        body.as_deref(),
+        secret_ctx,
+    );
 
     // If no retry context or retries disabled, just send once
     let Some(ctx) = retry_context else {
         let request = build_request(client, method, url, headers, body);
-        return send_request(request).await;
+        return send_request(request, secret_ctx).await;
     };
 
     if !ctx.is_enabled() {
         let request = build_request(client, method, url, headers, body);
-        return send_request(request).await;
+        return send_request(request, secret_ctx).await;
     }
 
     // Check if safe to retry non-GET requests
@@ -269,7 +301,7 @@ async fn send_request_with_retry(
             "         Use --force-retry to enable retries anyway, or provide --idempotency-key"
         );
         let request = build_request(client, method.clone(), url, headers, body);
-        return send_request(request).await;
+        return send_request(request, secret_ctx).await;
     }
 
     // Create a RetryConfig from the RetryContext
@@ -292,7 +324,7 @@ async fn send_request_with_retry(
         attempt += 1;
 
         let request = build_request(client, method.clone(), url, headers.clone(), body.clone());
-        let result = send_request(request).await;
+        let result = send_request(request, secret_ctx).await;
 
         match result {
             Ok((status, response_headers, response_text)) => {
@@ -708,6 +740,9 @@ pub async fn execute_request(
         ctx
     });
 
+    // Build secret context for dynamic secret redaction in logs
+    let secret_ctx = logging::SecretContext::from_spec_and_config(spec, &spec.name, global_config);
+
     // Send request with retry support
     let (status, response_headers, response_text) = send_request_with_retry(
         &client,
@@ -717,6 +752,7 @@ pub async fn execute_request(
         request_body.clone(),
         retry_ctx.as_ref(),
         operation,
+        Some(&secret_ctx),
     )
     .await?;
 
@@ -1146,15 +1182,6 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
     validate_header_value(name, &expanded_value)?;
 
     Ok((name.to_string(), expanded_value))
-}
-
-/// Checks if a header name contains sensitive authentication information
-fn is_sensitive_header(header_name: &str) -> bool {
-    let name_lower = header_name.to_lowercase();
-    matches!(
-        name_lower.as_str(),
-        "authorization" | "proxy-authorization" | "x-api-key" | "x-api-token" | "x-auth-token"
-    )
 }
 
 /// Adds an authentication header based on a security scheme

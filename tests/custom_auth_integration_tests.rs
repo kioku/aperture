@@ -285,7 +285,7 @@ paths:
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "\"authorization\": \"<REDACTED>\"",
+            "\"authorization\": \"[REDACTED]\"",
         ))
         .stdout(predicate::str::contains(
             "\"url\": \"https://api.example.com/users\"",
@@ -594,7 +594,7 @@ paths:
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "\"authorization\": \"<REDACTED>\"",
+            "\"authorization\": \"[REDACTED]\"",
         ))
         .stdout(predicate::str::contains("super-secret-bearer-token").not());
 }
@@ -648,7 +648,7 @@ paths:
         .args(["api", "--dry-run", "api-key-api", "default", "get-data"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"x-api-key\": \"<REDACTED>\""))
+        .stdout(predicate::str::contains("\"x-api-key\": \"[REDACTED]\""))
         .stdout(predicate::str::contains("my-secret-api-key-12345").not());
 }
 

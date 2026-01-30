@@ -20,6 +20,7 @@ use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
@@ -27,7 +28,11 @@ async fn main() {
     // Ensures the provider is initialized before any TLS operations.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
+    // Parse CLI early to get verbosity level
     let cli = Cli::parse();
+
+    // Initialize tracing-subscriber for request/response logging
+    init_tracing(cli.verbosity);
     let json_errors = cli.json_errors;
     let output = Output::new(cli.quiet, cli.json_errors);
 
@@ -861,6 +866,105 @@ async fn execute_batch_operations(
     }
 
     Ok(())
+}
+
+/// Wrapper type to write logs to file or stderr
+struct FileOrStderr {
+    file: Option<std::sync::Mutex<std::fs::File>>,
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for FileOrStderr {
+    type Writer = Box<dyn std::io::Write + 'a>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.file
+            .as_ref()
+            .and_then(|mutex| mutex.lock().ok())
+            .and_then(|file| file.try_clone().ok())
+            .map_or_else(
+                || Box::new(std::io::stderr()) as Self::Writer,
+                |cloned| Box::new(cloned) as Self::Writer,
+            )
+    }
+}
+
+/// Initialize tracing-subscriber for request/response logging
+fn init_tracing(verbosity: u8) {
+    use std::fs::OpenOptions;
+    use std::sync::Mutex;
+    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    // Determine log level from CLI flags or APERTURE_LOG environment variable
+    let log_level_str = if verbosity > 0 {
+        // -v = debug, -vv+ = trace
+        match verbosity {
+            1 => "debug".to_string(),
+            _ => "trace".to_string(),
+        }
+    } else {
+        // Check environment variable or use default
+        std::env::var("APERTURE_LOG").unwrap_or_else(|_| "error".to_string())
+    };
+
+    let env_filter = EnvFilter::try_new(&log_level_str)
+        .or_else(|_| EnvFilter::try_new("error"))
+        .unwrap_or_else(|_| EnvFilter::new("error"));
+
+    // Get log format from APERTURE_LOG_FORMAT environment variable (defaults to "text")
+    let log_format = std::env::var("APERTURE_LOG_FORMAT")
+        .map_or_else(|_| "text".to_string(), |s| s.to_lowercase());
+
+    // Warn if an unrecognized log format is provided
+    if log_format != "json" && log_format != "text" {
+        eprintln!(
+            "Warning: Unrecognized APERTURE_LOG_FORMAT '{log_format}'. Valid values: 'json', 'text'. Using 'text'."
+        );
+    }
+
+    // Check for file output via APERTURE_LOG_FILE
+    let writer = std::env::var("APERTURE_LOG_FILE").ok().map_or_else(
+        || FileOrStderr { file: None },
+        |path| match OpenOptions::new().create(true).append(true).open(&path) {
+            Ok(file) => FileOrStderr {
+                file: Some(Mutex::new(file)),
+            },
+            Err(e) => {
+                eprintln!("Warning: Could not open log file '{path}': {e}. Using stderr.");
+                FileOrStderr { file: None }
+            }
+        },
+    );
+
+    if log_format == "json" {
+        let json_layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_span_list(false)
+            .with_target(true)
+            .with_thread_ids(false)
+            .with_line_number(true)
+            .with_writer(writer);
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(json_layer)
+            .init();
+    } else {
+        // Default text format
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .pretty()
+            .with_span_events(FmtSpan::CLOSE)
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_line_number(false)
+            .with_writer(writer);
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(fmt_layer)
+            .init();
+    }
 }
 
 /// Prints an error message, either as JSON or user-friendly format

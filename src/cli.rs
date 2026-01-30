@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 
 #[derive(ValueEnum, Clone, Debug)]
 pub enum OutputFormat {
@@ -52,6 +52,15 @@ pub struct Cli {
         help = "Suppress informational output"
     )]
     pub quiet: bool,
+
+    /// Increase logging verbosity
+    #[arg(
+        short = 'v',
+        global = true,
+        action = ArgAction::Count,
+        help = "Increase logging verbosity (-v for debug, -vv for trace)"
+    )]
+    pub verbosity: u8,
 
     /// Show the HTTP request that would be made without executing it
     #[arg(long, global = true, help = "Show request details without executing")]
