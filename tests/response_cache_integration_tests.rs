@@ -58,6 +58,7 @@ fn create_test_cache_config() -> (CacheConfig, TempDir) {
         default_ttl: Duration::from_secs(60),
         max_entries: 10,
         enabled: true,
+        allow_authenticated: false,
     };
     (cache_config, temp_dir)
 }

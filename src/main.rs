@@ -714,6 +714,7 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
             default_ttl: Duration::from_secs(cli.cache_ttl.unwrap_or(300)),
             max_entries: 1000,
             enabled: cli.cache || cli.cache_ttl.is_some(),
+            allow_authenticated: false, // Secure by default
         })
     };
 

@@ -355,6 +355,7 @@ impl BatchProcessor {
                 default_ttl: std::time::Duration::from_secs(300),
                 max_entries: 1000,
                 enabled: true,
+                allow_authenticated: false, // Secure by default
             })
         } else {
             None

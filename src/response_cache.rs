@@ -17,6 +17,9 @@ pub struct CacheConfig {
     pub max_entries: usize,
     /// Whether caching is enabled globally
     pub enabled: bool,
+    /// Whether to cache responses from authenticated requests.
+    /// Default is `false` for security: auth headers could leak to disk.
+    pub allow_authenticated: bool,
 }
 
 impl Default for CacheConfig {
@@ -26,6 +29,7 @@ impl Default for CacheConfig {
             default_ttl: Duration::from_secs(300), // 5 minutes
             max_entries: 1000,
             enabled: true,
+            allow_authenticated: false, // Secure by default
         }
     }
 }
@@ -498,6 +502,7 @@ mod tests {
             default_ttl: Duration::from_secs(60),
             max_entries: 10,
             enabled: true,
+            allow_authenticated: false,
         };
         (config, temp_dir)
     }
