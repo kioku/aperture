@@ -9,7 +9,8 @@ use crate::resilience::{
     calculate_retry_delay_with_header, is_retryable_status, parse_retry_after_value,
 };
 use crate::response_cache::{
-    CacheConfig, CacheKey, CachedRequestInfo, CachedResponse, ResponseCache,
+    is_auth_header, scrub_auth_headers, CacheConfig, CacheKey, CachedRequestInfo, CachedResponse,
+    ResponseCache,
 };
 use crate::utils::to_kebab_case;
 use base64::{engine::general_purpose, Engine as _};
@@ -511,6 +512,12 @@ fn prepare_cache_context(
         return Ok(None);
     }
 
+    // Skip caching for authenticated requests unless explicitly allowed
+    let has_auth_headers = headers.iter().any(|(k, _)| is_auth_header(k.as_str()));
+    if has_auth_headers && !cache_cfg.allow_authenticated {
+        return Ok(None);
+    }
+
     let header_map: HashMap<String, String> = headers
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
@@ -557,13 +564,17 @@ async fn store_in_cache(
         return Ok(());
     };
 
+    // Convert headers to HashMap and scrub auth headers before caching
+    let raw_headers: HashMap<String, String> = headers
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    let scrubbed_headers = scrub_auth_headers(&raw_headers);
+
     let cached_request_info = CachedRequestInfo {
         method: method.to_string(),
         url,
-        headers: headers
-            .iter()
-            .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect(),
+        headers: scrubbed_headers,
         body_hash: body.map(|b| {
             let mut hasher = Sha256::new();
             hasher.update(b.as_bytes());

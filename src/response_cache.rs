@@ -17,6 +17,9 @@ pub struct CacheConfig {
     pub max_entries: usize,
     /// Whether caching is enabled globally
     pub enabled: bool,
+    /// Whether to cache responses from authenticated requests.
+    /// Default is `false` for security: auth headers could leak to disk.
+    pub allow_authenticated: bool,
 }
 
 impl Default for CacheConfig {
@@ -26,6 +29,7 @@ impl Default for CacheConfig {
             default_ttl: Duration::from_secs(300), // 5 minutes
             max_entries: 1000,
             enabled: true,
+            allow_authenticated: false, // Secure by default
         }
     }
 }
@@ -476,7 +480,8 @@ pub struct CacheStats {
 }
 
 /// Check if a header is an authentication header that should be excluded from caching
-fn is_auth_header(header_name: &str) -> bool {
+#[must_use]
+pub fn is_auth_header(header_name: &str) -> bool {
     constants::is_auth_header(header_name)
         || header_name
             .to_lowercase()
@@ -484,6 +489,21 @@ fn is_auth_header(header_name: &str) -> bool {
         || header_name
             .to_lowercase()
             .starts_with(constants::HEADER_PREFIX_X_API)
+}
+
+/// Scrub authentication headers from a header map before caching.
+///
+/// This ensures sensitive credentials are never persisted to disk,
+/// maintaining the security boundary between configuration and secrets.
+#[must_use]
+pub fn scrub_auth_headers<S: std::hash::BuildHasher>(
+    headers: &HashMap<String, String, S>,
+) -> HashMap<String, String> {
+    headers
+        .iter()
+        .filter(|(key, _)| !is_auth_header(key))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -498,6 +518,7 @@ mod tests {
             default_ttl: Duration::from_secs(60),
             max_entries: 10,
             enabled: true,
+            allow_authenticated: false,
         };
         (config, temp_dir)
     }
@@ -540,6 +561,38 @@ mod tests {
         assert!(is_auth_header("x-auth-token"));
         assert!(!is_auth_header(constants::HEADER_CONTENT_TYPE));
         assert!(!is_auth_header("User-Agent"));
+    }
+
+    #[test]
+    fn test_scrub_auth_headers() {
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer secret".to_string());
+        headers.insert("X-API-Key".to_string(), "api-key-123".to_string());
+        headers.insert("x-auth-token".to_string(), "token-456".to_string());
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        headers.insert("User-Agent".to_string(), "test-agent".to_string());
+        headers.insert("Accept".to_string(), "application/json".to_string());
+
+        let scrubbed = scrub_auth_headers(&headers);
+
+        // Auth headers should be removed
+        assert!(!scrubbed.contains_key("Authorization"));
+        assert!(!scrubbed.contains_key("X-API-Key"));
+        assert!(!scrubbed.contains_key("x-auth-token"));
+
+        // Non-auth headers should be preserved
+        assert_eq!(
+            scrubbed.get("Content-Type"),
+            Some(&"application/json".to_string())
+        );
+        assert_eq!(scrubbed.get("User-Agent"), Some(&"test-agent".to_string()));
+        assert_eq!(
+            scrubbed.get("Accept"),
+            Some(&"application/json".to_string())
+        );
+
+        // Only 3 non-auth headers should remain
+        assert_eq!(scrubbed.len(), 3);
     }
 
     #[tokio::test]
