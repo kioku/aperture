@@ -93,6 +93,9 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         let spec_metadata = SpecMetadata {
             updated_at: chrono::Utc::now().to_rfc3339(),
             file_size,
+            content_hash: None,
+            mtime_secs: None,
+            spec_file_size: None,
         };
 
         metadata.specs.insert(spec_name.to_string(), spec_metadata);
