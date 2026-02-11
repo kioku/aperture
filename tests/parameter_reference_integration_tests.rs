@@ -5,7 +5,7 @@
 use aperture_cli::config::context_name::ApiContextName;
 use aperture_cli::config::manager::ConfigManager;
 
-/// Helper to create a validated ApiContextName from a string literal in tests
+/// Helper to create a validated `ApiContextName` from a string literal in tests
 fn name(s: &str) -> ApiContextName {
     ApiContextName::new(s).expect("test name should be valid")
 }
