@@ -268,25 +268,23 @@ async fn run_command(
             }
         },
         Commands::ListCommands { ref context } => {
-            validate_api_name(context)?;
-            list_commands(context, output)?;
+            let context = validate_api_name(context)?;
+            list_commands(&context, output)?;
         }
         Commands::Api {
             ref context,
             ref args,
         } => {
-            validate_api_name(context)?;
-            execute_api_command(context, args.clone(), &cli).await?;
+            let context = validate_api_name(context)?;
+            execute_api_command(&context, args.clone(), &cli).await?;
         }
         Commands::Search {
             ref query,
             ref api,
             verbose,
         } => {
-            if let Some(ref name) = api {
-                validate_api_name(name)?;
-            }
-            execute_search_command(manager, query, api.as_deref(), verbose, output)?;
+            let validated_api = api.as_deref().map(validate_api_name).transpose()?;
+            execute_search_command(manager, query, validated_api.as_deref(), verbose, output)?;
         }
         Commands::Exec { ref args } => {
             execute_shortcut_command(manager, args.clone(), &cli).await?;
@@ -297,12 +295,10 @@ async fn run_command(
             ref operation,
             enhanced,
         } => {
-            if let Some(ref name) = api {
-                validate_api_name(name)?;
-            }
+            let validated_api = api.as_deref().map(validate_api_name).transpose()?;
             execute_help_command(
                 manager,
-                api.as_deref(),
+                validated_api.as_deref(),
                 tag.as_deref(),
                 operation.as_deref(),
                 enhanced,
@@ -310,10 +306,8 @@ async fn run_command(
             )?;
         }
         Commands::Overview { ref api, all } => {
-            if let Some(ref name) = api {
-                validate_api_name(name)?;
-            }
-            execute_overview_command(manager, api.as_deref(), all, output)?;
+            let validated_api = api.as_deref().map(validate_api_name).transpose()?;
+            execute_overview_command(manager, validated_api.as_deref(), all, output)?;
         }
     }
 

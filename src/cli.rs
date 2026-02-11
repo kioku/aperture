@@ -252,7 +252,8 @@ pub enum Commands {
     Search {
         /// Search query (keywords, patterns, or regex)
         query: String,
-        /// Limit search to a specific API context
+        /// Limit search to a specific API context.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         #[arg(long, value_name = "API", help = "Search only in specified API")]
         api: Option<String>,
         /// Show detailed results including paths and parameters
@@ -290,7 +291,8 @@ pub enum Commands {
                       aperture docs myapi users get-user  # Detailed command help"
     )]
     Docs {
-        /// API name (optional, shows interactive menu if omitted)
+        /// API name (optional, shows interactive menu if omitted).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api: Option<String>,
         /// Tag/category name (optional)
         tag: Option<String>,
@@ -310,7 +312,8 @@ pub enum Commands {
                       aperture overview --all  # Overview of all registered APIs"
     )]
     Overview {
-        /// API name (required unless using --all)
+        /// API name (required unless using --all).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api: Option<String>,
         /// Show overview for all registered APIs
         #[arg(long, conflicts_with = "api", help = "Show overview for all APIs")]
@@ -511,7 +514,8 @@ pub enum ConfigCommands {
                       aperture config reinit myapi     # Reinitialize specific spec"
     )]
     Reinit {
-        /// Name of the API specification to reinitialize (omit for --all)
+        /// Name of the API specification to reinitialize (omit for --all).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         context: Option<String>,
         /// Reinitialize all cached specifications
         #[arg(long, conflicts_with = "context", help = "Reinitialize all specs")]
@@ -526,7 +530,8 @@ pub enum ConfigCommands {
                       aperture config clear-cache myapi     # Clear cache for specific API\n  \
                       aperture config clear-cache --all     # Clear all cached responses")]
     ClearCache {
-        /// Name of the API specification to clear cache for (omit for --all)
+        /// Name of the API specification to clear cache for (omit for --all).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: Option<String>,
         /// Clear all cached responses
         #[arg(long, conflicts_with = "api_name", help = "Clear all response cache")]
@@ -540,7 +545,8 @@ pub enum ConfigCommands {
                       aperture config cache-stats myapi     # Stats for specific API\n  \
                       aperture config cache-stats           # Stats for all APIs")]
     CacheStats {
-        /// Name of the API specification to show stats for (omit for all APIs)
+        /// Name of the API specification to show stats for (omit for all APIs).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: Option<String>,
     },
     /// Set a global configuration setting
