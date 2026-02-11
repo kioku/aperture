@@ -2,6 +2,7 @@ use aperture_cli::agent;
 use aperture_cli::batch::{BatchConfig, BatchProcessor};
 use aperture_cli::cache::models::CachedSpec;
 use aperture_cli::cli::{Cli, Commands, ConfigCommands};
+use aperture_cli::config::context_name::ApiContextName;
 use aperture_cli::config::manager::{get_config_dir, ConfigManager};
 use aperture_cli::config::models::{GlobalConfig, SecretSource};
 use aperture_cli::constants;
@@ -53,6 +54,11 @@ async fn main() {
     }
 }
 
+/// Validates and returns the API context name, returning an error for invalid names.
+fn validate_api_name(name: &str) -> Result<ApiContextName, Error> {
+    ApiContextName::new(name)
+}
+
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
 async fn run_command(
     cli: Cli,
@@ -67,6 +73,7 @@ async fn run_command(
                 force,
                 strict,
             } => {
+                let name = validate_api_name(&name)?;
                 manager
                     .add_spec_auto(&name, &file_or_url, force, strict)
                     .await?;
@@ -82,14 +89,17 @@ async fn run_command(
                 }
             }
             ConfigCommands::Remove { name } => {
+                let name = validate_api_name(&name)?;
                 manager.remove_spec(&name)?;
                 output.success(format!("Spec '{name}' removed successfully."));
             }
             ConfigCommands::Edit { name } => {
+                let name = validate_api_name(&name)?;
                 manager.edit_spec(&name)?;
                 output.success(format!("Opened spec '{name}' in editor."));
             }
             ConfigCommands::SetUrl { name, url, env } => {
+                let name = validate_api_name(&name)?;
                 manager.set_url(&name, &url, env.as_deref())?;
                 if let Some(environment) = env {
                     output.success(format!(
@@ -100,6 +110,7 @@ async fn run_command(
                 }
             }
             ConfigCommands::GetUrl { name } => {
+                let name = validate_api_name(&name)?;
                 let (base_override, env_urls, resolved) = manager.get_url(&name)?;
                 print_url_configuration(
                     &name,
@@ -133,12 +144,19 @@ async fn run_command(
                     std::process::exit(1);
                 };
 
+                let spec_name = validate_api_name(&spec_name)?;
                 reinit_spec(manager, &spec_name, output)?;
             }
             ConfigCommands::ClearCache { api_name, all } => {
+                if let Some(ref name) = api_name {
+                    validate_api_name(name)?;
+                }
                 clear_response_cache(manager, api_name.as_deref(), all, output).await?;
             }
             ConfigCommands::CacheStats { api_name } => {
+                if let Some(ref name) = api_name {
+                    validate_api_name(name)?;
+                }
                 show_cache_stats(manager, api_name.as_deref(), output).await?;
             }
             ConfigCommands::SetSecret {
@@ -147,6 +165,7 @@ async fn run_command(
                 env,
                 interactive,
             } => {
+                let api_name = validate_api_name(&api_name)?;
                 if interactive {
                     manager.set_secret_interactive(&api_name)?;
                     return Ok(());
@@ -164,6 +183,7 @@ async fn run_command(
                 ));
             }
             ConfigCommands::ListSecrets { api_name } => {
+                let api_name = validate_api_name(&api_name)?;
                 let secrets = manager.list_secrets(&api_name)?;
                 if secrets.is_empty() {
                     output.info(format!("No secrets configured for API '{api_name}'"));
@@ -175,12 +195,14 @@ async fn run_command(
                 api_name,
                 scheme_name,
             } => {
+                let api_name = validate_api_name(&api_name)?;
                 manager.remove_secret(&api_name, &scheme_name)?;
                 output.success(format!(
                     "Removed secret configuration for scheme '{scheme_name}' from API '{api_name}'"
                 ));
             }
             ConfigCommands::ClearSecrets { api_name, force } => {
+                let api_name = validate_api_name(&api_name)?;
                 // Check if API exists and has secrets
                 let secrets = manager.list_secrets(&api_name)?;
                 if secrets.is_empty() {
@@ -246,12 +268,14 @@ async fn run_command(
             }
         },
         Commands::ListCommands { ref context } => {
+            validate_api_name(context)?;
             list_commands(context, output)?;
         }
         Commands::Api {
             ref context,
             ref args,
         } => {
+            validate_api_name(context)?;
             execute_api_command(context, args.clone(), &cli).await?;
         }
         Commands::Search {
@@ -259,6 +283,9 @@ async fn run_command(
             ref api,
             verbose,
         } => {
+            if let Some(ref name) = api {
+                validate_api_name(name)?;
+            }
             execute_search_command(manager, query, api.as_deref(), verbose, output)?;
         }
         Commands::Exec { ref args } => {
@@ -270,6 +297,9 @@ async fn run_command(
             ref operation,
             enhanced,
         } => {
+            if let Some(ref name) = api {
+                validate_api_name(name)?;
+            }
             execute_help_command(
                 manager,
                 api.as_deref(),
@@ -280,6 +310,9 @@ async fn run_command(
             )?;
         }
         Commands::Overview { ref api, all } => {
+            if let Some(ref name) = api {
+                validate_api_name(name)?;
+            }
             execute_overview_command(manager, api.as_deref(), all, output)?;
         }
     }
