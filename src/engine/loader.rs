@@ -1,6 +1,6 @@
+use crate::cache::fingerprint::compute_content_hash;
 use crate::cache::metadata::CacheMetadataManager;
 use crate::cache::models::{CachedSpec, CACHE_FORMAT_VERSION};
-use crate::config::manager::{compute_content_hash, get_file_mtime_secs};
 use crate::error::Error;
 use crate::fs::OsFileSystem;
 use std::fs;
@@ -59,7 +59,9 @@ pub fn load_cached_spec<P: AsRef<Path>>(
 /// Checks whether the spec source file has been modified since the cache was built.
 ///
 /// Derives the spec file path from the cache directory (sibling `specs/` directory).
-/// Uses a fast path: checks mtime + `file_size` first, only computes content hash if needed.
+/// Uses a fast path: checks mtime + file size first and only reads the file to
+/// compute a content hash when those match (avoiding I/O on every load when mtime
+/// already differs).
 /// Silently passes through if fingerprint data is unavailable (legacy metadata) or
 /// if the spec file cannot be read (e.g., deleted after caching).
 fn check_spec_file_freshness<P: AsRef<Path>>(
@@ -67,6 +69,13 @@ fn check_spec_file_freshness<P: AsRef<Path>>(
     spec_name: &str,
     metadata_manager: &CacheMetadataManager<'_, OsFileSystem>,
 ) -> Result<(), Error> {
+    // Bail early if no fingerprint data (legacy metadata) or metadata error
+    let Ok(Some((stored_hash, stored_mtime, stored_size))) =
+        metadata_manager.get_stored_fingerprint(&cache_dir, spec_name)
+    else {
+        return Ok(());
+    };
+
     // Derive the spec file path from the cache directory
     // cache_dir is typically ~/.config/aperture/.cache
     // specs_dir is typically ~/.config/aperture/specs
@@ -77,40 +86,37 @@ fn check_spec_file_freshness<P: AsRef<Path>>(
         .join(crate::constants::DIR_SPECS)
         .join(format!("{spec_name}{}", crate::constants::FILE_EXT_YAML));
 
-    // If the spec file doesn't exist, skip the freshness check
-    // (the file might have been deleted but cache is still usable)
-    if !spec_path.exists() {
-        return Ok(());
-    }
-
-    // Get current file attributes
-    let Some(current_mtime) = get_file_mtime_secs(&spec_path) else {
-        return Ok(()); // Can't read mtime, skip check
-    };
+    // Get current file metadata (single syscall for both mtime and size)
     let Ok(file_meta) = fs::metadata(&spec_path) else {
-        return Ok(()); // Can't read metadata, skip check
+        return Ok(()); // File missing or unreadable, skip check
+    };
+    let current_mtime = file_meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+    let Some(current_mtime) = current_mtime else {
+        return Ok(()); // Can't read mtime, skip check
     };
     let current_size = file_meta.len();
 
-    // Read file content and compute hash
+    // Fast path: if mtime or file size differ, cache is likely stale — no need to
+    // read file content or compute hash
+    if stored_mtime != current_mtime || stored_size != current_size {
+        return Err(Error::cache_stale(spec_name));
+    }
+
+    // Slow path: mtime and size match — read file and verify content hash for certainty
     let Ok(content) = fs::read(&spec_path) else {
         return Ok(()); // Can't read file, skip check
     };
     let current_hash = compute_content_hash(&content);
 
-    // Check freshness against stored fingerprint
-    match metadata_manager.check_spec_freshness(
-        &cache_dir,
-        spec_name,
-        current_mtime,
-        current_size,
-        &current_hash,
-    ) {
-        // Stale cache: spec file has been modified since caching
-        Ok(Some(false)) => Err(Error::cache_stale(spec_name)),
-        // Fresh, no fingerprint data (legacy), or metadata error — pass through
-        Ok(Some(true) | None) | Err(_) => Ok(()),
+    if stored_hash != current_hash {
+        return Err(Error::cache_stale(spec_name));
     }
+
+    Ok(())
 }
 
 /// Load cached spec without version checking (optimized path)

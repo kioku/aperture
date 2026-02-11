@@ -121,31 +121,25 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         Ok(())
     }
 
-    /// Check if a spec's cache is fresh by comparing fingerprints
+    /// Retrieve the stored fingerprint for a spec (content hash, mtime, file size).
     ///
-    /// Returns `true` if the cache is fresh (fingerprint matches), `false` if stale.
-    /// Returns `None` if no fingerprint data is available (legacy metadata).
-    ///
-    /// Uses a fast path: checks mtime + `file_size` first, only computes the
-    /// content hash if those match (to avoid hashing on every load when mtime differs).
+    /// Returns `None` if the spec is not in metadata or has no fingerprint data
+    /// (legacy metadata created before fingerprinting was added).
     ///
     /// # Errors
     /// Returns an error if the metadata file cannot be loaded
-    pub fn check_spec_freshness<P: AsRef<Path>>(
+    pub fn get_stored_fingerprint<P: AsRef<Path>>(
         &self,
         cache_dir: P,
         spec_name: &str,
-        current_mtime_secs: u64,
-        current_file_size: u64,
-        current_content_hash: &str,
-    ) -> Result<Option<bool>, Error> {
+    ) -> Result<Option<(String, u64, u64)>, Error> {
         let metadata = self.load_metadata(&cache_dir)?;
 
         let Some(spec_meta) = metadata.specs.get(spec_name) else {
             return Ok(None);
         };
 
-        // If no fingerprint data stored, treat as legacy (no opinion on freshness)
+        // If no fingerprint data stored, treat as legacy
         let (Some(stored_hash), Some(stored_mtime), Some(stored_size)) = (
             &spec_meta.content_hash,
             spec_meta.mtime_secs,
@@ -154,13 +148,7 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
             return Ok(None);
         };
 
-        // Fast path: if mtime or file size differ, cache is definitely stale
-        if stored_mtime != current_mtime_secs || stored_size != current_file_size {
-            return Ok(Some(false));
-        }
-
-        // mtime and size match — verify content hash for certainty
-        Ok(Some(stored_hash == current_content_hash))
+        Ok(Some((stored_hash.clone(), stored_mtime, stored_size)))
     }
 
     /// Remove spec from metadata
