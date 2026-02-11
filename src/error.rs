@@ -348,9 +348,9 @@ impl Error {
             )),
             context: Some(ErrorContext::new(
                 Some(json!({ "spec_name": name })),
-                Some(Cow::Borrowed(
-                    "Run 'aperture config reinit' to regenerate the cache.",
-                )),
+                Some(Cow::Owned(format!(
+                    "Run 'aperture config reinit {name}' to regenerate the cache."
+                ))),
             )),
         }
     }
