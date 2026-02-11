@@ -88,19 +88,77 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         spec_name: &str,
         file_size: u64,
     ) -> Result<(), Error> {
+        self.update_spec_metadata_with_fingerprint(cache_dir, spec_name, file_size, None, None, None)
+    }
+
+    /// Update metadata for a specific spec including fingerprint data for cache invalidation
+    ///
+    /// # Errors
+    /// Returns an error if the metadata cannot be loaded or saved
+    pub fn update_spec_metadata_with_fingerprint<P: AsRef<Path>>(
+        &self,
+        cache_dir: P,
+        spec_name: &str,
+        file_size: u64,
+        content_hash: Option<String>,
+        mtime_secs: Option<u64>,
+        spec_file_size: Option<u64>,
+    ) -> Result<(), Error> {
         let mut metadata = self.load_metadata(&cache_dir)?;
 
         let spec_metadata = SpecMetadata {
             updated_at: chrono::Utc::now().to_rfc3339(),
             file_size,
-            content_hash: None,
-            mtime_secs: None,
-            spec_file_size: None,
+            content_hash,
+            mtime_secs,
+            spec_file_size,
         };
 
         metadata.specs.insert(spec_name.to_string(), spec_metadata);
         self.save_metadata(&cache_dir, &metadata)?;
         Ok(())
+    }
+
+    /// Check if a spec's cache is fresh by comparing fingerprints
+    ///
+    /// Returns `true` if the cache is fresh (fingerprint matches), `false` if stale.
+    /// Returns `None` if no fingerprint data is available (legacy metadata).
+    ///
+    /// Uses a fast path: checks mtime + file_size first, only computes the
+    /// content hash if those match (to avoid hashing on every load when mtime differs).
+    ///
+    /// # Errors
+    /// Returns an error if the metadata file cannot be loaded
+    pub fn check_spec_freshness<P: AsRef<Path>>(
+        &self,
+        cache_dir: P,
+        spec_name: &str,
+        current_mtime_secs: u64,
+        current_file_size: u64,
+        current_content_hash: &str,
+    ) -> Result<Option<bool>, Error> {
+        let metadata = self.load_metadata(&cache_dir)?;
+
+        let Some(spec_meta) = metadata.specs.get(spec_name) else {
+            return Ok(None);
+        };
+
+        // If no fingerprint data stored, treat as legacy (no opinion on freshness)
+        let (Some(stored_hash), Some(stored_mtime), Some(stored_size)) = (
+            &spec_meta.content_hash,
+            spec_meta.mtime_secs,
+            spec_meta.spec_file_size,
+        ) else {
+            return Ok(None);
+        };
+
+        // Fast path: if mtime or file size differ, cache is definitely stale
+        if stored_mtime != current_mtime_secs || stored_size != current_file_size {
+            return Ok(Some(false));
+        }
+
+        // mtime and size match — verify content hash for certainty
+        Ok(Some(stored_hash == current_content_hash))
     }
 
     /// Remove spec from metadata
