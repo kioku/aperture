@@ -70,8 +70,9 @@ impl ApiContextName {
             ));
         }
 
-        // First character must be ASCII alphanumeric
-        let first = name.chars().next().expect("non-empty string");
+        // First character must be ASCII alphanumeric.
+        // Safety: we verified `name` is non-empty above.
+        let first = name.as_bytes()[0];
         if !first.is_ascii_alphanumeric() {
             return Err(Error::invalid_api_context_name(
                 name,
@@ -80,9 +81,10 @@ impl ApiContextName {
         }
 
         // All characters must be ASCII alphanumeric, dot, hyphen, or underscore
-        if let Some(invalid) = name.chars().find(|c| {
-            !c.is_ascii_alphanumeric() && *c != '.' && *c != '-' && *c != '_'
-        }) {
+        if let Some(invalid) = name
+            .chars()
+            .find(|c| !c.is_ascii_alphanumeric() && *c != '.' && *c != '-' && *c != '_')
+        {
             return Err(Error::invalid_api_context_name(
                 name,
                 format!("contains invalid character '{invalid}'"),

@@ -64,110 +64,74 @@ fn test_invalid_empty() {
 #[test]
 fn test_invalid_path_traversal_dotdot() {
     let err = ApiContextName::new("../foo").unwrap_err();
-    assert!(
-        err.to_string().contains("must start with"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("must start with"), "{err}");
 }
 
 #[test]
 fn test_invalid_forward_slash() {
     let err = ApiContextName::new("foo/bar").unwrap_err();
-    assert!(
-        err.to_string().contains("invalid character '/'"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("invalid character '/'"), "{err}");
 }
 
 #[test]
 fn test_invalid_backslash() {
     let err = ApiContextName::new("foo\\bar").unwrap_err();
-    assert!(
-        err.to_string().contains("invalid character '\\'"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("invalid character '\\'"), "{err}");
 }
 
 #[test]
 fn test_invalid_leading_dot() {
     let err = ApiContextName::new(".hidden").unwrap_err();
-    assert!(
-        err.to_string().contains("must start with"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("must start with"), "{err}");
 }
 
 #[test]
 fn test_invalid_exceeds_max_length() {
     let name = "a".repeat(65);
     let err = ApiContextName::new(&name).unwrap_err();
-    assert!(
-        err.to_string().contains("exceeds maximum length"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("exceeds maximum length"), "{err}");
 }
 
 #[test]
 fn test_invalid_leading_hyphen() {
     let err = ApiContextName::new("-api").unwrap_err();
-    assert!(
-        err.to_string().contains("must start with"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("must start with"), "{err}");
 }
 
 #[test]
 fn test_invalid_leading_underscore() {
     let err = ApiContextName::new("_api").unwrap_err();
-    assert!(
-        err.to_string().contains("must start with"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("must start with"), "{err}");
 }
 
 #[test]
 fn test_invalid_space() {
     let err = ApiContextName::new("my api").unwrap_err();
-    assert!(
-        err.to_string().contains("invalid character ' '"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("invalid character ' '"), "{err}");
 }
 
 #[test]
 fn test_invalid_unicode() {
     let err = ApiContextName::new("café").unwrap_err();
-    assert!(
-        err.to_string().contains("invalid character"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("invalid character"), "{err}");
 }
 
 #[test]
 fn test_invalid_control_char() {
     let err = ApiContextName::new("foo\tbar").unwrap_err();
-    assert!(
-        err.to_string().contains("invalid character"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("invalid character"), "{err}");
 }
 
 #[test]
 fn test_invalid_colon() {
     let err = ApiContextName::new("foo:bar").unwrap_err();
-    assert!(
-        err.to_string().contains("invalid character ':'"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("invalid character ':'"), "{err}");
 }
 
 #[test]
 fn test_invalid_null_byte() {
     let err = ApiContextName::new("foo\0bar").unwrap_err();
-    assert!(
-        err.to_string().contains("invalid character"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("invalid character"), "{err}");
 }
 
 // ---- Trait impls ----
