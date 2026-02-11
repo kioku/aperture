@@ -485,7 +485,7 @@ fn list_commands(context: &str, output: &Output) -> Result<(), Error> {
 
 fn reinit_spec(
     manager: &ConfigManager<OsFileSystem>,
-    spec_name: &str,
+    spec_name: &ApiContextName,
     output: &Output,
 ) -> Result<(), Error> {
     output.info(format!("Reinitializing cached specification: {spec_name}"));
@@ -493,7 +493,7 @@ fn reinit_spec(
     // Check if the spec exists
     let specs = manager.list_specs()?;
     if !specs.contains(&spec_name.to_string()) {
-        return Err(Error::spec_not_found(spec_name));
+        return Err(Error::spec_not_found(spec_name.as_str()));
     }
 
     // Get the config directory
@@ -533,7 +533,14 @@ fn reinit_all_specs(manager: &ConfigManager<OsFileSystem>, output: &Output) -> R
     ));
 
     for spec_name in &specs {
-        match reinit_spec(manager, spec_name, output) {
+        let validated = match validate_api_name(spec_name) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("  {spec_name}: {e}");
+                continue;
+            }
+        };
+        match reinit_spec(manager, &validated, output) {
             Ok(()) => {
                 output.info(format!("  {spec_name}"));
             }

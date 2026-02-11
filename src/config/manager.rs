@@ -1,4 +1,5 @@
 use crate::cache::metadata::CacheMetadataManager;
+use crate::config::context_name::ApiContextName;
 use crate::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
@@ -89,7 +90,8 @@ impl<F: FileSystem> ConfigManager<F> {
     /// # Errors
     ///
     /// Returns an error if the global config cannot be loaded
-    pub fn get_strict_preference(&self, api_name: &str) -> Result<bool, Error> {
+    pub fn get_strict_preference(&self, api_name: &ApiContextName) -> Result<bool, Error> {
+        let api_name = api_name.as_str();
         let config = self.load_global_config()?;
         Ok(config
             .api_configs
@@ -221,12 +223,12 @@ impl<F: FileSystem> ConfigManager<F> {
     /// Panics if the spec path parent directory is None (should not happen in normal usage).
     pub fn add_spec(
         &self,
-        name: &str,
+        name: &ApiContextName,
         file_path: &Path,
         force: bool,
         strict: bool,
     ) -> Result<(), Error> {
-        self.check_spec_exists(name, force)?;
+        self.check_spec_exists(name.as_str(), force)?;
 
         let content = self.fs.read_to_string(file_path)?;
         let openapi_spec = crate::spec::parse_openapi(&content)?;
@@ -247,7 +249,7 @@ impl<F: FileSystem> ConfigManager<F> {
         Self::display_validation_warnings(&validation_result.warnings, Some(total_operations));
 
         self.add_spec_from_validated_openapi(
-            name,
+            name.as_str(),
             &openapi_spec,
             &content,
             &validation_result,
@@ -273,12 +275,12 @@ impl<F: FileSystem> ConfigManager<F> {
     #[allow(clippy::future_not_send)]
     pub async fn add_spec_from_url(
         &self,
-        name: &str,
+        name: &ApiContextName,
         url: &str,
         force: bool,
         strict: bool,
     ) -> Result<(), Error> {
-        self.check_spec_exists(name, force)?;
+        self.check_spec_exists(name.as_str(), force)?;
 
         // Fetch content from URL
         let content = fetch_spec_from_url(url).await?;
@@ -300,7 +302,7 @@ impl<F: FileSystem> ConfigManager<F> {
         Self::display_validation_warnings(&validation_result.warnings, Some(total_operations));
 
         self.add_spec_from_validated_openapi(
-            name,
+            name.as_str(),
             &openapi_spec,
             &content,
             &validation_result,
@@ -326,7 +328,7 @@ impl<F: FileSystem> ConfigManager<F> {
     #[allow(clippy::future_not_send)]
     pub async fn add_spec_auto(
         &self,
-        name: &str,
+        name: &ApiContextName,
         file_or_url: &str,
         force: bool,
         strict: bool,
@@ -384,7 +386,8 @@ impl<F: FileSystem> ConfigManager<F> {
     /// # Errors
     ///
     /// Returns an error if the spec does not exist or cannot be removed.
-    pub fn remove_spec(&self, name: &str) -> Result<(), Error> {
+    pub fn remove_spec(&self, name: &ApiContextName) -> Result<(), Error> {
+        let name = name.as_str();
         let spec_path = self
             .config_dir
             .join(crate::constants::DIR_SPECS)
@@ -420,7 +423,8 @@ impl<F: FileSystem> ConfigManager<F> {
     /// - The spec does not exist.
     /// - The `$EDITOR` environment variable is not set.
     /// - The editor command fails to execute.
-    pub fn edit_spec(&self, name: &str) -> Result<(), Error> {
+    pub fn edit_spec(&self, name: &ApiContextName) -> Result<(), Error> {
+        let name = name.as_str();
         let spec_path = self
             .config_dir
             .join(crate::constants::DIR_SPECS)
@@ -622,10 +626,11 @@ impl<F: FileSystem> ConfigManager<F> {
     /// Returns an error if the spec doesn't exist or config cannot be saved.
     pub fn set_url(
         &self,
-        api_name: &str,
+        api_name: &ApiContextName,
         url: &str,
         environment: Option<&str>,
     ) -> Result<(), Error> {
+        let api_name = api_name.as_str();
         // Verify the spec exists
         let spec_path = self
             .config_dir
@@ -677,8 +682,9 @@ impl<F: FileSystem> ConfigManager<F> {
     #[allow(clippy::type_complexity)]
     pub fn get_url(
         &self,
-        api_name: &str,
+        api_name: &ApiContextName,
     ) -> Result<(Option<String>, HashMap<String, String>, String), Error> {
+        let api_name = api_name.as_str();
         // Verify the spec exists
         let spec_path = self
             .config_dir
@@ -750,13 +756,13 @@ impl<F: FileSystem> ConfigManager<F> {
     #[allow(clippy::future_not_send)]
     pub async fn add_spec_from_url_with_timeout(
         &self,
-        name: &str,
+        name: &ApiContextName,
         url: &str,
         force: bool,
         timeout: std::time::Duration,
     ) -> Result<(), Error> {
         // Default to non-strict mode to match CLI behavior
-        self.add_spec_from_url_with_timeout_and_mode(name, url, force, timeout, false)
+        self.add_spec_from_url_with_timeout_and_mode(name.as_str(), url, force, timeout, false)
             .await
     }
 
@@ -809,10 +815,11 @@ impl<F: FileSystem> ConfigManager<F> {
     /// Returns an error if the spec doesn't exist or config cannot be saved.
     pub fn set_secret(
         &self,
-        api_name: &str,
+        api_name: &ApiContextName,
         scheme_name: &str,
         env_var_name: &str,
     ) -> Result<(), Error> {
+        let api_name = api_name.as_str();
         // Verify the spec exists
         let spec_path = self
             .config_dir
@@ -861,7 +868,11 @@ impl<F: FileSystem> ConfigManager<F> {
     /// # Errors
     ///
     /// Returns an error if the spec doesn't exist.
-    pub fn list_secrets(&self, api_name: &str) -> Result<HashMap<String, ApertureSecret>, Error> {
+    pub fn list_secrets(
+        &self,
+        api_name: &ApiContextName,
+    ) -> Result<HashMap<String, ApertureSecret>, Error> {
+        let api_name = api_name.as_str();
         // Verify the spec exists
         let spec_path = self
             .config_dir
@@ -898,7 +909,7 @@ impl<F: FileSystem> ConfigManager<F> {
     /// Returns an error if the spec doesn't exist.
     pub fn get_secret(
         &self,
-        api_name: &str,
+        api_name: &ApiContextName,
         scheme_name: &str,
     ) -> Result<Option<ApertureSecret>, Error> {
         let secrets = self.list_secrets(api_name)?;
@@ -913,7 +924,8 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// # Errors
     /// Returns an error if the spec doesn't exist or if the scheme is not configured
-    pub fn remove_secret(&self, api_name: &str, scheme_name: &str) -> Result<(), Error> {
+    pub fn remove_secret(&self, api_name: &ApiContextName, scheme_name: &str) -> Result<(), Error> {
+        let api_name = api_name.as_str();
         // Verify the spec exists
         let spec_path = self
             .config_dir
@@ -968,7 +980,8 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// # Errors
     /// Returns an error if the spec doesn't exist
-    pub fn clear_secrets(&self, api_name: &str) -> Result<(), Error> {
+    pub fn clear_secrets(&self, api_name: &ApiContextName) -> Result<(), Error> {
+        let api_name = api_name.as_str();
         // Verify the spec exists
         let spec_path = self
             .config_dir
@@ -1021,7 +1034,7 @@ impl<F: FileSystem> ConfigManager<F> {
     ///
     /// Panics if the selected scheme is not found in the cached spec
     /// (this should never happen due to menu validation)
-    pub fn set_secret_interactive(&self, api_name: &str) -> Result<(), Error> {
+    pub fn set_secret_interactive(&self, api_name: &ApiContextName) -> Result<(), Error> {
         // Verify the spec exists and load cached spec
         let (cached_spec, current_secrets) = self.load_spec_for_interactive_config(api_name)?;
 
@@ -1031,17 +1044,18 @@ impl<F: FileSystem> ConfigManager<F> {
             return Ok(());
         }
 
-        Self::display_interactive_header(api_name, &cached_spec);
+        Self::display_interactive_header(api_name.as_str(), &cached_spec);
 
         // Create options for selection with rich descriptions
         let options = Self::build_security_scheme_options(&cached_spec, &current_secrets);
 
         // Interactive loop for configuration
         self.run_interactive_configuration_loop(
-            api_name,
+            api_name.as_str(),
             &cached_spec,
             &current_secrets,
             &options,
+            api_name,
         )?;
 
         // ast-grep-ignore: no-println
@@ -1192,7 +1206,7 @@ impl<F: FileSystem> ConfigManager<F> {
     /// Returns an error if the spec doesn't exist or cannot be loaded
     fn load_spec_for_interactive_config(
         &self,
-        api_name: &str,
+        api_name: &ApiContextName,
     ) -> Result<
         (
             crate::cache::models::CachedSpec,
@@ -1206,12 +1220,12 @@ impl<F: FileSystem> ConfigManager<F> {
             .join(crate::constants::DIR_SPECS)
             .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
         if !self.fs.exists(&spec_path) {
-            return Err(Error::spec_not_found(api_name));
+            return Err(Error::spec_not_found(api_name.as_str()));
         }
 
         // Load cached spec to get security schemes
         let cache_dir = self.config_dir.join(crate::constants::DIR_CACHE);
-        let cached_spec = loader::load_cached_spec(&cache_dir, api_name)?;
+        let cached_spec = loader::load_cached_spec(&cache_dir, api_name.as_str())?;
 
         // Get current configuration
         let current_secrets = self.list_secrets(api_name)?;
@@ -1289,6 +1303,7 @@ impl<F: FileSystem> ConfigManager<F> {
         cached_spec: &crate::cache::models::CachedSpec,
         current_secrets: &std::collections::HashMap<String, ApertureSecret>,
         options: &[(String, String)],
+        validated_name: &ApiContextName,
     ) -> Result<(), Error> {
         loop {
             let selected_scheme =
@@ -1309,7 +1324,12 @@ impl<F: FileSystem> ConfigManager<F> {
                 // ast-grep-ignore: no-println
                 println!("Skipping configuration for '{selected_scheme}'");
             } else {
-                self.handle_secret_configuration(api_name, &selected_scheme, &env_var)?;
+                self.handle_secret_configuration(
+                    api_name,
+                    &selected_scheme,
+                    &env_var,
+                    validated_name,
+                )?;
             }
 
             // Ask if user wants to configure another scheme
@@ -1369,6 +1389,7 @@ impl<F: FileSystem> ConfigManager<F> {
         api_name: &str,
         selected_scheme: &str,
         env_var: &str,
+        validated_name: &ApiContextName,
     ) -> Result<(), Error> {
         // Validate environment variable name using the comprehensive validator
         if let Err(e) = crate::interactive::validate_env_var_name(env_var) {
@@ -1388,7 +1409,7 @@ impl<F: FileSystem> ConfigManager<F> {
         println!("   Environment Variable: {env_var}");
 
         if confirm("Apply this configuration?")? {
-            self.set_secret(api_name, selected_scheme, env_var)?;
+            self.set_secret(validated_name, selected_scheme, env_var)?;
             // ast-grep-ignore: no-println
             println!("Configuration saved successfully!");
         } else {

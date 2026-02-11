@@ -6,7 +6,13 @@
 mod common;
 mod test_helpers;
 
+use aperture_cli::config::context_name::ApiContextName;
 use aperture_cli::config::manager::ConfigManager;
+
+/// Helper to create a validated ApiContextName from a string literal in tests
+fn name(s: &str) -> ApiContextName {
+    ApiContextName::new(s).expect("test name should be valid")
+}
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::fs::OsFileSystem;
 
@@ -29,7 +35,7 @@ fn test_non_strict_mode_accepts_spec_with_multipart() {
 
     // Add spec with multipart endpoints (non-strict mode - default)
     let spec_path = Path::new("tests/fixtures/openapi/spec-with-multipart.yaml");
-    let result = config_manager.add_spec("test-multipart", spec_path, false, false);
+    let result = config_manager.add_spec(&name("test-multipart"), spec_path, false, false);
 
     assert!(
         result.is_ok(),
@@ -68,7 +74,7 @@ fn test_strict_mode_rejects_spec_with_multipart() {
 
     // Add spec with multipart endpoints (strict mode)
     let spec_path = Path::new("tests/fixtures/openapi/spec-with-multipart.yaml");
-    let result = config_manager.add_spec("test-multipart", spec_path, false, true);
+    let result = config_manager.add_spec(&name("test-multipart"), spec_path, false, true);
 
     assert!(
         result.is_err(),
@@ -346,7 +352,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Add spec in non-strict mode
-    let result = config_manager.add_spec("case-test", &spec_file, false, false);
+    let result = config_manager.add_spec(&name("case-test"), &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
     // Load cached spec and verify correct endpoints were filtered

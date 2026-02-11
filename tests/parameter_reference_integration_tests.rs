@@ -2,7 +2,13 @@
 // These lints are overly pedantic for test code
 #![allow(clippy::too_many_lines)]
 
+use aperture_cli::config::context_name::ApiContextName;
 use aperture_cli::config::manager::ConfigManager;
+
+/// Helper to create a validated ApiContextName from a string literal in tests
+fn name(s: &str) -> ApiContextName {
+    ApiContextName::new(s).expect("test name should be valid")
+}
 use aperture_cli::fs::FileSystem;
 mod common;
 
@@ -163,7 +169,7 @@ paths:
     let config_manager = ConfigManager::with_fs(fs, config_dir);
 
     // Should successfully add the spec with parameter references
-    let result = config_manager.add_spec("test-api", &spec_path, false, true);
+    let result = config_manager.add_spec(&name("test-api"), &spec_path, false, true);
     assert!(
         result.is_ok(),
         "Should successfully add spec with parameter references: {:?}",
@@ -284,7 +290,7 @@ paths:
     let config_manager = ConfigManager::with_fs(fs, config_dir);
 
     // Should successfully add the spec with special parameter names
-    let result = config_manager.add_spec("test-special-api", &spec_path, false, true);
+    let result = config_manager.add_spec(&name("test-special-api"), &spec_path, false, true);
     assert!(
         result.is_ok(),
         "Should successfully add spec with special parameter names: {:?}",
@@ -462,7 +468,7 @@ paths:
     let config_manager = ConfigManager::with_fs(fs, config_dir);
 
     // Should fail to add the spec with invalid reference
-    let result = config_manager.add_spec("test-api", &spec_path, false, true);
+    let result = config_manager.add_spec(&name("test-api"), &spec_path, false, true);
     assert!(
         result.is_err(),
         "Should fail to add spec with invalid parameter reference"

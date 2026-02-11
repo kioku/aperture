@@ -8,9 +8,15 @@
 
 mod test_helpers;
 
+use aperture_cli::config::context_name::ApiContextName;
 use aperture_cli::config::manager::{is_url, ConfigManager};
 use aperture_cli::error::{Error, ErrorKind};
 use aperture_cli::fs::FileSystem;
+
+/// Helper to create a validated `ApiContextName` from a string literal in tests
+fn name(s: &str) -> ApiContextName {
+    ApiContextName::new(s).expect("test name should be valid")
+}
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -202,7 +208,7 @@ paths: {}
     let temp_spec_path = PathBuf::from("/tmp/new_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_ok());
 
     let expected_path = PathBuf::from(TEST_CONFIG_DIR)
@@ -231,7 +237,7 @@ paths: {}
     let temp_spec_path = PathBuf::from("/tmp/updated_api.yaml");
     fs.add_file(&temp_spec_path, "updated content");
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_err());
     match result {
         Err(Error::Internal {
@@ -281,7 +287,7 @@ paths: {}
     let temp_spec_path = PathBuf::from("/tmp/updated_api.yaml");
     fs.add_file(&temp_spec_path, updated_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, true, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, true, true);
     assert!(result.is_ok());
 
     assert_eq!(
@@ -298,7 +304,7 @@ fn test_add_spec_invalid_openapi() {
     let temp_spec_path = PathBuf::from("/tmp/invalid_api.yaml");
     fs.add_file(&temp_spec_path, invalid_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Yaml(err)) = result {
         assert!(err.to_string().contains("invalid type: string"));
@@ -315,7 +321,7 @@ fn test_add_spec_io_error_on_read() {
     fs.add_file(&temp_spec_path, "dummy content");
     fs.set_io_error_on_read(true);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Io(err)) = result {
         assert!(err.to_string().contains("Mock I/O error on read"));
@@ -339,7 +345,7 @@ paths: {}
     fs.add_file(&temp_spec_path, spec_content);
     fs.set_io_error_on_write(true);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Io(err)) = result {
         assert!(err.to_string().contains("Mock I/O error on write"));
@@ -394,7 +400,7 @@ fn test_remove_spec_success() {
     fs.add_file(&spec_path, "content");
     fs.add_file(&cache_path, "cached content");
 
-    let result = manager.remove_spec(spec_name);
+    let result = manager.remove_spec(&name(spec_name));
     assert!(result.is_ok());
     assert!(!fs.exists(&spec_path));
     assert!(!fs.exists(&cache_path));
@@ -405,7 +411,7 @@ fn test_remove_spec_not_found() {
     let (manager, _fs) = setup_manager();
     let spec_name = "non-existent-api";
 
-    let result = manager.remove_spec(spec_name);
+    let result = manager.remove_spec(&name(spec_name));
     assert!(result.is_err());
     match result {
         Err(Error::Internal {
@@ -434,7 +440,7 @@ fn test_remove_spec_io_error() {
     fs.add_file(&spec_path, "content");
     fs.set_io_error_on_write(true); // Simulate I/O error on remove
 
-    let result = manager.remove_spec(spec_name);
+    let result = manager.remove_spec(&name(spec_name));
     assert!(result.is_err());
     if let Err(Error::Io(err)) = result {
         assert!(err.to_string().contains("Mock I/O error on write"));
@@ -474,7 +480,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/api_key_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_ok());
 
     // Verify both spec and cache files were created
@@ -523,7 +529,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/bearer_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_ok());
 }
 
@@ -557,7 +563,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/oauth2_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Internal {
         kind: ErrorKind::Validation,
@@ -602,7 +608,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/openid_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Internal {
         kind: ErrorKind::Validation,
@@ -647,7 +653,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/negotiate_auth_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Internal {
         kind: ErrorKind::Validation,
@@ -688,7 +694,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/xml_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Internal {
         kind: ErrorKind::Validation,
@@ -729,7 +735,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/no_json_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_err());
     if let Err(Error::Internal {
         kind: ErrorKind::Validation,
@@ -786,7 +792,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/caching_test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_ok());
 
     // Verify cache file was created
@@ -847,7 +853,7 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/no_operation_id_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
 
-    let result = manager.add_spec(spec_name, &temp_spec_path, false, true);
+    let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
     assert!(result.is_ok());
 
     // Verify cache was created with method name as command
@@ -875,11 +881,11 @@ fn test_set_url_base_override() {
     let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
     manager
-        .add_spec(spec_name, &temp_spec_path, false, true)
+        .add_spec(&name(spec_name), &temp_spec_path, false, true)
         .unwrap();
 
     // Set base URL
-    let result = manager.set_url(spec_name, "https://custom.example.com", None);
+    let result = manager.set_url(&name(spec_name), "https://custom.example.com", None);
     assert!(result.is_ok());
 
     // Verify config was saved
@@ -906,15 +912,19 @@ fn test_set_url_environment_specific() {
     let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
     manager
-        .add_spec(spec_name, &temp_spec_path, false, true)
+        .add_spec(&name(spec_name), &temp_spec_path, false, true)
         .unwrap();
 
     // Set environment-specific URLs
     manager
-        .set_url(spec_name, "https://staging.example.com", Some("staging"))
+        .set_url(
+            &name(spec_name),
+            "https://staging.example.com",
+            Some("staging"),
+        )
         .unwrap();
     manager
-        .set_url(spec_name, "https://prod.example.com", Some("prod"))
+        .set_url(&name(spec_name), "https://prod.example.com", Some("prod"))
         .unwrap();
 
     // Load and check config
@@ -934,7 +944,7 @@ fn test_set_url_environment_specific() {
 fn test_set_url_spec_not_found() {
     let (manager, _fs) = setup_manager();
 
-    let result = manager.set_url("nonexistent", "https://example.com", None);
+    let result = manager.set_url(&name("nonexistent"), "https://example.com", None);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("not found"));
 }
@@ -962,19 +972,19 @@ paths:
     let temp_spec_path = PathBuf::from("/tmp/test_api.yaml");
     fs.add_file(&temp_spec_path, spec_content);
     manager
-        .add_spec(spec_name, &temp_spec_path, false, true)
+        .add_spec(&name(spec_name), &temp_spec_path, false, true)
         .unwrap();
 
     // Set some URLs
     manager
-        .set_url(spec_name, "https://override.example.com", None)
+        .set_url(&name(spec_name), "https://override.example.com", None)
         .unwrap();
     manager
-        .set_url(spec_name, "https://dev.example.com", Some("dev"))
+        .set_url(&name(spec_name), "https://dev.example.com", Some("dev"))
         .unwrap();
 
     // Get URL config - this will fail to load cached spec but should still return config
-    let result = manager.get_url(spec_name);
+    let result = manager.get_url(&name(spec_name));
     assert!(result.is_ok());
     let (base_override, env_urls, _resolved) = result.unwrap();
 
@@ -1001,21 +1011,21 @@ fn test_list_urls_shows_all_configs() {
     fs.add_file(&temp_spec_path2, spec_content);
 
     manager
-        .add_spec("api1", &temp_spec_path1, false, true)
+        .add_spec(&name("api1"), &temp_spec_path1, false, true)
         .unwrap();
     manager
-        .add_spec("api2", &temp_spec_path2, false, true)
+        .add_spec(&name("api2"), &temp_spec_path2, false, true)
         .unwrap();
 
     // Set URLs for both
     manager
-        .set_url("api1", "https://api1.example.com", None)
+        .set_url(&name("api1"), "https://api1.example.com", None)
         .unwrap();
     manager
-        .set_url("api2", "https://api2.example.com", None)
+        .set_url(&name("api2"), "https://api2.example.com", None)
         .unwrap();
     manager
-        .set_url("api2", "https://api2-prod.example.com", Some("prod"))
+        .set_url(&name("api2"), "https://api2-prod.example.com", Some("prod"))
         .unwrap();
 
     // List URLs
@@ -1093,7 +1103,7 @@ paths:
 
     // Test that adding a remote spec works
     let result = manager
-        .add_spec_from_url("remote-api", &spec_url, false, true)
+        .add_spec_from_url(&name("remote-api"), &spec_url, false, true)
         .await;
     assert!(result.is_ok());
 
@@ -1127,7 +1137,7 @@ async fn test_remote_spec_fetching_timeout() {
     // Test that the request times out using a 1-second timeout instead of 30 seconds
     let result = manager
         .add_spec_from_url_with_timeout(
-            "slow-api",
+            &name("slow-api"),
             &spec_url,
             false,
             std::time::Duration::from_secs(1),
@@ -1165,7 +1175,7 @@ async fn test_remote_spec_fetching_size_limit() {
 
     // Test that large responses are rejected
     let result = manager
-        .add_spec_from_url("large-api", &spec_url, false, true)
+        .add_spec_from_url(&name("large-api"), &spec_url, false, true)
         .await;
     assert!(result.is_err());
     match result {
@@ -1188,7 +1198,7 @@ async fn test_remote_spec_fetching_invalid_url() {
     // Test with a completely invalid URL that will fail to connect
     let result = manager
         .add_spec_from_url(
-            "invalid-api",
+            &name("invalid-api"),
             "https://nonexistent-domain-12345.com/spec.yaml",
             false,
             true,
@@ -1223,7 +1233,7 @@ async fn test_remote_spec_fetching_http_error() {
 
     // Test that HTTP errors are handled properly
     let result = manager
-        .add_spec_from_url("not-found-api", &spec_url, false, true)
+        .add_spec_from_url(&name("not-found-api"), &spec_url, false, true)
         .await;
     assert!(result.is_err());
     match result {
@@ -1256,7 +1266,7 @@ async fn test_remote_spec_fetching_invalid_yaml() {
 
     // Test that invalid YAML is rejected
     let result = manager
-        .add_spec_from_url("invalid-yaml-api", &spec_url, false, true)
+        .add_spec_from_url(&name("invalid-yaml-api"), &spec_url, false, true)
         .await;
     assert!(result.is_err());
     // Should get a YAML parsing error
@@ -1304,7 +1314,7 @@ paths:
 
     // Test that remote specs are validated the same as local files
     let result = manager
-        .add_spec_from_url("oauth2-api", &spec_url, false, true)
+        .add_spec_from_url(&name("oauth2-api"), &spec_url, false, true)
         .await;
     assert!(result.is_err());
     if let Err(Error::Internal {
