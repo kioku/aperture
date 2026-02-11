@@ -102,8 +102,10 @@ flowchart TD
 To ensure fast startup, Aperture does not parse the full OpenAPI specification on every invocation. Instead:
 
 1. When `aperture config add` is run, the spec is thoroughly parsed and validated. This includes checking for command collisions and unsupported features.
-2. If valid, a lightweight, serialized representation of the command tree and operations is saved to the `.cache/` directory.
-3. On subsequent runs (`aperture <context> ...`), Aperture loads this pre-processed file directly, bypassing the expensive parsing and validation steps. The cache is invalidated if the spec file is modified.
+2. If valid, a lightweight, serialized representation of the command tree and operations is saved to the `.cache/` directory. A **fingerprint** of the spec file (SHA-256 content hash, modification time, and file size) is stored in the cache metadata.
+3. On subsequent runs (`aperture <context> ...`), Aperture loads this pre-processed file directly, bypassing the expensive parsing and validation steps. The cache is validated against the spec file fingerprint: if the spec file has been modified since caching, a stale cache error is returned with a suggestion to run `aperture config reinit`.
+
+> **Cache validity invariant:** The cache is valid if and only if the spec file fingerprint matches the stored fingerprint. Fingerprint comparison uses a fast path—modification time and file size are checked first—and only computes the content hash if those match.
 
 ## 5. OpenAPI Specification Support (v1.0)
 

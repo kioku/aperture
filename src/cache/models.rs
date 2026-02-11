@@ -84,6 +84,15 @@ pub struct SpecMetadata {
     pub updated_at: String, // Using String for simplicity in serialization
     /// Size of the cached spec file in bytes
     pub file_size: u64,
+    /// SHA-256 hash of the original spec file content for cache invalidation
+    #[serde(default)]
+    pub content_hash: Option<String>,
+    /// File modification time (seconds since epoch) for fast staleness checks
+    #[serde(default)]
+    pub mtime_secs: Option<u64>,
+    /// Size of the original spec file in bytes (distinct from cached binary size)
+    #[serde(default)]
+    pub spec_file_size: Option<u64>,
 }
 
 impl Default for GlobalCacheMetadata {

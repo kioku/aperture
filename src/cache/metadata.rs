@@ -88,16 +88,67 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         spec_name: &str,
         file_size: u64,
     ) -> Result<(), Error> {
+        self.update_spec_metadata_with_fingerprint(
+            cache_dir, spec_name, file_size, None, None, None,
+        )
+    }
+
+    /// Update metadata for a specific spec including fingerprint data for cache invalidation
+    ///
+    /// # Errors
+    /// Returns an error if the metadata cannot be loaded or saved
+    pub fn update_spec_metadata_with_fingerprint<P: AsRef<Path>>(
+        &self,
+        cache_dir: P,
+        spec_name: &str,
+        file_size: u64,
+        content_hash: Option<String>,
+        mtime_secs: Option<u64>,
+        spec_file_size: Option<u64>,
+    ) -> Result<(), Error> {
         let mut metadata = self.load_metadata(&cache_dir)?;
 
         let spec_metadata = SpecMetadata {
             updated_at: chrono::Utc::now().to_rfc3339(),
             file_size,
+            content_hash,
+            mtime_secs,
+            spec_file_size,
         };
 
         metadata.specs.insert(spec_name.to_string(), spec_metadata);
         self.save_metadata(&cache_dir, &metadata)?;
         Ok(())
+    }
+
+    /// Retrieve the stored fingerprint for a spec (content hash, mtime, file size).
+    ///
+    /// Returns `None` if the spec is not in metadata or has no fingerprint data
+    /// (legacy metadata created before fingerprinting was added).
+    ///
+    /// # Errors
+    /// Returns an error if the metadata file cannot be loaded
+    pub fn get_stored_fingerprint<P: AsRef<Path>>(
+        &self,
+        cache_dir: P,
+        spec_name: &str,
+    ) -> Result<Option<(String, u64, u64)>, Error> {
+        let metadata = self.load_metadata(&cache_dir)?;
+
+        let Some(spec_meta) = metadata.specs.get(spec_name) else {
+            return Ok(None);
+        };
+
+        // If no fingerprint data stored, treat as legacy
+        let (Some(stored_hash), Some(stored_mtime), Some(stored_size)) = (
+            &spec_meta.content_hash,
+            spec_meta.mtime_secs,
+            spec_meta.spec_file_size,
+        ) else {
+            return Ok(None);
+        };
+
+        Ok(Some((stored_hash.clone(), stored_mtime, stored_size)))
     }
 
     /// Remove spec from metadata

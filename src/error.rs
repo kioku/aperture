@@ -338,6 +338,23 @@ impl Error {
         }
     }
 
+    /// Create a cache stale error when the spec file has been modified since caching
+    pub fn cache_stale(name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self::Internal {
+            kind: ErrorKind::Specification,
+            message: Cow::Owned(format!(
+                "Cache for '{name}' is stale — the spec file has been modified since it was cached"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "spec_name": name })),
+                Some(Cow::Owned(format!(
+                    "Run 'aperture config reinit {name}' to regenerate the cache."
+                ))),
+            )),
+        }
+    }
+
     /// Create a cached spec not found error
     pub fn cached_spec_not_found(name: impl Into<String>) -> Self {
         let name = name.into();

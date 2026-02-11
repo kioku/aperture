@@ -1,3 +1,4 @@
+use crate::cache::fingerprint::{compute_content_hash, get_file_mtime_secs};
 use crate::cache::metadata::CacheMetadataManager;
 use crate::config::context_name::ApiContextName;
 use crate::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
@@ -1163,10 +1164,22 @@ impl<F: FileSystem> ConfigManager<F> {
             .map_err(|e| Error::serialization_error(e.to_string()))?;
         self.fs.write_all(cache_path, &cached_data)?;
 
-        // Update cache metadata for optimized version checking
+        // Compute fingerprint for cache invalidation
+        let content_hash = compute_content_hash(content.as_bytes());
+        let spec_file_size = content.len() as u64;
+        let mtime_secs = get_file_mtime_secs(spec_path);
+
+        // Update cache metadata with fingerprint for optimized version checking
         let cache_dir = self.config_dir.join(crate::constants::DIR_CACHE);
         let metadata_manager = CacheMetadataManager::new(&self.fs);
-        metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
+        metadata_manager.update_spec_metadata_with_fingerprint(
+            &cache_dir,
+            name,
+            cached_data.len() as u64,
+            Some(content_hash),
+            mtime_secs,
+            Some(spec_file_size),
+        )?;
 
         Ok(())
     }
