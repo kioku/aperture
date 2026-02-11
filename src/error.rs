@@ -1080,6 +1080,24 @@ impl Error {
         }
     }
 
+    // ---- API Context Name Errors ----
+
+    /// Create an invalid API context name error
+    pub fn invalid_api_context_name(name: impl Into<String>, reason: impl Into<String>) -> Self {
+        let name = name.into();
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!("Invalid API context name '{name}': {reason}")),
+            context: Some(ErrorContext::new(
+                Some(json!({ "name": name, "reason": reason })),
+                Some(Cow::Borrowed(
+                    "API names must start with a letter or digit and contain only letters, digits, dots, hyphens, or underscores (max 64 chars).",
+                )),
+            )),
+        }
+    }
+
     // ---- Settings Errors ----
 
     /// Create an unknown setting key error
