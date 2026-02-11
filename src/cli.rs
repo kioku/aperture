@@ -216,7 +216,8 @@ pub enum Commands {
                       aperture list-commands myapi"
     )]
     ListCommands {
-        /// Name of the API specification context
+        /// Name of the API specification context.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         context: String,
     },
     /// Execute API operations for a specific context
@@ -231,7 +232,8 @@ pub enum Commands {
                       aperture api myapi --help  # See available operations"
     )]
     Api {
-        /// Name of the API specification context
+        /// Name of the API specification context.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         context: String,
         /// Remaining arguments will be parsed dynamically based on the `OpenAPI` spec
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -331,7 +333,8 @@ pub enum ConfigCommands {
                       aperture config add myapi https://api.example.com/openapi.yaml"
     )]
     Add {
-        /// Name to identify this API specification (used as context in 'aperture api')
+        /// Name to identify this API specification (used as context in 'aperture api').
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
         /// Path to the `OpenAPI` 3.x specification file (YAML format) or URL
         file_or_url: String,
@@ -364,7 +367,8 @@ pub enum ConfigCommands {
                       Use 'aperture config list' to see available specifications."
     )]
     Remove {
-        /// Name of the API specification to remove
+        /// Name of the API specification to remove.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
     /// Edit an API specification in your default editor
@@ -378,7 +382,8 @@ pub enum ConfigCommands {
                       aperture config edit myapi"
     )]
     Edit {
-        /// Name of the API specification to edit
+        /// Name of the API specification to edit.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
     /// Set base URL for an API specification
@@ -391,7 +396,8 @@ pub enum ConfigCommands {
                       aperture config set-url myapi --env staging https://staging.example.com\n  \
                       aperture config set-url myapi --env prod https://prod.example.com")]
     SetUrl {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
         /// The base URL to set
         url: String,
@@ -409,7 +415,8 @@ pub enum ConfigCommands {
                       aperture config get-url myapi"
     )]
     GetUrl {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
     /// List all configured base URLs
@@ -432,7 +439,8 @@ pub enum ConfigCommands {
                       aperture config set-secret myapi --interactive"
     )]
     SetSecret {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: String,
         /// Name of the security scheme (omit for interactive mode)
         scheme_name: Option<String>,
@@ -453,7 +461,8 @@ pub enum ConfigCommands {
                       aperture config list-secrets myapi"
     )]
     ListSecrets {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: String,
     },
     /// Remove a specific configured secret for an API specification
@@ -467,7 +476,8 @@ pub enum ConfigCommands {
                       aperture config remove-secret myapi apiKey"
     )]
     RemoveSecret {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: String,
         /// Name of the security scheme to remove
         scheme_name: String,
@@ -483,7 +493,8 @@ pub enum ConfigCommands {
                       aperture config clear-secrets myapi --force"
     )]
     ClearSecrets {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: String,
         /// Skip confirmation prompt
         #[arg(long, help = "Skip confirmation prompt")]
