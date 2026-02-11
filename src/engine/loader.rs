@@ -59,7 +59,7 @@ pub fn load_cached_spec<P: AsRef<Path>>(
 /// Checks whether the spec source file has been modified since the cache was built.
 ///
 /// Derives the spec file path from the cache directory (sibling `specs/` directory).
-/// Uses a fast path: checks mtime + file_size first, only computes content hash if needed.
+/// Uses a fast path: checks mtime + `file_size` first, only computes content hash if needed.
 /// Silently passes through if fingerprint data is unavailable (legacy metadata) or
 /// if the spec file cannot be read (e.g., deleted after caching).
 fn check_spec_file_freshness<P: AsRef<Path>>(
@@ -84,19 +84,17 @@ fn check_spec_file_freshness<P: AsRef<Path>>(
     }
 
     // Get current file attributes
-    let current_mtime = match get_file_mtime_secs(&spec_path) {
-        Some(mtime) => mtime,
-        None => return Ok(()), // Can't read mtime, skip check
+    let Some(current_mtime) = get_file_mtime_secs(&spec_path) else {
+        return Ok(()); // Can't read mtime, skip check
     };
-    let current_size = match fs::metadata(&spec_path) {
-        Ok(m) => m.len(),
-        Err(_) => return Ok(()), // Can't read metadata, skip check
+    let Ok(file_meta) = fs::metadata(&spec_path) else {
+        return Ok(()); // Can't read metadata, skip check
     };
+    let current_size = file_meta.len();
 
     // Read file content and compute hash
-    let content = match fs::read(&spec_path) {
-        Ok(c) => c,
-        Err(_) => return Ok(()), // Can't read file, skip check
+    let Ok(content) = fs::read(&spec_path) else {
+        return Ok(()); // Can't read file, skip check
     };
     let current_hash = compute_content_hash(&content);
 
@@ -108,10 +106,10 @@ fn check_spec_file_freshness<P: AsRef<Path>>(
         current_size,
         &current_hash,
     ) {
-        Ok(Some(true)) => Ok(()),  // Fresh
-        Ok(Some(false)) => Err(Error::cache_stale(spec_name)), // Stale
-        Ok(None) => Ok(()),        // No fingerprint data (legacy), pass through
-        Err(_) => Ok(()),          // Metadata error, pass through
+        // Stale cache: spec file has been modified since caching
+        Ok(Some(false)) => Err(Error::cache_stale(spec_name)),
+        // Fresh, no fingerprint data (legacy), or metadata error — pass through
+        Ok(Some(true) | None) | Err(_) => Ok(()),
     }
 }
 

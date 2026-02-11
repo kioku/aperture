@@ -88,7 +88,9 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
         spec_name: &str,
         file_size: u64,
     ) -> Result<(), Error> {
-        self.update_spec_metadata_with_fingerprint(cache_dir, spec_name, file_size, None, None, None)
+        self.update_spec_metadata_with_fingerprint(
+            cache_dir, spec_name, file_size, None, None, None,
+        )
     }
 
     /// Update metadata for a specific spec including fingerprint data for cache invalidation
@@ -124,7 +126,7 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
     /// Returns `true` if the cache is fresh (fingerprint matches), `false` if stale.
     /// Returns `None` if no fingerprint data is available (legacy metadata).
     ///
-    /// Uses a fast path: checks mtime + file_size first, only computes the
+    /// Uses a fast path: checks mtime + `file_size` first, only computes the
     /// content hash if those match (to avoid hashing on every load when mtime differs).
     ///
     /// # Errors
