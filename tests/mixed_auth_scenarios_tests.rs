@@ -5,8 +5,14 @@
 #![allow(clippy::option_if_let_else)]
 #![allow(clippy::significant_drop_tightening)]
 
+use aperture_cli::config::context_name::ApiContextName;
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::error::Error;
+
+/// Helper to create a validated `ApiContextName` from a string literal in tests
+fn name(s: &str) -> ApiContextName {
+    ApiContextName::new(s).expect("test name should be valid")
+}
 use aperture_cli::fs::FileSystem;
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
@@ -227,7 +233,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should succeed in non-strict mode with warnings
-    let result = manager.add_spec("mixed-auth", &spec_path, false, false);
+    let result = manager.add_spec(&name("mixed-auth"), &spec_path, false, false);
     assert!(
         result.is_ok(),
         "Expected success in non-strict mode, got: {result:?}"
@@ -318,7 +324,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should fail in strict mode
-    let result = manager.add_spec("mixed-auth-strict", &spec_path, false, true);
+    let result = manager.add_spec(&name("mixed-auth-strict"), &spec_path, false, true);
     assert!(result.is_err(), "Expected failure in strict mode");
 
     if let Err(Error::Internal {
@@ -382,7 +388,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should succeed in non-strict mode
-    let result = manager.add_spec("empty-security", &spec_path, false, false);
+    let result = manager.add_spec(&name("empty-security"), &spec_path, false, false);
     assert!(
         result.is_ok(),
         "Expected success in non-strict mode, got: {result:?}"
@@ -458,7 +464,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should fail due to invalid environment variable name
-    let result = manager.add_spec("env-var-test", &spec_path, false, false);
+    let result = manager.add_spec(&name("env-var-test"), &spec_path, false, false);
     assert!(
         result.is_err(),
         "Expected failure due to invalid env var name"
@@ -537,7 +543,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should succeed in non-strict mode
-    let result = manager.add_spec("global-auth", &spec_path, false, false);
+    let result = manager.add_spec(&name("global-auth"), &spec_path, false, false);
     assert!(
         result.is_ok(),
         "Expected success in non-strict mode, got: {result:?}"
@@ -633,7 +639,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should succeed in non-strict mode
-    let result = manager.add_spec("negotiate-auth", &spec_path, false, false);
+    let result = manager.add_spec(&name("negotiate-auth"), &spec_path, false, false);
     assert!(
         result.is_ok(),
         "Expected success in non-strict mode, got: {result:?}"
@@ -698,7 +704,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should succeed in non-strict mode but skip all endpoints
-    let result = manager.add_spec("oidc-auth", &spec_path, false, false);
+    let result = manager.add_spec(&name("oidc-auth"), &spec_path, false, false);
     assert!(
         result.is_ok(),
         "Expected success in non-strict mode, got: {result:?}"

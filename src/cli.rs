@@ -216,7 +216,8 @@ pub enum Commands {
                       aperture list-commands myapi"
     )]
     ListCommands {
-        /// Name of the API specification context
+        /// Name of the API specification context.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         context: String,
     },
     /// Execute API operations for a specific context
@@ -231,7 +232,8 @@ pub enum Commands {
                       aperture api myapi --help  # See available operations"
     )]
     Api {
-        /// Name of the API specification context
+        /// Name of the API specification context.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         context: String,
         /// Remaining arguments will be parsed dynamically based on the `OpenAPI` spec
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -250,7 +252,8 @@ pub enum Commands {
     Search {
         /// Search query (keywords, patterns, or regex)
         query: String,
-        /// Limit search to a specific API context
+        /// Limit search to a specific API context.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         #[arg(long, value_name = "API", help = "Search only in specified API")]
         api: Option<String>,
         /// Show detailed results including paths and parameters
@@ -288,7 +291,8 @@ pub enum Commands {
                       aperture docs myapi users get-user  # Detailed command help"
     )]
     Docs {
-        /// API name (optional, shows interactive menu if omitted)
+        /// API name (optional, shows interactive menu if omitted).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api: Option<String>,
         /// Tag/category name (optional)
         tag: Option<String>,
@@ -308,7 +312,8 @@ pub enum Commands {
                       aperture overview --all  # Overview of all registered APIs"
     )]
     Overview {
-        /// API name (required unless using --all)
+        /// API name (required unless using --all).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api: Option<String>,
         /// Show overview for all registered APIs
         #[arg(long, conflicts_with = "api", help = "Show overview for all APIs")]
@@ -331,7 +336,8 @@ pub enum ConfigCommands {
                       aperture config add myapi https://api.example.com/openapi.yaml"
     )]
     Add {
-        /// Name to identify this API specification (used as context in 'aperture api')
+        /// Name to identify this API specification (used as context in 'aperture api').
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
         /// Path to the `OpenAPI` 3.x specification file (YAML format) or URL
         file_or_url: String,
@@ -364,7 +370,8 @@ pub enum ConfigCommands {
                       Use 'aperture config list' to see available specifications."
     )]
     Remove {
-        /// Name of the API specification to remove
+        /// Name of the API specification to remove.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
     /// Edit an API specification in your default editor
@@ -378,7 +385,8 @@ pub enum ConfigCommands {
                       aperture config edit myapi"
     )]
     Edit {
-        /// Name of the API specification to edit
+        /// Name of the API specification to edit.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
     /// Set base URL for an API specification
@@ -391,7 +399,8 @@ pub enum ConfigCommands {
                       aperture config set-url myapi --env staging https://staging.example.com\n  \
                       aperture config set-url myapi --env prod https://prod.example.com")]
     SetUrl {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
         /// The base URL to set
         url: String,
@@ -409,7 +418,8 @@ pub enum ConfigCommands {
                       aperture config get-url myapi"
     )]
     GetUrl {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
     /// List all configured base URLs
@@ -432,7 +442,8 @@ pub enum ConfigCommands {
                       aperture config set-secret myapi --interactive"
     )]
     SetSecret {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: String,
         /// Name of the security scheme (omit for interactive mode)
         scheme_name: Option<String>,
@@ -453,7 +464,8 @@ pub enum ConfigCommands {
                       aperture config list-secrets myapi"
     )]
     ListSecrets {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: String,
     },
     /// Remove a specific configured secret for an API specification
@@ -467,7 +479,8 @@ pub enum ConfigCommands {
                       aperture config remove-secret myapi apiKey"
     )]
     RemoveSecret {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: String,
         /// Name of the security scheme to remove
         scheme_name: String,
@@ -483,7 +496,8 @@ pub enum ConfigCommands {
                       aperture config clear-secrets myapi --force"
     )]
     ClearSecrets {
-        /// Name of the API specification
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: String,
         /// Skip confirmation prompt
         #[arg(long, help = "Skip confirmation prompt")]
@@ -500,7 +514,8 @@ pub enum ConfigCommands {
                       aperture config reinit myapi     # Reinitialize specific spec"
     )]
     Reinit {
-        /// Name of the API specification to reinitialize (omit for --all)
+        /// Name of the API specification to reinitialize (omit for --all).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         context: Option<String>,
         /// Reinitialize all cached specifications
         #[arg(long, conflicts_with = "context", help = "Reinitialize all specs")]
@@ -515,7 +530,8 @@ pub enum ConfigCommands {
                       aperture config clear-cache myapi     # Clear cache for specific API\n  \
                       aperture config clear-cache --all     # Clear all cached responses")]
     ClearCache {
-        /// Name of the API specification to clear cache for (omit for --all)
+        /// Name of the API specification to clear cache for (omit for --all).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: Option<String>,
         /// Clear all cached responses
         #[arg(long, conflicts_with = "api_name", help = "Clear all response cache")]
@@ -529,7 +545,8 @@ pub enum ConfigCommands {
                       aperture config cache-stats myapi     # Stats for specific API\n  \
                       aperture config cache-stats           # Stats for all APIs")]
     CacheStats {
-        /// Name of the API specification to show stats for (omit for all APIs)
+        /// Name of the API specification to show stats for (omit for all APIs).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: Option<String>,
     },
     /// Set a global configuration setting

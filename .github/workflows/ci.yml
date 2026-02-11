@@ -19,9 +19,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Override target-cpu=native from .cargo/config.toml to prevent SIGILL
-  # when cached artifacts are used on runners with different CPU features
-  CARGO_BUILD_RUSTFLAGS: ""
 
 jobs:
   unit-tests:
@@ -42,9 +39,9 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-unit
+          key: ${{ runner.os }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}-unit
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-v2-
 
       - name: Run unit tests
         run: cargo test --lib --no-default-features --verbose
@@ -77,9 +74,9 @@ jobs:
             ~/.cargo/git/db
             ~/.cargo/bin/cargo-nextest
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-nextest
+          key: ${{ runner.os }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}-nextest
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-v2-
 
       - name: Check formatting
         run: cargo fmt --check

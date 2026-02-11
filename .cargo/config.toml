@@ -1,6 +1,8 @@
 [build]
-# Optimize build performance
-rustflags = ["-Ctarget-cpu=native"]
+# NOTE: To optimize for your local CPU, set in your shell profile:
+#   export RUSTFLAGS="-Ctarget-cpu=native"
+# Do NOT set rustflags here — it causes SIGILL in CI when cached
+# proc-macro artifacts are reused across runners with different CPUs.
 
 # Faster incremental builds (commented out - lld not available on all systems)
 # [target.x86_64-unknown-linux-gnu]

@@ -6,7 +6,13 @@
 
 mod common;
 
+use aperture_cli::config::context_name::ApiContextName;
 use aperture_cli::config::manager::ConfigManager;
+
+/// Helper to create a validated `ApiContextName` from a string literal in tests
+fn name(s: &str) -> ApiContextName {
+    ApiContextName::new(s).expect("test name should be valid")
+}
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::fs::OsFileSystem;
 use common::aperture_cmd;
@@ -197,7 +203,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Add spec in non-strict mode
-    let result = config_manager.add_spec("content-test", &spec_file, false, false);
+    let result = config_manager.add_spec(&name("content-test"), &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
     // Load cached spec and verify only JSON endpoints were included
@@ -216,7 +222,8 @@ paths:
     assert!(operation_ids.contains(&"postCustom")); // application/vnd.custom+json is now accepted
 
     // Try in strict mode - should fail
-    let result_strict = config_manager.add_spec("content-test-strict", &spec_file, false, true);
+    let result_strict =
+        config_manager.add_spec(&name("content-test-strict"), &spec_file, false, true);
     assert!(result_strict.is_err(), "Should reject spec in strict mode");
 }
 
@@ -273,7 +280,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Add spec in non-strict mode
-    let result = config_manager.add_spec("mixed-test", &spec_file, false, false);
+    let result = config_manager.add_spec(&name("mixed-test"), &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
     // Both endpoints should be INCLUDED because they support JSON
@@ -363,7 +370,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Add spec in non-strict mode
-    let result = config_manager.add_spec("malformed-test", &spec_file, false, false);
+    let result = config_manager.add_spec(&name("malformed-test"), &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
     // Check which endpoints were included
@@ -579,7 +586,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Add spec in non-strict mode
-    let result = config_manager.add_spec("image-test", &spec_file, false, false);
+    let result = config_manager.add_spec(&name("image-test"), &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
     // All image endpoints should be skipped
@@ -756,7 +763,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Add spec in non-strict mode
-    let result = config_manager.add_spec("json-test", &spec_file, false, false);
+    let result = config_manager.add_spec(&name("json-test"), &spec_file, false, false);
     assert!(
         result.is_ok(),
         "Should accept spec with JSON content type variations"
@@ -951,7 +958,7 @@ paths:
     std::fs::write(&spec_file, spec_content).unwrap();
 
     // Add spec - should succeed even with empty content
-    let result = config_manager.add_spec("empty-test", &spec_file, false, false);
+    let result = config_manager.add_spec(&name("empty-test"), &spec_file, false, false);
     assert!(
         result.is_ok(),
         "Should accept spec with empty request body content"

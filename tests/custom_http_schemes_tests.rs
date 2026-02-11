@@ -6,8 +6,14 @@
 #![allow(clippy::option_if_let_else)]
 #![allow(clippy::significant_drop_tightening)]
 
+use aperture_cli::config::context_name::ApiContextName;
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::error::{Error, ErrorKind as ApertureErrorKind};
+
+/// Helper to create a validated `ApiContextName` from a string literal in tests
+fn name(s: &str) -> ApiContextName {
+    ApiContextName::new(s).expect("test name should be valid")
+}
 use aperture_cli::fs::FileSystem;
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
@@ -169,7 +175,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should succeed - Token scheme is now supported
-    let result = manager.add_spec("token-api", &spec_path, false, false);
+    let result = manager.add_spec(&name("token-api"), &spec_path, false, false);
     assert!(result.is_ok(), "Token HTTP scheme should be supported");
 
     // Verify the spec was added
@@ -213,7 +219,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should succeed - ApiKey HTTP scheme is now supported
-    let result = manager.add_spec("apikey-scheme", &spec_path, false, false);
+    let result = manager.add_spec(&name("apikey-scheme"), &spec_path, false, false);
     assert!(result.is_ok(), "ApiKey HTTP scheme should be supported");
 }
 
@@ -253,7 +259,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should succeed - DSN scheme is now supported
-    let result = manager.add_spec("dsn-api", &spec_path, false, false);
+    let result = manager.add_spec(&name("dsn-api"), &spec_path, false, false);
     assert!(result.is_ok(), "DSN HTTP scheme should be supported");
 }
 
@@ -293,7 +299,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should fail in strict mode
-    let result = manager.add_spec("oauth-api", &spec_path, false, true);
+    let result = manager.add_spec(&name("oauth-api"), &spec_path, false, true);
     assert!(
         result.is_err(),
         "OAuth HTTP scheme should be rejected in strict mode"
@@ -328,7 +334,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should fail in strict mode
-    let result = manager.add_spec("negotiate-api", &spec_path, false, true);
+    let result = manager.add_spec(&name("negotiate-api"), &spec_path, false, true);
     assert!(
         result.is_err(),
         "Negotiate HTTP scheme should be rejected in strict mode"
@@ -371,7 +377,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should succeed - any custom scheme name is now supported
-    let result = manager.add_spec("proprietary-api", &spec_path, false, false);
+    let result = manager.add_spec(&name("proprietary-api"), &spec_path, false, false);
     assert!(
         result.is_ok(),
         "Custom proprietary HTTP schemes should be supported"
@@ -409,7 +415,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should fail - 'oauth' as HTTP scheme suggests complex flows
-    let result = manager.add_spec("oauth-http", &spec_path, false, true); // Use strict mode
+    let result = manager.add_spec(&name("oauth-http"), &spec_path, false, true); // Use strict mode
     assert!(result.is_err());
     if let Err(Error::Internal {
         kind: ApertureErrorKind::Validation,
@@ -457,7 +463,7 @@ paths:
         .expect("Failed to write spec");
 
     // Should fail - Negotiate requires complex Kerberos/NTLM flows
-    let result = manager.add_spec("negotiate-api", &spec_path, false, true); // Use strict mode
+    let result = manager.add_spec(&name("negotiate-api"), &spec_path, false, true); // Use strict mode
     assert!(result.is_err());
     if let Err(Error::Internal {
         kind: ApertureErrorKind::Validation,
