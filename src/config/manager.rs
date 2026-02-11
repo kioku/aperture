@@ -9,6 +9,7 @@ use crate::fs::{FileSystem, OsFileSystem};
 use crate::interactive::{confirm, prompt_for_input, select_from_options};
 use crate::spec::{SpecTransformer, SpecValidator};
 use openapiv3::{OpenAPI, ReferenceOr};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1163,10 +1164,22 @@ impl<F: FileSystem> ConfigManager<F> {
             .map_err(|e| Error::serialization_error(e.to_string()))?;
         self.fs.write_all(cache_path, &cached_data)?;
 
-        // Update cache metadata for optimized version checking
+        // Compute fingerprint for cache invalidation
+        let content_hash = compute_content_hash(content.as_bytes());
+        let spec_file_size = content.len() as u64;
+        let mtime_secs = get_file_mtime_secs(spec_path);
+
+        // Update cache metadata with fingerprint for optimized version checking
         let cache_dir = self.config_dir.join(crate::constants::DIR_CACHE);
         let metadata_manager = CacheMetadataManager::new(&self.fs);
-        metadata_manager.update_spec_metadata(&cache_dir, name, cached_data.len() as u64)?;
+        metadata_manager.update_spec_metadata_with_fingerprint(
+            &cache_dir,
+            name,
+            cached_data.len() as u64,
+            Some(content_hash),
+            mtime_secs,
+            Some(spec_file_size),
+        )?;
 
         Ok(())
     }
@@ -1572,6 +1585,25 @@ impl<F: FileSystem> ConfigManager<F> {
             ));
         }
     }
+}
+
+/// Compute SHA-256 hash of content and return as hex string
+#[must_use]
+pub fn compute_content_hash(content: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content);
+    format!("{:x}", hasher.finalize())
+}
+
+/// Get the modification time of a file in seconds since epoch.
+/// Returns `None` if the file metadata cannot be read.
+#[must_use]
+pub fn get_file_mtime_secs(path: &Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
 }
 
 /// Gets the default configuration directory path.
