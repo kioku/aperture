@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod atomic;
 pub mod batch;
 pub mod cache;
 pub mod cli;
