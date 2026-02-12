@@ -449,6 +449,27 @@ impl ResponseCache {
         Ok(stats)
     }
 
+    /// Check whether a directory entry is a stale temp file (older than 1 hour)
+    /// and, if so, add it to the collection for removal.
+    async fn collect_stale_temp_file(
+        &self,
+        entry: &tokio::fs::DirEntry,
+        now: SystemTime,
+        stale_files: &mut Vec<std::path::PathBuf>,
+    ) {
+        let is_stale = entry
+            .metadata()
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .is_some_and(|modified| {
+                now.duration_since(modified).unwrap_or(Duration::ZERO) > Duration::from_secs(3600)
+            });
+        if is_stale {
+            stale_files.push(entry.path());
+        }
+    }
+
     /// Clean up old cache entries for an API, keeping only the most recent
     /// `max_entries`.  Also sweeps orphaned `.*.tmp` files older than 1 hour
     /// that may have been left behind by a crashed process.
@@ -471,22 +492,13 @@ impl ResponseCache {
 
             // Detect orphaned temp files from crashed atomic writes.
             // Pattern: .filename.random.tmp
-            if filename_str.starts_with('.')
+            let is_temp_file = filename_str.starts_with('.')
                 && filename_str.ends_with(".tmp")
-                && filename_str.len() > 4
-            {
-                if let Ok(metadata) = entry.metadata().await {
-                    if let Ok(modified) = metadata.modified() {
-                        // Remove temp files older than 1 hour
-                        if now_system
-                            .duration_since(modified)
-                            .unwrap_or(Duration::ZERO)
-                            > Duration::from_secs(3600)
-                        {
-                            stale_tmp_files.push(entry.path());
-                        }
-                    }
-                }
+                && filename_str.len() > 4;
+
+            if is_temp_file {
+                self.collect_stale_temp_file(&entry, now_system, &mut stale_tmp_files)
+                    .await;
                 continue;
             }
 

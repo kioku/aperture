@@ -23,7 +23,7 @@ repos:
 
     -   id: ast-grep
         name: ast-grep
-        entry: sg scan
+        entry: ast-grep scan
         language: system
         types: [rust]
         pass_filenames: false

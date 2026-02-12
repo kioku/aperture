@@ -231,12 +231,14 @@ fn test_metadata_backward_compatibility() {
     let mut metadata: serde_json::Value = serde_json::from_str(&metadata_content).unwrap();
 
     // Remove fingerprint fields from the spec metadata
-    if let Some(specs) = metadata.get_mut("specs") {
-        if let Some(spec) = specs.get_mut("fp-test") {
-            spec.as_object_mut().unwrap().remove("content_hash");
-            spec.as_object_mut().unwrap().remove("mtime_secs");
-            spec.as_object_mut().unwrap().remove("spec_file_size");
-        }
+    if let Some(spec) = metadata
+        .get_mut("specs")
+        .and_then(|s| s.get_mut("fp-test"))
+        .and_then(|s| s.as_object_mut())
+    {
+        spec.remove("content_hash");
+        spec.remove("mtime_secs");
+        spec.remove("spec_file_size");
     }
     fs::write(
         &metadata_path,
