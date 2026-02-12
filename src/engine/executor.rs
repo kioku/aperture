@@ -1263,6 +1263,276 @@ fn add_authentication_header(
     Ok(())
 }
 
+// ── New domain-type-based API ───────────────────────────────────────
+
+/// Executes an API operation using CLI-agnostic domain types.
+///
+/// This is the primary entry point for the execution engine. It accepts
+/// pre-extracted parameters in [`OperationCall`] and execution configuration
+/// in [`ExecutionContext`], returning a structured [`ExecutionResult`]
+/// instead of printing directly.
+///
+/// # Errors
+///
+/// Returns errors for authentication failures, network issues, or response
+/// validation problems.
+#[allow(clippy::too_many_lines)]
+pub async fn execute(
+    spec: &CachedSpec,
+    call: crate::invocation::OperationCall,
+    ctx: crate::invocation::ExecutionContext,
+) -> Result<crate::invocation::ExecutionResult, Error> {
+    use crate::invocation::ExecutionResult;
+
+    // Find the operation by operation_id
+    let operation = find_operation_by_id(spec, &call.operation_id)?;
+
+    // Resolve base URL
+    let resolver = BaseUrlResolver::new(spec);
+    let resolver = if let Some(ref config) = ctx.global_config {
+        resolver.with_global_config(config)
+    } else {
+        resolver
+    };
+    let base_url =
+        resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
+
+    // Build the full URL from pre-extracted parameters
+    let url = build_url_from_params(
+        &base_url,
+        &operation.path,
+        &call.path_params,
+        &call.query_params,
+    )?;
+
+    // Create HTTP client
+    let client = build_http_client()?;
+
+    // Build headers from pre-extracted parameters
+    let mut headers = build_headers_from_params(
+        spec,
+        operation,
+        &call.header_params,
+        &call.custom_headers,
+        &spec.name,
+        ctx.global_config.as_ref(),
+    )?;
+
+    // Add idempotency key if provided
+    if let Some(ref key) = ctx.idempotency_key {
+        headers.insert(
+            HeaderName::from_static("idempotency-key"),
+            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
+        );
+    }
+
+    // Determine HTTP method
+    let method = Method::from_str(&operation.method)
+        .map_err(|_| Error::invalid_http_method(&operation.method))?;
+
+    let headers_clone = headers.clone();
+
+    // Prepare cache context
+    let cache_context = prepare_cache_context(
+        ctx.cache_config.as_ref(),
+        &spec.name,
+        &operation.operation_id,
+        &method,
+        &url,
+        &headers_clone,
+        call.body.as_deref(),
+    )?;
+
+    // Check cache for existing response
+    if let Some(cached_response) = check_cache(cache_context.as_ref()).await? {
+        return Ok(ExecutionResult::Cached {
+            body: cached_response.body,
+        });
+    }
+
+    // Handle dry-run mode
+    if ctx.dry_run {
+        let headers_map: HashMap<String, String> = headers_clone
+            .iter()
+            .map(|(k, v)| {
+                let value = if logging::should_redact_header(k.as_str()) {
+                    "[REDACTED]".to_string()
+                } else {
+                    v.to_str().unwrap_or("<binary>").to_string()
+                };
+                (k.as_str().to_string(), value)
+            })
+            .collect();
+
+        let request_info = serde_json::json!({
+            "dry_run": true,
+            "method": method.to_string(),
+            "url": url,
+            "headers": headers_map,
+            "body": call.body,
+            "operation_id": operation.operation_id
+        });
+
+        return Ok(ExecutionResult::DryRun { request_info });
+    }
+
+    // Build retry context with method information
+    let retry_ctx = ctx.retry_context.map(|mut rc| {
+        rc.method = Some(method.to_string());
+        rc
+    });
+
+    // Build secret context for dynamic secret redaction in logs
+    let secret_ctx =
+        logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref());
+
+    // Send request with retry support
+    let (status, response_headers, response_text) = send_request_with_retry(
+        &client,
+        method.clone(),
+        &url,
+        headers,
+        call.body.clone(),
+        retry_ctx.as_ref(),
+        operation,
+        Some(&secret_ctx),
+    )
+    .await?;
+
+    // Check if request was successful
+    if !status.is_success() {
+        return Err(handle_http_error(status, response_text, spec, operation));
+    }
+
+    // Store response in cache
+    store_in_cache(
+        cache_context,
+        &response_text,
+        status,
+        &response_headers,
+        method,
+        url,
+        &headers_clone,
+        call.body.as_deref(),
+        ctx.cache_config.as_ref(),
+    )
+    .await?;
+
+    if response_text.is_empty() {
+        Ok(ExecutionResult::Empty)
+    } else {
+        Ok(ExecutionResult::Success {
+            body: response_text,
+            status: status.as_u16(),
+            headers: response_headers,
+        })
+    }
+}
+
+/// Finds an operation by its `operation_id` in the spec.
+fn find_operation_by_id<'a>(
+    spec: &'a CachedSpec,
+    operation_id: &str,
+) -> Result<&'a CachedCommand, Error> {
+    spec.commands
+        .iter()
+        .find(|cmd| cmd.operation_id == operation_id)
+        .ok_or_else(|| {
+            let kebab_id = to_kebab_case(operation_id);
+            let suggestions = crate::suggestions::suggest_similar_operations(spec, &kebab_id);
+            Error::operation_not_found_with_suggestions(operation_id, &suggestions)
+        })
+}
+
+/// Builds the full URL from pre-extracted path and query parameter maps.
+fn build_url_from_params(
+    base_url: &str,
+    path_template: &str,
+    path_params: &HashMap<String, String>,
+    query_params: &HashMap<String, String>,
+) -> Result<String, Error> {
+    let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
+
+    // Substitute path parameters: replace {param} with values from the map
+    let mut start = 0;
+    while let Some(open) = url[start..].find('{') {
+        let open_pos = start + open;
+        let Some(close) = url[open_pos..].find('}') else {
+            break;
+        };
+        let close_pos = open_pos + close;
+        let param_name = url[open_pos + 1..close_pos].to_string();
+
+        let value = path_params
+            .get(&param_name)
+            .ok_or_else(|| Error::missing_path_parameter(&param_name))?;
+
+        url.replace_range(open_pos..=close_pos, value);
+        start = open_pos + value.len();
+    }
+
+    // Append query parameters
+    if !query_params.is_empty() {
+        let qs: Vec<String> = query_params
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+            .collect();
+        url.push('?');
+        url.push_str(&qs.join("&"));
+    }
+
+    Ok(url)
+}
+
+/// Builds HTTP headers from pre-extracted header parameter maps.
+#[allow(clippy::too_many_arguments)]
+fn build_headers_from_params(
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+    header_params: &HashMap<String, String>,
+    custom_headers: &[String],
+    api_name: &str,
+    global_config: Option<&GlobalConfig>,
+) -> Result<HeaderMap, Error> {
+    let mut headers = HeaderMap::new();
+
+    // Default headers
+    headers.insert("User-Agent", HeaderValue::from_static("aperture/0.1.0"));
+    headers.insert(
+        constants::HEADER_ACCEPT,
+        HeaderValue::from_static(constants::CONTENT_TYPE_JSON),
+    );
+
+    // Add header parameters from the pre-extracted map
+    for (name, value) in header_params {
+        let header_name = HeaderName::from_str(name)
+            .map_err(|e| Error::invalid_header_name(name, e.to_string()))?;
+        let header_value = HeaderValue::from_str(value)
+            .map_err(|e| Error::invalid_header_value(name, e.to_string()))?;
+        headers.insert(header_name, header_value);
+    }
+
+    // Add authentication headers
+    for security_scheme_name in &operation.security_requirements {
+        let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) else {
+            continue;
+        };
+        add_authentication_header(&mut headers, security_scheme, api_name, global_config)?;
+    }
+
+    // Add custom headers
+    for header_str in custom_headers {
+        let (name, value) = parse_custom_header(header_str)?;
+        let header_name = HeaderName::from_str(&name)
+            .map_err(|e| Error::invalid_header_name(&name, e.to_string()))?;
+        let header_value = HeaderValue::from_str(&value)
+            .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
+        headers.insert(header_name, header_value);
+    }
+
+    Ok(headers)
+}
+
 /// Prints the response text in the specified format
 /// Thin wrapper that delegates to `cli::render` for backward compatibility.
 /// This function is removed in step 7 when `execute_request` is deleted.
