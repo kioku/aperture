@@ -18,22 +18,25 @@ fn resolve_output_format(
     matches: &clap::ArgMatches,
     cli_format: &crate::cli::OutputFormat,
 ) -> crate::cli::OutputFormat {
-    matches.get_one::<String>("format").map_or_else(
-        || cli_format.clone(),
-        |format_str| {
-            let is_default_json =
-                format_str == "json" && !matches!(cli_format, crate::cli::OutputFormat::Json);
-            if is_default_json {
-                return cli_format.clone();
-            }
-            match format_str.as_str() {
-                "json" => crate::cli::OutputFormat::Json,
-                "yaml" => crate::cli::OutputFormat::Yaml,
-                "table" => crate::cli::OutputFormat::Table,
-                _ => cli_format.clone(),
-            }
-        },
-    )
+    use clap::parser::ValueSource;
+
+    let Some(format_str) = matches.get_one::<String>("format") else {
+        return cli_format.clone();
+    };
+
+    // The dynamic command tree always sets a default of "json".
+    // If clap reports this value came from a default (not user input),
+    // preserve the top-level CLI format parsed by `Cli`.
+    if matches.value_source("format") == Some(ValueSource::DefaultValue) {
+        return cli_format.clone();
+    }
+
+    match format_str.as_str() {
+        "json" => crate::cli::OutputFormat::Json,
+        "yaml" => crate::cli::OutputFormat::Yaml,
+        "table" => crate::cli::OutputFormat::Table,
+        _ => cli_format.clone(),
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -324,4 +327,38 @@ fn count_shortcut_args(args: &[String]) -> usize {
         }
     }
     std::cmp::min(args.len(), 3)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_output_format;
+    use crate::cli::OutputFormat;
+    use clap::{Arg, Command};
+
+    fn matches_from(args: &[&str]) -> clap::ArgMatches {
+        Command::new("api")
+            .arg(
+                Arg::new("format")
+                    .long("format")
+                    .value_parser(["json", "yaml", "table"])
+                    .default_value("json"),
+            )
+            .get_matches_from(args)
+    }
+
+    #[test]
+    fn resolve_output_format_prefers_cli_value_when_dynamic_match_is_default() {
+        let matches = matches_from(&["api"]);
+        let resolved = resolve_output_format(&matches, &OutputFormat::Yaml);
+
+        assert!(matches!(resolved, OutputFormat::Yaml));
+    }
+
+    #[test]
+    fn resolve_output_format_honors_explicit_json_override() {
+        let matches = matches_from(&["api", "--format", "json"]);
+        let resolved = resolve_output_format(&matches, &OutputFormat::Yaml);
+
+        assert!(matches!(resolved, OutputFormat::Json));
+    }
 }
