@@ -203,7 +203,7 @@ impl ResponseCache {
             Error::serialization_error(format!("Failed to serialize cached response: {e}"))
         })?;
 
-        tokio::fs::write(&cache_file, json_content)
+        crate::atomic::atomic_write(&cache_file, json_content.as_bytes())
             .await
             .map_err(|e| Error::io_error(format!("Failed to write cache file: {e}")))?;
 
