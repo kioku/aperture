@@ -1,3 +1,17 @@
+//! Dynamic clap command tree generator from cached `OpenAPI` specifications.
+//!
+//! # `Box::leak` and `'static` lifetimes
+//!
+//! Clap requires `'static` strings for command and argument names. Since
+//! operation IDs, parameter names, and tag names are determined at runtime
+//! from the `OpenAPI` spec, we use [`Box::leak`] via [`to_static_str`] to
+//! convert owned `String`s into `&'static str`.
+//!
+//! This is the standard pattern for dynamic clap usage and is safe because:
+//! - The CLI binary runs once and exits — leaked memory is reclaimed by the OS.
+//! - Total leaked memory is bounded by the spec size (typically <100KB).
+//! - No long-running process or repeated allocation occurs.
+
 use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use crate::constants;
 use crate::utils::to_kebab_case;
