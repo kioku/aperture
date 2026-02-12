@@ -203,6 +203,16 @@ impl ResponseCache {
             Error::serialization_error(format!("Failed to serialize cached response: {e}"))
         })?;
 
+        // Acquire advisory lock on the cache directory to coordinate with
+        // other Aperture processes writing to the same cache.
+        let cache_dir = self.config.cache_dir.clone();
+        let _lock = tokio::task::spawn_blocking(move || {
+            crate::atomic::DirLock::acquire(&cache_dir)
+        })
+        .await
+        .map_err(|e| Error::io_error(format!("Lock task failed: {e}")))?
+        .map_err(|e| Error::io_error(format!("Failed to acquire cache lock: {e}")))?;
+
         crate::atomic::atomic_write(&cache_file, json_content.as_bytes())
             .await
             .map_err(|e| Error::io_error(format!("Failed to write cache file: {e}")))?;
@@ -210,6 +220,7 @@ impl ResponseCache {
         // Clean up old entries if we exceed max_entries
         self.cleanup_old_entries(&key.api_name).await?;
 
+        // Lock is released when `_lock` is dropped
         Ok(())
     }
 
