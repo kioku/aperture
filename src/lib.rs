@@ -11,6 +11,7 @@ pub mod engine;
 pub mod error;
 pub mod fs;
 pub mod interactive;
+pub mod invocation;
 pub mod logging;
 pub mod output;
 pub mod resilience;
