@@ -59,6 +59,18 @@ pub trait FileSystem {
     ///
     /// Returns an error if the directory does not exist or cannot be read.
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>>;
+
+    /// Writes data to a file atomically using a temp-file + rename strategy.
+    ///
+    /// The default implementation delegates to [`crate::atomic::atomic_write_sync`].
+    /// Test doubles may override this to use a simpler (non-atomic) write.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write or rename fails.
+    fn atomic_write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        crate::atomic::atomic_write_sync(path, contents)
+    }
 }
 
 pub struct OsFileSystem;

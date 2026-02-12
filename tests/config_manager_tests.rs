@@ -163,6 +163,10 @@ impl FileSystem for MockFileSystem {
         }
         Ok(entries)
     }
+
+    fn atomic_write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        self.write_all(path, contents)
+    }
 }
 
 // --- Tests for ConfigManager ---

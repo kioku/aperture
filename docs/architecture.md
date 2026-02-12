@@ -107,6 +107,48 @@ To ensure fast startup, Aperture does not parse the full OpenAPI specification o
 
 > **Cache validity invariant:** The cache is valid if and only if the spec file fingerprint matches the stored fingerprint. Fingerprint comparison uses a fast path—modification time and file size are checked first—and only computes the content hash if those match.
 
+### 4.3. Concurrency Safety
+
+Aperture is designed for "agent-first" usage where multiple processes may invoke `aperture` concurrently (e.g., parallel CI/CD pipelines, multiple agents). All cache and configuration I/O provides the following guarantees:
+
+#### Atomic Writes
+
+All file writes use a **temp-file + rename** pattern (`src/atomic.rs`):
+
+1. Data is written to a temporary sibling file (`.filename.random.tmp`).
+2. The temp file is atomically renamed to the target path.
+3. On failure, the temp file is cleaned up; the target file is never left in a partial state.
+
+This applies to:
+- **`ResponseCache::store()`** — response cache entries
+- **`CacheMetadataManager::save_metadata()`** — cache metadata JSON
+- **`ConfigManager::write_spec_files()`** — spec YAML and cached binary files
+- **`ConfigManager::save_global_config()`** — `config.toml`
+- **`ConfigManager::set_setting()`** — settings updates
+
+> **Guarantee:** A reader will never observe a partially written file. Concurrent writers to the same path produce one complete file (last writer wins).
+
+#### Advisory File Locking
+
+The response cache directory uses advisory file locking (`fs2`) via a `.aperture.lock` file:
+
+- `ResponseCache::store()` acquires an exclusive lock before writing and cleaning up entries.
+- `ResponseCache::clear_api_cache()` and `ResponseCache::clear_all()` acquire the lock before deleting entries.
+- `ResponseCache::get()` is lock-free (read-only; expired entries are left for `cleanup_old_entries()`).
+- The lock coordinates between cooperating Aperture processes — it does **not** prevent non-Aperture processes from accessing the directory.
+- Locks are automatically released when the lock guard is dropped.
+
+> **Note:** Advisory locking is cooperative. Non-Aperture programs writing to the cache directory are not affected by these locks.
+
+#### Stale Temp File Cleanup
+
+If a process is killed between writing a temporary file and the atomic rename, an orphaned `.*.tmp` file may remain. The `cleanup_old_entries()` routine (invoked under the advisory lock during `store()`) sweeps these files and removes any that are older than 1 hour.
+
+#### Cross-Platform Behavior
+
+- **POSIX (Linux, macOS):** `rename(2)` is atomic within the same filesystem. `flock(2)` provides advisory locking.
+- **Windows:** `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING` provides atomic same-volume renames. `LockFileEx` provides advisory locking.
+
 ## 5. OpenAPI Specification Support (v1.0)
 
 Aperture's v1.0 implementation will support a well-defined subset of the OpenAPI 3.x specification.
