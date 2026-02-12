@@ -1,4 +1,7 @@
+pub mod commands;
+pub mod errors;
 pub mod render;
+pub mod tracing_init;
 pub mod translate;
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
