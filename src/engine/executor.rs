@@ -19,10 +19,8 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::Write;
+use std::collections::HashMap;
 use std::str::FromStr;
-use tabled::Table;
 use tokio::time::sleep;
 
 #[cfg(feature = "jq")]
@@ -107,9 +105,6 @@ impl RetryContext {
         })
     }
 }
-
-/// Maximum number of rows to display in table format to prevent memory exhaustion
-const MAX_TABLE_ROWS: usize = 1000;
 
 // Helper functions
 
@@ -658,7 +653,7 @@ pub async fn execute_request(
         .unwrap_or(false)
         && operation_matches.get_flag("show-examples")
     {
-        print_extended_examples(operation);
+        crate::cli::render::render_examples(operation);
         return Ok(None);
     }
 
@@ -795,72 +790,6 @@ pub async fn execute_request(
 }
 
 /// Finds the operation from the command hierarchy
-/// Print extended examples for a command
-fn print_extended_examples(operation: &CachedCommand) {
-    // ast-grep-ignore: no-println
-    println!("Command: {}\n", to_kebab_case(&operation.operation_id));
-
-    if let Some(ref summary) = operation.summary {
-        // ast-grep-ignore: no-println
-        println!("Description: {summary}\n");
-    }
-
-    // ast-grep-ignore: no-println
-    println!("Method: {} {}\n", operation.method, operation.path);
-
-    if operation.examples.is_empty() {
-        // ast-grep-ignore: no-println
-        println!("No examples available for this command.");
-        return;
-    }
-
-    // ast-grep-ignore: no-println
-    println!("Examples:\n");
-    for (i, example) in operation.examples.iter().enumerate() {
-        // ast-grep-ignore: no-println
-        println!("{}. {}", i + 1, example.description);
-        // ast-grep-ignore: no-println
-        println!("   {}", example.command_line);
-        if let Some(ref explanation) = example.explanation {
-            // ast-grep-ignore: no-println
-            println!("   {explanation}");
-        }
-        // ast-grep-ignore: no-println
-        println!();
-    }
-
-    // Additional helpful information
-    if operation.parameters.is_empty() {
-        return;
-    }
-
-    // ast-grep-ignore: no-println
-    println!("Parameters:");
-    for param in &operation.parameters {
-        let required = if param.required { " (required)" } else { "" };
-        let param_type = param.schema_type.as_deref().unwrap_or("string");
-        // ast-grep-ignore: no-println
-        println!("  --{}{} [{}]", param.name, required, param_type);
-
-        let Some(ref desc) = param.description else {
-            continue;
-        };
-        // ast-grep-ignore: no-println
-        println!("      {desc}");
-    }
-    // ast-grep-ignore: no-println
-    println!();
-
-    if operation.request_body.is_some() {
-        // ast-grep-ignore: no-println
-        println!("Request Body:");
-        // ast-grep-ignore: no-println
-        println!("  --body JSON (required)");
-        // ast-grep-ignore: no-println
-        println!("      JSON data to send in the request body");
-    }
-}
-
 #[allow(dead_code)]
 fn find_operation<'a>(
     spec: &'a CachedSpec,
@@ -1335,242 +1264,27 @@ fn add_authentication_header(
 }
 
 /// Prints the response text in the specified format
+/// Thin wrapper that delegates to `cli::render` for backward compatibility.
+/// This function is removed in step 7 when `execute_request` is deleted.
 fn print_formatted_response(
     response_text: &str,
     output_format: &OutputFormat,
     jq_filter: Option<&str>,
     capture_output: bool,
 ) -> Result<Option<String>, Error> {
-    // Apply JQ filter if provided
-    let processed_text = if let Some(filter) = jq_filter {
-        apply_jq_filter(response_text, filter)?
-    } else {
-        response_text.to_string()
+    use crate::invocation::ExecutionResult;
+
+    let result = ExecutionResult::Success {
+        body: response_text.to_string(),
+        status: 200,
+        headers: std::collections::HashMap::new(),
     };
 
-    match output_format {
-        OutputFormat::Json => {
-            // Try to pretty-print JSON (default behavior)
-            let output = serde_json::from_str::<Value>(&processed_text)
-                .ok()
-                .and_then(|json_value| serde_json::to_string_pretty(&json_value).ok())
-                .unwrap_or_else(|| processed_text.clone());
-
-            if capture_output {
-                return Ok(Some(output));
-            }
-            // ast-grep-ignore: no-println
-            println!("{output}");
-        }
-        OutputFormat::Yaml => {
-            // Convert JSON to YAML
-            let output = serde_json::from_str::<Value>(&processed_text)
-                .ok()
-                .and_then(|json_value| serde_yaml::to_string(&json_value).ok())
-                .unwrap_or_else(|| processed_text.clone());
-
-            if capture_output {
-                return Ok(Some(output));
-            }
-            // ast-grep-ignore: no-println
-            println!("{output}");
-        }
-        OutputFormat::Table => {
-            // Convert JSON to table format
-            let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) else {
-                // If not JSON, output as-is
-                if capture_output {
-                    return Ok(Some(processed_text));
-                }
-                // ast-grep-ignore: no-println
-                println!("{processed_text}");
-                return Ok(None);
-            };
-
-            let table_output = print_as_table(&json_value, capture_output)?;
-            if capture_output {
-                return Ok(table_output);
-            }
-        }
-    }
-
-    Ok(None)
-}
-
-// Define table structures at module level to avoid clippy::items_after_statements
-#[derive(tabled::Tabled)]
-struct TableRow {
-    #[tabled(rename = "Key")]
-    key: String,
-    #[tabled(rename = "Value")]
-    value: String,
-}
-
-#[derive(tabled::Tabled)]
-struct KeyValue {
-    #[tabled(rename = "Key")]
-    key: String,
-    #[tabled(rename = "Value")]
-    value: String,
-}
-
-/// Prints items as a numbered list
-fn print_numbered_list(items: &[Value], capture_output: bool) -> Option<String> {
     if capture_output {
-        let mut output = String::new();
-        for (i, item) in items.iter().enumerate() {
-            writeln!(&mut output, "{}: {}", i, format_value_for_table(item))
-                .expect("writing to String cannot fail");
-        }
-        return Some(output.trim_end().to_string());
-    }
-
-    for (i, item) in items.iter().enumerate() {
-        // ast-grep-ignore: no-println
-        println!("{}: {}", i, format_value_for_table(item));
-    }
-    None
-}
-
-/// Helper to output or capture a message
-fn output_or_capture(message: &str, capture_output: bool) -> Option<String> {
-    if capture_output {
-        return Some(message.to_string());
-    }
-    // ast-grep-ignore: no-println
-    println!("{message}");
-    None
-}
-
-/// Prints JSON data as a formatted table
-#[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
-fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<String>, Error> {
-    match json_value {
-        Value::Array(items) => {
-            if items.is_empty() {
-                return Ok(output_or_capture(constants::EMPTY_ARRAY, capture_output));
-            }
-
-            // Check if array is too large
-            if items.len() > MAX_TABLE_ROWS {
-                let msg = format!(
-                    "Array too large: {} items (max {} for table display)\nUse --format json or --jq to process the full data",
-                    items.len(),
-                    MAX_TABLE_ROWS
-                );
-                return Ok(output_or_capture(&msg, capture_output));
-            }
-
-            // Try to create a table from array of objects
-            let Some(Value::Object(_)) = items.first() else {
-                // Continue to fallback case
-                return Ok(print_numbered_list(items, capture_output));
-            };
-
-            // Create table for array of objects
-            let mut table_data: Vec<BTreeMap<String, String>> = Vec::new();
-
-            for item in items {
-                let Value::Object(obj) = item else {
-                    continue;
-                };
-                let mut row = BTreeMap::new();
-                for (key, value) in obj {
-                    row.insert(key.clone(), format_value_for_table(value));
-                }
-                table_data.push(row);
-            }
-
-            if table_data.is_empty() {
-                // Fallback to numbered list
-                return Ok(print_numbered_list(items, capture_output));
-            }
-
-            // For now, use a simple key-value representation
-            // In the future, we could implement a more sophisticated table structure
-            let mut rows = Vec::new();
-            for (i, row) in table_data.iter().enumerate() {
-                if i > 0 {
-                    rows.push(TableRow {
-                        key: "---".to_string(),
-                        value: "---".to_string(),
-                    });
-                }
-                for (key, value) in row {
-                    rows.push(TableRow {
-                        key: key.clone(),
-                        value: value.clone(),
-                    });
-                }
-            }
-
-            let table = Table::new(&rows);
-            Ok(output_or_capture(&table.to_string(), capture_output))
-        }
-        Value::Object(obj) => {
-            // Check if object has too many fields
-            if obj.len() > MAX_TABLE_ROWS {
-                let msg = format!(
-                    "Object too large: {} fields (max {} for table display)\nUse --format json or --jq to process the full data",
-                    obj.len(),
-                    MAX_TABLE_ROWS
-                );
-                return Ok(output_or_capture(&msg, capture_output));
-            }
-
-            // Create a simple key-value table for objects
-            let rows: Vec<KeyValue> = obj
-                .iter()
-                .map(|(key, value)| KeyValue {
-                    key: key.clone(),
-                    value: format_value_for_table(value),
-                })
-                .collect();
-
-            let table = Table::new(&rows);
-            Ok(output_or_capture(&table.to_string(), capture_output))
-        }
-        _ => {
-            // For primitive values, just print them
-            let formatted = format_value_for_table(json_value);
-            Ok(output_or_capture(&formatted, capture_output))
-        }
-    }
-}
-
-/// Formats a JSON value for display in a table cell
-fn format_value_for_table(value: &Value) -> String {
-    match value {
-        Value::Null => constants::NULL_VALUE.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::String(s) => s.clone(),
-        Value::Array(arr) => {
-            if arr.len() <= 3 {
-                format!(
-                    "[{}]",
-                    arr.iter()
-                        .map(format_value_for_table)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            } else {
-                format!("[{} items]", arr.len())
-            }
-        }
-        Value::Object(obj) => {
-            if obj.len() <= 2 {
-                format!(
-                    "{{{}}}",
-                    obj.iter()
-                        .map(|(k, v)| format!("{}: {}", k, format_value_for_table(v)))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            } else {
-                format!("{{object with {} fields}}", obj.len())
-            }
-        }
+        crate::cli::render::render_result_to_string(&result, output_format, jq_filter)
+    } else {
+        crate::cli::render::render_result(&result, output_format, jq_filter)?;
+        Ok(None)
     }
 }
 
