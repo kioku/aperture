@@ -133,10 +133,16 @@ This applies to:
 The response cache directory uses advisory file locking (`fs2`) via a `.aperture.lock` file:
 
 - `ResponseCache::store()` acquires an exclusive lock before writing and cleaning up entries.
+- `ResponseCache::clear_api_cache()` and `ResponseCache::clear_all()` acquire the lock before deleting entries.
+- `ResponseCache::get()` is lock-free (read-only; expired entries are left for `cleanup_old_entries()`).
 - The lock coordinates between cooperating Aperture processes — it does **not** prevent non-Aperture processes from accessing the directory.
 - Locks are automatically released when the lock guard is dropped.
 
 > **Note:** Advisory locking is cooperative. Non-Aperture programs writing to the cache directory are not affected by these locks.
+
+#### Stale Temp File Cleanup
+
+If a process is killed between writing a temporary file and the atomic rename, an orphaned `.*.tmp` file may remain. The `cleanup_old_entries()` routine (invoked under the advisory lock during `store()`) sweeps these files and removes any that are older than 1 hour.
 
 #### Cross-Platform Behavior
 

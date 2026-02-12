@@ -84,6 +84,28 @@ fn temp_sibling(path: &Path) -> std::path::PathBuf {
     path.with_file_name(temp_name)
 }
 
+/// Check whether an I/O error represents a lock-contention condition
+/// on the current platform.
+fn is_lock_contention_error(e: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        // EAGAIN and EWOULDBLOCK are the same value on Linux but may
+        // differ on other POSIX systems, so we check both.
+        let code = e.raw_os_error();
+        code == Some(libc::EAGAIN) || code == Some(libc::EWOULDBLOCK)
+    }
+    #[cfg(windows)]
+    {
+        // ERROR_LOCK_VIOLATION = 33
+        e.raw_os_error() == Some(33)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = e;
+        false
+    }
+}
+
 /// Name of the advisory lock file placed in cache directories.
 const LOCK_FILE_NAME: &str = ".aperture.lock";
 
@@ -160,14 +182,15 @@ impl DirLock {
         match file.try_lock_exclusive() {
             Ok(()) => Ok(Some(Self { _file: file })),
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
-            // On some platforms, `try_lock_exclusive` may return a different
-            // error kind for "already locked". We treat any lock-contention
-            // error as WouldBlock.
-            Err(e) if e.raw_os_error().is_some() => {
-                // EWOULDBLOCK / EAGAIN on Unix, ERROR_LOCK_VIOLATION on Windows
-                Ok(None)
+            Err(e) => {
+                // On some platforms, `try_lock_exclusive` may return a
+                // platform-specific error code instead of `WouldBlock`.
+                // Only treat known lock-contention codes as "already held".
+                if is_lock_contention_error(&e) {
+                    return Ok(None);
+                }
+                Err(e)
             }
-            Err(e) => Err(e),
         }
     }
 }

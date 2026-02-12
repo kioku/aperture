@@ -161,6 +161,18 @@ impl ResponseCache {
         Ok(Self { config })
     }
 
+    /// Acquire the advisory directory lock asynchronously.
+    ///
+    /// The blocking `flock` call is offloaded to a blocking thread via
+    /// `spawn_blocking` so it does not stall the async runtime.
+    async fn acquire_lock(&self) -> Result<crate::atomic::DirLock, Error> {
+        let cache_dir = self.config.cache_dir.clone();
+        tokio::task::spawn_blocking(move || crate::atomic::DirLock::acquire(&cache_dir))
+            .await
+            .map_err(|e| Error::io_error(format!("Lock task failed: {e}")))?
+            .map_err(|e| Error::io_error(format!("Failed to acquire cache lock: {e}")))
+    }
+
     /// Store a response in the cache
     ///
     /// # Errors
@@ -205,12 +217,7 @@ impl ResponseCache {
 
         // Acquire advisory lock on the cache directory to coordinate with
         // other Aperture processes writing to the same cache.
-        let cache_dir = self.config.cache_dir.clone();
-        let _lock =
-            tokio::task::spawn_blocking(move || crate::atomic::DirLock::acquire(&cache_dir))
-                .await
-                .map_err(|e| Error::io_error(format!("Lock task failed: {e}")))?
-                .map_err(|e| Error::io_error(format!("Failed to acquire cache lock: {e}")))?;
+        let _lock = self.acquire_lock().await?;
 
         crate::atomic::atomic_write(&cache_file, json_content.as_bytes())
             .await
@@ -255,8 +262,10 @@ impl ResponseCache {
             .as_secs();
 
         if now > cached_response.cached_at + cached_response.ttl_seconds {
-            // Cache entry has expired, remove it
-            let _ = tokio::fs::remove_file(&cache_file).await;
+            // Cache entry has expired — don't eagerly delete here because
+            // deletion is a mutating operation that should be coordinated
+            // under the advisory lock. Expired entries are cleaned up by
+            // `cleanup_old_entries()` (called from `store()` under the lock).
             return Ok(None);
         }
 
@@ -274,10 +283,15 @@ impl ResponseCache {
 
     /// Clear all cached responses for a specific API
     ///
+    /// Acquires the advisory directory lock to coordinate with concurrent
+    /// `store()` calls.
+    ///
     /// # Errors
     ///
     /// Returns an error if cache files cannot be removed
     pub async fn clear_api_cache(&self, api_name: &str) -> Result<usize, Error> {
+        let _lock = self.acquire_lock().await?;
+
         let mut cleared_count = 0;
         let mut entries = tokio::fs::read_dir(&self.config.cache_dir)
             .await
@@ -306,10 +320,15 @@ impl ResponseCache {
 
     /// Clear all cached responses
     ///
+    /// Acquires the advisory directory lock to coordinate with concurrent
+    /// `store()` calls.
+    ///
     /// # Errors
     ///
     /// Returns an error if cache directory cannot be cleared
     pub async fn clear_all(&self) -> Result<usize, Error> {
+        let _lock = self.acquire_lock().await?;
+
         let mut cleared_count = 0;
         let mut entries = tokio::fs::read_dir(&self.config.cache_dir)
             .await
@@ -430,9 +449,14 @@ impl ResponseCache {
         Ok(stats)
     }
 
-    /// Clean up old cache entries for an API, keeping only the most recent `max_entries`
+    /// Clean up old cache entries for an API, keeping only the most recent
+    /// `max_entries`.  Also sweeps orphaned `.*.tmp` files older than 1 hour
+    /// that may have been left behind by a crashed process.
     async fn cleanup_old_entries(&self, api_name: &str) -> Result<(), Error> {
         let mut entries = Vec::new();
+        let mut stale_tmp_files = Vec::new();
+        let now_system = SystemTime::now();
+
         let mut dir_entries = tokio::fs::read_dir(&self.config.cache_dir)
             .await
             .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
@@ -444,6 +468,27 @@ impl ResponseCache {
         {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
+
+            // Detect orphaned temp files from crashed atomic writes.
+            // Pattern: .filename.random.tmp
+            if filename_str.starts_with('.')
+                && filename_str.ends_with(".tmp")
+                && filename_str.len() > 4
+            {
+                if let Ok(metadata) = entry.metadata().await {
+                    if let Ok(modified) = metadata.modified() {
+                        // Remove temp files older than 1 hour
+                        if now_system
+                            .duration_since(modified)
+                            .unwrap_or(Duration::ZERO)
+                            > Duration::from_secs(3600)
+                        {
+                            stale_tmp_files.push(entry.path());
+                        }
+                    }
+                }
+                continue;
+            }
 
             if !filename_str.starts_with(&format!("{api_name}_"))
                 || !filename_str.ends_with(constants::CACHE_FILE_SUFFIX)
@@ -460,6 +505,11 @@ impl ResponseCache {
             };
 
             entries.push((entry.path(), modified));
+        }
+
+        // Remove orphaned temp files
+        for path in &stale_tmp_files {
+            let _ = tokio::fs::remove_file(path).await;
         }
 
         // If we have more entries than max_entries, remove the oldest ones
@@ -706,7 +756,9 @@ mod tests {
         // Should no longer be cached due to expiration
         assert!(!cache.is_cached(&key).await.unwrap());
 
-        // The expired file should be removed
-        assert!(!cache_file.exists());
+        // The expired file is not eagerly deleted by get() — it is left for
+        // cleanup_old_entries() which runs under the advisory lock during
+        // store(). Verify the file still exists on disk.
+        assert!(cache_file.exists());
     }
 }

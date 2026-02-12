@@ -118,6 +118,7 @@ dependencies = [
  "jaq-core",
  "jaq-json",
  "jaq-std",
+ "libc",
  "mockall",
  "oas3",
  "once_cell",

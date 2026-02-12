@@ -247,33 +247,57 @@ async fn test_concurrent_store_same_key_no_corruption() {
     );
 }
 
-// ---- Partial write / crash simulation test ----
+// ---- Crash simulation / failure resilience tests ----
 
+/// Simulates a crash between writing the temp file and the rename.
+/// The original target file must remain intact.
 #[tokio::test]
-async fn test_partial_write_does_not_corrupt_existing_file() {
+async fn test_crash_before_rename_leaves_original_intact() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("important.json");
 
-    // Write initial valid content
+    // Write valid initial content via atomic_write
     let original = r#"{"status": "original"}"#;
     atomic_write(&path, original.as_bytes()).await.unwrap();
 
-    // Attempt to write to a path whose parent doesn't exist (simulating failure)
-    // Actually, let's test by writing original, then trying to "rename" from a
-    // non-existent temp — the atomic_write function handles this internally.
-    // Instead, verify that after a successful write followed by reading, the
-    // original content is never in a partial state.
+    // Simulate a crash: manually create a temp sibling (what atomic_write
+    // would create) but never rename it — as if the process was killed.
+    let orphan_tmp = dir.path().join(".important.json.00000000deadbeef.tmp");
+    tokio::fs::write(&orphan_tmp, b"incomplete garbage data")
+        .await
+        .unwrap();
+
+    // The original file must be completely untouched
+    let content = tokio::fs::read_to_string(&path).await.unwrap();
+    assert_eq!(content, original, "Original file must not be corrupted");
+
+    // A subsequent atomic_write should succeed, overwriting the original
+    let updated = r#"{"status": "updated"}"#;
+    atomic_write(&path, updated.as_bytes()).await.unwrap();
+
+    let content = tokio::fs::read_to_string(&path).await.unwrap();
+    assert_eq!(content, updated);
+}
+
+/// Verifies that sequential atomic writes always produce complete files.
+#[tokio::test]
+async fn test_sequential_atomic_writes_preserve_integrity() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("important.json");
+
+    let original = r#"{"status": "original"}"#;
+    atomic_write(&path, original.as_bytes()).await.unwrap();
+
     let content = tokio::fs::read_to_string(&path).await.unwrap();
     assert_eq!(content, original);
 
-    // Overwrite with new content
     let updated = r#"{"status": "updated", "extra": "data"}"#;
     atomic_write(&path, updated.as_bytes()).await.unwrap();
 
     let content = tokio::fs::read_to_string(&path).await.unwrap();
     assert_eq!(content, updated);
 
-    // Verify no temp files remain
+    // Only the target file should remain (no temp files)
     let entries: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .filter_map(Result::ok)
