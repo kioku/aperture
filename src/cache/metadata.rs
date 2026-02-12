@@ -54,7 +54,7 @@ impl<'a, F: FileSystem> CacheMetadataManager<'a, F> {
             Error::serialization_error(format!("Failed to serialize cache metadata: {e}"))
         })?;
 
-        self.fs.write_all(&metadata_path, content.as_bytes())?;
+        self.fs.atomic_write(&metadata_path, content.as_bytes())?;
         Ok(())
     }
 

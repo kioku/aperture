@@ -123,6 +123,10 @@ impl FileSystem for MockFileSystem {
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         Ok(path.to_path_buf())
     }
+
+    fn atomic_write(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        self.write_all(path, contents)
+    }
 }
 
 fn setup_manager() -> (ConfigManager<MockFileSystem>, MockFileSystem) {
