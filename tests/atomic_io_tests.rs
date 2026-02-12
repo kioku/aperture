@@ -240,7 +240,11 @@ async fn test_concurrent_store_same_key_no_corruption() {
     let body_parsed: serde_json::Value = serde_json::from_str(body_str).unwrap();
     assert!(body_parsed.get("writer").is_some());
     let payload = body_parsed["payload"].as_str().unwrap();
-    assert_eq!(payload.len(), 300, "Payload should be complete, not truncated");
+    assert_eq!(
+        payload.len(),
+        300,
+        "Payload should be complete, not truncated"
+    );
 }
 
 // ---- Partial write / crash simulation test ----
