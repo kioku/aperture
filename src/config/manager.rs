@@ -1156,13 +1156,13 @@ impl<F: FileSystem> ConfigManager<F> {
         spec_path: &Path,
         cache_path: &Path,
     ) -> Result<(), Error> {
-        // Write original spec file
-        self.fs.write_all(spec_path, content.as_bytes())?;
+        // Write original spec file atomically
+        self.fs.atomic_write(spec_path, content.as_bytes())?;
 
-        // Serialize and write cached representation
+        // Serialize and write cached representation atomically
         let cached_data = bincode::serialize(cached_spec)
             .map_err(|e| Error::serialization_error(e.to_string()))?;
-        self.fs.write_all(cache_path, &cached_data)?;
+        self.fs.atomic_write(cache_path, &cached_data)?;
 
         // Compute fingerprint for cache invalidation
         let content_hash = compute_content_hash(content.as_bytes());
