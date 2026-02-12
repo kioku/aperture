@@ -1,3 +1,6 @@
+pub mod render;
+pub mod translate;
+
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 
 #[derive(ValueEnum, Clone, Debug)]
