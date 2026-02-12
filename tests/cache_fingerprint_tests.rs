@@ -8,8 +8,8 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
-/// Minimal OpenAPI spec for testing
-fn minimal_spec() -> &'static str {
+/// Minimal `OpenAPI` spec for testing
+const fn minimal_spec() -> &'static str {
     "openapi: 3.0.0
 info:
   title: Fingerprint Test API
@@ -34,7 +34,7 @@ paths:
 }
 
 /// Modified spec with an additional endpoint
-fn modified_spec() -> &'static str {
+const fn modified_spec() -> &'static str {
     "openapi: 3.0.0
 info:
   title: Fingerprint Test API
