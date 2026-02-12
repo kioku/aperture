@@ -481,7 +481,7 @@ impl<F: FileSystem> ConfigManager<F> {
         let content = toml::to_string_pretty(config)
             .map_err(|e| Error::serialization_error(format!("Failed to serialize config: {e}")))?;
 
-        self.fs.write_all(&config_path, content.as_bytes())?;
+        self.fs.atomic_write(&config_path, content.as_bytes())?;
         Ok(())
     }
 
@@ -576,9 +576,9 @@ impl<F: FileSystem> ConfigManager<F> {
         // Ensure config directory exists
         self.fs.create_dir_all(&self.config_dir)?;
 
-        // Write back preserving formatting
+        // Write back preserving formatting (atomic to prevent corruption)
         self.fs
-            .write_all(&config_path, doc.to_string().as_bytes())?;
+            .atomic_write(&config_path, doc.to_string().as_bytes())?;
         Ok(())
     }
 
