@@ -286,15 +286,11 @@ async fn send_request_with_retry(
 
     // Check if safe to retry non-GET requests
     if !ctx.is_safe_to_retry() {
-        // ast-grep-ignore: no-println
-        eprintln!(
-            "Warning: Retries disabled for {} {} - method is not idempotent and no --idempotency-key provided",
-            method,
-            operation.operation_id
-        );
-        // ast-grep-ignore: no-println
-        eprintln!(
-            "         Use --force-retry to enable retries anyway, or provide --idempotency-key"
+        tracing::warn!(
+            method = %method,
+            operation_id = %operation.operation_id,
+            "Retries disabled - method is not idempotent and no idempotency key provided. \
+             Use --force-retry or provide --idempotency-key"
         );
         let request = build_request(client, method.clone(), url, headers, body);
         return send_request(request, secret_ctx).await;
@@ -348,15 +344,14 @@ async fn send_request_with_retry(
 
                 // Check if we have more attempts
                 if attempt < max_attempts {
-                    // ast-grep-ignore: no-println
-                    eprintln!(
-                        "Retry {}/{}: {} {} returned {} - retrying in {}ms",
+                    tracing::warn!(
                         attempt,
                         max_attempts,
-                        method,
-                        operation.operation_id,
-                        status.as_u16(),
-                        delay.as_millis()
+                        method = %method,
+                        operation_id = %operation.operation_id,
+                        status = status.as_u16(),
+                        delay_ms = delay.as_millis(),
+                        "Retrying after HTTP error"
                     );
                     sleep(delay).await;
                 }
@@ -379,15 +374,14 @@ async fn send_request_with_retry(
                     calculate_retry_delay_with_header(&retry_config, (attempt - 1) as usize, None);
 
                 if attempt < max_attempts {
-                    // ast-grep-ignore: no-println
-                    eprintln!(
-                        "Retry {}/{}: {} {} failed - retrying in {}ms: {}",
+                    tracing::warn!(
                         attempt,
                         max_attempts,
-                        method,
-                        operation.operation_id,
-                        delay.as_millis(),
-                        e
+                        method = %method,
+                        operation_id = %operation.operation_id,
+                        delay_ms = delay.as_millis(),
+                        error = %e,
+                        "Retrying after network error"
                     );
                     sleep(delay).await;
                 }
@@ -401,20 +395,22 @@ async fn send_request_with_retry(
     if let (Some(status), Some(headers), Some(text)) =
         (last_status, last_response_headers, last_response_text)
     {
-        // ast-grep-ignore: no-println
-        eprintln!(
-            "Retry exhausted: {} {} failed after {} attempts",
-            method, operation.operation_id, max_attempts
+        tracing::warn!(
+            method = %method,
+            operation_id = %operation.operation_id,
+            max_attempts,
+            "Retry exhausted"
         );
         return Ok((status, headers, text));
     }
 
     // Return detailed retry error if we have a last error
     if let Some(e) = last_error {
-        // ast-grep-ignore: no-println
-        eprintln!(
-            "Retry exhausted: {} {} failed after {} attempts",
-            method, operation.operation_id, max_attempts
+        tracing::warn!(
+            method = %method,
+            operation_id = %operation.operation_id,
+            max_attempts,
+            "Retry exhausted"
         );
         // Return detailed retry error with full context
         return Err(Error::retry_limit_exceeded_detailed(
@@ -1132,14 +1128,11 @@ fn add_authentication_header(
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<(), Error> {
-    // Debug logging when RUST_LOG is set
-    if std::env::var("RUST_LOG").is_ok() {
-        // ast-grep-ignore: no-println
-        eprintln!(
-            "[DEBUG] Adding authentication header for scheme: {} (type: {})",
-            security_scheme.name, security_scheme.scheme_type
-        );
-    }
+    tracing::debug!(
+        scheme_name = %security_scheme.name,
+        scheme_type = %security_scheme.scheme_type,
+        "Adding authentication header"
+    );
 
     // Priority 1: Check config-based secrets first
     let secret_config = global_config
@@ -1165,19 +1158,17 @@ fn add_authentication_header(
         }
     };
 
-    // Debug logging for resolved secret source
-    if std::env::var("RUST_LOG").is_ok() {
-        let source = if secret_config.is_some() {
-            "config"
-        } else {
-            "x-aperture-secret"
-        };
-        // ast-grep-ignore: no-println
-        eprintln!(
-            "[DEBUG] Using secret from {source} for scheme '{}': env var '{env_var_name}'",
-            security_scheme.name
-        );
-    }
+    let source = if secret_config.is_some() {
+        "config"
+    } else {
+        "x-aperture-secret"
+    };
+    tracing::debug!(
+        source,
+        scheme_name = %security_scheme.name,
+        env_var = %env_var_name,
+        "Resolved secret"
+    );
 
     // Validate the secret doesn't contain control characters
     validate_header_value(constants::HEADER_AUTHORIZATION, &secret_value)?;
@@ -1233,25 +1224,7 @@ fn add_authentication_header(
             })?;
             headers.insert(constants::HEADER_AUTHORIZATION, header_value);
 
-            // Debug logging
-            if std::env::var("RUST_LOG").is_ok() {
-                match &auth_scheme {
-                    AuthScheme::Bearer => {
-                        // ast-grep-ignore: no-println
-                        eprintln!("[DEBUG] Added Bearer authentication header");
-                    }
-                    AuthScheme::Basic => {
-                        // ast-grep-ignore: no-println
-                        eprintln!("[DEBUG] Added Basic authentication header (base64 encoded)");
-                    }
-                    _ => {
-                        // ast-grep-ignore: no-println
-                        eprintln!(
-                            "[DEBUG] Added custom HTTP auth header with scheme: {scheme_str}"
-                        );
-                    }
-                }
-            }
+            tracing::debug!(scheme = %scheme_str, "Added HTTP authentication header");
         }
         _ => {
             return Err(Error::unsupported_security_scheme(
@@ -1676,15 +1649,11 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
         || filter.contains("length");
 
     if uses_advanced_features {
-        // ast-grep-ignore: no-println
-        eprintln!(
-            "{} Advanced JQ features require building with --features jq",
-            crate::constants::MSG_WARNING_PREFIX
+        tracing::warn!(
+            "Advanced JQ features require building with --features jq. \
+             Currently only basic field access is supported (e.g., '.field', '.nested.field'). \
+             To enable full JQ support: cargo install aperture-cli --features jq"
         );
-        // ast-grep-ignore: no-println
-        eprintln!("         Currently only basic field access is supported (e.g., '.field', '.nested.field')");
-        // ast-grep-ignore: no-println
-        eprintln!("         To enable full JQ support: cargo install aperture-cli --features jq");
     }
 
     let result = match filter {
