@@ -3,7 +3,7 @@ use aperture_cli::cache::models::{
 };
 use aperture_cli::cli::translate::{
     cli_to_execution_context, extract_server_var_args, has_show_examples_flag,
-    matches_to_operation_call,
+    matches_to_operation_call, matches_to_operation_id,
 };
 use aperture_cli::cli::{Cli, Commands, OutputFormat};
 use aperture_cli::config::models::GlobalConfig;
@@ -253,6 +253,38 @@ fn extract_server_var_args_reads_repeated_flags() {
 fn has_show_examples_flag_checks_deepest_subcommand() {
     let matches = build_matches(true);
     assert!(has_show_examples_flag(&matches));
+}
+
+#[test]
+fn matches_to_operation_id_does_not_validate_body_json() {
+    let spec = build_spec(vec![cached_parameter("id", "path", "string", true)], true);
+
+    let matches = Command::new("aperture")
+        .subcommand(
+            Command::new("users").subcommand(
+                Command::new("get-user-by-id")
+                    .arg(Arg::new("id").required(true))
+                    .arg(Arg::new("body").long("body"))
+                    .arg(
+                        Arg::new("show-examples")
+                            .long("show-examples")
+                            .action(ArgAction::SetTrue),
+                    ),
+            ),
+        )
+        .get_matches_from(vec![
+            "aperture",
+            "users",
+            "get-user-by-id",
+            "123",
+            "--show-examples",
+            "--body",
+            "{not-json}",
+        ]);
+
+    let operation_id =
+        matches_to_operation_id(&spec, &matches).expect("operation resolution should succeed");
+    assert_eq!(operation_id, "getUserById");
 }
 
 #[test]

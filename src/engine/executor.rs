@@ -1,5 +1,4 @@
 use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
-use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
@@ -14,7 +13,6 @@ use crate::response_cache::{
 };
 use crate::utils::to_kebab_case;
 use base64::{engine::general_purpose, Engine as _};
-use clap::ArgMatches;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
 use serde_json::Value;
@@ -512,66 +510,11 @@ async fn store_in_cache(
     Ok(())
 }
 
-/// Legacy wrapper that translates `ArgMatches` into domain types and delegates
-/// to [`execute()`]. Retained for test backward compatibility.
+/// Legacy compatibility wrapper retained for existing tests and callers.
 ///
-/// Production code should use [`execute()`] directly with [`OperationCall`] and
-/// [`ExecutionContext`].
-///
-/// # Errors
-///
-/// Returns errors for authentication failures, network issues, or JQ filter errors.
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::missing_panics_doc)]
-pub async fn execute_request(
-    spec: &CachedSpec,
-    matches: &ArgMatches,
-    base_url: Option<&str>,
-    dry_run: bool,
-    idempotency_key: Option<&str>,
-    global_config: Option<&GlobalConfig>,
-    output_format: &OutputFormat,
-    jq_filter: Option<&str>,
-    cache_config: Option<&CacheConfig>,
-    capture_output: bool,
-    retry_context: Option<&RetryContext>,
-) -> Result<Option<String>, Error> {
-    use crate::cli::translate;
-    use crate::invocation::ExecutionContext;
-
-    // Check --show-examples flag (CLI-only concern)
-    if translate::has_show_examples_flag(matches) {
-        let call = translate::matches_to_operation_call(spec, matches)?;
-        let op = find_operation_by_id(spec, &call.operation_id)?;
-        crate::cli::render::render_examples(op);
-        return Ok(None);
-    }
-
-    // Translate ArgMatches → OperationCall
-    let call = translate::matches_to_operation_call(spec, matches)?;
-
-    // Build ExecutionContext from the individual parameters
-    let ctx = ExecutionContext {
-        dry_run,
-        idempotency_key: idempotency_key.map(String::from),
-        cache_config: cache_config.cloned(),
-        retry_context: retry_context.cloned(),
-        base_url: base_url.map(String::from),
-        global_config: global_config.cloned(),
-        server_var_args: translate::extract_server_var_args(matches),
-    };
-
-    // Execute using the new domain-type API
-    let result = execute(spec, call, ctx).await?;
-
-    // Render to string or stdout based on capture_output
-    if capture_output {
-        crate::cli::render::render_result_to_string(&result, output_format, jq_filter)
-    } else {
-        crate::cli::render::render_result(&result, output_format, jq_filter)?;
-        Ok(None)
-    }
-}
+/// The implementation lives in the CLI layer to keep this engine module free
+/// of direct clap/rendering dependencies.
+pub use crate::cli::legacy_execute::execute_request;
 
 /// Validates that a header value doesn't contain control characters
 fn validate_header_value(name: &str, value: &str) -> Result<(), Error> {
@@ -939,10 +882,14 @@ fn build_url_from_params(
 
     // Append query parameters
     if !query_params.is_empty() {
-        let qs: Vec<String> = query_params
-            .iter()
+        let mut qs_pairs: Vec<(&String, &String)> = query_params.iter().collect();
+        qs_pairs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+
+        let qs: Vec<String> = qs_pairs
+            .into_iter()
             .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
             .collect();
+
         url.push('?');
         url.push_str(&qs.join("&"));
     }
@@ -1237,6 +1184,23 @@ fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_build_url_from_params_sorts_query_parameters() {
+        let mut query = std::collections::HashMap::new();
+        query.insert("b".to_string(), "2".to_string());
+        query.insert("a".to_string(), "1".to_string());
+
+        let url = build_url_from_params(
+            "https://example.com",
+            "/items",
+            &std::collections::HashMap::new(),
+            &query,
+        )
+        .expect("url build should succeed");
+
+        assert_eq!(url, "https://example.com/items?a=1&b=2");
+    }
 
     #[test]
     fn test_apply_jq_filter_simple_field_access() {

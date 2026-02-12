@@ -32,33 +32,7 @@ pub fn matches_to_operation_call(
     spec: &CachedSpec,
     matches: &ArgMatches,
 ) -> Result<OperationCall, Error> {
-    // Walk the subcommand hierarchy to find the deepest matches and operation name
-    let mut current_matches = matches;
-    let mut subcommand_path = Vec::new();
-
-    while let Some((name, sub_matches)) = current_matches.subcommand() {
-        subcommand_path.push(name.to_string());
-        current_matches = sub_matches;
-    }
-
-    let operation_name = subcommand_path.last().ok_or_else(|| {
-        let name = "unknown".to_string();
-        let suggestions = crate::suggestions::suggest_similar_operations(spec, &name);
-        Error::operation_not_found_with_suggestions(name, &suggestions)
-    })?;
-
-    // Find the matching operation in the spec
-    let operation = spec
-        .commands
-        .iter()
-        .find(|cmd| {
-            let kebab_id = to_kebab_case(&cmd.operation_id);
-            &kebab_id == operation_name || cmd.method.to_lowercase() == *operation_name
-        })
-        .ok_or_else(|| {
-            let suggestions = crate::suggestions::suggest_similar_operations(spec, operation_name);
-            Error::operation_not_found_with_suggestions(operation_name.clone(), &suggestions)
-        })?;
+    let (operation, current_matches) = find_operation_from_matches(spec, matches)?;
 
     // Extract parameters by location
     let mut path_params = HashMap::new();
@@ -94,6 +68,55 @@ pub fn matches_to_operation_call(
         body,
         custom_headers,
     })
+}
+
+/// Resolves the matched operation and returns its `operation_id`.
+///
+/// Unlike [`matches_to_operation_call`], this does not attempt to parse or
+/// validate request body content, making it suitable for purely metadata-driven
+/// flows like `--show-examples`.
+///
+/// # Errors
+///
+/// Returns an error if no matching operation can be resolved from the
+/// subcommand hierarchy.
+pub fn matches_to_operation_id(spec: &CachedSpec, matches: &ArgMatches) -> Result<String, Error> {
+    let (operation, _) = find_operation_from_matches(spec, matches)?;
+    Ok(operation.operation_id.clone())
+}
+
+/// Walks the clap hierarchy and resolves the target operation plus deepest matches.
+fn find_operation_from_matches<'a>(
+    spec: &'a CachedSpec,
+    matches: &'a ArgMatches,
+) -> Result<(&'a crate::cache::models::CachedCommand, &'a ArgMatches), Error> {
+    let mut current_matches = matches;
+    let mut subcommand_path = Vec::new();
+
+    while let Some((name, sub_matches)) = current_matches.subcommand() {
+        subcommand_path.push(name.to_string());
+        current_matches = sub_matches;
+    }
+
+    let operation_name = subcommand_path.last().ok_or_else(|| {
+        let name = "unknown".to_string();
+        let suggestions = crate::suggestions::suggest_similar_operations(spec, &name);
+        Error::operation_not_found_with_suggestions(name, &suggestions)
+    })?;
+
+    let operation = spec
+        .commands
+        .iter()
+        .find(|cmd| {
+            let kebab_id = to_kebab_case(&cmd.operation_id);
+            &kebab_id == operation_name || cmd.method.to_lowercase() == *operation_name
+        })
+        .ok_or_else(|| {
+            let suggestions = crate::suggestions::suggest_similar_operations(spec, operation_name);
+            Error::operation_not_found_with_suggestions(operation_name.clone(), &suggestions)
+        })?;
+
+    Ok((operation, current_matches))
 }
 
 /// Extracts a single parameter value from matches and inserts it into the

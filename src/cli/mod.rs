@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod errors;
+pub mod legacy_execute;
 pub mod render;
 pub mod tracing_init;
 pub mod translate;

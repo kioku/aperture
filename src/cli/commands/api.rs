@@ -99,11 +99,11 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
 
     // Check --show-examples flag
     if crate::cli::translate::has_show_examples_flag(&matches) {
-        let call = crate::cli::translate::matches_to_operation_call(&spec, &matches)?;
+        let operation_id = crate::cli::translate::matches_to_operation_id(&spec, &matches)?;
         let operation = spec
             .commands
             .iter()
-            .find(|cmd| cmd.operation_id == call.operation_id)
+            .find(|cmd| cmd.operation_id == operation_id)
             .ok_or_else(|| Error::spec_not_found(context))?;
         crate::cli::render::render_examples(operation);
         return Ok(());
