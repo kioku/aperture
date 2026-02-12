@@ -7,8 +7,6 @@ use aperture_cli::config::manager::{get_config_dir, ConfigManager};
 use aperture_cli::config::models::{GlobalConfig, SecretSource};
 use aperture_cli::constants;
 use aperture_cli::docs::{DocumentationGenerator, HelpFormatter};
-use aperture_cli::duration::parse_duration;
-use aperture_cli::engine::executor::RetryContext;
 use aperture_cli::engine::{executor, generator, loader};
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
@@ -20,7 +18,6 @@ use aperture_cli::shortcuts::{ResolutionResult, ShortcutResolver};
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -57,6 +54,31 @@ async fn main() {
 /// Validates and returns the API context name, returning an error for invalid names.
 fn validate_api_name(name: &str) -> Result<ApiContextName, Error> {
     ApiContextName::new(name)
+}
+
+/// Resolves the output format from dynamic matches vs CLI global flag.
+fn resolve_output_format(
+    matches: &clap::ArgMatches,
+    cli_format: &aperture_cli::cli::OutputFormat,
+) -> aperture_cli::cli::OutputFormat {
+    matches.get_one::<String>("format").map_or_else(
+        || cli_format.clone(),
+        |format_str| {
+            let is_default_json = format_str == "json"
+                && !matches!(cli_format, aperture_cli::cli::OutputFormat::Json);
+
+            if is_default_json {
+                return cli_format.clone();
+            }
+
+            match format_str.as_str() {
+                "json" => aperture_cli::cli::OutputFormat::Json,
+                "yaml" => aperture_cli::cli::OutputFormat::Yaml,
+                "table" => aperture_cli::cli::OutputFormat::Table,
+                _ => cli_format.clone(),
+            }
+        },
+    )
 }
 
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
@@ -699,13 +721,23 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         .await;
     }
 
-    // Generate the dynamic command tree
+    // Generate the dynamic command tree and parse arguments
     let command = generator::generate_command_tree_with_flags(&spec, cli.positional_args);
-
-    // Parse the arguments against the dynamic command
     let matches = command
         .try_get_matches_from(std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args))
         .map_err(|e| Error::invalid_command(context, e.to_string()))?;
+
+    // Check --show-examples flag (CLI-only concern, handled before executor)
+    if aperture_cli::cli::translate::has_show_examples_flag(&matches) {
+        let call = aperture_cli::cli::translate::matches_to_operation_call(&spec, &matches)?;
+        let operation = spec
+            .commands
+            .iter()
+            .find(|cmd| cmd.operation_id == call.operation_id)
+            .ok_or_else(|| Error::spec_not_found(context))?;
+        aperture_cli::cli::render::render_examples(operation);
+        return Ok(());
+    }
 
     // Extract JQ filter from dynamic matches (takes precedence) or CLI global flag
     let jq_filter = matches
@@ -714,63 +746,16 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
         .or(cli.jq.as_deref());
 
     // Extract format from dynamic matches or fall back to CLI global flag
-    // Only override the CLI format if the dynamic format was explicitly provided (not default)
-    let output_format = matches.get_one::<String>("format").map_or_else(
-        || cli.format.clone(),
-        |format_str| {
-            // Check if the user explicitly provided a format or if it's the default
-            // If the CLI format is not the default Json, use the CLI format
-            let is_default_json = format_str == "json"
-                && !matches!(cli.format, aperture_cli::cli::OutputFormat::Json);
+    let output_format = resolve_output_format(&matches, &cli.format);
 
-            if is_default_json {
-                // User didn't explicitly set format in dynamic command, use CLI global format
-                return cli.format.clone();
-            }
+    // Translate ArgMatches → domain types
+    let call = aperture_cli::cli::translate::matches_to_operation_call(&spec, &matches)?;
+    let mut ctx = aperture_cli::cli::translate::cli_to_execution_context(cli, global_config)?;
+    // Server var args come from the dynamic matches, not CLI struct
+    ctx.server_var_args = aperture_cli::cli::translate::extract_server_var_args(&matches);
 
-            match format_str.as_str() {
-                "json" => aperture_cli::cli::OutputFormat::Json,
-                "yaml" => aperture_cli::cli::OutputFormat::Yaml,
-                "table" => aperture_cli::cli::OutputFormat::Table,
-                _ => cli.format.clone(),
-            }
-        },
-    );
-
-    // Create cache configuration from CLI flags
-    let cache_config = if cli.no_cache {
-        None
-    } else {
-        Some(CacheConfig {
-            cache_dir: config_dir
-                .join(constants::DIR_CACHE)
-                .join(constants::DIR_RESPONSES),
-            default_ttl: Duration::from_secs(cli.cache_ttl.unwrap_or(300)),
-            max_entries: 1000,
-            enabled: cli.cache || cli.cache_ttl.is_some(),
-            allow_authenticated: false, // Secure by default
-        })
-    };
-
-    // Build retry configuration from CLI flags and global config defaults
-    let retry_context = build_retry_context(cli, global_config.as_ref())?;
-
-    // Execute the request with agent flags
-    executor::execute_request(
-        &spec,
-        &matches,
-        None, // base_url (None = use BaseUrlResolver)
-        cli.dry_run,
-        cli.idempotency_key.as_deref(),
-        global_config.as_ref(),
-        &output_format,
-        jq_filter,
-        cache_config.as_ref(),
-        false, // capture_output
-        retry_context.as_ref(),
-    )
-    .await
-    .map_err(|e| {
+    // Execute the request using domain types
+    let result = executor::execute(&spec, call, ctx).await.map_err(|e| {
         let Error::Network(req_err) = &e else {
             return e;
         };
@@ -785,6 +770,9 @@ async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Res
 
         e
     })?;
+
+    // Render the result to stdout
+    aperture_cli::cli::render::render_result(&result, &output_format, jq_filter)?;
 
     Ok(())
 }
@@ -1486,55 +1474,4 @@ fn load_all_specs(
     }
 
     Ok(all_specs)
-}
-
-/// Builds a `RetryContext` from CLI flags and global configuration.
-///
-/// CLI flags take precedence over global config defaults.
-#[allow(clippy::cast_possible_truncation)]
-fn build_retry_context(
-    cli: &Cli,
-    global_config: Option<&GlobalConfig>,
-) -> Result<Option<RetryContext>, Error> {
-    // Get retry defaults from global config
-    let defaults = global_config.map(|c| &c.retry_defaults);
-
-    // Determine max_attempts: CLI > global config > 0 (disabled)
-    let max_attempts = cli
-        .retry
-        .or_else(|| defaults.map(|d| d.max_attempts))
-        .unwrap_or(0);
-
-    // If retries are disabled, return None
-    if max_attempts == 0 {
-        return Ok(None);
-    }
-
-    // Determine initial_delay_ms: CLI > global config > 500ms default
-    // Truncation is safe: delay values in practice are well under u64::MAX milliseconds
-    let initial_delay_ms = if let Some(ref delay_str) = cli.retry_delay {
-        parse_duration(delay_str)?.as_millis() as u64
-    } else {
-        defaults.map_or(500, |d| d.initial_delay_ms)
-    };
-
-    // Determine max_delay_ms: CLI > global config > 30000ms default
-    // Truncation is safe: delay values in practice are well under u64::MAX milliseconds
-    let max_delay_ms = if let Some(ref delay_str) = cli.retry_max_delay {
-        parse_duration(delay_str)?.as_millis() as u64
-    } else {
-        defaults.map_or(30_000, |d| d.max_delay_ms)
-    };
-
-    // Check for idempotency key
-    let has_idempotency_key = cli.idempotency_key.is_some();
-
-    Ok(Some(RetryContext {
-        max_attempts,
-        initial_delay_ms,
-        max_delay_ms,
-        force_retry: cli.force_retry,
-        method: None, // Will be determined in executor
-        has_idempotency_key,
-    }))
 }

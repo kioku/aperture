@@ -114,19 +114,22 @@ fn extract_param(
 
     let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
 
+    if !is_boolean {
+        // Non-boolean: extract string value (must be checked first to avoid
+        // get_flag panic on non-boolean args)
+        let Some(value) = matches.try_get_one::<String>(&param.name).ok().flatten() else {
+            return;
+        };
+        target.insert(param.name.clone(), value.clone());
+        return;
+    }
+
     // Boolean parameters are flags (SetTrue action in clap)
     // Path booleans always need a value (true/false); query/header only when true
-    match (is_boolean, matches.get_flag(&param.name), &*param.location) {
-        (true, true, _) => target.insert(param.name.clone(), "true".to_string()),
-        (true, false, "path") => target.insert(param.name.clone(), "false".to_string()),
-        (true, false, _) => return,
-        (false, _, _) => {
-            let Some(value) = matches.try_get_one::<String>(&param.name).ok().flatten() else {
-                return;
-            };
-            target.insert(param.name.clone(), value.clone())
-        }
-    };
+    let flag_set = matches.get_flag(&param.name);
+    if flag_set || param.location == "path" {
+        target.insert(param.name.clone(), flag_set.to_string());
+    }
 }
 
 /// Extracts the request body from matches.

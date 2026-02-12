@@ -1,4 +1,4 @@
-use crate::cache::models::{CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec};
+use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
 use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
@@ -108,16 +108,6 @@ impl RetryContext {
 
 // Helper functions
 
-/// Extract server variable arguments from CLI matches
-fn extract_server_var_args(matches: &ArgMatches) -> Vec<String> {
-    matches
-        .try_get_many::<String>("server-var")
-        .ok()
-        .flatten()
-        .map(|values| values.cloned().collect())
-        .unwrap_or_default()
-}
-
 /// Build HTTP client with default timeout
 fn build_http_client() -> Result<reqwest::Client, Error> {
     reqwest::Client::builder()
@@ -129,79 +119,6 @@ fn build_http_client() -> Result<reqwest::Client, Error> {
                 format!("Failed to create HTTP client: {e}"),
             )
         })
-}
-
-/// Extract request body from matches
-fn extract_request_body(
-    operation: &CachedCommand,
-    matches: &ArgMatches,
-) -> Result<Option<String>, Error> {
-    if operation.request_body.is_none() {
-        return Ok(None);
-    }
-
-    // Get to the deepest subcommand matches
-    let mut current_matches = matches;
-    while let Some((_name, sub_matches)) = current_matches.subcommand() {
-        current_matches = sub_matches;
-    }
-
-    if let Some(body_value) = current_matches.get_one::<String>("body") {
-        // Validate JSON
-        let _json_body: Value = serde_json::from_str(body_value)
-            .map_err(|e| Error::invalid_json_body(e.to_string()))?;
-        Ok(Some(body_value.clone()))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Handle dry-run mode
-fn handle_dry_run(
-    dry_run: bool,
-    method: &reqwest::Method,
-    url: &str,
-    headers: &reqwest::header::HeaderMap,
-    body: Option<&str>,
-    operation: &CachedCommand,
-    capture_output: bool,
-) -> Result<Option<String>, Error> {
-    if !dry_run {
-        return Ok(None);
-    }
-
-    let headers_map: HashMap<String, String> = headers
-        .iter()
-        .map(|(k, v)| {
-            let value = if logging::should_redact_header(k.as_str()) {
-                "[REDACTED]".to_string()
-            } else {
-                v.to_str().unwrap_or("<binary>").to_string()
-            };
-            (k.as_str().to_string(), value)
-        })
-        .collect();
-
-    let dry_run_info = serde_json::json!({
-        "dry_run": true,
-        "method": method.to_string(),
-        "url": url,
-        "headers": headers_map,
-        "body": body,
-        "operation_id": operation.operation_id
-    });
-
-    let output = serde_json::to_string_pretty(&dry_run_info).map_err(|e| {
-        Error::serialization_error(format!("Failed to serialize dry run info: {e}"))
-    })?;
-
-    if capture_output {
-        Ok(Some(output))
-    } else {
-        // ast-grep-ignore: no-println
-        println!("{output}");
-        Ok(None)
-    }
 }
 
 /// Send HTTP request and get response
@@ -595,37 +512,17 @@ async fn store_in_cache(
     Ok(())
 }
 
-/// Executes HTTP requests based on parsed CLI arguments and cached spec data.
+/// Legacy wrapper that translates `ArgMatches` into domain types and delegates
+/// to [`execute()`]. Retained for test backward compatibility.
 ///
-/// This module handles the mapping from CLI arguments back to API operations,
-/// resolves authentication secrets, builds HTTP requests, and validates responses.
-///
-/// # Arguments
-/// * `spec` - The cached specification containing operation details
-/// * `matches` - Parsed CLI arguments from clap
-/// * `base_url` - Optional base URL override. If None, uses `BaseUrlResolver`
-/// * `dry_run` - If true, show request details without executing
-/// * `idempotency_key` - Optional idempotency key for safe retries
-/// * `global_config` - Optional global configuration for URL resolution
-/// * `output_format` - Format for response output (json, yaml, table)
-/// * `jq_filter` - Optional JQ filter expression to apply to response
-/// * `cache_config` - Optional cache configuration for response caching
-/// * `capture_output` - If true, captures output and returns it instead of printing to stdout
-/// * `retry_context` - Optional retry configuration for automatic request retries
-///
-/// # Returns
-/// * `Ok(Option<String>)` - Request executed successfully. Returns Some(output) if `capture_output` is true
-/// * `Err(Error)` - Request failed or validation error
+/// Production code should use [`execute()`] directly with [`OperationCall`] and
+/// [`ExecutionContext`].
 ///
 /// # Errors
-/// Returns errors for authentication failures, network issues, response validation, or JQ filter errors
 ///
-/// # Panics
-/// Panics if JSON serialization of dry-run information fails (extremely unlikely)
-#[allow(clippy::too_many_lines)]
+/// Returns errors for authentication failures, network issues, or JQ filter errors.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::missing_panics_doc)]
-#[allow(clippy::missing_errors_doc)]
 pub async fn execute_request(
     spec: &CachedSpec,
     matches: &ArgMatches,
@@ -639,445 +536,41 @@ pub async fn execute_request(
     capture_output: bool,
     retry_context: Option<&RetryContext>,
 ) -> Result<Option<String>, Error> {
-    // Find the operation from the command hierarchy (also returns the operation's ArgMatches)
-    let (operation, operation_matches) = find_operation_with_matches(spec, matches)?;
+    use crate::cli::translate;
+    use crate::invocation::ExecutionContext;
 
-    // Check if --show-examples flag is present in the operation's matches
-    // Only check if the flag exists in the matches (it won't exist in some test scenarios)
-    if operation_matches
-        .try_contains_id("show-examples")
-        .unwrap_or(false)
-        && operation_matches.get_flag("show-examples")
-    {
-        crate::cli::render::render_examples(operation);
+    // Check --show-examples flag (CLI-only concern)
+    if translate::has_show_examples_flag(matches) {
+        let call = translate::matches_to_operation_call(spec, matches)?;
+        let op = find_operation_by_id(spec, &call.operation_id)?;
+        crate::cli::render::render_examples(op);
         return Ok(None);
     }
 
-    // Extract server variable arguments
-    let server_var_args = extract_server_var_args(matches);
+    // Translate ArgMatches → OperationCall
+    let call = translate::matches_to_operation_call(spec, matches)?;
 
-    // Resolve base URL using the new priority hierarchy with server variable support
-    let resolver = BaseUrlResolver::new(spec);
-    let resolver = if let Some(config) = global_config {
-        resolver.with_global_config(config)
-    } else {
-        resolver
-    };
-    let base_url = resolver.resolve_with_variables(base_url, &server_var_args)?;
-
-    // Build the full URL with path parameters
-    let url = build_url(&base_url, &operation.path, operation, operation_matches)?;
-
-    // Create HTTP client
-    let client = build_http_client()?;
-
-    // Build headers including authentication and idempotency
-    let mut headers = build_headers(
-        spec,
-        operation,
-        operation_matches,
-        &spec.name,
-        global_config,
-    )?;
-
-    // Add idempotency key if provided
-    if let Some(key) = idempotency_key {
-        headers.insert(
-            HeaderName::from_static("idempotency-key"),
-            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
-        );
-    }
-
-    // Build request
-    let method = Method::from_str(&operation.method)
-        .map_err(|_| Error::invalid_http_method(&operation.method))?;
-
-    let headers_clone = headers.clone(); // For dry-run output
-
-    // Extract request body
-    let request_body = extract_request_body(operation, operation_matches)?;
-
-    // Prepare cache context
-    let cache_context = prepare_cache_context(
-        cache_config,
-        &spec.name,
-        &operation.operation_id,
-        &method,
-        &url,
-        &headers_clone,
-        request_body.as_deref(),
-    )?;
-
-    // Check cache for existing response
-    if let Some(cached_response) = check_cache(cache_context.as_ref()).await? {
-        let output = print_formatted_response(
-            &cached_response.body,
-            output_format,
-            jq_filter,
-            capture_output,
-        )?;
-        return Ok(output);
-    }
-
-    // Handle dry-run mode
-    if let Some(output) = handle_dry_run(
+    // Build ExecutionContext from the individual parameters
+    let ctx = ExecutionContext {
         dry_run,
-        &method,
-        &url,
-        &headers_clone,
-        request_body.as_deref(),
-        operation,
-        capture_output,
-    )? {
-        return Ok(Some(output));
-    }
-    if dry_run {
-        return Ok(None);
-    }
+        idempotency_key: idempotency_key.map(String::from),
+        cache_config: cache_config.cloned(),
+        retry_context: retry_context.cloned(),
+        base_url: base_url.map(String::from),
+        global_config: global_config.cloned(),
+        server_var_args: translate::extract_server_var_args(matches),
+    };
 
-    // Build retry context with method information
-    let retry_ctx = retry_context.map(|ctx| {
-        let mut ctx = ctx.clone();
-        ctx.method = Some(method.to_string());
-        ctx
-    });
+    // Execute using the new domain-type API
+    let result = execute(spec, call, ctx).await?;
 
-    // Build secret context for dynamic secret redaction in logs
-    let secret_ctx = logging::SecretContext::from_spec_and_config(spec, &spec.name, global_config);
-
-    // Send request with retry support
-    let (status, response_headers, response_text) = send_request_with_retry(
-        &client,
-        method.clone(),
-        &url,
-        headers,
-        request_body.clone(),
-        retry_ctx.as_ref(),
-        operation,
-        Some(&secret_ctx),
-    )
-    .await?;
-
-    // Check if request was successful
-    if !status.is_success() {
-        return Err(handle_http_error(status, response_text, spec, operation));
-    }
-
-    // Store response in cache
-    store_in_cache(
-        cache_context,
-        &response_text,
-        status,
-        &response_headers,
-        method,
-        url,
-        &headers_clone,
-        request_body.as_deref(),
-        cache_config,
-    )
-    .await?;
-
-    // Print response in the requested format
-    if response_text.is_empty() {
+    // Render to string or stdout based on capture_output
+    if capture_output {
+        crate::cli::render::render_result_to_string(&result, output_format, jq_filter)
+    } else {
+        crate::cli::render::render_result(&result, output_format, jq_filter)?;
         Ok(None)
-    } else {
-        print_formatted_response(&response_text, output_format, jq_filter, capture_output)
     }
-}
-
-/// Finds the operation from the command hierarchy
-#[allow(dead_code)]
-fn find_operation<'a>(
-    spec: &'a CachedSpec,
-    matches: &ArgMatches,
-) -> Result<&'a CachedCommand, Error> {
-    // Get the subcommand path from matches
-    let mut current_matches = matches;
-    let mut subcommand_path = Vec::new();
-
-    while let Some((name, sub_matches)) = current_matches.subcommand() {
-        subcommand_path.push(name);
-        current_matches = sub_matches;
-    }
-
-    // For now, just find the first matching operation
-    // In a real implementation, we'd match based on the full path
-    let Some(operation_name) = subcommand_path.last() else {
-        let operation_name = "unknown".to_string();
-        let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
-        return Err(Error::operation_not_found_with_suggestions(
-            operation_name,
-            &suggestions,
-        ));
-    };
-
-    for command in &spec.commands {
-        // Convert operation_id to kebab-case for comparison
-        let kebab_id = to_kebab_case(&command.operation_id);
-        if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
-            return Ok(command);
-        }
-    }
-
-    let operation_name = subcommand_path
-        .last()
-        .map_or_else(|| "unknown".to_string(), ToString::to_string);
-
-    // Generate suggestions for similar operations
-    let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
-
-    Err(Error::operation_not_found_with_suggestions(
-        operation_name,
-        &suggestions,
-    ))
-}
-
-fn find_operation_with_matches<'a>(
-    spec: &'a CachedSpec,
-    matches: &'a ArgMatches,
-) -> Result<(&'a CachedCommand, &'a ArgMatches), Error> {
-    // Get the subcommand path from matches
-    let mut current_matches = matches;
-    let mut subcommand_path = Vec::new();
-
-    while let Some((name, sub_matches)) = current_matches.subcommand() {
-        subcommand_path.push(name);
-        current_matches = sub_matches;
-    }
-
-    // For now, just find the first matching operation
-    // In a real implementation, we'd match based on the full path
-    let Some(operation_name) = subcommand_path.last() else {
-        let operation_name = "unknown".to_string();
-        let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
-        return Err(Error::operation_not_found_with_suggestions(
-            operation_name,
-            &suggestions,
-        ));
-    };
-
-    for command in &spec.commands {
-        // Convert operation_id to kebab-case for comparison
-        let kebab_id = to_kebab_case(&command.operation_id);
-        if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
-            // Return current_matches (the deepest subcommand) which contains the operation's arguments
-            return Ok((command, current_matches));
-        }
-    }
-
-    let operation_name = subcommand_path
-        .last()
-        .map_or_else(|| "unknown".to_string(), ToString::to_string);
-
-    // Generate suggestions for similar operations
-    let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
-
-    Err(Error::operation_not_found_with_suggestions(
-        operation_name,
-        &suggestions,
-    ))
-}
-
-/// Get query parameter value formatted for URL
-/// Returns None if the parameter value should be skipped
-fn get_query_param_value(
-    param: &CachedParameter,
-    current_matches: &ArgMatches,
-    arg_str: &str,
-) -> Option<String> {
-    let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
-
-    if is_boolean {
-        // Boolean parameters are flags - add only if set
-        current_matches
-            .get_flag(arg_str)
-            .then(|| format!("{arg_str}=true"))
-    } else {
-        // Non-boolean parameters have string values
-        current_matches
-            .get_one::<String>(arg_str)
-            .map(|value| format!("{arg_str}={}", urlencoding::encode(value)))
-    }
-}
-
-/// Builds the full URL with path parameters substituted
-///
-/// Note: Server variable substitution is now handled by `BaseUrlResolver.resolve_with_variables()`
-/// before calling this function, so `base_url` should already have server variables resolved.
-fn build_url(
-    base_url: &str,
-    path_template: &str,
-    operation: &CachedCommand,
-    matches: &ArgMatches,
-) -> Result<String, Error> {
-    let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
-
-    // Get to the deepest subcommand matches
-    let mut current_matches = matches;
-    while let Some((_name, sub_matches)) = current_matches.subcommand() {
-        current_matches = sub_matches;
-    }
-
-    // Substitute path parameters
-    // Look for {param} patterns and replace with values from matches
-    let mut start = 0;
-    while let Some(open) = url[start..].find('{') {
-        let open_pos = start + open;
-        let Some(close) = url[open_pos..].find('}') else {
-            break;
-        };
-
-        let close_pos = open_pos + close;
-        let param_name = &url[open_pos + 1..close_pos];
-
-        // Check if this is a boolean parameter
-        let param = operation.parameters.iter().find(|p| p.name == param_name);
-        let is_boolean = param
-            .and_then(|p| p.schema_type.as_ref())
-            .is_some_and(|t| t == "boolean");
-
-        let value = if is_boolean {
-            // Boolean path parameters are flags
-            if current_matches.get_flag(param_name) {
-                "true"
-            } else {
-                "false"
-            }
-            .to_string()
-        } else {
-            match current_matches
-                .try_get_one::<String>(param_name)
-                .ok()
-                .flatten()
-            {
-                Some(string_value) => string_value.clone(),
-                None => return Err(Error::missing_path_parameter(param_name)),
-            }
-        };
-
-        url.replace_range(open_pos..=close_pos, &value);
-        start = open_pos + value.len();
-    }
-
-    // Add query parameters
-    let mut query_params = Vec::new();
-    for arg in current_matches.ids() {
-        let arg_str = arg.as_str();
-        // Skip non-query args - only process query parameters from the operation
-        let param = operation
-            .parameters
-            .iter()
-            .find(|p| p.name == arg_str && p.location == "query");
-
-        let Some(param) = param else {
-            continue;
-        };
-
-        // Get query param value using helper (handles boolean vs string params)
-        if let Some(value) = get_query_param_value(param, current_matches, arg_str) {
-            query_params.push(value);
-        }
-    }
-
-    if !query_params.is_empty() {
-        url.push('?');
-        url.push_str(&query_params.join("&"));
-    }
-
-    Ok(url)
-}
-
-/// Get header value for a parameter from CLI matches
-/// Returns None if the parameter value should be skipped
-fn get_header_param_value(
-    param: &CachedParameter,
-    current_matches: &ArgMatches,
-) -> Result<Option<HeaderValue>, Error> {
-    let is_boolean = matches!(param.schema_type.as_deref(), Some("boolean"));
-
-    // Handle boolean and non-boolean parameters separately to avoid
-    // panics from mismatched types (get_flag on string or get_one on bool)
-    if is_boolean {
-        return Ok(current_matches
-            .get_flag(&param.name)
-            .then_some(HeaderValue::from_static("true")));
-    }
-
-    // Non-boolean: get string value
-    current_matches
-        .get_one::<String>(&param.name)
-        .map(|value| {
-            HeaderValue::from_str(value)
-                .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))
-        })
-        .transpose()
-}
-
-/// Builds headers including authentication
-fn build_headers(
-    spec: &CachedSpec,
-    operation: &CachedCommand,
-    matches: &ArgMatches,
-    api_name: &str,
-    global_config: Option<&GlobalConfig>,
-) -> Result<HeaderMap, Error> {
-    let mut headers = HeaderMap::new();
-
-    // Add default headers
-    headers.insert("User-Agent", HeaderValue::from_static("aperture/0.1.0"));
-    headers.insert(
-        constants::HEADER_ACCEPT,
-        HeaderValue::from_static(constants::CONTENT_TYPE_JSON),
-    );
-
-    // Get to the deepest subcommand matches
-    let mut current_matches = matches;
-    while let Some((_name, sub_matches)) = current_matches.subcommand() {
-        current_matches = sub_matches;
-    }
-
-    // Add header parameters from matches
-    for param in &operation.parameters {
-        // Skip non-header parameters early
-        if param.location != "header" {
-            continue;
-        }
-
-        let header_name = HeaderName::from_str(&param.name)
-            .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
-
-        // Get header value using helper (handles boolean vs string params)
-        let Some(header_value) = get_header_param_value(param, current_matches)? else {
-            continue;
-        };
-
-        headers.insert(header_name, header_value);
-    }
-
-    // Add authentication headers based on security requirements
-    for security_scheme_name in &operation.security_requirements {
-        let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) else {
-            continue;
-        };
-        add_authentication_header(&mut headers, security_scheme, api_name, global_config)?;
-    }
-
-    // Add custom headers from --header/-H flags
-    // Use try_get_many to avoid panic when header arg doesn't exist
-    let Ok(Some(custom_headers)) = current_matches.try_get_many::<String>("header") else {
-        return Ok(headers);
-    };
-
-    for header_str in custom_headers {
-        let (name, value) = parse_custom_header(header_str)?;
-        let header_name = HeaderName::from_str(&name)
-            .map_err(|e| Error::invalid_header_name(&name, e.to_string()))?;
-        let header_value = HeaderValue::from_str(&value)
-            .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
-        headers.insert(header_name, header_value);
-    }
-
-    Ok(headers)
 }
 
 /// Validates that a header value doesn't contain control characters
@@ -1504,31 +997,6 @@ fn build_headers_from_params(
     }
 
     Ok(headers)
-}
-
-/// Prints the response text in the specified format
-/// Thin wrapper that delegates to `cli::render` for backward compatibility.
-/// This function is removed in step 7 when `execute_request` is deleted.
-fn print_formatted_response(
-    response_text: &str,
-    output_format: &OutputFormat,
-    jq_filter: Option<&str>,
-    capture_output: bool,
-) -> Result<Option<String>, Error> {
-    use crate::invocation::ExecutionResult;
-
-    let result = ExecutionResult::Success {
-        body: response_text.to_string(),
-        status: 200,
-        headers: std::collections::HashMap::new(),
-    };
-
-    if capture_output {
-        crate::cli::render::render_result_to_string(&result, output_format, jq_filter)
-    } else {
-        crate::cli::render::render_result(&result, output_format, jq_filter)?;
-        Ok(None)
-    }
 }
 
 /// Applies a JQ filter to the response text
