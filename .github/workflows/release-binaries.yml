@@ -216,7 +216,7 @@ jobs:
           echo "ARCHIVE=$ARCHIVE_NAME.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
