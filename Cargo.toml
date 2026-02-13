@@ -11,6 +11,23 @@ keywords = ["api", "cli", "openapi", "agent", "automation"]
 categories = ["command-line-utilities", "web-programming", "api-bindings"]
 authors = ["Claudiu Ivan <contact@claudiu-ivan.com>"]
 readme = "README.md"
+exclude = [
+    ".github/",
+    ".ast-grep/",
+    "scripts/",
+    "sgconfig.yml",
+    "deny.toml",
+    "cliff.toml",
+    ".config/",
+    ".pre-commit-config.yaml",
+    "docs/",
+    "CLAUDE.md",
+    "GEMINI.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+]
 
 [[bin]]
 name = "aperture"
