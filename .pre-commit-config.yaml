@@ -27,3 +27,10 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+
+    -   id: conventional-commit
+        name: conventional commit
+        entry: scripts/commit-msg-lint.sh
+        language: script
+        stages: [commit-msg]
+        always_run: true
