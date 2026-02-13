@@ -250,7 +250,7 @@ paths:
     // Load the cached spec to verify operations
     let cached_content = fs.read(&cache_path).expect("Failed to read cache");
     let cached_spec: aperture_cli::cache::models::CachedSpec =
-        bincode::deserialize(&cached_content).expect("Failed to deserialize");
+        postcard::from_bytes(&cached_content).expect("Failed to deserialize");
 
     // Should have 3 operations (getUsers, getPublic, getMixed) - getAdmin should be skipped
     assert_eq!(
@@ -404,7 +404,7 @@ paths:
 
     let cached_content = fs.read(&cache_path).expect("Failed to read cache");
     let cached_spec: aperture_cli::cache::models::CachedSpec =
-        bincode::deserialize(&cached_content).expect("Failed to deserialize");
+        postcard::from_bytes(&cached_content).expect("Failed to deserialize");
 
     // Should have only getPublic operation (getPrivate uses global OAuth2)
     assert_eq!(
@@ -557,7 +557,7 @@ paths:
     let cache_path = PathBuf::from("/tmp/aperture_test/.cache/global-auth.bin");
     let cached_content = fs.read(&cache_path).expect("Failed to read cache");
     let cached_spec: aperture_cli::cache::models::CachedSpec =
-        bincode::deserialize(&cached_content).expect("Failed to deserialize");
+        postcard::from_bytes(&cached_content).expect("Failed to deserialize");
 
     // Should have 2 operations (getPublic with no auth, getAdmin with bearer override)
     assert_eq!(
@@ -653,7 +653,7 @@ paths:
     let cache_path = PathBuf::from("/tmp/aperture_test/.cache/negotiate-auth.bin");
     let cached_content = fs.read(&cache_path).expect("Failed to read cache");
     let cached_spec: aperture_cli::cache::models::CachedSpec =
-        bincode::deserialize(&cached_content).expect("Failed to deserialize");
+        postcard::from_bytes(&cached_content).expect("Failed to deserialize");
 
     // Should have 1 operation (getDual has bearer alternative)
     assert_eq!(
@@ -718,7 +718,7 @@ paths:
     let cache_path = PathBuf::from("/tmp/aperture_test/.cache/oidc-auth.bin");
     let cached_content = fs.read(&cache_path).expect("Failed to read cache");
     let cached_spec: aperture_cli::cache::models::CachedSpec =
-        bincode::deserialize(&cached_content).expect("Failed to deserialize");
+        postcard::from_bytes(&cached_content).expect("Failed to deserialize");
 
     // Should have no operations
     assert_eq!(

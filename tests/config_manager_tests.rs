@@ -812,9 +812,9 @@ paths:
     let cache_data = cache_content.unwrap();
     assert!(!cache_data.is_empty());
 
-    // Verify it's valid bincode by attempting to deserialize
+    // Verify it's valid postcard by attempting to deserialize
     let cached_spec: Result<aperture_cli::cache::models::CachedSpec, _> =
-        bincode::deserialize(&cache_data);
+        postcard::from_bytes(&cache_data);
     assert!(cached_spec.is_ok());
 
     let spec = cached_spec.unwrap();
@@ -867,7 +867,7 @@ paths:
 
     let cache_data = fs.files.lock().unwrap().get(&cache_path).cloned().unwrap();
     let cached_spec: aperture_cli::cache::models::CachedSpec =
-        bincode::deserialize(&cache_data).unwrap();
+        postcard::from_bytes(&cache_data).unwrap();
 
     assert_eq!(cached_spec.commands.len(), 1);
     assert_eq!(cached_spec.commands[0].name, "default"); // No tags, so default

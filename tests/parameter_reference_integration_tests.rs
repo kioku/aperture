@@ -182,7 +182,7 @@ paths:
     // Load and verify the cached spec
     let cached_content = std::fs::read(&cache_file).unwrap();
     let cached_spec: aperture_cli::cache::models::CachedSpec =
-        bincode::deserialize(&cached_content).unwrap();
+        postcard::from_bytes(&cached_content).unwrap();
 
     // Verify commands were created with resolved parameters
     assert_eq!(cached_spec.commands.len(), 2);
@@ -303,7 +303,7 @@ paths:
     // Load and verify the cached spec
     let cached_content = std::fs::read(&cache_file).unwrap();
     let cached_spec: aperture_cli::cache::models::CachedSpec =
-        bincode::deserialize(&cached_content).unwrap();
+        postcard::from_bytes(&cached_content).unwrap();
 
     // Verify command was created with all special parameters
     assert_eq!(cached_spec.commands.len(), 1);

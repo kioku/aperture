@@ -134,7 +134,7 @@ fn load_cached_spec_without_version_check<P: AsRef<Path>>(
 
     let cache_data = fs::read(&cache_path)
         .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
-    bincode::deserialize(&cache_data)
+    postcard::from_bytes(&cache_data)
         .map_err(|e| Error::cached_spec_corrupted(spec_name, e.to_string()))
 }
 
@@ -153,7 +153,7 @@ fn load_cached_spec_with_version_check<P: AsRef<Path>>(
 
     let cache_data = fs::read(&cache_path)
         .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
-    let cached_spec: CachedSpec = bincode::deserialize(&cache_data)
+    let cached_spec: CachedSpec = postcard::from_bytes(&cache_data)
         .map_err(|e| Error::cached_spec_corrupted(spec_name, e.to_string()))?;
 
     // Check cache format version

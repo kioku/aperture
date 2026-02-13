@@ -1160,7 +1160,7 @@ impl<F: FileSystem> ConfigManager<F> {
         self.fs.atomic_write(spec_path, content.as_bytes())?;
 
         // Serialize and write cached representation atomically
-        let cached_data = bincode::serialize(cached_spec)
+        let cached_data = postcard::to_allocvec(cached_spec)
             .map_err(|e| Error::serialization_error(e.to_string()))?;
         self.fs.atomic_write(cache_path, &cached_data)?;
 
