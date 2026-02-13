@@ -1,4 +1,5 @@
-use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
+use crate::cache::models::{CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec};
+use crate::cli::OutputFormat;
 use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
@@ -13,12 +14,15 @@ use crate::response_cache::{
 };
 use crate::utils::to_kebab_case;
 use base64::{engine::general_purpose, Engine as _};
+use clap::ArgMatches;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write;
 use std::str::FromStr;
+use tabled::Table;
 use tokio::time::sleep;
 
 #[cfg(feature = "jq")]
@@ -104,7 +108,20 @@ impl RetryContext {
     }
 }
 
+/// Maximum number of rows to display in table format to prevent memory exhaustion
+const MAX_TABLE_ROWS: usize = 1000;
+
 // Helper functions
+
+/// Extract server variable arguments from CLI matches
+fn extract_server_var_args(matches: &ArgMatches) -> Vec<String> {
+    matches
+        .try_get_many::<String>("server-var")
+        .ok()
+        .flatten()
+        .map(|values| values.cloned().collect())
+        .unwrap_or_default()
+}
 
 /// Build HTTP client with default timeout
 fn build_http_client() -> Result<reqwest::Client, Error> {
@@ -117,6 +134,79 @@ fn build_http_client() -> Result<reqwest::Client, Error> {
                 format!("Failed to create HTTP client: {e}"),
             )
         })
+}
+
+/// Extract request body from matches
+fn extract_request_body(
+    operation: &CachedCommand,
+    matches: &ArgMatches,
+) -> Result<Option<String>, Error> {
+    if operation.request_body.is_none() {
+        return Ok(None);
+    }
+
+    // Get to the deepest subcommand matches
+    let mut current_matches = matches;
+    while let Some((_name, sub_matches)) = current_matches.subcommand() {
+        current_matches = sub_matches;
+    }
+
+    if let Some(body_value) = current_matches.get_one::<String>("body") {
+        // Validate JSON
+        let _json_body: Value = serde_json::from_str(body_value)
+            .map_err(|e| Error::invalid_json_body(e.to_string()))?;
+        Ok(Some(body_value.clone()))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Handle dry-run mode
+fn handle_dry_run(
+    dry_run: bool,
+    method: &reqwest::Method,
+    url: &str,
+    headers: &reqwest::header::HeaderMap,
+    body: Option<&str>,
+    operation: &CachedCommand,
+    capture_output: bool,
+) -> Result<Option<String>, Error> {
+    if !dry_run {
+        return Ok(None);
+    }
+
+    let headers_map: HashMap<String, String> = headers
+        .iter()
+        .map(|(k, v)| {
+            let value = if logging::should_redact_header(k.as_str()) {
+                "[REDACTED]".to_string()
+            } else {
+                v.to_str().unwrap_or("<binary>").to_string()
+            };
+            (k.as_str().to_string(), value)
+        })
+        .collect();
+
+    let dry_run_info = serde_json::json!({
+        "dry_run": true,
+        "method": method.to_string(),
+        "url": url,
+        "headers": headers_map,
+        "body": body,
+        "operation_id": operation.operation_id
+    });
+
+    let output = serde_json::to_string_pretty(&dry_run_info).map_err(|e| {
+        Error::serialization_error(format!("Failed to serialize dry run info: {e}"))
+    })?;
+
+    if capture_output {
+        Ok(Some(output))
+    } else {
+        // ast-grep-ignore: no-println
+        println!("{output}");
+        Ok(None)
+    }
 }
 
 /// Send HTTP request and get response
@@ -201,11 +291,15 @@ async fn send_request_with_retry(
 
     // Check if safe to retry non-GET requests
     if !ctx.is_safe_to_retry() {
-        tracing::warn!(
-            method = %method,
-            operation_id = %operation.operation_id,
-            "Retries disabled - method is not idempotent and no idempotency key provided. \
-             Use --force-retry or provide --idempotency-key"
+        // ast-grep-ignore: no-println
+        eprintln!(
+            "Warning: Retries disabled for {} {} - method is not idempotent and no --idempotency-key provided",
+            method,
+            operation.operation_id
+        );
+        // ast-grep-ignore: no-println
+        eprintln!(
+            "         Use --force-retry to enable retries anyway, or provide --idempotency-key"
         );
         let request = build_request(client, method.clone(), url, headers, body);
         return send_request(request, secret_ctx).await;
@@ -259,14 +353,15 @@ async fn send_request_with_retry(
 
                 // Check if we have more attempts
                 if attempt < max_attempts {
-                    tracing::warn!(
+                    // ast-grep-ignore: no-println
+                    eprintln!(
+                        "Retry {}/{}: {} {} returned {} - retrying in {}ms",
                         attempt,
                         max_attempts,
-                        method = %method,
-                        operation_id = %operation.operation_id,
-                        status = status.as_u16(),
-                        delay_ms = delay.as_millis(),
-                        "Retrying after HTTP error"
+                        method,
+                        operation.operation_id,
+                        status.as_u16(),
+                        delay.as_millis()
                     );
                     sleep(delay).await;
                 }
@@ -289,14 +384,15 @@ async fn send_request_with_retry(
                     calculate_retry_delay_with_header(&retry_config, (attempt - 1) as usize, None);
 
                 if attempt < max_attempts {
-                    tracing::warn!(
+                    // ast-grep-ignore: no-println
+                    eprintln!(
+                        "Retry {}/{}: {} {} failed - retrying in {}ms: {}",
                         attempt,
                         max_attempts,
-                        method = %method,
-                        operation_id = %operation.operation_id,
-                        delay_ms = delay.as_millis(),
-                        error = %e,
-                        "Retrying after network error"
+                        method,
+                        operation.operation_id,
+                        delay.as_millis(),
+                        e
                     );
                     sleep(delay).await;
                 }
@@ -310,22 +406,20 @@ async fn send_request_with_retry(
     if let (Some(status), Some(headers), Some(text)) =
         (last_status, last_response_headers, last_response_text)
     {
-        tracing::warn!(
-            method = %method,
-            operation_id = %operation.operation_id,
-            max_attempts,
-            "Retry exhausted"
+        // ast-grep-ignore: no-println
+        eprintln!(
+            "Retry exhausted: {} {} failed after {} attempts",
+            method, operation.operation_id, max_attempts
         );
         return Ok((status, headers, text));
     }
 
     // Return detailed retry error if we have a last error
     if let Some(e) = last_error {
-        tracing::warn!(
-            method = %method,
-            operation_id = %operation.operation_id,
-            max_attempts,
-            "Retry exhausted"
+        // ast-grep-ignore: no-println
+        eprintln!(
+            "Retry exhausted: {} {} failed after {} attempts",
+            method, operation.operation_id, max_attempts
         );
         // Return detailed retry error with full context
         return Err(Error::retry_limit_exceeded_detailed(
@@ -510,11 +604,556 @@ async fn store_in_cache(
     Ok(())
 }
 
-/// Legacy compatibility wrapper retained for existing tests and callers.
+/// Executes HTTP requests based on parsed CLI arguments and cached spec data.
 ///
-/// The implementation lives in the CLI layer to keep this engine module free
-/// of direct clap/rendering dependencies.
-pub use crate::cli::legacy_execute::execute_request;
+/// This module handles the mapping from CLI arguments back to API operations,
+/// resolves authentication secrets, builds HTTP requests, and validates responses.
+///
+/// # Arguments
+/// * `spec` - The cached specification containing operation details
+/// * `matches` - Parsed CLI arguments from clap
+/// * `base_url` - Optional base URL override. If None, uses `BaseUrlResolver`
+/// * `dry_run` - If true, show request details without executing
+/// * `idempotency_key` - Optional idempotency key for safe retries
+/// * `global_config` - Optional global configuration for URL resolution
+/// * `output_format` - Format for response output (json, yaml, table)
+/// * `jq_filter` - Optional JQ filter expression to apply to response
+/// * `cache_config` - Optional cache configuration for response caching
+/// * `capture_output` - If true, captures output and returns it instead of printing to stdout
+/// * `retry_context` - Optional retry configuration for automatic request retries
+///
+/// # Returns
+/// * `Ok(Option<String>)` - Request executed successfully. Returns Some(output) if `capture_output` is true
+/// * `Err(Error)` - Request failed or validation error
+///
+/// # Errors
+/// Returns errors for authentication failures, network issues, response validation, or JQ filter errors
+///
+/// # Panics
+/// Panics if JSON serialization of dry-run information fails (extremely unlikely)
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::missing_panics_doc)]
+#[allow(clippy::missing_errors_doc)]
+pub async fn execute_request(
+    spec: &CachedSpec,
+    matches: &ArgMatches,
+    base_url: Option<&str>,
+    dry_run: bool,
+    idempotency_key: Option<&str>,
+    global_config: Option<&GlobalConfig>,
+    output_format: &OutputFormat,
+    jq_filter: Option<&str>,
+    cache_config: Option<&CacheConfig>,
+    capture_output: bool,
+    retry_context: Option<&RetryContext>,
+) -> Result<Option<String>, Error> {
+    // Find the operation from the command hierarchy (also returns the operation's ArgMatches)
+    let (operation, operation_matches) = find_operation_with_matches(spec, matches)?;
+
+    // Check if --show-examples flag is present in the operation's matches
+    // Only check if the flag exists in the matches (it won't exist in some test scenarios)
+    if operation_matches
+        .try_contains_id("show-examples")
+        .unwrap_or(false)
+        && operation_matches.get_flag("show-examples")
+    {
+        print_extended_examples(operation);
+        return Ok(None);
+    }
+
+    // Extract server variable arguments
+    let server_var_args = extract_server_var_args(matches);
+
+    // Resolve base URL using the new priority hierarchy with server variable support
+    let resolver = BaseUrlResolver::new(spec);
+    let resolver = if let Some(config) = global_config {
+        resolver.with_global_config(config)
+    } else {
+        resolver
+    };
+    let base_url = resolver.resolve_with_variables(base_url, &server_var_args)?;
+
+    // Build the full URL with path parameters
+    let url = build_url(&base_url, &operation.path, operation, operation_matches)?;
+
+    // Create HTTP client
+    let client = build_http_client()?;
+
+    // Build headers including authentication and idempotency
+    let mut headers = build_headers(
+        spec,
+        operation,
+        operation_matches,
+        &spec.name,
+        global_config,
+    )?;
+
+    // Add idempotency key if provided
+    if let Some(key) = idempotency_key {
+        headers.insert(
+            HeaderName::from_static("idempotency-key"),
+            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
+        );
+    }
+
+    // Build request
+    let method = Method::from_str(&operation.method)
+        .map_err(|_| Error::invalid_http_method(&operation.method))?;
+
+    let headers_clone = headers.clone(); // For dry-run output
+
+    // Extract request body
+    let request_body = extract_request_body(operation, operation_matches)?;
+
+    // Prepare cache context
+    let cache_context = prepare_cache_context(
+        cache_config,
+        &spec.name,
+        &operation.operation_id,
+        &method,
+        &url,
+        &headers_clone,
+        request_body.as_deref(),
+    )?;
+
+    // Check cache for existing response
+    if let Some(cached_response) = check_cache(cache_context.as_ref()).await? {
+        let output = print_formatted_response(
+            &cached_response.body,
+            output_format,
+            jq_filter,
+            capture_output,
+        )?;
+        return Ok(output);
+    }
+
+    // Handle dry-run mode
+    if let Some(output) = handle_dry_run(
+        dry_run,
+        &method,
+        &url,
+        &headers_clone,
+        request_body.as_deref(),
+        operation,
+        capture_output,
+    )? {
+        return Ok(Some(output));
+    }
+    if dry_run {
+        return Ok(None);
+    }
+
+    // Build retry context with method information
+    let retry_ctx = retry_context.map(|ctx| {
+        let mut ctx = ctx.clone();
+        ctx.method = Some(method.to_string());
+        ctx
+    });
+
+    // Build secret context for dynamic secret redaction in logs
+    let secret_ctx = logging::SecretContext::from_spec_and_config(spec, &spec.name, global_config);
+
+    // Send request with retry support
+    let (status, response_headers, response_text) = send_request_with_retry(
+        &client,
+        method.clone(),
+        &url,
+        headers,
+        request_body.clone(),
+        retry_ctx.as_ref(),
+        operation,
+        Some(&secret_ctx),
+    )
+    .await?;
+
+    // Check if request was successful
+    if !status.is_success() {
+        return Err(handle_http_error(status, response_text, spec, operation));
+    }
+
+    // Store response in cache
+    store_in_cache(
+        cache_context,
+        &response_text,
+        status,
+        &response_headers,
+        method,
+        url,
+        &headers_clone,
+        request_body.as_deref(),
+        cache_config,
+    )
+    .await?;
+
+    // Print response in the requested format
+    if response_text.is_empty() {
+        Ok(None)
+    } else {
+        print_formatted_response(&response_text, output_format, jq_filter, capture_output)
+    }
+}
+
+/// Finds the operation from the command hierarchy
+/// Print extended examples for a command
+fn print_extended_examples(operation: &CachedCommand) {
+    // ast-grep-ignore: no-println
+    println!("Command: {}\n", to_kebab_case(&operation.operation_id));
+
+    if let Some(ref summary) = operation.summary {
+        // ast-grep-ignore: no-println
+        println!("Description: {summary}\n");
+    }
+
+    // ast-grep-ignore: no-println
+    println!("Method: {} {}\n", operation.method, operation.path);
+
+    if operation.examples.is_empty() {
+        // ast-grep-ignore: no-println
+        println!("No examples available for this command.");
+        return;
+    }
+
+    // ast-grep-ignore: no-println
+    println!("Examples:\n");
+    for (i, example) in operation.examples.iter().enumerate() {
+        // ast-grep-ignore: no-println
+        println!("{}. {}", i + 1, example.description);
+        // ast-grep-ignore: no-println
+        println!("   {}", example.command_line);
+        if let Some(ref explanation) = example.explanation {
+            // ast-grep-ignore: no-println
+            println!("   {explanation}");
+        }
+        // ast-grep-ignore: no-println
+        println!();
+    }
+
+    // Additional helpful information
+    if operation.parameters.is_empty() {
+        return;
+    }
+
+    // ast-grep-ignore: no-println
+    println!("Parameters:");
+    for param in &operation.parameters {
+        let required = if param.required { " (required)" } else { "" };
+        let param_type = param.schema_type.as_deref().unwrap_or("string");
+        // ast-grep-ignore: no-println
+        println!("  --{}{} [{}]", param.name, required, param_type);
+
+        let Some(ref desc) = param.description else {
+            continue;
+        };
+        // ast-grep-ignore: no-println
+        println!("      {desc}");
+    }
+    // ast-grep-ignore: no-println
+    println!();
+
+    if operation.request_body.is_some() {
+        // ast-grep-ignore: no-println
+        println!("Request Body:");
+        // ast-grep-ignore: no-println
+        println!("  --body JSON (required)");
+        // ast-grep-ignore: no-println
+        println!("      JSON data to send in the request body");
+    }
+}
+
+#[allow(dead_code)]
+fn find_operation<'a>(
+    spec: &'a CachedSpec,
+    matches: &ArgMatches,
+) -> Result<&'a CachedCommand, Error> {
+    // Get the subcommand path from matches
+    let mut current_matches = matches;
+    let mut subcommand_path = Vec::new();
+
+    while let Some((name, sub_matches)) = current_matches.subcommand() {
+        subcommand_path.push(name);
+        current_matches = sub_matches;
+    }
+
+    // For now, just find the first matching operation
+    // In a real implementation, we'd match based on the full path
+    let Some(operation_name) = subcommand_path.last() else {
+        let operation_name = "unknown".to_string();
+        let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
+        return Err(Error::operation_not_found_with_suggestions(
+            operation_name,
+            &suggestions,
+        ));
+    };
+
+    for command in &spec.commands {
+        // Convert operation_id to kebab-case for comparison
+        let kebab_id = to_kebab_case(&command.operation_id);
+        if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
+            return Ok(command);
+        }
+    }
+
+    let operation_name = subcommand_path
+        .last()
+        .map_or_else(|| "unknown".to_string(), ToString::to_string);
+
+    // Generate suggestions for similar operations
+    let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
+
+    Err(Error::operation_not_found_with_suggestions(
+        operation_name,
+        &suggestions,
+    ))
+}
+
+fn find_operation_with_matches<'a>(
+    spec: &'a CachedSpec,
+    matches: &'a ArgMatches,
+) -> Result<(&'a CachedCommand, &'a ArgMatches), Error> {
+    // Get the subcommand path from matches
+    let mut current_matches = matches;
+    let mut subcommand_path = Vec::new();
+
+    while let Some((name, sub_matches)) = current_matches.subcommand() {
+        subcommand_path.push(name);
+        current_matches = sub_matches;
+    }
+
+    // For now, just find the first matching operation
+    // In a real implementation, we'd match based on the full path
+    let Some(operation_name) = subcommand_path.last() else {
+        let operation_name = "unknown".to_string();
+        let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
+        return Err(Error::operation_not_found_with_suggestions(
+            operation_name,
+            &suggestions,
+        ));
+    };
+
+    for command in &spec.commands {
+        // Convert operation_id to kebab-case for comparison
+        let kebab_id = to_kebab_case(&command.operation_id);
+        if &kebab_id == operation_name || command.method.to_lowercase() == *operation_name {
+            // Return current_matches (the deepest subcommand) which contains the operation's arguments
+            return Ok((command, current_matches));
+        }
+    }
+
+    let operation_name = subcommand_path
+        .last()
+        .map_or_else(|| "unknown".to_string(), ToString::to_string);
+
+    // Generate suggestions for similar operations
+    let suggestions = crate::suggestions::suggest_similar_operations(spec, &operation_name);
+
+    Err(Error::operation_not_found_with_suggestions(
+        operation_name,
+        &suggestions,
+    ))
+}
+
+/// Get query parameter value formatted for URL
+/// Returns None if the parameter value should be skipped
+fn get_query_param_value(
+    param: &CachedParameter,
+    current_matches: &ArgMatches,
+    arg_str: &str,
+) -> Option<String> {
+    let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
+
+    if is_boolean {
+        // Boolean parameters are flags - add only if set
+        current_matches
+            .get_flag(arg_str)
+            .then(|| format!("{arg_str}=true"))
+    } else {
+        // Non-boolean parameters have string values
+        current_matches
+            .get_one::<String>(arg_str)
+            .map(|value| format!("{arg_str}={}", urlencoding::encode(value)))
+    }
+}
+
+/// Builds the full URL with path parameters substituted
+///
+/// Note: Server variable substitution is now handled by `BaseUrlResolver.resolve_with_variables()`
+/// before calling this function, so `base_url` should already have server variables resolved.
+fn build_url(
+    base_url: &str,
+    path_template: &str,
+    operation: &CachedCommand,
+    matches: &ArgMatches,
+) -> Result<String, Error> {
+    let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
+
+    // Get to the deepest subcommand matches
+    let mut current_matches = matches;
+    while let Some((_name, sub_matches)) = current_matches.subcommand() {
+        current_matches = sub_matches;
+    }
+
+    // Substitute path parameters
+    // Look for {param} patterns and replace with values from matches
+    let mut start = 0;
+    while let Some(open) = url[start..].find('{') {
+        let open_pos = start + open;
+        let Some(close) = url[open_pos..].find('}') else {
+            break;
+        };
+
+        let close_pos = open_pos + close;
+        let param_name = &url[open_pos + 1..close_pos];
+
+        // Check if this is a boolean parameter
+        let param = operation.parameters.iter().find(|p| p.name == param_name);
+        let is_boolean = param
+            .and_then(|p| p.schema_type.as_ref())
+            .is_some_and(|t| t == "boolean");
+
+        let value = if is_boolean {
+            // Boolean path parameters are flags
+            if current_matches.get_flag(param_name) {
+                "true"
+            } else {
+                "false"
+            }
+            .to_string()
+        } else {
+            match current_matches
+                .try_get_one::<String>(param_name)
+                .ok()
+                .flatten()
+            {
+                Some(string_value) => string_value.clone(),
+                None => return Err(Error::missing_path_parameter(param_name)),
+            }
+        };
+
+        url.replace_range(open_pos..=close_pos, &value);
+        start = open_pos + value.len();
+    }
+
+    // Add query parameters
+    let mut query_params = Vec::new();
+    for arg in current_matches.ids() {
+        let arg_str = arg.as_str();
+        // Skip non-query args - only process query parameters from the operation
+        let param = operation
+            .parameters
+            .iter()
+            .find(|p| p.name == arg_str && p.location == "query");
+
+        let Some(param) = param else {
+            continue;
+        };
+
+        // Get query param value using helper (handles boolean vs string params)
+        if let Some(value) = get_query_param_value(param, current_matches, arg_str) {
+            query_params.push(value);
+        }
+    }
+
+    if !query_params.is_empty() {
+        url.push('?');
+        url.push_str(&query_params.join("&"));
+    }
+
+    Ok(url)
+}
+
+/// Get header value for a parameter from CLI matches
+/// Returns None if the parameter value should be skipped
+fn get_header_param_value(
+    param: &CachedParameter,
+    current_matches: &ArgMatches,
+) -> Result<Option<HeaderValue>, Error> {
+    let is_boolean = matches!(param.schema_type.as_deref(), Some("boolean"));
+
+    // Handle boolean and non-boolean parameters separately to avoid
+    // panics from mismatched types (get_flag on string or get_one on bool)
+    if is_boolean {
+        return Ok(current_matches
+            .get_flag(&param.name)
+            .then_some(HeaderValue::from_static("true")));
+    }
+
+    // Non-boolean: get string value
+    current_matches
+        .get_one::<String>(&param.name)
+        .map(|value| {
+            HeaderValue::from_str(value)
+                .map_err(|e| Error::invalid_header_value(&param.name, e.to_string()))
+        })
+        .transpose()
+}
+
+/// Builds headers including authentication
+fn build_headers(
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+    matches: &ArgMatches,
+    api_name: &str,
+    global_config: Option<&GlobalConfig>,
+) -> Result<HeaderMap, Error> {
+    let mut headers = HeaderMap::new();
+
+    // Add default headers
+    headers.insert("User-Agent", HeaderValue::from_static("aperture/0.1.0"));
+    headers.insert(
+        constants::HEADER_ACCEPT,
+        HeaderValue::from_static(constants::CONTENT_TYPE_JSON),
+    );
+
+    // Get to the deepest subcommand matches
+    let mut current_matches = matches;
+    while let Some((_name, sub_matches)) = current_matches.subcommand() {
+        current_matches = sub_matches;
+    }
+
+    // Add header parameters from matches
+    for param in &operation.parameters {
+        // Skip non-header parameters early
+        if param.location != "header" {
+            continue;
+        }
+
+        let header_name = HeaderName::from_str(&param.name)
+            .map_err(|e| Error::invalid_header_name(&param.name, e.to_string()))?;
+
+        // Get header value using helper (handles boolean vs string params)
+        let Some(header_value) = get_header_param_value(param, current_matches)? else {
+            continue;
+        };
+
+        headers.insert(header_name, header_value);
+    }
+
+    // Add authentication headers based on security requirements
+    for security_scheme_name in &operation.security_requirements {
+        let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) else {
+            continue;
+        };
+        add_authentication_header(&mut headers, security_scheme, api_name, global_config)?;
+    }
+
+    // Add custom headers from --header/-H flags
+    // Use try_get_many to avoid panic when header arg doesn't exist
+    let Ok(Some(custom_headers)) = current_matches.try_get_many::<String>("header") else {
+        return Ok(headers);
+    };
+
+    for header_str in custom_headers {
+        let (name, value) = parse_custom_header(header_str)?;
+        let header_name = HeaderName::from_str(&name)
+            .map_err(|e| Error::invalid_header_name(&name, e.to_string()))?;
+        let header_value = HeaderValue::from_str(&value)
+            .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
+        headers.insert(header_name, header_value);
+    }
+
+    Ok(headers)
+}
 
 /// Validates that a header value doesn't contain control characters
 fn validate_header_value(name: &str, value: &str) -> Result<(), Error> {
@@ -564,11 +1203,14 @@ fn add_authentication_header(
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<(), Error> {
-    tracing::debug!(
-        scheme_name = %security_scheme.name,
-        scheme_type = %security_scheme.scheme_type,
-        "Adding authentication header"
-    );
+    // Debug logging when RUST_LOG is set
+    if std::env::var("RUST_LOG").is_ok() {
+        // ast-grep-ignore: no-println
+        eprintln!(
+            "[DEBUG] Adding authentication header for scheme: {} (type: {})",
+            security_scheme.name, security_scheme.scheme_type
+        );
+    }
 
     // Priority 1: Check config-based secrets first
     let secret_config = global_config
@@ -594,17 +1236,19 @@ fn add_authentication_header(
         }
     };
 
-    let source = if secret_config.is_some() {
-        "config"
-    } else {
-        "x-aperture-secret"
-    };
-    tracing::debug!(
-        source,
-        scheme_name = %security_scheme.name,
-        env_var = %env_var_name,
-        "Resolved secret"
-    );
+    // Debug logging for resolved secret source
+    if std::env::var("RUST_LOG").is_ok() {
+        let source = if secret_config.is_some() {
+            "config"
+        } else {
+            "x-aperture-secret"
+        };
+        // ast-grep-ignore: no-println
+        eprintln!(
+            "[DEBUG] Using secret from {source} for scheme '{}': env var '{env_var_name}'",
+            security_scheme.name
+        );
+    }
 
     // Validate the secret doesn't contain control characters
     validate_header_value(constants::HEADER_AUTHORIZATION, &secret_value)?;
@@ -660,7 +1304,25 @@ fn add_authentication_header(
             })?;
             headers.insert(constants::HEADER_AUTHORIZATION, header_value);
 
-            tracing::debug!(scheme = %scheme_str, "Added HTTP authentication header");
+            // Debug logging
+            if std::env::var("RUST_LOG").is_ok() {
+                match &auth_scheme {
+                    AuthScheme::Bearer => {
+                        // ast-grep-ignore: no-println
+                        eprintln!("[DEBUG] Added Bearer authentication header");
+                    }
+                    AuthScheme::Basic => {
+                        // ast-grep-ignore: no-println
+                        eprintln!("[DEBUG] Added Basic authentication header (base64 encoded)");
+                    }
+                    _ => {
+                        // ast-grep-ignore: no-println
+                        eprintln!(
+                            "[DEBUG] Added custom HTTP auth header with scheme: {scheme_str}"
+                        );
+                    }
+                }
+            }
         }
         _ => {
             return Err(Error::unsupported_security_scheme(
@@ -672,278 +1334,244 @@ fn add_authentication_header(
     Ok(())
 }
 
-// ── New domain-type-based API ───────────────────────────────────────
-
-/// Executes an API operation using CLI-agnostic domain types.
-///
-/// This is the primary entry point for the execution engine. It accepts
-/// pre-extracted parameters in [`OperationCall`] and execution configuration
-/// in [`ExecutionContext`], returning a structured [`ExecutionResult`]
-/// instead of printing directly.
-///
-/// # Errors
-///
-/// Returns errors for authentication failures, network issues, or response
-/// validation problems.
-#[allow(clippy::too_many_lines)]
-pub async fn execute(
-    spec: &CachedSpec,
-    call: crate::invocation::OperationCall,
-    ctx: crate::invocation::ExecutionContext,
-) -> Result<crate::invocation::ExecutionResult, Error> {
-    use crate::invocation::ExecutionResult;
-
-    // Find the operation by operation_id
-    let operation = find_operation_by_id(spec, &call.operation_id)?;
-
-    // Resolve base URL
-    let resolver = BaseUrlResolver::new(spec);
-    let resolver = if let Some(ref config) = ctx.global_config {
-        resolver.with_global_config(config)
+/// Prints the response text in the specified format
+fn print_formatted_response(
+    response_text: &str,
+    output_format: &OutputFormat,
+    jq_filter: Option<&str>,
+    capture_output: bool,
+) -> Result<Option<String>, Error> {
+    // Apply JQ filter if provided
+    let processed_text = if let Some(filter) = jq_filter {
+        apply_jq_filter(response_text, filter)?
     } else {
-        resolver
+        response_text.to_string()
     };
-    let base_url =
-        resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
 
-    // Build the full URL from pre-extracted parameters
-    let url = build_url_from_params(
-        &base_url,
-        &operation.path,
-        &call.path_params,
-        &call.query_params,
-    )?;
+    match output_format {
+        OutputFormat::Json => {
+            // Try to pretty-print JSON (default behavior)
+            let output = serde_json::from_str::<Value>(&processed_text)
+                .ok()
+                .and_then(|json_value| serde_json::to_string_pretty(&json_value).ok())
+                .unwrap_or_else(|| processed_text.clone());
 
-    // Create HTTP client
-    let client = build_http_client()?;
+            if capture_output {
+                return Ok(Some(output));
+            }
+            // ast-grep-ignore: no-println
+            println!("{output}");
+        }
+        OutputFormat::Yaml => {
+            // Convert JSON to YAML
+            let output = serde_json::from_str::<Value>(&processed_text)
+                .ok()
+                .and_then(|json_value| serde_yaml::to_string(&json_value).ok())
+                .unwrap_or_else(|| processed_text.clone());
 
-    // Build headers from pre-extracted parameters
-    let mut headers = build_headers_from_params(
-        spec,
-        operation,
-        &call.header_params,
-        &call.custom_headers,
-        &spec.name,
-        ctx.global_config.as_ref(),
-    )?;
+            if capture_output {
+                return Ok(Some(output));
+            }
+            // ast-grep-ignore: no-println
+            println!("{output}");
+        }
+        OutputFormat::Table => {
+            // Convert JSON to table format
+            let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) else {
+                // If not JSON, output as-is
+                if capture_output {
+                    return Ok(Some(processed_text));
+                }
+                // ast-grep-ignore: no-println
+                println!("{processed_text}");
+                return Ok(None);
+            };
 
-    // Add idempotency key if provided
-    if let Some(ref key) = ctx.idempotency_key {
-        headers.insert(
-            HeaderName::from_static("idempotency-key"),
-            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
-        );
+            let table_output = print_as_table(&json_value, capture_output)?;
+            if capture_output {
+                return Ok(table_output);
+            }
+        }
     }
 
-    // Determine HTTP method
-    let method = Method::from_str(&operation.method)
-        .map_err(|_| Error::invalid_http_method(&operation.method))?;
+    Ok(None)
+}
 
-    let headers_clone = headers.clone();
+// Define table structures at module level to avoid clippy::items_after_statements
+#[derive(tabled::Tabled)]
+struct TableRow {
+    #[tabled(rename = "Key")]
+    key: String,
+    #[tabled(rename = "Value")]
+    value: String,
+}
 
-    // Prepare cache context
-    let cache_context = prepare_cache_context(
-        ctx.cache_config.as_ref(),
-        &spec.name,
-        &operation.operation_id,
-        &method,
-        &url,
-        &headers_clone,
-        call.body.as_deref(),
-    )?;
+#[derive(tabled::Tabled)]
+struct KeyValue {
+    #[tabled(rename = "Key")]
+    key: String,
+    #[tabled(rename = "Value")]
+    value: String,
+}
 
-    // Check cache for existing response
-    if let Some(cached_response) = check_cache(cache_context.as_ref()).await? {
-        return Ok(ExecutionResult::Cached {
-            body: cached_response.body,
-        });
+/// Prints items as a numbered list
+fn print_numbered_list(items: &[Value], capture_output: bool) -> Option<String> {
+    if capture_output {
+        let mut output = String::new();
+        for (i, item) in items.iter().enumerate() {
+            writeln!(&mut output, "{}: {}", i, format_value_for_table(item))
+                .expect("writing to String cannot fail");
+        }
+        return Some(output.trim_end().to_string());
     }
 
-    // Handle dry-run mode
-    if ctx.dry_run {
-        let headers_map: HashMap<String, String> = headers_clone
-            .iter()
-            .map(|(k, v)| {
-                let value = if logging::should_redact_header(k.as_str()) {
-                    "[REDACTED]".to_string()
-                } else {
-                    v.to_str().unwrap_or("<binary>").to_string()
+    for (i, item) in items.iter().enumerate() {
+        // ast-grep-ignore: no-println
+        println!("{}: {}", i, format_value_for_table(item));
+    }
+    None
+}
+
+/// Helper to output or capture a message
+fn output_or_capture(message: &str, capture_output: bool) -> Option<String> {
+    if capture_output {
+        return Some(message.to_string());
+    }
+    // ast-grep-ignore: no-println
+    println!("{message}");
+    None
+}
+
+/// Prints JSON data as a formatted table
+#[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
+fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<String>, Error> {
+    match json_value {
+        Value::Array(items) => {
+            if items.is_empty() {
+                return Ok(output_or_capture(constants::EMPTY_ARRAY, capture_output));
+            }
+
+            // Check if array is too large
+            if items.len() > MAX_TABLE_ROWS {
+                let msg = format!(
+                    "Array too large: {} items (max {} for table display)\nUse --format json or --jq to process the full data",
+                    items.len(),
+                    MAX_TABLE_ROWS
+                );
+                return Ok(output_or_capture(&msg, capture_output));
+            }
+
+            // Try to create a table from array of objects
+            let Some(Value::Object(_)) = items.first() else {
+                // Continue to fallback case
+                return Ok(print_numbered_list(items, capture_output));
+            };
+
+            // Create table for array of objects
+            let mut table_data: Vec<BTreeMap<String, String>> = Vec::new();
+
+            for item in items {
+                let Value::Object(obj) = item else {
+                    continue;
                 };
-                (k.as_str().to_string(), value)
-            })
-            .collect();
+                let mut row = BTreeMap::new();
+                for (key, value) in obj {
+                    row.insert(key.clone(), format_value_for_table(value));
+                }
+                table_data.push(row);
+            }
 
-        let request_info = serde_json::json!({
-            "dry_run": true,
-            "method": method.to_string(),
-            "url": url,
-            "headers": headers_map,
-            "body": call.body,
-            "operation_id": operation.operation_id
-        });
+            if table_data.is_empty() {
+                // Fallback to numbered list
+                return Ok(print_numbered_list(items, capture_output));
+            }
 
-        return Ok(ExecutionResult::DryRun { request_info });
-    }
+            // For now, use a simple key-value representation
+            // In the future, we could implement a more sophisticated table structure
+            let mut rows = Vec::new();
+            for (i, row) in table_data.iter().enumerate() {
+                if i > 0 {
+                    rows.push(TableRow {
+                        key: "---".to_string(),
+                        value: "---".to_string(),
+                    });
+                }
+                for (key, value) in row {
+                    rows.push(TableRow {
+                        key: key.clone(),
+                        value: value.clone(),
+                    });
+                }
+            }
 
-    // Build retry context with method information
-    let retry_ctx = ctx.retry_context.map(|mut rc| {
-        rc.method = Some(method.to_string());
-        rc
-    });
+            let table = Table::new(&rows);
+            Ok(output_or_capture(&table.to_string(), capture_output))
+        }
+        Value::Object(obj) => {
+            // Check if object has too many fields
+            if obj.len() > MAX_TABLE_ROWS {
+                let msg = format!(
+                    "Object too large: {} fields (max {} for table display)\nUse --format json or --jq to process the full data",
+                    obj.len(),
+                    MAX_TABLE_ROWS
+                );
+                return Ok(output_or_capture(&msg, capture_output));
+            }
 
-    // Build secret context for dynamic secret redaction in logs
-    let secret_ctx =
-        logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref());
+            // Create a simple key-value table for objects
+            let rows: Vec<KeyValue> = obj
+                .iter()
+                .map(|(key, value)| KeyValue {
+                    key: key.clone(),
+                    value: format_value_for_table(value),
+                })
+                .collect();
 
-    // Send request with retry support
-    let (status, response_headers, response_text) = send_request_with_retry(
-        &client,
-        method.clone(),
-        &url,
-        headers,
-        call.body.clone(),
-        retry_ctx.as_ref(),
-        operation,
-        Some(&secret_ctx),
-    )
-    .await?;
-
-    // Check if request was successful
-    if !status.is_success() {
-        return Err(handle_http_error(status, response_text, spec, operation));
-    }
-
-    // Store response in cache
-    store_in_cache(
-        cache_context,
-        &response_text,
-        status,
-        &response_headers,
-        method,
-        url,
-        &headers_clone,
-        call.body.as_deref(),
-        ctx.cache_config.as_ref(),
-    )
-    .await?;
-
-    if response_text.is_empty() {
-        Ok(ExecutionResult::Empty)
-    } else {
-        Ok(ExecutionResult::Success {
-            body: response_text,
-            status: status.as_u16(),
-            headers: response_headers,
-        })
+            let table = Table::new(&rows);
+            Ok(output_or_capture(&table.to_string(), capture_output))
+        }
+        _ => {
+            // For primitive values, just print them
+            let formatted = format_value_for_table(json_value);
+            Ok(output_or_capture(&formatted, capture_output))
+        }
     }
 }
 
-/// Finds an operation by its `operation_id` in the spec.
-fn find_operation_by_id<'a>(
-    spec: &'a CachedSpec,
-    operation_id: &str,
-) -> Result<&'a CachedCommand, Error> {
-    spec.commands
-        .iter()
-        .find(|cmd| cmd.operation_id == operation_id)
-        .ok_or_else(|| {
-            let kebab_id = to_kebab_case(operation_id);
-            let suggestions = crate::suggestions::suggest_similar_operations(spec, &kebab_id);
-            Error::operation_not_found_with_suggestions(operation_id, &suggestions)
-        })
-}
-
-/// Builds the full URL from pre-extracted path and query parameter maps.
-fn build_url_from_params(
-    base_url: &str,
-    path_template: &str,
-    path_params: &HashMap<String, String>,
-    query_params: &HashMap<String, String>,
-) -> Result<String, Error> {
-    let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
-
-    // Substitute path parameters: replace {param} with values from the map
-    let mut start = 0;
-    while let Some(open) = url[start..].find('{') {
-        let open_pos = start + open;
-        let Some(close) = url[open_pos..].find('}') else {
-            break;
-        };
-        let close_pos = open_pos + close;
-        let param_name = url[open_pos + 1..close_pos].to_string();
-
-        let value = path_params
-            .get(&param_name)
-            .ok_or_else(|| Error::missing_path_parameter(&param_name))?;
-
-        url.replace_range(open_pos..=close_pos, value);
-        start = open_pos + value.len();
+/// Formats a JSON value for display in a table cell
+fn format_value_for_table(value: &Value) -> String {
+    match value {
+        Value::Null => constants::NULL_VALUE.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Array(arr) => {
+            if arr.len() <= 3 {
+                format!(
+                    "[{}]",
+                    arr.iter()
+                        .map(format_value_for_table)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                format!("[{} items]", arr.len())
+            }
+        }
+        Value::Object(obj) => {
+            if obj.len() <= 2 {
+                format!(
+                    "{{{}}}",
+                    obj.iter()
+                        .map(|(k, v)| format!("{}: {}", k, format_value_for_table(v)))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                format!("{{object with {} fields}}", obj.len())
+            }
+        }
     }
-
-    // Append query parameters
-    if !query_params.is_empty() {
-        let mut qs_pairs: Vec<(&String, &String)> = query_params.iter().collect();
-        qs_pairs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-
-        let qs: Vec<String> = qs_pairs
-            .into_iter()
-            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
-            .collect();
-
-        url.push('?');
-        url.push_str(&qs.join("&"));
-    }
-
-    Ok(url)
-}
-
-/// Builds HTTP headers from pre-extracted header parameter maps.
-#[allow(clippy::too_many_arguments)]
-fn build_headers_from_params(
-    spec: &CachedSpec,
-    operation: &CachedCommand,
-    header_params: &HashMap<String, String>,
-    custom_headers: &[String],
-    api_name: &str,
-    global_config: Option<&GlobalConfig>,
-) -> Result<HeaderMap, Error> {
-    let mut headers = HeaderMap::new();
-
-    // Default headers
-    headers.insert("User-Agent", HeaderValue::from_static("aperture/0.1.0"));
-    headers.insert(
-        constants::HEADER_ACCEPT,
-        HeaderValue::from_static(constants::CONTENT_TYPE_JSON),
-    );
-
-    // Add header parameters from the pre-extracted map
-    for (name, value) in header_params {
-        let header_name = HeaderName::from_str(name)
-            .map_err(|e| Error::invalid_header_name(name, e.to_string()))?;
-        let header_value = HeaderValue::from_str(value)
-            .map_err(|e| Error::invalid_header_value(name, e.to_string()))?;
-        headers.insert(header_name, header_value);
-    }
-
-    // Add authentication headers
-    for security_scheme_name in &operation.security_requirements {
-        let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) else {
-            continue;
-        };
-        add_authentication_header(&mut headers, security_scheme, api_name, global_config)?;
-    }
-
-    // Add custom headers
-    for header_str in custom_headers {
-        let (name, value) = parse_custom_header(header_str)?;
-        let header_name = HeaderName::from_str(&name)
-            .map_err(|e| Error::invalid_header_name(&name, e.to_string()))?;
-        let header_value = HeaderValue::from_str(&value)
-            .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
-        headers.insert(header_name, header_value);
-    }
-
-    Ok(headers)
 }
 
 /// Applies a JQ filter to the response text
@@ -1064,11 +1692,15 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
         || filter.contains("length");
 
     if uses_advanced_features {
-        tracing::warn!(
-            "Advanced JQ features require building with --features jq. \
-             Currently only basic field access is supported (e.g., '.field', '.nested.field'). \
-             To enable full JQ support: cargo install aperture-cli --features jq"
+        // ast-grep-ignore: no-println
+        eprintln!(
+            "{} Advanced JQ features require building with --features jq",
+            crate::constants::MSG_WARNING_PREFIX
         );
+        // ast-grep-ignore: no-println
+        eprintln!("         Currently only basic field access is supported (e.g., '.field', '.nested.field')");
+        // ast-grep-ignore: no-println
+        eprintln!("         To enable full JQ support: cargo install aperture-cli --features jq");
     }
 
     let result = match filter {
@@ -1184,23 +1816,6 @@ fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_build_url_from_params_sorts_query_parameters() {
-        let mut query = std::collections::HashMap::new();
-        query.insert("b".to_string(), "2".to_string());
-        query.insert("a".to_string(), "1".to_string());
-
-        let url = build_url_from_params(
-            "https://example.com",
-            "/items",
-            &std::collections::HashMap::new(),
-            &query,
-        )
-        .expect("url build should succeed");
-
-        assert_eq!(url, "https://example.com/items?a=1&b=2");
-    }
 
     #[test]
     fn test_apply_jq_filter_simple_field_access() {

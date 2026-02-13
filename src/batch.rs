@@ -330,11 +330,10 @@ impl BatchProcessor {
         jq_filter: Option<&str>,
         suppress_output: bool,
     ) -> Result<String, Error> {
-        use crate::cli::translate;
-        use crate::invocation::ExecutionContext;
-
-        // Generate the command tree and parse operation args into ArgMatches
+        // Generate the command tree (we don't use experimental flags for batch operations)
         let command = generator::generate_command_tree_with_flags(spec, false);
+
+        // Parse the operation args into ArgMatches
         let matches = command
             .try_get_matches_from(
                 std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
@@ -342,26 +341,21 @@ impl BatchProcessor {
             )
             .map_err(|e| Error::invalid_command(crate::constants::CONTEXT_BATCH, e.to_string()))?;
 
-        // Translate ArgMatches → OperationCall
-        let call = translate::matches_to_operation_call(spec, &matches)?;
-
-        // Build cache configuration
+        // Create cache configuration - for batch operations, we use the operation's use_cache setting
         let cache_enabled = operation.use_cache.unwrap_or(false);
         let cache_config = if cache_enabled {
-            let config_dir =
-                if let Ok(dir) = std::env::var(crate::constants::ENV_APERTURE_CONFIG_DIR) {
-                    std::path::PathBuf::from(dir)
-                } else {
-                    crate::config::manager::get_config_dir()?
-                };
             Some(crate::response_cache::CacheConfig {
-                cache_dir: config_dir
+                cache_dir: std::env::var(crate::constants::ENV_APERTURE_CONFIG_DIR)
+                    .map_or_else(
+                        |_| std::path::PathBuf::from("~/.config/aperture"),
+                        std::path::PathBuf::from,
+                    )
                     .join(crate::constants::DIR_CACHE)
                     .join(crate::constants::DIR_RESPONSES),
                 default_ttl: std::time::Duration::from_secs(300),
                 max_entries: 1000,
                 enabled: true,
-                allow_authenticated: false,
+                allow_authenticated: false, // Secure by default
             })
         } else {
             None
@@ -370,29 +364,70 @@ impl BatchProcessor {
         // Build retry context from operation settings and global config defaults
         let retry_context = build_batch_retry_context(operation, global_config)?;
 
-        // Build ExecutionContext
-        let ctx = ExecutionContext {
-            dry_run,
-            idempotency_key: None,
-            cache_config,
-            retry_context,
-            base_url: base_url.map(String::from),
-            global_config: global_config.cloned(),
-            server_var_args: translate::extract_server_var_args(&matches),
-        };
-
-        // Execute
-        let result = crate::engine::executor::execute(spec, call, ctx).await?;
-
-        // Render based on suppress_output flag
+        // When suppressing output, capture it and return early
         if suppress_output {
-            let output =
-                crate::cli::render::render_result_to_string(&result, output_format, jq_filter)?;
+            let output = crate::engine::executor::execute_request(
+                spec,
+                &matches,
+                base_url,
+                dry_run,
+                None, // idempotency_key
+                global_config,
+                output_format,
+                jq_filter,
+                cache_config.as_ref(),
+                true, // capture_output
+                retry_context.as_ref(),
+            )
+            .await?;
+
+            // Return captured output (for debugging/logging if needed)
             return Ok(output.unwrap_or_default());
         }
 
-        crate::cli::render::render_result(&result, output_format, jq_filter)?;
+        // Normal execution - output goes to stdout
+        // Handle dry run case
+        if dry_run {
+            crate::engine::executor::execute_request(
+                spec,
+                &matches,
+                base_url,
+                true, // dry_run
+                None, // idempotency_key
+                global_config,
+                output_format,
+                jq_filter,
+                cache_config.as_ref(),
+                false, // capture_output
+                retry_context.as_ref(),
+            )
+            .await?;
 
+            // Return dry run message
+            return Ok(format!(
+                "DRY RUN: Would execute operation with args: {:?}",
+                operation.args
+            ));
+        }
+
+        // For actual execution, call execute_request normally
+        // The output will go to stdout as expected for batch operations
+        crate::engine::executor::execute_request(
+            spec,
+            &matches,
+            base_url,
+            false, // dry_run
+            None,  // idempotency_key
+            global_config,
+            output_format,
+            jq_filter,
+            cache_config.as_ref(),
+            false, // capture_output
+            retry_context.as_ref(),
+        )
+        .await?;
+
+        // Return success message
         Ok(format!(
             "Successfully executed operation: {}",
             operation
