@@ -348,12 +348,14 @@ impl BatchProcessor {
         // Build cache configuration
         let cache_enabled = operation.use_cache.unwrap_or(false);
         let cache_config = if cache_enabled {
+            let config_dir =
+                if let Ok(dir) = std::env::var(crate::constants::ENV_APERTURE_CONFIG_DIR) {
+                    std::path::PathBuf::from(dir)
+                } else {
+                    crate::config::manager::get_config_dir()?
+                };
             Some(crate::response_cache::CacheConfig {
-                cache_dir: std::env::var(crate::constants::ENV_APERTURE_CONFIG_DIR)
-                    .map_or_else(
-                        |_| std::path::PathBuf::from("~/.config/aperture"),
-                        std::path::PathBuf::from,
-                    )
+                cache_dir: config_dir
                     .join(crate::constants::DIR_CACHE)
                     .join(crate::constants::DIR_RESPONSES),
                 default_ttl: std::time::Duration::from_secs(300),

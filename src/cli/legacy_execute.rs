@@ -36,7 +36,11 @@ pub async fn execute_request(
     use crate::cli::translate;
     use crate::invocation::ExecutionContext;
 
-    // Check --show-examples flag (CLI-only concern)
+    // Check --show-examples flag (CLI-only concern).
+    // NOTE: The primary path through `execute_api_command` also checks this
+    // flag before reaching here.  This duplicate check is intentional so that
+    // callers of the legacy `execute_request` API (tests, batch) still get
+    // correct behavior without depending on an outer guard.
     if translate::has_show_examples_flag(matches) {
         let operation_id = translate::matches_to_operation_id(spec, matches)?;
         let operation = spec
