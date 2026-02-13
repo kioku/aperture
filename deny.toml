@@ -16,7 +16,7 @@ allow = [
     "BSL-1.0",
     "ISC",
     "Unlicense",
-
+    "Zlib",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "MPL-2.0",
