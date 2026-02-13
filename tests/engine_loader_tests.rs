@@ -59,7 +59,7 @@ fn test_load_cached_spec_success() {
 
     // Create a test cached spec
     let test_spec = create_test_cached_spec();
-    let cache_data = bincode::serialize(&test_spec).unwrap();
+    let cache_data = postcard::to_allocvec(&test_spec).unwrap();
 
     let cache_file = cache_dir.join("test-api.bin");
     fs::write(&cache_file, cache_data).unwrap();
@@ -139,7 +139,7 @@ fn test_load_cached_spec_version_mismatch() {
     let mut test_spec = create_test_cached_spec();
     test_spec.cache_format_version = 1; // Old version (current is 2)
 
-    let cache_data = bincode::serialize(&test_spec).unwrap();
+    let cache_data = postcard::to_allocvec(&test_spec).unwrap();
     let cache_file = cache_dir.join("old-version-api.bin");
     fs::write(&cache_file, cache_data).unwrap();
 
