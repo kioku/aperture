@@ -87,7 +87,7 @@ predicates = "3.1.3"
 tempfile = "3.25.0"
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["rt", "macros", "test-util"] }
-mockall = "0.13"
+mockall = "0.14"
 once_cell = "1.21.3"
 
 [profile.release]
