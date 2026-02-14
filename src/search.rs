@@ -330,18 +330,29 @@ impl Default for CommandSearcher {
 }
 
 /// Returns the effective command path using display overrides if present.
+/// Returns the effective command path using display overrides if present.
+///
+/// Uses `command.name` (not `tags.first()`) for the group fallback to stay
+/// consistent with `engine::generator::effective_group_name`.
 fn effective_command_path(command: &CachedCommand) -> String {
     let group = command.display_group.as_ref().map_or_else(
         || {
-            command.tags.first().map_or_else(
-                || constants::DEFAULT_GROUP.to_string(),
-                |t| to_kebab_case(t),
-            )
+            if command.name.is_empty() {
+                constants::DEFAULT_GROUP.to_string()
+            } else {
+                to_kebab_case(&command.name)
+            }
         },
         |g| to_kebab_case(g),
     );
     let name = command.display_name.as_ref().map_or_else(
-        || to_kebab_case(&command.operation_id),
+        || {
+            if command.operation_id.is_empty() {
+                command.method.to_lowercase()
+            } else {
+                to_kebab_case(&command.operation_id)
+            }
+        },
         |n| to_kebab_case(n),
     );
     format!("{group} {name}")
