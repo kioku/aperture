@@ -346,6 +346,7 @@ async fn test_execute_request_with_global_config_base_url() {
             environment_urls: HashMap::new(),
             strict_mode: false,
             secrets: HashMap::new(),
+            command_mapping: None,
         },
     );
 

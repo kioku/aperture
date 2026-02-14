@@ -144,6 +144,7 @@ fn create_global_config_with_secrets(
             environment_urls: HashMap::new(),
             strict_mode: false,
             secrets,
+            command_mapping: None,
         },
     );
 
@@ -484,6 +485,7 @@ async fn test_partial_config_override() {
             environment_urls: HashMap::new(),
             strict_mode: false,
             secrets,
+            command_mapping: None,
         },
     );
 

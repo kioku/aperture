@@ -323,6 +323,7 @@ mod tests {
                     environment_urls: HashMap::new(),
                     strict_mode: false,
                     secrets: HashMap::new(),
+                    command_mapping: None,
                 },
             );
 
@@ -357,6 +358,7 @@ mod tests {
                     environment_urls,
                     strict_mode: false,
                     secrets: HashMap::new(),
+                    command_mapping: None,
                 },
             );
 
@@ -393,6 +395,7 @@ mod tests {
                     environment_urls: HashMap::new(),
                     strict_mode: false,
                     secrets: HashMap::new(),
+                    command_mapping: None,
                 },
             );
 
@@ -584,6 +587,7 @@ mod tests {
                     environment_urls: HashMap::new(),
                     strict_mode: false,
                     secrets: HashMap::new(),
+                    command_mapping: None,
                 },
             );
 

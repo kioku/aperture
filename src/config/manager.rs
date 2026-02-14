@@ -80,6 +80,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 environment_urls: HashMap::new(),
                 strict_mode: false,
                 secrets: HashMap::new(),
+                command_mapping: None,
             });
         api_config.strict_mode = strict;
         self.save_global_config(&config)?;
@@ -653,6 +654,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 environment_urls: HashMap::new(),
                 strict_mode: false,
                 secrets: HashMap::new(),
+                command_mapping: None,
             });
 
         // Set the URL
@@ -842,6 +844,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 environment_urls: HashMap::new(),
                 strict_mode: false,
                 secrets: HashMap::new(),
+                command_mapping: None,
             });
 
         // Set the secret

@@ -389,6 +389,7 @@ fn test_manifest_with_global_config() {
             environment_urls: HashMap::new(),
             strict_mode: false,
             secrets: HashMap::new(),
+            command_mapping: None,
         },
     );
 
