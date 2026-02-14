@@ -315,6 +315,45 @@ pub fn generate_capability_manifest_from_openapi(
         }
     }
 
+    // Overlay command mapping fields from the cached spec.
+    //
+    // The manifest is generated from the raw OpenAPI spec for richer metadata,
+    // but command mappings (display_group, display_name, aliases, hidden) are
+    // applied at the cache layer during `config add`/`config reinit`. We merge
+    // these fields back into the manifest so agents see the effective CLI names.
+    let mapping_index: HashMap<&str, &CachedCommand> = cached_spec
+        .commands
+        .iter()
+        .map(|c| (c.operation_id.as_str(), c))
+        .collect();
+
+    // We also need to re-group commands when display_group overrides are present,
+    // since the original grouping uses the raw tag name.
+    let mut regrouped: HashMap<String, Vec<CommandInfo>> = HashMap::new();
+    for (_group, commands) in command_groups {
+        for mut cmd_info in commands {
+            if let Some(cached_cmd) = mapping_index.get(cmd_info.operation_id.as_str()) {
+                cmd_info.display_group.clone_from(&cached_cmd.display_group);
+                cmd_info.display_name.clone_from(&cached_cmd.display_name);
+                cmd_info.aliases.clone_from(&cached_cmd.aliases);
+                cmd_info.hidden = cached_cmd.hidden;
+            }
+
+            // Determine the effective group key for manifest output
+            let effective_group = cmd_info.display_group.as_ref().map_or_else(
+                || {
+                    cmd_info.original_tags.first().map_or_else(
+                        || constants::DEFAULT_GROUP.to_string(),
+                        |tag| to_kebab_case(tag),
+                    )
+                },
+                |g| to_kebab_case(g),
+            );
+
+            regrouped.entry(effective_group).or_default().push(cmd_info);
+        }
+    }
+
     // Extract security schemes directly from OpenAPI
     let security_schemes = extract_security_schemes_from_openapi(spec);
 
@@ -336,7 +375,7 @@ pub fn generate_capability_manifest_from_openapi(
             available,
             skipped,
         },
-        commands: command_groups,
+        commands: regrouped,
         security_schemes,
     };
 
@@ -667,8 +706,8 @@ fn convert_openapi_operation_to_info(
             .as_ref()
             .map(|docs| docs.url.clone()),
         response_schema,
-        // Command mappings are not available in the OpenAPI-direct path;
-        // they are applied at the cache layer during config add/reinit.
+        // Command mapping fields start as None/empty/false here; they are
+        // overlaid from the cached spec in generate_capability_manifest_from_openapi().
         display_group: None,
         display_name: None,
         aliases: vec![],
