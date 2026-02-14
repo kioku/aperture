@@ -78,6 +78,19 @@ brew install kioku/tap/aperture
 cargo binstall aperture-cli
 ```
 
+### Nix
+
+```bash
+# Install directly
+nix profile install github:kioku/aperture
+
+# With JQ support
+nix profile install github:kioku/aperture#aperture-jq
+
+# With all features
+nix profile install github:kioku/aperture#aperture-full
+```
+
 ### From crates.io
 
 ```bash
