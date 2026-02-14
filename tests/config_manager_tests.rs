@@ -1542,3 +1542,209 @@ json_errors = false
         "New timeout value should be present. Got:\n{content}"
     );
 }
+
+// ── Command Mapping Management ──
+
+/// Helper to set up a manager with a spec file present (needed for `ensure_command_mapping`)
+fn setup_manager_with_spec(spec_name: &str) -> (ConfigManager<MockFileSystem>, MockFileSystem) {
+    let (manager, fs) = setup_manager();
+    let spec_path = PathBuf::from(TEST_CONFIG_DIR)
+        .join("specs")
+        .join(format!("{spec_name}.yaml"));
+    fs.add_file(
+        &spec_path,
+        "openapi: 3.0.0\ninfo:\n  title: Test\n  version: 1.0.0\npaths: {}\n",
+    );
+    // Ensure a default config.toml exists
+    let config_path = PathBuf::from(TEST_CONFIG_DIR).join("config.toml");
+    if !fs.exists(&config_path) {
+        fs.add_file(&config_path, "");
+    }
+    (manager, fs)
+}
+
+#[test]
+fn test_set_group_mapping() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    manager
+        .set_group_mapping(&api_name, "User Management", "users")
+        .unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap();
+    let mapping = mapping.expect("mapping should exist");
+    assert_eq!(
+        mapping.groups.get("User Management"),
+        Some(&"users".to_string())
+    );
+}
+
+#[test]
+fn test_set_group_mapping_nonexistent_spec_fails() {
+    let (manager, _fs) = setup_manager();
+    // config.toml needed for load_global_config to succeed
+    let config_path = PathBuf::from(TEST_CONFIG_DIR).join("config.toml");
+    _fs.add_file(&config_path, "");
+
+    let api_name = name("nonexistent");
+    let result = manager.set_group_mapping(&api_name, "tag", "renamed");
+    assert!(result.is_err(), "Should fail for non-existent spec");
+}
+
+#[test]
+fn test_remove_group_mapping() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    // Set then remove
+    manager
+        .set_group_mapping(&api_name, "User Management", "users")
+        .unwrap();
+    manager
+        .remove_group_mapping(&api_name, "User Management")
+        .unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap();
+    let mapping = mapping.expect("mapping should still exist as struct");
+    assert!(
+        !mapping.groups.contains_key("User Management"),
+        "group mapping should have been removed"
+    );
+}
+
+#[test]
+fn test_remove_group_mapping_no_config_is_noop() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+    // No mapping set — remove should succeed silently
+    let result = manager.remove_group_mapping(&api_name, "anything");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_set_operation_mapping_name_and_group() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    manager
+        .set_operation_mapping(
+            &api_name,
+            "getUserById",
+            Some("fetch"),
+            Some("accounts"),
+            None,
+            None,
+        )
+        .unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap().unwrap();
+    let op = mapping.operations.get("getUserById").unwrap();
+    assert_eq!(op.name, Some("fetch".to_string()));
+    assert_eq!(op.group, Some("accounts".to_string()));
+    assert!(op.aliases.is_empty());
+    assert!(!op.hidden);
+}
+
+#[test]
+fn test_set_operation_mapping_alias_deduplication() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    // Add alias twice — should only appear once
+    manager
+        .set_operation_mapping(&api_name, "getUser", None, None, Some("fetch"), None)
+        .unwrap();
+    manager
+        .set_operation_mapping(&api_name, "getUser", None, None, Some("fetch"), None)
+        .unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap().unwrap();
+    let op = mapping.operations.get("getUser").unwrap();
+    assert_eq!(op.aliases, vec!["fetch".to_string()]);
+}
+
+#[test]
+fn test_set_operation_mapping_hidden() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    manager
+        .set_operation_mapping(&api_name, "deleteUser", None, None, None, Some(true))
+        .unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap().unwrap();
+    let op = mapping.operations.get("deleteUser").unwrap();
+    assert!(op.hidden);
+
+    // Unhide
+    manager
+        .set_operation_mapping(&api_name, "deleteUser", None, None, None, Some(false))
+        .unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap().unwrap();
+    let op = mapping.operations.get("deleteUser").unwrap();
+    assert!(!op.hidden);
+}
+
+#[test]
+fn test_remove_operation_mapping() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    manager
+        .set_operation_mapping(
+            &api_name,
+            "getUserById",
+            Some("fetch"),
+            None,
+            Some("get"),
+            Some(true),
+        )
+        .unwrap();
+    manager
+        .remove_operation_mapping(&api_name, "getUserById")
+        .unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap().unwrap();
+    assert!(
+        !mapping.operations.contains_key("getUserById"),
+        "operation mapping should have been removed"
+    );
+}
+
+#[test]
+fn test_get_command_mapping_no_config_returns_none() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap();
+    assert!(mapping.is_none(), "should be None when no mapping is set");
+}
+
+#[test]
+fn test_set_operation_mapping_incremental_updates() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    // First call: set name
+    manager
+        .set_operation_mapping(&api_name, "getUser", Some("fetch"), None, None, None)
+        .unwrap();
+
+    // Second call: add alias (name should be preserved)
+    manager
+        .set_operation_mapping(&api_name, "getUser", None, None, Some("get"), None)
+        .unwrap();
+
+    // Third call: set hidden (name and alias should be preserved)
+    manager
+        .set_operation_mapping(&api_name, "getUser", None, None, None, Some(true))
+        .unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap().unwrap();
+    let op = mapping.operations.get("getUser").unwrap();
+    assert_eq!(op.name, Some("fetch".to_string()));
+    assert_eq!(op.aliases, vec!["get".to_string()]);
+    assert!(op.hidden);
+}
