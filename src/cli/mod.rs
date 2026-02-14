@@ -638,6 +638,9 @@ pub enum ConfigCommands {
         /// Add an alias for an operation
         #[arg(long, requires = "operation", value_name = "ALIAS")]
         alias: Option<String>,
+        /// Remove an alias from an operation
+        #[arg(long, requires = "operation", value_name = "ALIAS")]
+        remove_alias: Option<String>,
         /// Mark an operation as hidden from help output
         #[arg(long, requires = "operation")]
         hidden: bool,

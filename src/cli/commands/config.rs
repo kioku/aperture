@@ -214,6 +214,7 @@ pub async fn execute_config_command(
             name,
             op_group,
             alias,
+            remove_alias,
             hidden,
             visible,
         } => {
@@ -226,6 +227,7 @@ pub async fn execute_config_command(
                 name.as_deref(),
                 op_group.as_deref(),
                 alias.as_deref(),
+                remove_alias.as_deref(),
                 hidden,
                 visible,
                 output,
@@ -546,6 +548,7 @@ pub fn handle_set_mapping(
     name: Option<&str>,
     op_group: Option<&str>,
     alias: Option<&str>,
+    remove_alias: Option<&str>,
     hidden: bool,
     visible: bool,
     output: &Output,
@@ -575,6 +578,11 @@ pub fn handle_set_mapping(
 
     manager.set_operation_mapping(api_name, op_id, name, op_group, alias, hidden_flag)?;
 
+    // Handle alias removal (after set, so add + remove in one call is remove-wins)
+    if let Some(alias_to_remove) = remove_alias {
+        manager.remove_alias(api_name, op_id, alias_to_remove)?;
+    }
+
     // Build a descriptive message
     let mut changes = Vec::new();
     if let Some(n) = name {
@@ -584,7 +592,10 @@ pub fn handle_set_mapping(
         changes.push(format!("group='{g}'"));
     }
     if let Some(a) = alias {
-        changes.push(format!("alias='{a}'"));
+        changes.push(format!("alias+='{a}'"));
+    }
+    if let Some(a) = remove_alias {
+        changes.push(format!("alias-='{a}'"));
     }
     if hidden {
         changes.push("hidden=true".to_string());

@@ -1174,6 +1174,33 @@ impl<F: FileSystem> ConfigManager<F> {
         self.save_global_config(&config)
     }
 
+    /// Removes a single alias from an operation mapping.
+    ///
+    /// If the operation mapping or alias does not exist, this is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded or saved.
+    pub fn remove_alias(
+        &self,
+        api_name: &ApiContextName,
+        operation_id: &str,
+        alias: &str,
+    ) -> Result<(), Error> {
+        let mut config = self.load_global_config()?;
+        let Some(api_config) = config.api_configs.get_mut(api_name.as_str()) else {
+            return Ok(());
+        };
+        let Some(ref mut mapping) = api_config.command_mapping else {
+            return Ok(());
+        };
+        let Some(op) = mapping.operations.get_mut(operation_id) else {
+            return Ok(());
+        };
+        op.aliases.retain(|a| a != alias);
+        self.save_global_config(&config)
+    }
+
     /// Gets the command mapping for an API, if any.
     ///
     /// # Errors

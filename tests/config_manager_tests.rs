@@ -1748,3 +1748,34 @@ fn test_set_operation_mapping_incremental_updates() {
     assert_eq!(op.aliases, vec!["get".to_string()]);
     assert!(op.hidden);
 }
+
+#[test]
+fn test_remove_alias() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    // Add two aliases
+    manager
+        .set_operation_mapping(&api_name, "getUser", None, None, Some("fetch"), None)
+        .unwrap();
+    manager
+        .set_operation_mapping(&api_name, "getUser", None, None, Some("show"), None)
+        .unwrap();
+
+    // Remove one
+    manager.remove_alias(&api_name, "getUser", "fetch").unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap().unwrap();
+    let op = mapping.operations.get("getUser").unwrap();
+    assert_eq!(op.aliases, vec!["show".to_string()]);
+}
+
+#[test]
+fn test_remove_alias_nonexistent_is_noop() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    // No mapping at all — should not error
+    let result = manager.remove_alias(&api_name, "getUser", "nope");
+    assert!(result.is_ok());
+}
