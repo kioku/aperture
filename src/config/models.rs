@@ -93,6 +93,21 @@ pub struct ApiConfig {
     pub command_mapping: Option<CommandMapping>,
 }
 
+impl ApiConfig {
+    /// Returns true if this config entry has no meaningful user-configured data
+    /// and can safely be removed from the global config.
+    ///
+    /// `strict_mode` is not considered because it is only meaningful when other
+    /// config (like the spec itself) exists.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.base_url_override.is_none()
+            && self.environment_urls.is_empty()
+            && self.secrets.is_empty()
+            && self.command_mapping.is_none()
+    }
+}
+
 /// Custom command tree mapping for an API specification.
 ///
 /// Allows users to customize the CLI command tree structure generated from an

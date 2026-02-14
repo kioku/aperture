@@ -966,8 +966,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Remove the secret
         api_config.secrets.remove(scheme_name);
 
-        // If no secrets remain, remove the entire API config
-        if api_config.secrets.is_empty() && api_config.base_url_override.is_none() {
+        // If no meaningful config remains, remove the entire API config entry
+        if api_config.is_empty() {
             config.api_configs.remove(api_name);
         }
 
@@ -1007,8 +1007,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Clear all secrets
         api_config.secrets.clear();
 
-        // If no other configuration remains, remove the entire API config
-        if api_config.base_url_override.is_none() {
+        // If no meaningful config remains, remove the entire API config entry
+        if api_config.is_empty() {
             config.api_configs.remove(api_name);
         }
 
