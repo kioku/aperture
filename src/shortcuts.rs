@@ -87,17 +87,50 @@ impl ShortcutResolver {
                     .or_default()
                     .push((api_name.clone(), spec.clone(), command.clone()));
 
-                // Index by tags
-                for tag in &command.tags {
-                    let tag_key = to_kebab_case(tag);
+                // Index by display name (custom command name override)
+                if let Some(ref display_name) = command.display_name {
+                    let display_kebab = to_kebab_case(display_name);
+                    self.operation_map.entry(display_kebab).or_default().push((
+                        api_name.clone(),
+                        spec.clone(),
+                        command.clone(),
+                    ));
+                }
+
+                // Index by aliases
+                for alias in &command.aliases {
+                    let alias_kebab = to_kebab_case(alias);
+                    self.operation_map.entry(alias_kebab).or_default().push((
+                        api_name.clone(),
+                        spec.clone(),
+                        command.clone(),
+                    ));
+                }
+
+                // Index by tags (and display_group override)
+                let effective_tags: Vec<String> = command.display_group.as_ref().map_or_else(
+                    || command.tags.iter().map(|t| to_kebab_case(t)).collect(),
+                    |dg| {
+                        let mut tags: Vec<String> =
+                            command.tags.iter().map(|t| to_kebab_case(t)).collect();
+                        tags.push(to_kebab_case(dg));
+                        tags
+                    },
+                );
+
+                for tag_key in &effective_tags {
                     self.tag_map.entry(tag_key.clone()).or_default().push((
                         api_name.clone(),
                         spec.clone(),
                         command.clone(),
                     ));
 
-                    // Also index tag + operation combinations
-                    let tag_operation_key = format!("{tag_key} {operation_kebab}");
+                    // Also index tag + operation combinations (with effective name)
+                    let effective_name = command
+                        .display_name
+                        .as_ref()
+                        .map_or(&operation_kebab, |n| n);
+                    let tag_operation_key = format!("{tag_key} {}", to_kebab_case(effective_name));
                     self.tag_map.entry(tag_operation_key).or_default().push((
                         api_name.clone(),
                         spec.clone(),

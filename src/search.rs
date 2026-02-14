@@ -87,12 +87,7 @@ impl CommandSearcher {
 
                 // Only include results with positive scores
                 if score_result.score > 0 {
-                    let operation_id_kebab = to_kebab_case(&command.operation_id);
-                    let tag = command.tags.first().map_or_else(
-                        || constants::DEFAULT_GROUP.to_string(),
-                        |t| to_kebab_case(t),
-                    );
-                    let command_path = format!("{tag} {operation_id_kebab}");
+                    let command_path = effective_command_path(command);
 
                     results.push(CommandSearchResult {
                         api_context: api_name.clone(),
@@ -122,9 +117,21 @@ impl CommandSearcher {
         let summary = command.summary.as_deref().unwrap_or("");
         let description = command.description.as_deref().unwrap_or("");
 
-        // Build searchable text from command attributes
+        // Build searchable text from command attributes, including display overrides and aliases
+        let display_name = command
+            .display_name
+            .as_deref()
+            .map(to_kebab_case)
+            .unwrap_or_default();
+        let display_group = command
+            .display_group
+            .as_deref()
+            .map(to_kebab_case)
+            .unwrap_or_default();
+        let aliases_text = command.aliases.join(" ");
+
         let search_text = format!(
-            "{operation_id_kebab} {} {} {} {summary} {description}",
+            "{operation_id_kebab} {} {} {} {summary} {description} {display_name} {display_group} {aliases_text}",
             command.operation_id, command.method, command.path
         );
 
@@ -219,6 +226,30 @@ impl CommandSearcher {
             );
         }
 
+        // Bonus for display name matches (custom command names)
+        if let Some(display_name) = &command.display_name {
+            Self::add_field_bonus(
+                &query_lower,
+                display_name,
+                "Display name",
+                50,
+                &mut total_score,
+                &mut highlights,
+            );
+        }
+
+        // Bonus for alias matches
+        for alias in &command.aliases {
+            Self::add_field_bonus(
+                &query_lower,
+                alias,
+                "Alias",
+                45,
+                &mut total_score,
+                &mut highlights,
+            );
+        }
+
         ScoringResult {
             score: total_score,
             highlights,
@@ -252,23 +283,35 @@ impl CommandSearcher {
         let mut suggestions = Vec::new();
 
         for command in &spec.commands {
-            let operation_id_kebab = to_kebab_case(&command.operation_id);
-            let tag = command.tags.first().map_or_else(
-                || constants::DEFAULT_GROUP.to_string(),
-                |t| to_kebab_case(t),
-            );
-            let full_command = format!("{tag} {operation_id_kebab}");
+            let full_command = effective_command_path(command);
 
-            // Check fuzzy match score - use match with guard to avoid nesting
+            // Check fuzzy match score on the effective command path
             match self.matcher.fuzzy_match(&full_command, input) {
                 Some(score) if score > 0 => suggestions.push((full_command.clone(), score)),
                 _ => {}
             }
 
-            // Also check just the operation ID - use match with guard to avoid nesting
-            match self.matcher.fuzzy_match(&operation_id_kebab, input) {
-                Some(score) if score > 0 => suggestions.push((full_command.clone(), score + 10)), // Bonus for direct match
+            // Also check the effective subcommand name directly
+            let effective_name = command
+                .display_name
+                .as_deref()
+                .map_or_else(|| to_kebab_case(&command.operation_id), to_kebab_case);
+            match self.matcher.fuzzy_match(&effective_name, input) {
+                Some(score) if score > 0 => {
+                    suggestions.push((full_command.clone(), score + 10));
+                }
                 _ => {}
+            }
+
+            // Also check aliases
+            for alias in &command.aliases {
+                let alias_kebab = to_kebab_case(alias);
+                match self.matcher.fuzzy_match(&alias_kebab, input) {
+                    Some(score) if score > 0 => {
+                        suggestions.push((full_command.clone(), score + 5));
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -284,6 +327,24 @@ impl Default for CommandSearcher {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Returns the effective command path using display overrides if present.
+fn effective_command_path(command: &CachedCommand) -> String {
+    let group = command.display_group.as_ref().map_or_else(
+        || {
+            command.tags.first().map_or_else(
+                || constants::DEFAULT_GROUP.to_string(),
+                |t| to_kebab_case(t),
+            )
+        },
+        |g| to_kebab_case(g),
+    );
+    let name = command.display_name.as_ref().map_or_else(
+        || to_kebab_case(&command.operation_id),
+        |n| to_kebab_case(n),
+    );
+    format!("{group} {name}")
 }
 
 /// Format search results for display
