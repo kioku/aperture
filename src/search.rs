@@ -330,7 +330,6 @@ impl Default for CommandSearcher {
 }
 
 /// Returns the effective command path using display overrides if present.
-/// Returns the effective command path using display overrides if present.
 ///
 /// Uses `command.name` (not `tags.first()`) for the group fallback to stay
 /// consistent with `engine::generator::effective_group_name`.

@@ -18,7 +18,13 @@ fn build_full_command(api_name: &str, command: &CachedCommand) -> Vec<String> {
         |g| to_kebab_case(g),
     );
     let operation = command.display_name.as_ref().map_or_else(
-        || to_kebab_case(&command.operation_id),
+        || {
+            if command.operation_id.is_empty() {
+                command.method.to_lowercase()
+            } else {
+                to_kebab_case(&command.operation_id)
+            }
+        },
         |n| to_kebab_case(n),
     );
     vec!["api".to_string(), api_name.to_string(), group, operation]
