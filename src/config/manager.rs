@@ -1201,7 +1201,11 @@ impl<F: FileSystem> ConfigManager<F> {
         strict: bool,
     ) -> Result<(), Error> {
         // Transform to cached representation
-        let cached_spec = Self::transform_spec_to_cached(name, openapi_spec, validation_result)?;
+        let mut cached_spec =
+            Self::transform_spec_to_cached(name, openapi_spec, validation_result)?;
+
+        // Apply command mappings from config (if any)
+        self.apply_command_mapping_if_configured(name, &mut cached_spec)?;
 
         // Create directories
         let (spec_path, cache_path) = self.create_spec_directories(name)?;
@@ -1211,6 +1215,34 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Save strict mode preference
         self.save_strict_preference(name, strict)?;
+
+        Ok(())
+    }
+
+    /// Loads and applies command mappings from config for the given API.
+    ///
+    /// If no mapping is configured, this is a no-op.
+    /// Stale mapping warnings are printed to stderr.
+    fn apply_command_mapping_if_configured(
+        &self,
+        name: &str,
+        cached_spec: &mut crate::cache::models::CachedSpec,
+    ) -> Result<(), Error> {
+        let config = self.load_global_config()?;
+        let Some(api_config) = config.api_configs.get(name) else {
+            return Ok(());
+        };
+        let Some(ref mapping) = api_config.command_mapping else {
+            return Ok(());
+        };
+
+        let result =
+            crate::config::mapping::apply_command_mapping(&mut cached_spec.commands, mapping)?;
+
+        for warning in &result.warnings {
+            // ast-grep-ignore: no-println
+            eprintln!("{} {warning}", crate::constants::MSG_WARNING_PREFIX);
+        }
 
         Ok(())
     }
