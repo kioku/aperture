@@ -1018,6 +1018,178 @@ impl<F: FileSystem> ConfigManager<F> {
         Ok(())
     }
 
+    // ---- Command Mapping Management ----
+
+    /// Gets or creates the command mapping for an API, returning a mutable reference
+    /// to the `GlobalConfig` with the mapping initialized.
+    fn ensure_command_mapping(
+        &self,
+        api_name: &str,
+    ) -> Result<(crate::config::models::GlobalConfig, String), Error> {
+        let spec_path = self
+            .config_dir
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::spec_not_found(api_name));
+        }
+
+        let mut config = self.load_global_config()?;
+        let api_config = config
+            .api_configs
+            .entry(api_name.to_string())
+            .or_insert_with(|| ApiConfig {
+                base_url_override: None,
+                environment_urls: HashMap::new(),
+                strict_mode: false,
+                secrets: HashMap::new(),
+                command_mapping: None,
+            });
+        if api_config.command_mapping.is_none() {
+            api_config.command_mapping = Some(crate::config::models::CommandMapping::default());
+        }
+        Ok((config, api_name.to_string()))
+    }
+
+    /// Sets a group mapping (tag rename) for an API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `ensure_command_mapping` invariants are violated (should never happen).
+    pub fn set_group_mapping(
+        &self,
+        api_name: &ApiContextName,
+        original_tag: &str,
+        new_name: &str,
+    ) -> Result<(), Error> {
+        let (mut config, key) = self.ensure_command_mapping(api_name.as_str())?;
+        // Safety: ensure_command_mapping guarantees these exist
+        let mapping = config
+            .api_configs
+            .get_mut(&key)
+            .expect("ensure_command_mapping guarantees api_config exists")
+            .command_mapping
+            .as_mut()
+            .expect("ensure_command_mapping guarantees command_mapping exists");
+        mapping
+            .groups
+            .insert(original_tag.to_string(), new_name.to_string());
+        self.save_global_config(&config)
+    }
+
+    /// Removes a group mapping for an API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    pub fn remove_group_mapping(
+        &self,
+        api_name: &ApiContextName,
+        original_tag: &str,
+    ) -> Result<(), Error> {
+        let mut config = self.load_global_config()?;
+        let Some(api_config) = config.api_configs.get_mut(api_name.as_str()) else {
+            return Ok(());
+        };
+        let Some(ref mut mapping) = api_config.command_mapping else {
+            return Ok(());
+        };
+        mapping.groups.remove(original_tag);
+        self.save_global_config(&config)
+    }
+
+    /// Sets an operation mapping field for an API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `ensure_command_mapping` invariants are violated (should never happen).
+    pub fn set_operation_mapping(
+        &self,
+        api_name: &ApiContextName,
+        operation_id: &str,
+        name: Option<&str>,
+        group: Option<&str>,
+        alias: Option<&str>,
+        hidden: Option<bool>,
+    ) -> Result<(), Error> {
+        let (mut config, key) = self.ensure_command_mapping(api_name.as_str())?;
+        // Safety: ensure_command_mapping guarantees these exist
+        let mapping = config
+            .api_configs
+            .get_mut(&key)
+            .expect("ensure_command_mapping guarantees api_config exists")
+            .command_mapping
+            .as_mut()
+            .expect("ensure_command_mapping guarantees command_mapping exists");
+        let op = mapping
+            .operations
+            .entry(operation_id.to_string())
+            .or_default();
+
+        if let Some(n) = name {
+            op.name = Some(n.to_string());
+        }
+        if let Some(g) = group {
+            op.group = Some(g.to_string());
+        }
+        // Add alias if specified and not already present
+        let alias_str = alias.map(str::to_string);
+        if alias_str.as_ref().is_some_and(|a| !op.aliases.contains(a)) {
+            op.aliases
+                .push(alias_str.expect("checked is_some_and above"));
+        }
+        if let Some(h) = hidden {
+            op.hidden = h;
+        }
+
+        self.save_global_config(&config)
+    }
+
+    /// Removes an operation mapping for an API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    pub fn remove_operation_mapping(
+        &self,
+        api_name: &ApiContextName,
+        operation_id: &str,
+    ) -> Result<(), Error> {
+        let mut config = self.load_global_config()?;
+        let Some(api_config) = config.api_configs.get_mut(api_name.as_str()) else {
+            return Ok(());
+        };
+        let Some(ref mut mapping) = api_config.command_mapping else {
+            return Ok(());
+        };
+        mapping.operations.remove(operation_id);
+        self.save_global_config(&config)
+    }
+
+    /// Gets the command mapping for an API, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded.
+    pub fn get_command_mapping(
+        &self,
+        api_name: &ApiContextName,
+    ) -> Result<Option<crate::config::models::CommandMapping>, Error> {
+        let config = self.load_global_config()?;
+        Ok(config
+            .api_configs
+            .get(api_name.as_str())
+            .and_then(|c| c.command_mapping.clone()))
+    }
+
     /// Configure secrets interactively for an API specification
     ///
     /// Loads the cached spec to discover available security schemes and

@@ -207,6 +207,42 @@ pub async fn execute_config_command(
             let settings = manager.list_settings()?;
             print_settings_list(settings, json, output)?;
         }
+        crate::cli::ConfigCommands::SetMapping {
+            api_name,
+            group,
+            operation,
+            name,
+            op_group,
+            alias,
+            hidden,
+            visible,
+        } => {
+            let api_name = validate_api_name(&api_name)?;
+            handle_set_mapping(
+                manager,
+                &api_name,
+                group.as_deref(),
+                operation.as_deref(),
+                name.as_deref(),
+                op_group.as_deref(),
+                alias.as_deref(),
+                hidden,
+                visible,
+                output,
+            )?;
+        }
+        crate::cli::ConfigCommands::ListMappings { api_name } => {
+            let api_name = validate_api_name(&api_name)?;
+            handle_list_mappings(manager, &api_name, output)?;
+        }
+        crate::cli::ConfigCommands::RemoveMapping {
+            api_name,
+            group,
+            operation,
+        } => {
+            let api_name = validate_api_name(&api_name)?;
+            handle_remove_mapping(manager, &api_name, group, operation, output)?;
+        }
     }
 
     Ok(())
@@ -496,4 +532,177 @@ pub async fn show_cache_stats(
         println!("  Hit rate: {hit_rate:.1}%");
     }
     Ok(())
+}
+
+// ── Command Mapping Handlers ──
+
+/// Handle the `config set-mapping` command
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
+pub fn handle_set_mapping(
+    manager: &ConfigManager<OsFileSystem>,
+    api_name: &crate::config::context_name::ApiContextName,
+    group: Option<&[String]>,
+    operation: Option<&str>,
+    name: Option<&str>,
+    op_group: Option<&str>,
+    alias: Option<&str>,
+    hidden: bool,
+    visible: bool,
+    output: &Output,
+) -> Result<(), Error> {
+    // Handle group rename
+    if let Some([original, new_name, ..]) = group {
+        manager.set_group_mapping(api_name, original, new_name)?;
+        output.success(format!(
+            "Set group mapping for '{api_name}': '{original}' → '{new_name}'"
+        ));
+        output.info("Run 'aperture config reinit' to apply changes.");
+        return Ok(());
+    }
+
+    // Handle operation mapping
+    let Some(op_id) = operation else {
+        return Err(Error::invalid_config(
+            "Either --group or --operation must be specified",
+        ));
+    };
+
+    let hidden_flag = match (hidden, visible) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
+    };
+
+    manager.set_operation_mapping(api_name, op_id, name, op_group, alias, hidden_flag)?;
+
+    // Build a descriptive message
+    let mut changes = Vec::new();
+    if let Some(n) = name {
+        changes.push(format!("name='{n}'"));
+    }
+    if let Some(g) = op_group {
+        changes.push(format!("group='{g}'"));
+    }
+    if let Some(a) = alias {
+        changes.push(format!("alias='{a}'"));
+    }
+    if hidden {
+        changes.push("hidden=true".to_string());
+    }
+    if visible {
+        changes.push("hidden=false".to_string());
+    }
+
+    let change_desc = if changes.is_empty() {
+        "(no changes)".to_string()
+    } else {
+        changes.join(", ")
+    };
+
+    output.success(format!(
+        "Set operation mapping for '{api_name}': '{op_id}' → {change_desc}"
+    ));
+    output.info("Run 'aperture config reinit' to apply changes.");
+    Ok(())
+}
+
+/// Handle the `config list-mappings` command
+pub fn handle_list_mappings(
+    manager: &ConfigManager<OsFileSystem>,
+    api_name: &crate::config::context_name::ApiContextName,
+    output: &Output,
+) -> Result<(), Error> {
+    let mapping = manager.get_command_mapping(api_name)?;
+    let Some(mapping) = mapping else {
+        output.info(format!(
+            "No command mappings configured for API '{api_name}'"
+        ));
+        return Ok(());
+    };
+
+    if mapping.groups.is_empty() && mapping.operations.is_empty() {
+        output.info(format!(
+            "No command mappings configured for API '{api_name}'"
+        ));
+        return Ok(());
+    }
+
+    output.info(format!("Command mappings for API '{api_name}':"));
+
+    if !mapping.groups.is_empty() {
+        // ast-grep-ignore: no-println
+        println!("\n  Group renames:");
+        for (original, new_name) in &mapping.groups {
+            // ast-grep-ignore: no-println
+            println!("    '{original}' → '{new_name}'");
+        }
+    }
+
+    if !mapping.operations.is_empty() {
+        // ast-grep-ignore: no-println
+        println!("\n  Operation mappings:");
+        for (op_id, op_mapping) in &mapping.operations {
+            print_operation_mapping(op_id, op_mapping);
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle the `config remove-mapping` command
+pub fn handle_remove_mapping(
+    manager: &ConfigManager<OsFileSystem>,
+    api_name: &crate::config::context_name::ApiContextName,
+    group: Option<String>,
+    operation: Option<String>,
+    output: &Output,
+) -> Result<(), Error> {
+    match (group, operation) {
+        (Some(ref original), None) => {
+            manager.remove_group_mapping(api_name, original)?;
+            output.success(format!(
+                "Removed group mapping for tag '{original}' from API '{api_name}'"
+            ));
+        }
+        (None, Some(ref op_id)) => {
+            manager.remove_operation_mapping(api_name, op_id)?;
+            output.success(format!(
+                "Removed operation mapping for '{op_id}' from API '{api_name}'"
+            ));
+        }
+        (Some(_), Some(_)) => {
+            return Err(Error::invalid_config(
+                "Specify either --group or --operation, not both",
+            ));
+        }
+        (None, None) => {
+            return Err(Error::invalid_config(
+                "Either --group or --operation must be specified",
+            ));
+        }
+    }
+    output.info("Run 'aperture config reinit' to apply changes.");
+    Ok(())
+}
+
+/// Prints details of a single operation mapping
+fn print_operation_mapping(op_id: &str, op_mapping: &crate::config::models::OperationMapping) {
+    // ast-grep-ignore: no-println
+    println!("    {op_id}:");
+    if let Some(ref name) = op_mapping.name {
+        // ast-grep-ignore: no-println
+        println!("      name: {name}");
+    }
+    if let Some(ref group) = op_mapping.group {
+        // ast-grep-ignore: no-println
+        println!("      group: {group}");
+    }
+    if !op_mapping.aliases.is_empty() {
+        // ast-grep-ignore: no-println
+        println!("      aliases: {}", op_mapping.aliases.join(", "));
+    }
+    if op_mapping.hidden {
+        // ast-grep-ignore: no-println
+        println!("      hidden: true");
+    }
 }
