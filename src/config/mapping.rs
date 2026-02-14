@@ -99,17 +99,35 @@ fn apply_operation_mapping(
 }
 
 /// Resolves the effective group name for a command, considering display overrides.
+///
+/// Mirrors the logic in `engine::generator::effective_group_name` to ensure
+/// collision detection matches the actual command tree.
 fn effective_group(command: &CachedCommand) -> String {
-    command
-        .display_group
-        .as_ref()
-        .map_or_else(|| to_kebab_case(&command.name), |g| to_kebab_case(g))
+    command.display_group.as_ref().map_or_else(
+        || {
+            if command.name.is_empty() {
+                crate::constants::DEFAULT_GROUP.to_string()
+            } else {
+                to_kebab_case(&command.name)
+            }
+        },
+        |g| to_kebab_case(g),
+    )
 }
 
 /// Resolves the effective subcommand name for a command, considering display overrides.
+///
+/// Mirrors the logic in `engine::generator::effective_subcommand_name` to ensure
+/// collision detection matches the actual command tree.
 fn effective_name(command: &CachedCommand) -> String {
     command.display_name.as_ref().map_or_else(
-        || to_kebab_case(&command.operation_id),
+        || {
+            if command.operation_id.is_empty() {
+                command.method.to_lowercase()
+            } else {
+                to_kebab_case(&command.operation_id)
+            }
+        },
         |n| to_kebab_case(n),
     )
 }
@@ -367,5 +385,36 @@ mod tests {
         assert_eq!(commands[0].display_name, None);
         assert!(commands[0].aliases.is_empty());
         assert!(!commands[0].hidden);
+    }
+
+    #[test]
+    fn test_empty_name_uses_default_group() {
+        // A command with empty name should use DEFAULT_GROUP, not empty string
+        let mut cmd = make_command("", "getUser");
+        cmd.name = String::new();
+        cmd.tags = vec![];
+        let mut commands = vec![cmd];
+        let mapping = CommandMapping::default();
+
+        let result = apply_command_mapping(&mut commands, &mapping).unwrap();
+        assert!(result.warnings.is_empty());
+        // Verify effective_group resolves to DEFAULT_GROUP for collision detection
+        assert_eq!(
+            super::effective_group(&commands[0]),
+            crate::constants::DEFAULT_GROUP
+        );
+    }
+
+    #[test]
+    fn test_empty_operation_id_uses_method() {
+        let mut cmd = make_command("users", "");
+        cmd.operation_id = String::new();
+        cmd.method = "POST".to_string();
+        let mut commands = vec![cmd];
+        let mapping = CommandMapping::default();
+
+        let result = apply_command_mapping(&mut commands, &mapping).unwrap();
+        assert!(result.warnings.is_empty());
+        assert_eq!(super::effective_name(&commands[0]), "post");
     }
 }
