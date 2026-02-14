@@ -68,6 +68,10 @@ fn create_test_spec() -> CachedSpec {
                         explanation: Some("Example of retrieving user with ID 123".to_string()),
                     },
                 ],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
                 name: "create-user".to_string(),
@@ -98,6 +102,10 @@ fn create_test_spec() -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
         ],
     }

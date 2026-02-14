@@ -150,6 +150,10 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             deprecated: false,
             external_docs_url: Some("https://docs.example.com/users".to_string()),
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         },
         // Deprecated command with request body
         CachedCommand {
@@ -179,6 +183,10 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             deprecated: true,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         },
         // Public endpoint with no auth
         CachedCommand {
@@ -202,6 +210,10 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         },
     ];
 
@@ -1007,6 +1019,10 @@ fn test_manifest_from_cached_with_response_schema() {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -1145,6 +1161,10 @@ fn test_manifest_cached_status_code_fallback() {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],

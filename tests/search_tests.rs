@@ -7,6 +7,7 @@ use aperture_cli::cache::models::{
 use aperture_cli::search::{format_search_results, CommandSearcher};
 use std::collections::{BTreeMap, HashMap};
 
+#[allow(clippy::too_many_lines)]
 fn create_test_spec(name: &str) -> CachedSpec {
     CachedSpec {
         cache_format_version: CACHE_FORMAT_VERSION,
@@ -40,6 +41,10 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
                 operation_id: "listUsers".to_string(),
@@ -56,6 +61,10 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
                 operation_id: "createUser".to_string(),
@@ -72,6 +81,10 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
                 operation_id: "getIssue".to_string(),
@@ -88,6 +101,10 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
         ],
         servers: vec![],

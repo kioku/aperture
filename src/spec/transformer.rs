@@ -358,6 +358,10 @@ impl SpecTransformer {
                 .as_ref()
                 .map(|docs| docs.url.clone()),
             examples,
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         })
     }
 

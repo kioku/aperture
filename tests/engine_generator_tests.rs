@@ -87,6 +87,10 @@ macro_rules! cached_command {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }
     };
 }

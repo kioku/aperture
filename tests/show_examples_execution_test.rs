@@ -50,6 +50,10 @@ fn create_nested_test_spec() -> CachedSpec {
                 external_docs_url: None,
                 responses: vec![],
                 tags: vec!["users".to_string()],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
                 name: "getUser".to_string(),
@@ -91,6 +95,10 @@ fn create_nested_test_spec() -> CachedSpec {
                 external_docs_url: None,
                 responses: vec![],
                 tags: vec!["users".to_string()],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
         ],
         security_schemes: std::collections::HashMap::new(),
@@ -281,6 +289,10 @@ async fn test_show_examples_does_not_require_valid_json_body() {
         external_docs_url: None,
         responses: vec![],
         tags: vec!["users".to_string()],
+        display_group: None,
+        display_name: None,
+        aliases: vec![],
+        hidden: false,
     });
 
     let cmd = generate_command_tree_with_flags(&spec, false);

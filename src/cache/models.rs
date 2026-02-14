@@ -66,7 +66,8 @@ pub struct SkippedEndpoint {
 /// Version 2: Added `skipped_endpoints` field to track endpoints skipped during validation
 /// Version 3: Added `server_variables` field to support `OpenAPI` server URL template variables
 /// Version 4: Added `example` field to `CachedResponse` for response schema examples
-pub const CACHE_FORMAT_VERSION: u32 = 4;
+/// Version 5: Added `display_group`, `display_name`, `aliases`, `hidden` fields for command mapping
+pub const CACHE_FORMAT_VERSION: u32 = 5;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -126,6 +127,18 @@ pub struct CachedCommand {
     /// Usage examples for this command (added in v0.1.6)
     #[serde(default)]
     pub examples: Vec<CommandExample>,
+    /// Display name override for the command group (tag), from command mapping (added in v5)
+    #[serde(default)]
+    pub display_group: Option<String>,
+    /// Display name override for the subcommand (operation), from command mapping (added in v5)
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Additional subcommand aliases from command mapping (added in v5)
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    /// Whether this command is hidden from help output, from command mapping (added in v5)
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

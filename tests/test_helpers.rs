@@ -67,5 +67,9 @@ pub fn test_command(name: &str, operation_id: &str, method: &str, path: &str) ->
         deprecated: false,
         external_docs_url: None,
         examples: vec![],
+        display_group: None,
+        display_name: None,
+        aliases: vec![],
+        hidden: false,
     }
 }
