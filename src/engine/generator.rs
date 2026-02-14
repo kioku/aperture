@@ -117,17 +117,11 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
                 .action(ArgAction::Append),
         );
 
-    // Group commands by their tag (namespace)
+    // Group commands by their effective group name (display_group override or tag)
     let mut command_groups: HashMap<String, Vec<&CachedCommand>> = HashMap::new();
 
     for command in &spec.commands {
-        // Use the command name (first tag) or "default" as fallback
-        let group_name = if command.name.is_empty() {
-            constants::DEFAULT_GROUP.to_string()
-        } else {
-            command.name.clone()
-        };
-
+        let group_name = effective_group_name(command);
         command_groups.entry(group_name).or_default().push(command);
     }
 
@@ -140,13 +134,7 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 
         // Add operations as subcommands
         for cached_command in commands {
-            let subcommand_name = if cached_command.operation_id.is_empty() {
-                // Fallback to HTTP method if no operationId
-                cached_command.method.to_lowercase()
-            } else {
-                to_kebab_case(&cached_command.operation_id)
-            };
-
+            let subcommand_name = effective_subcommand_name(cached_command);
             let subcommand_name_static = to_static_str(subcommand_name);
 
             // Build help text with examples
@@ -190,6 +178,21 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
                     .action(ArgAction::SetTrue),
             );
 
+            // Apply command mapping: aliases
+            if !cached_command.aliases.is_empty() {
+                let alias_strs: Vec<&'static str> = cached_command
+                    .aliases
+                    .iter()
+                    .map(|a| to_static_str(to_kebab_case(a)))
+                    .collect();
+                operation_command = operation_command.visible_aliases(alias_strs);
+            }
+
+            // Apply command mapping: hidden
+            if cached_command.hidden {
+                operation_command = operation_command.hide(true);
+            }
+
             group_command = group_command.subcommand(operation_command);
         }
 
@@ -197,6 +200,34 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
     }
 
     root_command
+}
+
+/// Returns the effective group name for a command, using `display_group` override if present.
+fn effective_group_name(command: &CachedCommand) -> String {
+    command.display_group.as_ref().map_or_else(
+        || {
+            if command.name.is_empty() {
+                constants::DEFAULT_GROUP.to_string()
+            } else {
+                command.name.clone()
+            }
+        },
+        Clone::clone,
+    )
+}
+
+/// Returns the effective subcommand name for a command, using `display_name` override if present.
+fn effective_subcommand_name(command: &CachedCommand) -> String {
+    command.display_name.as_ref().map_or_else(
+        || {
+            if command.operation_id.is_empty() {
+                command.method.to_lowercase()
+            } else {
+                to_kebab_case(&command.operation_id)
+            }
+        },
+        |n| to_kebab_case(n),
+    )
 }
 
 /// Creates a clap Arg from a `CachedParameter`
