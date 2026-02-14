@@ -95,6 +95,18 @@ pub struct CommandInfo {
     /// Response schema for successful responses (200/201/204)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_schema: Option<ResponseSchemaInfo>,
+    /// Display name override for the command group (from command mapping)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_group: Option<String>,
+    /// Display name override for the subcommand (from command mapping)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Additional subcommand aliases (from command mapping)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub aliases: Vec<String>,
+    /// Whether this command is hidden from help output (from command mapping)
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -446,6 +458,10 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
         deprecated: cached_command.deprecated,
         external_docs_url: cached_command.external_docs_url.clone(),
         response_schema,
+        display_group: cached_command.display_group.clone(),
+        display_name: cached_command.display_name.clone(),
+        aliases: cached_command.aliases.clone(),
+        hidden: cached_command.hidden,
     }
 }
 
@@ -651,6 +667,12 @@ fn convert_openapi_operation_to_info(
             .as_ref()
             .map(|docs| docs.url.clone()),
         response_schema,
+        // Command mappings are not available in the OpenAPI-direct path;
+        // they are applied at the cache layer during config add/reinit.
+        display_group: None,
+        display_name: None,
+        aliases: vec![],
+        hidden: false,
     }
 }
 
