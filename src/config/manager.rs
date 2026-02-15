@@ -1066,6 +1066,9 @@ impl<F: FileSystem> ConfigManager<F> {
         original_tag: &str,
         new_name: &str,
     ) -> Result<(), Error> {
+        if new_name.trim().is_empty() {
+            return Err(Error::invalid_config("Group name cannot be empty"));
+        }
         let (mut config, key) = self.ensure_command_mapping(api_name.as_str())?;
         // Safety: ensure_command_mapping guarantees these exist
         let mapping = config
@@ -1120,6 +1123,15 @@ impl<F: FileSystem> ConfigManager<F> {
         alias: Option<&str>,
         hidden: Option<bool>,
     ) -> Result<(), Error> {
+        if name.is_some_and(|n| n.trim().is_empty()) {
+            return Err(Error::invalid_config("Operation name cannot be empty"));
+        }
+        if group.is_some_and(|g| g.trim().is_empty()) {
+            return Err(Error::invalid_config("Operation group cannot be empty"));
+        }
+        if alias.is_some_and(|a| a.trim().is_empty()) {
+            return Err(Error::invalid_config("Alias cannot be empty"));
+        }
         let (mut config, key) = self.ensure_command_mapping(api_name.as_str())?;
         // Safety: ensure_command_mapping guarantees these exist
         let mapping = config

@@ -1779,3 +1779,30 @@ fn test_remove_alias_nonexistent_is_noop() {
     let result = manager.remove_alias(&api_name, "getUser", "nope");
     assert!(result.is_ok());
 }
+
+#[test]
+fn test_set_group_mapping_rejects_empty_name() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    let result = manager.set_group_mapping(&api_name, "Users", "");
+    assert!(result.is_err(), "Should reject empty group name");
+
+    let result = manager.set_group_mapping(&api_name, "Users", "  ");
+    assert!(result.is_err(), "Should reject whitespace-only group name");
+}
+
+#[test]
+fn test_set_operation_mapping_rejects_empty_values() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    let result = manager.set_operation_mapping(&api_name, "getUser", Some(""), None, None, None);
+    assert!(result.is_err(), "Should reject empty operation name");
+
+    let result = manager.set_operation_mapping(&api_name, "getUser", None, Some(""), None, None);
+    assert!(result.is_err(), "Should reject empty operation group");
+
+    let result = manager.set_operation_mapping(&api_name, "getUser", None, None, Some(""), None);
+    assert!(result.is_err(), "Should reject empty alias");
+}
