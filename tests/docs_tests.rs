@@ -20,7 +20,7 @@ fn create_test_spec() -> CachedSpec {
         server_variables: HashMap::new(),
         commands: vec![
             CachedCommand {
-                name: "get-user".to_string(),
+                name: "users".to_string(),
                 operation_id: "getUserById".to_string(),
                 method: "GET".to_string(),
                 path: "/users/{id}".to_string(),
@@ -74,7 +74,7 @@ fn create_test_spec() -> CachedSpec {
                 hidden: false,
             },
             CachedCommand {
-                name: "create-user".to_string(),
+                name: "users".to_string(),
                 operation_id: "createUser".to_string(),
                 method: "POST".to_string(),
                 path: "/users".to_string(),
@@ -286,4 +286,69 @@ fn test_command_help_contains_basic_example() {
     // Should generate a basic example since this command has no predefined examples
     assert!(help.contains("## Example"));
     assert!(help.contains("aperture api testapi users create-user"));
+}
+
+#[test]
+fn test_command_help_resolves_and_displays_mapped_names() {
+    let mut spec = create_test_spec();
+    spec.commands[0].display_group = Some("Accounts".to_string());
+    spec.commands[0].display_name = Some("Fetch".to_string());
+    spec.commands[0].aliases = vec!["get".to_string()];
+
+    let mut specs = BTreeMap::new();
+    specs.insert("testapi".to_string(), spec);
+
+    let doc_gen = DocumentationGenerator::new(specs);
+
+    // Mapped names should resolve.
+    let help = doc_gen
+        .generate_command_help("testapi", "accounts", "fetch")
+        .unwrap();
+    assert!(help.contains("aperture api testapi accounts fetch"));
+
+    // Aliases should resolve too.
+    let help_by_alias = doc_gen
+        .generate_command_help("testapi", "accounts", "get")
+        .unwrap();
+    assert!(help_by_alias.contains("aperture api testapi accounts fetch"));
+
+    // Legacy names still resolve, but output should show effective mapped path.
+    let help_legacy = doc_gen
+        .generate_command_help("testapi", "users", "get-user-by-id")
+        .unwrap();
+    assert!(help_legacy.contains("aperture api testapi accounts fetch"));
+}
+
+#[test]
+fn test_help_formatter_uses_effective_names_and_hides_hidden_commands() {
+    let mut spec = create_test_spec();
+    spec.commands[0].display_group = Some("Accounts".to_string());
+    spec.commands[0].display_name = Some("Fetch".to_string());
+    spec.commands[1].hidden = true;
+
+    let formatted = HelpFormatter::format_command_list(&spec);
+
+    assert!(formatted.contains("Operations: 1"));
+    assert!(formatted.contains("📁 accounts"));
+    assert!(formatted.contains("fetch"));
+    assert!(!formatted.contains("create-user"));
+}
+
+#[test]
+fn test_api_overview_uses_effective_names_and_excludes_hidden_commands() {
+    let mut spec = create_test_spec();
+    spec.commands[0].display_group = Some("Accounts".to_string());
+    spec.commands[0].display_name = Some("Fetch".to_string());
+    spec.commands[1].hidden = true;
+
+    let mut specs = BTreeMap::new();
+    specs.insert("testapi".to_string(), spec);
+
+    let doc_gen = DocumentationGenerator::new(specs);
+    let overview = doc_gen.generate_api_overview("testapi").unwrap();
+
+    assert!(overview.contains("**Total Operations**: 1"));
+    assert!(overview.contains("accounts: 1"));
+    assert!(overview.contains("aperture api testapi accounts fetch"));
+    assert!(!overview.contains("aperture api testapi users create-user"));
 }

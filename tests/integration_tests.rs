@@ -922,7 +922,7 @@ paths:
     // Check that commands are grouped by tags
     assert!(stdout.contains("users"));
     assert!(stdout.contains("posts"));
-    assert!(stdout.contains("General")); // For healthCheck without tag
+    assert!(stdout.contains("default")); // For healthCheck without tag
 
     // Check that operations are listed
     assert!(stdout.contains("list-users"));
