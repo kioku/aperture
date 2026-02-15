@@ -4,9 +4,10 @@
 //! CLI-agnostic [`OperationCall`] and [`ExecutionContext`] types used
 //! by the execution engine.
 
-use crate::cache::models::{CachedParameter, CachedSpec};
+use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use crate::cli::Cli;
 use crate::config::models::GlobalConfig;
+use crate::constants;
 use crate::duration::parse_duration;
 use crate::engine::executor::RetryContext;
 use crate::error::Error;
@@ -89,7 +90,7 @@ pub fn matches_to_operation_id(spec: &CachedSpec, matches: &ArgMatches) -> Resul
 fn find_operation_from_matches<'a>(
     spec: &'a CachedSpec,
     matches: &'a ArgMatches,
-) -> Result<(&'a crate::cache::models::CachedCommand, &'a ArgMatches), Error> {
+) -> Result<(&'a CachedCommand, &'a ArgMatches), Error> {
     let mut current_matches = matches;
     let mut subcommand_path = Vec::new();
 
@@ -104,12 +105,23 @@ fn find_operation_from_matches<'a>(
         Error::operation_not_found_with_suggestions(name, &suggestions)
     })?;
 
+    // Dynamic tree shape is: <group> <operation>
+    let group_name = subcommand_path
+        .len()
+        .checked_sub(2)
+        .and_then(|idx| subcommand_path.get(idx));
+
     let operation = spec
         .commands
         .iter()
-        .find(|cmd| {
-            let kebab_id = to_kebab_case(&cmd.operation_id);
-            &kebab_id == operation_name || cmd.method.to_lowercase() == *operation_name
+        .find(|cmd| matches_effective_command_path(cmd, group_name, operation_name))
+        // Backward-compatible fallback: resolve by operation name only.
+        // This supports existing tests and any callers that manually construct
+        // `ArgMatches` without a generator-consistent group segment.
+        .or_else(|| {
+            spec.commands
+                .iter()
+                .find(|cmd| matches_effective_command_path(cmd, None, operation_name))
         })
         .ok_or_else(|| {
             let suggestions = crate::suggestions::suggest_similar_operations(spec, operation_name);
@@ -117,6 +129,53 @@ fn find_operation_from_matches<'a>(
         })?;
 
     Ok((operation, current_matches))
+}
+
+/// Returns true when a command matches a parsed group/operation subcommand path.
+fn matches_effective_command_path(
+    command: &CachedCommand,
+    group_name: Option<&String>,
+    operation_name: &str,
+) -> bool {
+    let operation_matches = effective_operation_name(command) == operation_name
+        || command
+            .aliases
+            .iter()
+            .any(|alias| to_kebab_case(alias) == operation_name);
+
+    if !operation_matches {
+        return false;
+    }
+
+    group_name.is_none_or(|group| effective_group_name(command) == *group)
+}
+
+/// Computes the effective group name used by the command tree generator.
+fn effective_group_name(command: &CachedCommand) -> String {
+    command.display_group.as_ref().map_or_else(
+        || {
+            if command.name.is_empty() {
+                constants::DEFAULT_GROUP.to_string()
+            } else {
+                to_kebab_case(&command.name)
+            }
+        },
+        |group| to_kebab_case(group),
+    )
+}
+
+/// Computes the effective operation name used by the command tree generator.
+fn effective_operation_name(command: &CachedCommand) -> String {
+    command.display_name.as_ref().map_or_else(
+        || {
+            if command.operation_id.is_empty() {
+                command.method.to_lowercase()
+            } else {
+                to_kebab_case(&command.operation_id)
+            }
+        },
+        |name| to_kebab_case(name),
+    )
 }
 
 /// Extracts a single parameter value from matches and inserts it into the
