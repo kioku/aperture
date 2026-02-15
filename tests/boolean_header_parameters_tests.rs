@@ -82,6 +82,10 @@ fn create_spec_with_boolean_headers(
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: HashMap::new(),
     }
@@ -365,6 +369,10 @@ async fn test_kebab_case_boolean_header_conversion() {
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: HashMap::new(),
     };
@@ -476,6 +484,10 @@ async fn test_boolean_header_with_query_and_path_params() {
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: HashMap::new(),
     };
@@ -591,6 +603,10 @@ async fn test_multiple_boolean_headers() {
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: HashMap::new(),
     };

@@ -7,6 +7,7 @@ use aperture_cli::cache::models::{
 use aperture_cli::search::{format_search_results, CommandSearcher};
 use std::collections::{BTreeMap, HashMap};
 
+#[allow(clippy::too_many_lines)]
 fn create_test_spec(name: &str) -> CachedSpec {
     CachedSpec {
         cache_format_version: CACHE_FORMAT_VERSION,
@@ -40,6 +41,10 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
                 operation_id: "listUsers".to_string(),
@@ -56,6 +61,10 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
                 operation_id: "createUser".to_string(),
@@ -72,6 +81,10 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
                 operation_id: "getIssue".to_string(),
@@ -88,6 +101,10 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
         ],
         servers: vec![],
@@ -272,4 +289,145 @@ fn test_search_scoring() {
     for i in 1..results.len() {
         assert!(results[i - 1].score >= results[i].score);
     }
+}
+
+#[test]
+fn test_search_finds_by_display_name() {
+    let spec = CachedSpec {
+        cache_format_version: CACHE_FORMAT_VERSION,
+        name: "mapped-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            operation_id: "getUserById".to_string(),
+            name: "users".to_string(),
+            description: Some("Fetch a user".to_string()),
+            summary: None,
+            method: "GET".to_string(),
+            path: "/users/{id}".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec!["users".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: None,
+            display_name: Some("fetch".to_string()),
+            aliases: vec![],
+            hidden: false,
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec![],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    };
+
+    let searcher = CommandSearcher::new();
+    let mut specs = BTreeMap::new();
+    specs.insert("mapped-api".to_string(), spec);
+
+    // Searching by display name "fetch" should find the command
+    let results = searcher.search(&specs, "fetch", None).unwrap();
+    assert!(!results.is_empty(), "Should find command by display name");
+    assert_eq!(results[0].command.operation_id, "getUserById");
+
+    // The command path should use the display name
+    assert!(
+        results[0].command_path.contains("fetch"),
+        "Command path should use display name, got: {}",
+        results[0].command_path
+    );
+}
+
+#[test]
+fn test_search_finds_by_alias() {
+    let spec = CachedSpec {
+        cache_format_version: CACHE_FORMAT_VERSION,
+        name: "mapped-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            operation_id: "getUserById".to_string(),
+            name: "users".to_string(),
+            description: Some("Fetch a user".to_string()),
+            summary: None,
+            method: "GET".to_string(),
+            path: "/users/{id}".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec!["users".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec!["lookup".to_string()],
+            hidden: false,
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec![],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    };
+
+    let searcher = CommandSearcher::new();
+    let mut specs = BTreeMap::new();
+    specs.insert("mapped-api".to_string(), spec);
+
+    // Searching by alias "lookup" should find the command
+    let results = searcher.search(&specs, "lookup", None).unwrap();
+    assert!(!results.is_empty(), "Should find command by alias");
+    assert_eq!(results[0].command.operation_id, "getUserById");
+}
+
+#[test]
+fn test_search_suggestions_include_display_names() {
+    let spec = CachedSpec {
+        cache_format_version: CACHE_FORMAT_VERSION,
+        name: "mapped-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            operation_id: "getUserById".to_string(),
+            name: "users".to_string(),
+            description: Some("Fetch a user".to_string()),
+            summary: None,
+            method: "GET".to_string(),
+            path: "/users/{id}".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec!["users".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: Some("accounts".to_string()),
+            display_name: Some("fetch".to_string()),
+            aliases: vec!["show".to_string()],
+            hidden: false,
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec![],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    };
+
+    let searcher = CommandSearcher::new();
+
+    // Suggestions should use the effective command path with display names
+    let suggestions = searcher.find_similar_commands(&spec, "fetc", 5);
+    assert!(
+        !suggestions.is_empty(),
+        "Should suggest command by display name prefix"
+    );
+    let (suggestion, _score) = &suggestions[0];
+    assert!(
+        suggestion.contains("accounts") && suggestion.contains("fetch"),
+        "Suggestion should use display group and name, got: {suggestions:?}"
+    );
 }

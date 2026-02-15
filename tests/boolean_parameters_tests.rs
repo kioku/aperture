@@ -65,6 +65,10 @@ fn create_test_spec_with_boolean_params() -> CachedSpec {
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -120,6 +124,10 @@ fn create_test_spec_with_examples_param() -> CachedSpec {
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -346,6 +354,10 @@ fn test_boolean_path_parameters() {
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: std::collections::HashMap::new(),
     };

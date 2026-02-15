@@ -95,6 +95,18 @@ pub struct CommandInfo {
     /// Response schema for successful responses (200/201/204)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_schema: Option<ResponseSchemaInfo>,
+    /// Display name override for the command group (from command mapping)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_group: Option<String>,
+    /// Display name override for the subcommand (from command mapping)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Additional subcommand aliases (from command mapping)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub aliases: Vec<String>,
+    /// Whether this command is hidden from help output (from command mapping)
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -303,6 +315,45 @@ pub fn generate_capability_manifest_from_openapi(
         }
     }
 
+    // Overlay command mapping fields from the cached spec.
+    //
+    // The manifest is generated from the raw OpenAPI spec for richer metadata,
+    // but command mappings (display_group, display_name, aliases, hidden) are
+    // applied at the cache layer during `config add`/`config reinit`. We merge
+    // these fields back into the manifest so agents see the effective CLI names.
+    let mapping_index: HashMap<&str, &CachedCommand> = cached_spec
+        .commands
+        .iter()
+        .map(|c| (c.operation_id.as_str(), c))
+        .collect();
+
+    // We also need to re-group commands when display_group overrides are present,
+    // since the original grouping uses the raw tag name.
+    let mut regrouped: HashMap<String, Vec<CommandInfo>> = HashMap::new();
+    for (_group, commands) in command_groups {
+        for mut cmd_info in commands {
+            if let Some(cached_cmd) = mapping_index.get(cmd_info.operation_id.as_str()) {
+                cmd_info.display_group.clone_from(&cached_cmd.display_group);
+                cmd_info.display_name.clone_from(&cached_cmd.display_name);
+                cmd_info.aliases.clone_from(&cached_cmd.aliases);
+                cmd_info.hidden = cached_cmd.hidden;
+            }
+
+            // Determine the effective group key for manifest output
+            let effective_group = cmd_info.display_group.as_ref().map_or_else(
+                || {
+                    cmd_info.original_tags.first().map_or_else(
+                        || constants::DEFAULT_GROUP.to_string(),
+                        |tag| to_kebab_case(tag),
+                    )
+                },
+                |g| to_kebab_case(g),
+            );
+
+            regrouped.entry(effective_group).or_default().push(cmd_info);
+        }
+    }
+
     // Extract security schemes directly from OpenAPI
     let security_schemes = extract_security_schemes_from_openapi(spec);
 
@@ -324,7 +375,7 @@ pub fn generate_capability_manifest_from_openapi(
             available,
             skipped,
         },
-        commands: command_groups,
+        commands: regrouped,
         security_schemes,
     };
 
@@ -446,6 +497,10 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
         deprecated: cached_command.deprecated,
         external_docs_url: cached_command.external_docs_url.clone(),
         response_schema,
+        display_group: cached_command.display_group.clone(),
+        display_name: cached_command.display_name.clone(),
+        aliases: cached_command.aliases.clone(),
+        hidden: cached_command.hidden,
     }
 }
 
@@ -651,6 +706,12 @@ fn convert_openapi_operation_to_info(
             .as_ref()
             .map(|docs| docs.url.clone()),
         response_schema,
+        // Command mapping fields start as None/empty/false here; they are
+        // overlaid from the cached spec in generate_capability_manifest_from_openapi().
+        display_group: None,
+        display_name: None,
+        aliases: vec![],
+        hidden: false,
     }
 }
 
@@ -1017,6 +1078,10 @@ mod tests {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             }],
             base_url: Some("https://test-api.example.com".to_string()),
             servers: vec!["https://test-api.example.com".to_string()],

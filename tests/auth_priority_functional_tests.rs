@@ -105,6 +105,10 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         base_url: None,
         servers: vec![],
@@ -144,6 +148,7 @@ fn create_global_config_with_secrets(
             environment_urls: HashMap::new(),
             strict_mode: false,
             secrets,
+            command_mapping: None,
         },
     );
 
@@ -484,6 +489,7 @@ async fn test_partial_config_override() {
             environment_urls: HashMap::new(),
             strict_mode: false,
             secrets,
+            command_mapping: None,
         },
     );
 
@@ -581,6 +587,10 @@ async fn test_no_authentication_configured() {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         base_url: None,
         servers: vec![],

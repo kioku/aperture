@@ -88,6 +88,60 @@ pub struct ApiConfig {
     /// Secret configurations for security schemes (overrides x-aperture-secret extensions)
     #[serde(default)]
     pub secrets: HashMap<String, ApertureSecret>,
+    /// Custom command tree mapping (rename groups, operations, add aliases, hide commands)
+    #[serde(default)]
+    pub command_mapping: Option<CommandMapping>,
+}
+
+impl ApiConfig {
+    /// Returns true if this config entry has no meaningful user-configured data
+    /// and can safely be removed from the global config.
+    ///
+    /// `strict_mode` is not considered because it is only meaningful when other
+    /// config (like the spec itself) exists.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.base_url_override.is_none()
+            && self.environment_urls.is_empty()
+            && self.secrets.is_empty()
+            && self.command_mapping.is_none()
+    }
+}
+
+/// Custom command tree mapping for an API specification.
+///
+/// Allows users to customize the CLI command tree structure generated from an
+/// `OpenAPI` spec without modifying the original specification. This is especially
+/// useful for third-party specs with verbose or awkward naming.
+///
+/// Config-based mappings take precedence over default tag/operationId naming.
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq)]
+pub struct CommandMapping {
+    /// Tag group renames: original tag name → custom display name.
+    /// The original tag (as it appears in the `OpenAPI` spec) is the key,
+    /// and the desired CLI group name is the value.
+    #[serde(default)]
+    pub groups: HashMap<String, String>,
+    /// Per-operation mappings keyed by the original operationId from the `OpenAPI` spec.
+    #[serde(default)]
+    pub operations: HashMap<String, OperationMapping>,
+}
+
+/// Mapping overrides for a single API operation.
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq)]
+pub struct OperationMapping {
+    /// Override the subcommand name (replaces the kebab-cased operationId)
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Override the command group (replaces the tag-based group)
+    #[serde(default)]
+    pub group: Option<String>,
+    /// Additional subcommand aliases
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    /// Whether this command is hidden from help output
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]

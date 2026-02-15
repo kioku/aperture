@@ -607,4 +607,77 @@ pub enum ConfigCommands {
         #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    /// Set a command mapping for an API specification
+    #[command(
+        name = "set-mapping",
+        long_about = "Customize the CLI command tree for an API specification.\n\n\
+                      Rename tag groups, rename operations, add aliases, or hide commands\n\
+                      without modifying the original OpenAPI spec. Changes take effect\n\
+                      after `config reinit`.\n\n\
+                      Examples:\n  \
+                      aperture config set-mapping myapi --group \"User Management\" users\n  \
+                      aperture config set-mapping myapi --operation getUserById --name fetch\n  \
+                      aperture config set-mapping myapi --operation getUserById --alias get\n  \
+                      aperture config set-mapping myapi --operation deleteUser --hidden"
+    )]
+    SetMapping {
+        /// Name of the API specification.
+        api_name: String,
+        /// Rename a tag group: `--group <original> <new_name>`
+        #[arg(long, num_args = 2, value_names = ["ORIGINAL", "NEW_NAME"], conflicts_with = "operation")]
+        group: Option<Vec<String>>,
+        /// Target an operation by its operationId
+        #[arg(long, value_name = "OPERATION_ID")]
+        operation: Option<String>,
+        /// Set the subcommand name for an operation
+        #[arg(long, requires = "operation", value_name = "NAME")]
+        name: Option<String>,
+        /// Set the group for an operation (overrides tag)
+        #[arg(long = "op-group", requires = "operation", value_name = "GROUP")]
+        op_group: Option<String>,
+        /// Add an alias for an operation
+        #[arg(long, requires = "operation", value_name = "ALIAS")]
+        alias: Option<String>,
+        /// Remove an alias from an operation
+        #[arg(long, requires = "operation", value_name = "ALIAS")]
+        remove_alias: Option<String>,
+        /// Mark an operation as hidden from help output
+        #[arg(long, requires = "operation")]
+        hidden: bool,
+        /// Mark an operation as visible (unhide)
+        #[arg(long, requires = "operation", conflicts_with = "hidden")]
+        visible: bool,
+    },
+    /// List command mappings for an API specification
+    #[command(
+        name = "list-mappings",
+        long_about = "Display all custom command mappings for an API specification.\n\n\
+                      Shows group renames, operation renames, aliases, and hidden flags.\n\n\
+                      Example:\n  \
+                      aperture config list-mappings myapi"
+    )]
+    ListMappings {
+        /// Name of the API specification.
+        api_name: String,
+    },
+    /// Remove a command mapping for an API specification
+    #[command(
+        name = "remove-mapping",
+        long_about = "Remove a custom command mapping for an API specification.\n\n\
+                      Removes a group rename or an operation mapping. Changes take effect\n\
+                      after `config reinit`.\n\n\
+                      Examples:\n  \
+                      aperture config remove-mapping myapi --group \"User Management\"\n  \
+                      aperture config remove-mapping myapi --operation getUserById"
+    )]
+    RemoveMapping {
+        /// Name of the API specification.
+        api_name: String,
+        /// Remove a group mapping by original tag name
+        #[arg(long, value_name = "ORIGINAL", conflicts_with = "operation")]
+        group: Option<String>,
+        /// Remove an operation mapping by operationId
+        #[arg(long, value_name = "OPERATION_ID")]
+        operation: Option<String>,
+    },
 }

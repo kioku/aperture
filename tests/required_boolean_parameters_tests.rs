@@ -70,6 +70,10 @@ fn create_spec_with_required_boolean_path_param() -> CachedSpec {
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -110,6 +114,10 @@ fn create_spec_with_required_boolean_query_param() -> CachedSpec {
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -164,6 +172,10 @@ fn create_spec_with_mixed_boolean_params() -> CachedSpec {
             external_docs_url: None,
             responses: vec![],
             tags: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         security_schemes: std::collections::HashMap::new(),
     }

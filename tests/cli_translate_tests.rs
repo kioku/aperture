@@ -62,6 +62,10 @@ fn build_spec(parameters: Vec<CachedParameter>, with_body: bool) -> CachedSpec {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -328,4 +332,39 @@ fn cli_to_execution_context_disables_cache_when_no_cache_flag_is_set() {
 
     let ctx = cli_to_execution_context(&cli, None).expect("context construction should succeed");
     assert!(ctx.cache_config.is_none());
+}
+
+#[test]
+fn matches_to_operation_id_resolves_mapped_group_and_operation_names() {
+    let mut spec = build_spec(vec![cached_parameter("id", "path", "string", true)], false);
+    spec.commands[0].display_group = Some("Accounts".to_string());
+    spec.commands[0].display_name = Some("Fetch".to_string());
+
+    let matches = Command::new("aperture")
+        .subcommand(Command::new("accounts").subcommand(Command::new("fetch").arg(Arg::new("id"))))
+        .get_matches_from(vec!["aperture", "accounts", "fetch", "123"]);
+
+    let operation_id =
+        matches_to_operation_id(&spec, &matches).expect("operation resolution should succeed");
+    assert_eq!(operation_id, "getUserById");
+
+    let call = matches_to_operation_call(&spec, &matches).expect("translation should succeed");
+    assert_eq!(call.operation_id, "getUserById");
+    assert_eq!(call.path_params.get("id"), Some(&"123".to_string()));
+}
+
+#[test]
+fn matches_to_operation_id_resolves_operation_aliases() {
+    let mut spec = build_spec(vec![], false);
+    spec.commands[0].display_group = Some("Accounts".to_string());
+    spec.commands[0].display_name = Some("Fetch".to_string());
+    spec.commands[0].aliases = vec!["get".to_string()];
+
+    let matches = Command::new("aperture")
+        .subcommand(Command::new("accounts").subcommand(Command::new("get")))
+        .get_matches_from(vec!["aperture", "accounts", "get"]);
+
+    let operation_id =
+        matches_to_operation_id(&spec, &matches).expect("operation resolution should succeed");
+    assert_eq!(operation_id, "getUserById");
 }

@@ -87,6 +87,10 @@ macro_rules! cached_command {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }
     };
 }
@@ -314,4 +318,153 @@ fn test_fallback_to_http_method() {
 
     // Should use lowercase HTTP method as fallback
     assert_eq!(operation.get_name(), "post");
+}
+
+// ── Command mapping tests ──
+
+fn empty_spec(name: &str) -> CachedSpec {
+    CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: name.to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![],
+        base_url: None,
+        servers: vec![],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    }
+}
+
+#[test]
+fn test_display_group_overrides_tag_name() {
+    let mut spec = empty_spec("mapping-test");
+    let mut cmd = cached_command!(
+        "User Management",
+        "getUser",
+        "GET",
+        "/users",
+        vec![],
+        None,
+        vec![]
+    );
+    cmd.display_group = Some("users".to_string());
+    spec.commands.push(cmd);
+
+    let command = generate_command_tree(&spec);
+    let group_names: Vec<&str> = command
+        .get_subcommands()
+        .map(clap::Command::get_name)
+        .collect();
+    assert!(
+        group_names.contains(&"users"),
+        "Expected 'users' group, got: {group_names:?}"
+    );
+    assert!(
+        !group_names.contains(&"user-management"),
+        "Should not contain original tag name"
+    );
+}
+
+#[test]
+fn test_display_name_overrides_operation_id() {
+    let mut spec = empty_spec("mapping-test");
+    let mut cmd = cached_command!(
+        "users",
+        "getUserById",
+        "GET",
+        "/users/{id}",
+        vec![],
+        None,
+        vec![]
+    );
+    cmd.display_name = Some("fetch".to_string());
+    spec.commands.push(cmd);
+
+    let command = generate_command_tree(&spec);
+    let group = command.get_subcommands().next().unwrap();
+    let op_names: Vec<&str> = group
+        .get_subcommands()
+        .map(clap::Command::get_name)
+        .collect();
+    assert!(
+        op_names.contains(&"fetch"),
+        "Expected 'fetch', got: {op_names:?}"
+    );
+    assert!(
+        !op_names.contains(&"get-user-by-id"),
+        "Should not contain original operation name"
+    );
+}
+
+#[test]
+fn test_aliases_registered_on_command() {
+    let mut spec = empty_spec("mapping-test");
+    let mut cmd = cached_command!(
+        "users",
+        "getUserById",
+        "GET",
+        "/users/{id}",
+        vec![],
+        None,
+        vec![]
+    );
+    cmd.aliases = vec!["get".to_string(), "show".to_string()];
+    spec.commands.push(cmd);
+
+    let command = generate_command_tree(&spec);
+    let group = command.get_subcommands().next().unwrap();
+    let op = group.get_subcommands().next().unwrap();
+    let aliases: Vec<&str> = op.get_all_aliases().collect();
+    assert!(
+        aliases.contains(&"get"),
+        "Expected alias 'get', got: {aliases:?}"
+    );
+    assert!(
+        aliases.contains(&"show"),
+        "Expected alias 'show', got: {aliases:?}"
+    );
+}
+
+#[test]
+fn test_hidden_command_not_visible() {
+    let mut spec = empty_spec("mapping-test");
+    let mut cmd = cached_command!(
+        "users",
+        "deleteUser",
+        "DELETE",
+        "/users/{id}",
+        vec![],
+        None,
+        vec![]
+    );
+    cmd.hidden = true;
+    spec.commands.push(cmd);
+
+    let command = generate_command_tree(&spec);
+    let group = command.get_subcommands().next().unwrap();
+    let op = group.get_subcommands().next().unwrap();
+    assert!(op.is_hide_set(), "Expected command to be hidden");
+}
+
+#[test]
+fn test_no_mapping_uses_defaults() {
+    let mut spec = empty_spec("mapping-test");
+    let cmd = cached_command!(
+        "users",
+        "getUserById",
+        "GET",
+        "/users/{id}",
+        vec![],
+        None,
+        vec![]
+    );
+    spec.commands.push(cmd);
+
+    let command = generate_command_tree(&spec);
+    let group = command.get_subcommands().next().unwrap();
+    assert_eq!(group.get_name(), "users");
+    let op = group.get_subcommands().next().unwrap();
+    assert_eq!(op.get_name(), "get-user-by-id");
+    assert!(!op.is_hide_set());
 }

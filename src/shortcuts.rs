@@ -1,8 +1,37 @@
 //! Command shortcuts and aliases for improved CLI usability
 
 use crate::cache::models::{CachedCommand, CachedSpec};
+use crate::constants;
 use crate::utils::to_kebab_case;
 use std::collections::{BTreeMap, HashMap};
+
+/// Builds the full command path for a resolved shortcut, using effective
+/// display names when command mappings are active.
+fn build_full_command(api_name: &str, command: &CachedCommand) -> Vec<String> {
+    // Use `command.name` (not `tags.first()`) for consistency with
+    // `engine::generator::effective_group_name` and `search::effective_command_path`.
+    let group = command.display_group.as_ref().map_or_else(
+        || {
+            if command.name.is_empty() {
+                constants::DEFAULT_GROUP.to_string()
+            } else {
+                to_kebab_case(&command.name)
+            }
+        },
+        |g| to_kebab_case(g),
+    );
+    let operation = command.display_name.as_ref().map_or_else(
+        || {
+            if command.operation_id.is_empty() {
+                command.method.to_lowercase()
+            } else {
+                to_kebab_case(&command.operation_id)
+            }
+        },
+        |n| to_kebab_case(n),
+    );
+    vec!["api".to_string(), api_name.to_string(), group, operation]
+}
 
 /// Represents a resolved command shortcut
 #[derive(Debug, Clone)]
@@ -87,17 +116,50 @@ impl ShortcutResolver {
                     .or_default()
                     .push((api_name.clone(), spec.clone(), command.clone()));
 
-                // Index by tags
-                for tag in &command.tags {
-                    let tag_key = to_kebab_case(tag);
+                // Index by display name (custom command name override)
+                if let Some(ref display_name) = command.display_name {
+                    let display_kebab = to_kebab_case(display_name);
+                    self.operation_map.entry(display_kebab).or_default().push((
+                        api_name.clone(),
+                        spec.clone(),
+                        command.clone(),
+                    ));
+                }
+
+                // Index by aliases
+                for alias in &command.aliases {
+                    let alias_kebab = to_kebab_case(alias);
+                    self.operation_map.entry(alias_kebab).or_default().push((
+                        api_name.clone(),
+                        spec.clone(),
+                        command.clone(),
+                    ));
+                }
+
+                // Index by tags (and display_group override)
+                let effective_tags: Vec<String> = command.display_group.as_ref().map_or_else(
+                    || command.tags.iter().map(|t| to_kebab_case(t)).collect(),
+                    |dg| {
+                        let mut tags: Vec<String> =
+                            command.tags.iter().map(|t| to_kebab_case(t)).collect();
+                        tags.push(to_kebab_case(dg));
+                        tags
+                    },
+                );
+
+                for tag_key in &effective_tags {
                     self.tag_map.entry(tag_key.clone()).or_default().push((
                         api_name.clone(),
                         spec.clone(),
                         command.clone(),
                     ));
 
-                    // Also index tag + operation combinations
-                    let tag_operation_key = format!("{tag_key} {operation_kebab}");
+                    // Also index tag + operation combinations (with effective name)
+                    let effective_name = command
+                        .display_name
+                        .as_ref()
+                        .map_or(&operation_kebab, |n| n);
+                    let tag_operation_key = format!("{tag_key} {}", to_kebab_case(effective_name));
                     self.tag_map.entry(tag_operation_key).or_default().push((
                         api_name.clone(),
                         spec.clone(),
@@ -192,24 +254,11 @@ impl ShortcutResolver {
         self.operation_map.get(operation_id).map(|matches| {
             matches
                 .iter()
-                .map(|(api_name, spec, command)| {
-                    let tag = command
-                        .tags
-                        .first()
-                        .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
-                    let operation_kebab = to_kebab_case(&command.operation_id);
-
-                    ResolvedShortcut {
-                        full_command: vec![
-                            "api".to_string(),
-                            api_name.clone(),
-                            tag,
-                            operation_kebab,
-                        ],
-                        spec: spec.clone(),
-                        command: command.clone(),
-                        confidence: 95, // High confidence for exact operation ID match
-                    }
+                .map(|(api_name, spec, command)| ResolvedShortcut {
+                    full_command: build_full_command(api_name, command),
+                    spec: spec.clone(),
+                    command: command.clone(),
+                    confidence: 95, // High confidence for exact operation ID match
                 })
                 .collect()
         })
@@ -228,24 +277,11 @@ impl ShortcutResolver {
         self.method_path_map.get(&method_path_key).map(|matches| {
             matches
                 .iter()
-                .map(|(api_name, spec, command)| {
-                    let tag = command
-                        .tags
-                        .first()
-                        .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
-                    let operation_kebab = to_kebab_case(&command.operation_id);
-
-                    ResolvedShortcut {
-                        full_command: vec![
-                            "api".to_string(),
-                            api_name.clone(),
-                            tag,
-                            operation_kebab,
-                        ],
-                        spec: spec.clone(),
-                        command: command.clone(),
-                        confidence: 90, // High confidence for exact method+path match
-                    }
+                .map(|(api_name, spec, command)| ResolvedShortcut {
+                    full_command: build_full_command(api_name, command),
+                    spec: spec.clone(),
+                    command: command.clone(),
+                    confidence: 90, // High confidence for exact method+path match
                 })
                 .collect()
         })
@@ -259,14 +295,8 @@ impl ShortcutResolver {
         let tag_kebab = to_kebab_case(&args[0]);
         if let Some(matches) = self.tag_map.get(&tag_kebab) {
             for (api_name, spec, command) in matches {
-                let tag = command
-                    .tags
-                    .first()
-                    .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
-                let operation_kebab = to_kebab_case(&command.operation_id);
-
                 candidates.push(ResolvedShortcut {
-                    full_command: vec!["api".to_string(), api_name.clone(), tag, operation_kebab],
+                    full_command: build_full_command(api_name, command),
                     spec: spec.clone(),
                     command: command.clone(),
                     confidence: 70, // Medium confidence for tag-only match
@@ -289,14 +319,8 @@ impl ShortcutResolver {
 
         if let Some(matches) = self.tag_map.get(&tag_operation_key) {
             for (api_name, spec, command) in matches {
-                let tag = command
-                    .tags
-                    .first()
-                    .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
-                let operation_kebab = to_kebab_case(&command.operation_id);
-
                 candidates.push(ResolvedShortcut {
-                    full_command: vec!["api".to_string(), api_name.clone(), tag, operation_kebab],
+                    full_command: build_full_command(api_name, command),
                     spec: spec.clone(),
                     command: command.clone(),
                     confidence: 85, // Higher confidence for tag+operation match
@@ -324,19 +348,8 @@ impl ShortcutResolver {
         for (operation_id, matches) in &self.operation_map {
             if let Some(score) = matcher.fuzzy_match(operation_id, &query) {
                 for (api_name, spec, command) in matches {
-                    let tag = command
-                        .tags
-                        .first()
-                        .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
-                    let operation_kebab = to_kebab_case(&command.operation_id);
-
                     candidates.push(ResolvedShortcut {
-                        full_command: vec![
-                            "api".to_string(),
-                            api_name.clone(),
-                            tag,
-                            operation_kebab,
-                        ],
+                        full_command: build_full_command(api_name, command),
                         spec: spec.clone(),
                         command: command.clone(),
                         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

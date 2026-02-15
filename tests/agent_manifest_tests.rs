@@ -150,6 +150,10 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             deprecated: false,
             external_docs_url: Some("https://docs.example.com/users".to_string()),
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         },
         // Deprecated command with request body
         CachedCommand {
@@ -179,6 +183,10 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             deprecated: true,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         },
         // Public endpoint with no auth
         CachedCommand {
@@ -202,6 +210,10 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         },
     ];
 
@@ -389,6 +401,7 @@ fn test_manifest_with_global_config() {
             environment_urls: HashMap::new(),
             strict_mode: false,
             secrets: HashMap::new(),
+            command_mapping: None,
         },
     );
 
@@ -1006,6 +1019,10 @@ fn test_manifest_from_cached_with_response_schema() {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -1144,6 +1161,10 @@ fn test_manifest_cached_status_code_fallback() {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -1271,4 +1292,158 @@ fn test_manifest_response_reference_not_resolved() {
         command.get("response_schema").is_none() || command["response_schema"].is_null(),
         "response_schema should not be present when response is a $ref (documented limitation)"
     );
+}
+
+#[test]
+fn test_manifest_from_openapi_includes_command_mappings() {
+    // Create an OpenAPI spec with two operations under "User Management" tag
+    let mut paths = Paths::default();
+
+    let get_op = Operation {
+        tags: vec!["User Management".to_string()],
+        summary: Some("Get a user".to_string()),
+        description: None,
+        operation_id: Some("getUserById".to_string()),
+        parameters: vec![],
+        request_body: None,
+        responses: Responses::default(),
+        deprecated: false,
+        security: None,
+        servers: vec![],
+        external_docs: None,
+        callbacks: Default::default(),
+        extensions: Default::default(),
+    };
+
+    let delete_op = Operation {
+        tags: vec!["User Management".to_string()],
+        summary: Some("Delete a user".to_string()),
+        description: None,
+        operation_id: Some("deleteUser".to_string()),
+        parameters: vec![],
+        request_body: None,
+        responses: Responses::default(),
+        deprecated: false,
+        security: None,
+        servers: vec![],
+        external_docs: None,
+        callbacks: Default::default(),
+        extensions: Default::default(),
+    };
+
+    let mut path_item = PathItem::default();
+    path_item.get = Some(get_op);
+    path_item.delete = Some(delete_op);
+    paths
+        .paths
+        .insert("/users/{id}".to_string(), ReferenceOr::Item(path_item));
+
+    let spec = OpenAPI {
+        openapi: "3.0.0".to_string(),
+        info: Info {
+            title: "Mapping Test API".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        },
+        servers: vec![Server {
+            url: "https://api.example.com".to_string(),
+            description: None,
+            variables: Default::default(),
+            extensions: Default::default(),
+        }],
+        paths,
+        ..Default::default()
+    };
+
+    // Create a cached spec whose commands have mapping fields populated
+    // (simulating what happens after config add/reinit with command_mapping)
+    let cached_spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "mapping-test".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![
+            CachedCommand {
+                name: "User Management".to_string(),
+                description: None,
+                summary: Some("Get a user".to_string()),
+                operation_id: "getUserById".to_string(),
+                method: "GET".to_string(),
+                path: "/users/{id}".to_string(),
+                parameters: vec![],
+                request_body: None,
+                responses: vec![],
+                security_requirements: vec![],
+                tags: vec!["User Management".to_string()],
+                deprecated: false,
+                external_docs_url: None,
+                examples: vec![],
+                display_group: Some("users".to_string()),
+                display_name: Some("fetch".to_string()),
+                aliases: vec!["get".to_string(), "show".to_string()],
+                hidden: false,
+            },
+            CachedCommand {
+                name: "User Management".to_string(),
+                description: None,
+                summary: Some("Delete a user".to_string()),
+                operation_id: "deleteUser".to_string(),
+                method: "DELETE".to_string(),
+                path: "/users/{id}".to_string(),
+                parameters: vec![],
+                request_body: None,
+                responses: vec![],
+                security_requirements: vec![],
+                tags: vec!["User Management".to_string()],
+                deprecated: false,
+                external_docs_url: None,
+                examples: vec![],
+                display_group: Some("users".to_string()),
+                display_name: None,
+                aliases: vec![],
+                hidden: true,
+            },
+        ],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    };
+
+    let manifest_json =
+        generate_capability_manifest_from_openapi("mapping-test", &spec, &cached_spec, None)
+            .unwrap();
+    let manifest: ApiCapabilityManifest = serde_json::from_str(&manifest_json).unwrap();
+
+    // Commands should be re-grouped under "users" (the display_group), not "user-management"
+    assert!(
+        manifest.commands.contains_key("users"),
+        "Expected 'users' group from display_group, found: {:?}",
+        manifest.commands.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !manifest.commands.contains_key("user-management"),
+        "Should not contain original 'user-management' group"
+    );
+
+    let users_cmds = &manifest.commands["users"];
+    assert_eq!(users_cmds.len(), 2);
+
+    // Find the getUserById command
+    let get_cmd = users_cmds
+        .iter()
+        .find(|c| c.operation_id == "getUserById")
+        .expect("should find getUserById");
+    assert_eq!(get_cmd.display_name, Some("fetch".to_string()));
+    assert_eq!(get_cmd.display_group, Some("users".to_string()));
+    assert_eq!(get_cmd.aliases, vec!["get".to_string(), "show".to_string()]);
+    assert!(!get_cmd.hidden);
+
+    // Find the deleteUser command — should be hidden
+    let del_cmd = users_cmds
+        .iter()
+        .find(|c| c.operation_id == "deleteUser")
+        .expect("should find deleteUser");
+    assert_eq!(del_cmd.display_group, Some("users".to_string()));
+    assert!(del_cmd.hidden);
 }

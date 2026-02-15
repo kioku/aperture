@@ -44,6 +44,10 @@ macro_rules! cached_command {
             deprecated: false,
             external_docs_url: None,
             examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
         }
     };
 }
@@ -346,6 +350,7 @@ async fn test_execute_request_with_global_config_base_url() {
             environment_urls: HashMap::new(),
             strict_mode: false,
             secrets: HashMap::new(),
+            command_mapping: None,
         },
     );
 

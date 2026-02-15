@@ -14,7 +14,7 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
         version: "1.0.0".to_string(),
         commands: vec![
             CachedCommand {
-                name: "get-pet-by-id".to_string(),
+                name: "pets".to_string(),
                 description: Some("Get pet by ID".to_string()),
                 summary: None,
                 operation_id: "getPetById".to_string(),
@@ -28,9 +28,13 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
-                name: "create-pet".to_string(),
+                name: "pets".to_string(),
                 description: Some("Create a new pet".to_string()),
                 summary: None,
                 operation_id: "createPet".to_string(),
@@ -44,9 +48,13 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
             CachedCommand {
-                name: "list-users".to_string(),
+                name: "users".to_string(),
                 description: Some("List all users".to_string()),
                 summary: None,
                 operation_id: "listUsers".to_string(),
@@ -60,6 +68,10 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
                 deprecated: false,
                 external_docs_url: None,
                 examples: vec![],
+                display_group: None,
+                display_name: None,
+                aliases: vec![],
+                hidden: false,
             },
         ],
         base_url: Some("https://api.petstore.com".to_string()),
@@ -280,5 +292,79 @@ fn test_empty_args() {
             // Expected
         }
         _ => panic!("Expected NotFound for empty arguments"),
+    }
+}
+
+#[test]
+fn test_shortcut_uses_display_names_in_full_command() {
+    let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "User Management".to_string(),
+            description: Some("Get user by ID".to_string()),
+            summary: None,
+            operation_id: "getUserById".to_string(),
+            method: "GET".to_string(),
+            path: "/users/{id}".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec!["User Management".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: Some("users".to_string()),
+            display_name: Some("fetch".to_string()),
+            aliases: vec!["get".to_string()],
+            hidden: false,
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec![],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    };
+
+    let mut specs = BTreeMap::new();
+    specs.insert("myapi".to_string(), spec);
+
+    let mut resolver = ShortcutResolver::new();
+    resolver.index_specs(&specs);
+
+    // Resolve by original operation ID — full_command should use display names
+    match resolver.resolve_shortcut(&["getUserById".to_string()]) {
+        ResolutionResult::Resolved(shortcut) => {
+            assert_eq!(
+                shortcut.full_command,
+                vec!["api", "myapi", "users", "fetch"],
+                "full_command should use display_group and display_name, not original names"
+            );
+        }
+        other => panic!("Expected Resolved, got: {other:?}"),
+    }
+
+    // Resolve by display name
+    match resolver.resolve_shortcut(&["fetch".to_string()]) {
+        ResolutionResult::Resolved(shortcut) => {
+            assert_eq!(
+                shortcut.full_command,
+                vec!["api", "myapi", "users", "fetch"],
+            );
+        }
+        other => panic!("Expected Resolved for display name, got: {other:?}"),
+    }
+
+    // Resolve by alias
+    match resolver.resolve_shortcut(&["get".to_string()]) {
+        ResolutionResult::Resolved(shortcut) => {
+            assert_eq!(
+                shortcut.full_command,
+                vec!["api", "myapi", "users", "fetch"],
+            );
+        }
+        other => panic!("Expected Resolved for alias, got: {other:?}"),
     }
 }

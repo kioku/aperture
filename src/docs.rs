@@ -1,6 +1,7 @@
 //! Documentation and help system for improved CLI discoverability
 
 use crate::cache::models::{CachedCommand, CachedSpec};
+use crate::constants;
 use crate::error::Error;
 use crate::utils::to_kebab_case;
 use std::collections::BTreeMap;
@@ -37,26 +38,103 @@ impl DocumentationGenerator {
         let command = spec
             .commands
             .iter()
-            .find(|cmd| to_kebab_case(&cmd.operation_id) == operation_id)
+            .find(|cmd| Self::matches_command_reference(cmd, tag, operation_id))
             .ok_or_else(|| {
                 Error::spec_not_found(format!(
-                    "Operation '{operation_id}' not found in API '{api_name}'"
+                    "Operation '{tag} {operation_id}' not found in API '{api_name}'"
                 ))
             })?;
+
+        let effective_tag = Self::effective_group(command);
+        let effective_operation = Self::effective_operation(command);
 
         let mut help = String::new();
 
         // Build help sections
         Self::add_command_header(&mut help, command);
-        Self::add_usage_section(&mut help, api_name, tag, operation_id);
+        Self::add_usage_section(&mut help, api_name, &effective_tag, &effective_operation);
         Self::add_parameters_section(&mut help, command);
         Self::add_request_body_section(&mut help, command);
-        Self::add_examples_section(&mut help, api_name, tag, operation_id, command);
+        Self::add_examples_section(
+            &mut help,
+            api_name,
+            &effective_tag,
+            &effective_operation,
+            command,
+        );
         Self::add_responses_section(&mut help, command);
         Self::add_authentication_section(&mut help, command);
         Self::add_metadata_section(&mut help, command);
 
         Ok(help)
+    }
+
+    /// Returns the effective command group shown in CLI paths.
+    fn effective_group(command: &CachedCommand) -> String {
+        command.display_group.as_ref().map_or_else(
+            || {
+                if command.name.is_empty() {
+                    constants::DEFAULT_GROUP.to_string()
+                } else {
+                    to_kebab_case(&command.name)
+                }
+            },
+            |group| to_kebab_case(group),
+        )
+    }
+
+    /// Returns the effective command name shown in CLI paths.
+    fn effective_operation(command: &CachedCommand) -> String {
+        command.display_name.as_ref().map_or_else(
+            || {
+                if command.operation_id.is_empty() {
+                    command.method.to_lowercase()
+                } else {
+                    to_kebab_case(&command.operation_id)
+                }
+            },
+            |name| to_kebab_case(name),
+        )
+    }
+
+    /// Returns true when the provided docs path references this command.
+    ///
+    /// Supports both effective (mapped) names and original names for compatibility.
+    fn matches_command_reference(command: &CachedCommand, tag: &str, operation: &str) -> bool {
+        let requested_tag = to_kebab_case(tag);
+        let requested_operation = to_kebab_case(operation);
+
+        let effective_tag = Self::effective_group(command);
+        let effective_operation = Self::effective_operation(command);
+
+        let legacy_tag = command.tags.first().map_or_else(
+            || {
+                if command.name.is_empty() {
+                    constants::DEFAULT_GROUP.to_string()
+                } else {
+                    to_kebab_case(&command.name)
+                }
+            },
+            |t| to_kebab_case(t),
+        );
+
+        let legacy_operation = if command.operation_id.is_empty() {
+            command.method.to_lowercase()
+        } else {
+            to_kebab_case(&command.operation_id)
+        };
+
+        let alias_match = command
+            .aliases
+            .iter()
+            .any(|alias| to_kebab_case(alias) == requested_operation);
+
+        let tag_match = requested_tag == effective_tag || requested_tag == legacy_tag;
+        let operation_match = requested_operation == effective_operation
+            || requested_operation == legacy_operation
+            || alias_match;
+
+        tag_match && operation_match
     }
 
     /// Add command header with title and description
@@ -266,19 +344,21 @@ impl DocumentationGenerator {
         }
         overview.push('\n');
 
-        // Statistics
-        let total_operations = spec.commands.len();
+        // Statistics (hidden commands are excluded from docs-style listings)
+        let visible_commands: Vec<&CachedCommand> = spec
+            .commands
+            .iter()
+            .filter(|command| !command.hidden)
+            .collect();
+        let total_operations = visible_commands.len();
         let mut method_counts = BTreeMap::new();
         let mut tag_counts = BTreeMap::new();
 
-        for command in &spec.commands {
+        for command in &visible_commands {
             *method_counts.entry(command.method.clone()).or_insert(0) += 1;
-
-            let primary_tag = command
-                .tags
-                .first()
-                .map_or_else(|| "untagged".to_string(), |t| to_kebab_case(t));
-            *tag_counts.entry(primary_tag).or_insert(0) += 1;
+            *tag_counts
+                .entry(Self::effective_group(command))
+                .or_insert(0) += 1;
         }
 
         overview.push_str("## Statistics\n\n");
@@ -307,22 +387,20 @@ impl DocumentationGenerator {
         ).ok();
 
         // Show first few operations as examples
-        if !spec.commands.is_empty() {
+        if !visible_commands.is_empty() {
             overview.push_str("## Sample Operations\n\n");
-            for (i, command) in spec.commands.iter().take(3).enumerate() {
-                let tag = command
-                    .tags
-                    .first()
-                    .map_or_else(|| "api".to_string(), |t| to_kebab_case(t));
-                let operation_kebab = to_kebab_case(&command.operation_id);
+            for (i, command) in visible_commands.iter().take(3).enumerate() {
+                let tag = Self::effective_group(command);
+                let operation = Self::effective_operation(command);
                 write!(
                     overview,
-                    "{}. **{}** ({})\n   ```bash\n   aperture api {api_name} {tag} {operation_kebab}\n   ```\n   {}\n\n",
+                    "{}. **{}** ({})\n   ```bash\n   aperture api {api_name} {tag} {operation}\n   ```\n   {}\n\n",
                     i + 1,
-                    command.summary.as_deref().unwrap_or(&command.operation_id),
+                    command.summary.as_deref().unwrap_or(&operation),
                     command.method.to_uppercase(),
                     command.description.as_deref().unwrap_or("No description")
-                ).ok();
+                )
+                .ok();
             }
         }
 
@@ -386,11 +464,17 @@ impl HelpFormatter {
 
         // Header with API info
         writeln!(output, "📋 {} API Commands", spec.name).ok();
+        let visible_commands: Vec<&CachedCommand> = spec
+            .commands
+            .iter()
+            .filter(|command| !command.hidden)
+            .collect();
+
         writeln!(
             output,
             "   Version: {} | Operations: {}",
             spec.version,
-            spec.commands.len()
+            visible_commands.len()
         )
         .ok();
 
@@ -400,13 +484,10 @@ impl HelpFormatter {
         output.push_str(&"═".repeat(60));
         output.push('\n');
 
-        // Group by tags
+        // Group by effective command group
         let mut tag_groups = BTreeMap::new();
-        for command in &spec.commands {
-            let tag = command
-                .tags
-                .first()
-                .map_or_else(|| "General".to_string(), |t| to_kebab_case(t));
+        for command in visible_commands {
+            let tag = DocumentationGenerator::effective_group(command);
             tag_groups.entry(tag).or_insert_with(Vec::new).push(command);
         }
 
@@ -416,7 +497,7 @@ impl HelpFormatter {
             output.push('\n');
 
             for command in commands {
-                let operation_kebab = to_kebab_case(&command.operation_id);
+                let operation_kebab = DocumentationGenerator::effective_operation(command);
                 let method_badge = Self::format_method_badge(&command.method);
                 let description = command
                     .summary

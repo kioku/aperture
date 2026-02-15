@@ -80,6 +80,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 environment_urls: HashMap::new(),
                 strict_mode: false,
                 secrets: HashMap::new(),
+                command_mapping: None,
             });
         api_config.strict_mode = strict;
         self.save_global_config(&config)?;
@@ -653,6 +654,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 environment_urls: HashMap::new(),
                 strict_mode: false,
                 secrets: HashMap::new(),
+                command_mapping: None,
             });
 
         // Set the URL
@@ -842,6 +844,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 environment_urls: HashMap::new(),
                 strict_mode: false,
                 secrets: HashMap::new(),
+                command_mapping: None,
             });
 
         // Set the secret
@@ -963,8 +966,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Remove the secret
         api_config.secrets.remove(scheme_name);
 
-        // If no secrets remain, remove the entire API config
-        if api_config.secrets.is_empty() && api_config.base_url_override.is_none() {
+        // If no meaningful config remains, remove the entire API config entry
+        if api_config.is_empty() {
             config.api_configs.remove(api_name);
         }
 
@@ -1004,8 +1007,8 @@ impl<F: FileSystem> ConfigManager<F> {
         // Clear all secrets
         api_config.secrets.clear();
 
-        // If no other configuration remains, remove the entire API config
-        if api_config.base_url_override.is_none() {
+        // If no meaningful config remains, remove the entire API config entry
+        if api_config.is_empty() {
             config.api_configs.remove(api_name);
         }
 
@@ -1013,6 +1016,242 @@ impl<F: FileSystem> ConfigManager<F> {
         self.save_global_config(&config)?;
 
         Ok(())
+    }
+
+    // ---- Command Mapping Management ----
+
+    /// Ensures that the API spec file exists for the given context name.
+    ///
+    /// # Errors
+    ///
+    /// Returns `spec_not_found` if the API specification file does not exist.
+    fn ensure_spec_exists(&self, api_name: &str) -> Result<(), Error> {
+        let spec_path = self
+            .config_dir
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
+
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::spec_not_found(api_name));
+        }
+
+        Ok(())
+    }
+
+    /// Gets or creates the command mapping for an API, returning a mutable reference
+    /// to the `GlobalConfig` with the mapping initialized.
+    fn ensure_command_mapping(
+        &self,
+        api_name: &str,
+    ) -> Result<(crate::config::models::GlobalConfig, String), Error> {
+        self.ensure_spec_exists(api_name)?;
+
+        let mut config = self.load_global_config()?;
+        let api_config = config
+            .api_configs
+            .entry(api_name.to_string())
+            .or_insert_with(|| ApiConfig {
+                base_url_override: None,
+                environment_urls: HashMap::new(),
+                strict_mode: false,
+                secrets: HashMap::new(),
+                command_mapping: None,
+            });
+        if api_config.command_mapping.is_none() {
+            api_config.command_mapping = Some(crate::config::models::CommandMapping::default());
+        }
+        Ok((config, api_name.to_string()))
+    }
+
+    /// Sets a group mapping (tag rename) for an API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `ensure_command_mapping` invariants are violated (should never happen).
+    pub fn set_group_mapping(
+        &self,
+        api_name: &ApiContextName,
+        original_tag: &str,
+        new_name: &str,
+    ) -> Result<(), Error> {
+        if new_name.trim().is_empty() {
+            return Err(Error::invalid_config("Group name cannot be empty"));
+        }
+        let (mut config, key) = self.ensure_command_mapping(api_name.as_str())?;
+        // Safety: ensure_command_mapping guarantees these exist
+        let mapping = config
+            .api_configs
+            .get_mut(&key)
+            .expect("ensure_command_mapping guarantees api_config exists")
+            .command_mapping
+            .as_mut()
+            .expect("ensure_command_mapping guarantees command_mapping exists");
+        mapping
+            .groups
+            .insert(original_tag.to_string(), new_name.to_string());
+        self.save_global_config(&config)
+    }
+
+    /// Removes a group mapping for an API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    pub fn remove_group_mapping(
+        &self,
+        api_name: &ApiContextName,
+        original_tag: &str,
+    ) -> Result<(), Error> {
+        self.ensure_spec_exists(api_name.as_str())?;
+
+        let mut config = self.load_global_config()?;
+        let Some(api_config) = config.api_configs.get_mut(api_name.as_str()) else {
+            return Ok(());
+        };
+        let Some(ref mut mapping) = api_config.command_mapping else {
+            return Ok(());
+        };
+        mapping.groups.remove(original_tag);
+        self.save_global_config(&config)
+    }
+
+    /// Sets an operation mapping field for an API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `ensure_command_mapping` invariants are violated (should never happen).
+    pub fn set_operation_mapping(
+        &self,
+        api_name: &ApiContextName,
+        operation_id: &str,
+        name: Option<&str>,
+        group: Option<&str>,
+        alias: Option<&str>,
+        hidden: Option<bool>,
+    ) -> Result<(), Error> {
+        if name.is_some_and(|n| n.trim().is_empty()) {
+            return Err(Error::invalid_config("Operation name cannot be empty"));
+        }
+        if group.is_some_and(|g| g.trim().is_empty()) {
+            return Err(Error::invalid_config("Operation group cannot be empty"));
+        }
+        if alias.is_some_and(|a| a.trim().is_empty()) {
+            return Err(Error::invalid_config("Alias cannot be empty"));
+        }
+
+        // No-op updates should not create empty mapping entries.
+        if name.is_none() && group.is_none() && alias.is_none() && hidden.is_none() {
+            self.ensure_spec_exists(api_name.as_str())?;
+            return Ok(());
+        }
+
+        let (mut config, key) = self.ensure_command_mapping(api_name.as_str())?;
+        // Safety: ensure_command_mapping guarantees these exist
+        let mapping = config
+            .api_configs
+            .get_mut(&key)
+            .expect("ensure_command_mapping guarantees api_config exists")
+            .command_mapping
+            .as_mut()
+            .expect("ensure_command_mapping guarantees command_mapping exists");
+        let op = mapping
+            .operations
+            .entry(operation_id.to_string())
+            .or_default();
+
+        if let Some(n) = name {
+            op.name = Some(n.to_string());
+        }
+        if let Some(g) = group {
+            op.group = Some(g.to_string());
+        }
+        // Add alias if specified and not already present
+        let alias_str = alias.map(str::to_string);
+        if alias_str.as_ref().is_some_and(|a| !op.aliases.contains(a)) {
+            op.aliases
+                .push(alias_str.expect("checked is_some_and above"));
+        }
+        if let Some(h) = hidden {
+            op.hidden = h;
+        }
+
+        self.save_global_config(&config)
+    }
+
+    /// Removes an operation mapping for an API.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the spec doesn't exist or config cannot be saved.
+    pub fn remove_operation_mapping(
+        &self,
+        api_name: &ApiContextName,
+        operation_id: &str,
+    ) -> Result<(), Error> {
+        self.ensure_spec_exists(api_name.as_str())?;
+
+        let mut config = self.load_global_config()?;
+        let Some(api_config) = config.api_configs.get_mut(api_name.as_str()) else {
+            return Ok(());
+        };
+        let Some(ref mut mapping) = api_config.command_mapping else {
+            return Ok(());
+        };
+        mapping.operations.remove(operation_id);
+        self.save_global_config(&config)
+    }
+
+    /// Removes a single alias from an operation mapping.
+    ///
+    /// If the operation mapping or alias does not exist, this is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded or saved.
+    pub fn remove_alias(
+        &self,
+        api_name: &ApiContextName,
+        operation_id: &str,
+        alias: &str,
+    ) -> Result<(), Error> {
+        self.ensure_spec_exists(api_name.as_str())?;
+
+        let mut config = self.load_global_config()?;
+        let Some(api_config) = config.api_configs.get_mut(api_name.as_str()) else {
+            return Ok(());
+        };
+        let Some(ref mut mapping) = api_config.command_mapping else {
+            return Ok(());
+        };
+        let Some(op) = mapping.operations.get_mut(operation_id) else {
+            return Ok(());
+        };
+        op.aliases.retain(|a| a != alias);
+        self.save_global_config(&config)
+    }
+
+    /// Gets the command mapping for an API, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config cannot be loaded.
+    pub fn get_command_mapping(
+        &self,
+        api_name: &ApiContextName,
+    ) -> Result<Option<crate::config::models::CommandMapping>, Error> {
+        let config = self.load_global_config()?;
+        Ok(config
+            .api_configs
+            .get(api_name.as_str())
+            .and_then(|c| c.command_mapping.clone()))
     }
 
     /// Configure secrets interactively for an API specification
@@ -1198,7 +1437,11 @@ impl<F: FileSystem> ConfigManager<F> {
         strict: bool,
     ) -> Result<(), Error> {
         // Transform to cached representation
-        let cached_spec = Self::transform_spec_to_cached(name, openapi_spec, validation_result)?;
+        let mut cached_spec =
+            Self::transform_spec_to_cached(name, openapi_spec, validation_result)?;
+
+        // Apply command mappings from config (if any)
+        self.apply_command_mapping_if_configured(name, &mut cached_spec)?;
 
         // Create directories
         let (spec_path, cache_path) = self.create_spec_directories(name)?;
@@ -1208,6 +1451,34 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Save strict mode preference
         self.save_strict_preference(name, strict)?;
+
+        Ok(())
+    }
+
+    /// Loads and applies command mappings from config for the given API.
+    ///
+    /// If no mapping is configured, this is a no-op.
+    /// Stale mapping warnings are printed to stderr.
+    fn apply_command_mapping_if_configured(
+        &self,
+        name: &str,
+        cached_spec: &mut crate::cache::models::CachedSpec,
+    ) -> Result<(), Error> {
+        let config = self.load_global_config()?;
+        let Some(api_config) = config.api_configs.get(name) else {
+            return Ok(());
+        };
+        let Some(ref mapping) = api_config.command_mapping else {
+            return Ok(());
+        };
+
+        let result =
+            crate::config::mapping::apply_command_mapping(&mut cached_spec.commands, mapping)?;
+
+        for warning in &result.warnings {
+            // ast-grep-ignore: no-println
+            eprintln!("{} {warning}", crate::constants::MSG_WARNING_PREFIX);
+        }
 
         Ok(())
     }
