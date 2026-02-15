@@ -674,7 +674,7 @@ pub enum ConfigCommands {
         /// Name of the API specification.
         api_name: String,
         /// Remove a group mapping by original tag name
-        #[arg(long, value_name = "ORIGINAL")]
+        #[arg(long, value_name = "ORIGINAL", conflicts_with = "operation")]
         group: Option<String>,
         /// Remove an operation mapping by operationId
         #[arg(long, value_name = "OPERATION_ID")]
