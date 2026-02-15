@@ -624,7 +624,7 @@ pub enum ConfigCommands {
         /// Name of the API specification.
         api_name: String,
         /// Rename a tag group: `--group <original> <new_name>`
-        #[arg(long, num_args = 2, value_names = ["ORIGINAL", "NEW_NAME"])]
+        #[arg(long, num_args = 2, value_names = ["ORIGINAL", "NEW_NAME"], conflicts_with = "operation")]
         group: Option<Vec<String>>,
         /// Target an operation by its operationId
         #[arg(long, value_name = "OPERATION_ID")]
