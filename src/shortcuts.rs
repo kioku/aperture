@@ -8,12 +8,15 @@ use std::collections::{BTreeMap, HashMap};
 /// Builds the full command path for a resolved shortcut, using effective
 /// display names when command mappings are active.
 fn build_full_command(api_name: &str, command: &CachedCommand) -> Vec<String> {
+    // Use `command.name` (not `tags.first()`) for consistency with
+    // `engine::generator::effective_group_name` and `search::effective_command_path`.
     let group = command.display_group.as_ref().map_or_else(
         || {
-            command.tags.first().map_or_else(
-                || constants::DEFAULT_GROUP.to_string(),
-                |t| to_kebab_case(t),
-            )
+            if command.name.is_empty() {
+                constants::DEFAULT_GROUP.to_string()
+            } else {
+                to_kebab_case(&command.name)
+            }
         },
         |g| to_kebab_case(g),
     );

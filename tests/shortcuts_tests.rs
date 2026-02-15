@@ -14,7 +14,7 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
         version: "1.0.0".to_string(),
         commands: vec![
             CachedCommand {
-                name: "get-pet-by-id".to_string(),
+                name: "pets".to_string(),
                 description: Some("Get pet by ID".to_string()),
                 summary: None,
                 operation_id: "getPetById".to_string(),
@@ -34,7 +34,7 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
                 hidden: false,
             },
             CachedCommand {
-                name: "create-pet".to_string(),
+                name: "pets".to_string(),
                 description: Some("Create a new pet".to_string()),
                 summary: None,
                 operation_id: "createPet".to_string(),
@@ -54,7 +54,7 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
                 hidden: false,
             },
             CachedCommand {
-                name: "list-users".to_string(),
+                name: "users".to_string(),
                 description: Some("List all users".to_string()),
                 summary: None,
                 operation_id: "listUsers".to_string(),
