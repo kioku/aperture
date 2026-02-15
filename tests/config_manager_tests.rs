@@ -1806,3 +1806,19 @@ fn test_set_operation_mapping_rejects_empty_values() {
     let result = manager.set_operation_mapping(&api_name, "getUser", None, None, Some(""), None);
     assert!(result.is_err(), "Should reject empty alias");
 }
+
+#[test]
+fn test_set_operation_mapping_no_changes_is_noop() {
+    let (manager, _fs) = setup_manager_with_spec("myapi");
+    let api_name = name("myapi");
+
+    manager
+        .set_operation_mapping(&api_name, "getUser", None, None, None, None)
+        .unwrap();
+
+    let mapping = manager.get_command_mapping(&api_name).unwrap();
+    assert!(
+        mapping.is_none(),
+        "No-op set should not create empty operation mapping"
+    );
+}

@@ -1132,6 +1132,25 @@ impl<F: FileSystem> ConfigManager<F> {
         if alias.is_some_and(|a| a.trim().is_empty()) {
             return Err(Error::invalid_config("Alias cannot be empty"));
         }
+
+        // No-op updates should not create empty mapping entries.
+        if name.is_none() && group.is_none() && alias.is_none() && hidden.is_none() {
+            let spec_path = self
+                .config_dir
+                .join(crate::constants::DIR_SPECS)
+                .join(format!(
+                    "{}{}",
+                    api_name.as_str(),
+                    crate::constants::FILE_EXT_YAML
+                ));
+
+            return if self.fs.exists(&spec_path) {
+                Ok(())
+            } else {
+                Err(Error::spec_not_found(api_name.as_str()))
+            };
+        }
+
         let (mut config, key) = self.ensure_command_mapping(api_name.as_str())?;
         // Safety: ensure_command_mapping guarantees these exist
         let mapping = config
