@@ -1020,19 +1020,31 @@ impl<F: FileSystem> ConfigManager<F> {
 
     // ---- Command Mapping Management ----
 
+    /// Ensures that the API spec file exists for the given context name.
+    ///
+    /// # Errors
+    ///
+    /// Returns `spec_not_found` if the API specification file does not exist.
+    fn ensure_spec_exists(&self, api_name: &str) -> Result<(), Error> {
+        let spec_path = self
+            .config_dir
+            .join(crate::constants::DIR_SPECS)
+            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
+
+        if !self.fs.exists(&spec_path) {
+            return Err(Error::spec_not_found(api_name));
+        }
+
+        Ok(())
+    }
+
     /// Gets or creates the command mapping for an API, returning a mutable reference
     /// to the `GlobalConfig` with the mapping initialized.
     fn ensure_command_mapping(
         &self,
         api_name: &str,
     ) -> Result<(crate::config::models::GlobalConfig, String), Error> {
-        let spec_path = self
-            .config_dir
-            .join(crate::constants::DIR_SPECS)
-            .join(format!("{api_name}{}", crate::constants::FILE_EXT_YAML));
-        if !self.fs.exists(&spec_path) {
-            return Err(Error::spec_not_found(api_name));
-        }
+        self.ensure_spec_exists(api_name)?;
 
         let mut config = self.load_global_config()?;
         let api_config = config
@@ -1094,6 +1106,8 @@ impl<F: FileSystem> ConfigManager<F> {
         api_name: &ApiContextName,
         original_tag: &str,
     ) -> Result<(), Error> {
+        self.ensure_spec_exists(api_name.as_str())?;
+
         let mut config = self.load_global_config()?;
         let Some(api_config) = config.api_configs.get_mut(api_name.as_str()) else {
             return Ok(());
@@ -1135,20 +1149,8 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // No-op updates should not create empty mapping entries.
         if name.is_none() && group.is_none() && alias.is_none() && hidden.is_none() {
-            let spec_path = self
-                .config_dir
-                .join(crate::constants::DIR_SPECS)
-                .join(format!(
-                    "{}{}",
-                    api_name.as_str(),
-                    crate::constants::FILE_EXT_YAML
-                ));
-
-            return if self.fs.exists(&spec_path) {
-                Ok(())
-            } else {
-                Err(Error::spec_not_found(api_name.as_str()))
-            };
+            self.ensure_spec_exists(api_name.as_str())?;
+            return Ok(());
         }
 
         let (mut config, key) = self.ensure_command_mapping(api_name.as_str())?;
@@ -1194,6 +1196,8 @@ impl<F: FileSystem> ConfigManager<F> {
         api_name: &ApiContextName,
         operation_id: &str,
     ) -> Result<(), Error> {
+        self.ensure_spec_exists(api_name.as_str())?;
+
         let mut config = self.load_global_config()?;
         let Some(api_config) = config.api_configs.get_mut(api_name.as_str()) else {
             return Ok(());
@@ -1218,6 +1222,8 @@ impl<F: FileSystem> ConfigManager<F> {
         operation_id: &str,
         alias: &str,
     ) -> Result<(), Error> {
+        self.ensure_spec_exists(api_name.as_str())?;
+
         let mut config = self.load_global_config()?;
         let Some(api_config) = config.api_configs.get_mut(api_name.as_str()) else {
             return Ok(());

@@ -1822,3 +1822,36 @@ fn test_set_operation_mapping_no_changes_is_noop() {
         "No-op set should not create empty operation mapping"
     );
 }
+
+#[test]
+fn test_remove_group_mapping_nonexistent_spec_fails() {
+    let (manager, _fs) = setup_manager();
+    let config_path = PathBuf::from(TEST_CONFIG_DIR).join("config.toml");
+    _fs.add_file(&config_path, "");
+
+    let api_name = name("nonexistent");
+    let result = manager.remove_group_mapping(&api_name, "Users");
+    assert!(result.is_err(), "Should fail for non-existent spec");
+}
+
+#[test]
+fn test_remove_operation_mapping_nonexistent_spec_fails() {
+    let (manager, _fs) = setup_manager();
+    let config_path = PathBuf::from(TEST_CONFIG_DIR).join("config.toml");
+    _fs.add_file(&config_path, "");
+
+    let api_name = name("nonexistent");
+    let result = manager.remove_operation_mapping(&api_name, "getUser");
+    assert!(result.is_err(), "Should fail for non-existent spec");
+}
+
+#[test]
+fn test_remove_alias_nonexistent_spec_fails() {
+    let (manager, _fs) = setup_manager();
+    let config_path = PathBuf::from(TEST_CONFIG_DIR).join("config.toml");
+    _fs.add_file(&config_path, "");
+
+    let api_name = name("nonexistent");
+    let result = manager.remove_alias(&api_name, "getUser", "alias");
+    assert!(result.is_err(), "Should fail for non-existent spec");
+}
