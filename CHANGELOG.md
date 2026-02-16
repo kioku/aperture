@@ -2,6 +2,101 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.8] - 2026-02-15
+
+### ⚙️ Miscellaneous Tasks
+
+- Remove duplicate crates.io publish step
+- Move entire release process to GitHub Actions
+- Apply rustfmt formatting
+- Add conventional commit message hook
+- Add cargo-deny configuration
+- Add Dependabot configuration for cargo and github-actions
+- Upgrade CI workflow
+- Upgrade release workflow
+- Add exclude list to Cargo.toml for crates.io hygiene
+- Add fail-fast: false to integration-tests matrix
+- Bump oas3 from 0.17.0 to 0.20.1
+- Replace bincode with postcard for cache serialization
+- Add nix build and flake check steps to CI workflow
+- Add nix result symlink to .gitignore
+
+### 🐛 Bug Fixes
+
+- Prevent panic on Unicode body truncation in logging
+- Standardize redaction markers to [REDACTED]
+- **cache:** Scrub auth headers before storing CachedRequestInfo
+- **cache:** Skip caching for authenticated requests by default
+- **deps:** Upgrade bytes to 1.11.1 to resolve RUSTSEC-2026-0007
+- Validate API context names to prevent path traversal (#74)
+- Address review findings for atomic I/O and advisory locking
+- Resolve clippy warnings in cache_fingerprint_tests for CI
+- Resolve ast-grep and clippy linting violations
+- Honor global output format when api command uses default
+- Resolve PR review findings for batch cache path and legacy docs
+- Restore Zlib license in deny.toml
+- Move unix-gated dependencies to cross-platform section
+- Overlay command mapping fields onto --describe-json manifest
+- Use effective display names in exec shortcut resolution paths
+- Align mapping collision detection with generator name resolution
+- Align search effective_command_path with generator name resolution
+- Prevent secret removal from erasing command mappings and environment URLs
+- Correct minor issues in search and shortcut resolution
+- Align build_full_command group fallback with generator and search
+- Add conflicts_with between --group and --operation in set-mapping
+- Add conflicts_with between --group and --operation in remove-mapping
+- Reject empty string values in command mapping configuration
+- Avoid creating empty operation mapping entries
+- Validate spec existence for mapping removals
+- Honor mapped command names in help and listings
+- Resolve mapped command names in operation translation
+
+### 📚 Documentation
+
+- Add homebrew and cargo-binstall installation options
+- Add comprehensive debugging and logging guide
+- Update debugging guide with new logging features
+- **adr:** Document cache policy for authenticated requests
+- Add Nix installation instructions to README
+- Add ADR 009 for custom command mapping approach
+
+### 🚀 Features
+
+- Initialize tracing-subscriber for debug logging
+- Add -v flag for debug logging control
+- Create logging module with redaction utilities
+- Integrate logging into HTTP request/response execution
+- Enhance logging security with expanded redaction
+- Add APERTURE_LOG_FILE for file-based logging
+- Add dynamic x-aperture-secret redaction in logs
+- Warn on invalid APERTURE_LOG_FORMAT values
+- **cache:** Add allow_authenticated config option
+- **cache:** Add scrub_auth_headers utility function
+- Spec cache fingerprint invalidation when source file changes (#75)
+- Add flake.nix with package variants and devShell
+- Add CommandMapping and OperationMapping models to ApiConfig
+- Add display_group, display_name, aliases, hidden fields to CachedCommand
+- Apply command mappings during spec transformation
+- Update command tree generator to use display names, aliases, and hidden
+- Update search and shortcuts to recognize display names and aliases
+- Include mapping fields in --describe-json capability manifest
+- Add CLI commands for managing command mappings
+- Add --remove-alias flag to config set-mapping command
+
+### 🚜 Refactor
+
+- Decouple execution core from CLI layer (clap, stdout) (#77)
+- Resolve PR review findings for executor/CLI decoupling
+
+### 🧪 Testing
+
+- Add integration tests for logging functionality
+- **cache:** Add security tests for auth header scrubbing
+- Add domain, translate, render, and executor decoupling coverage
+- Add integration tests for command mapping feature
+- Add unit tests for command mapping config manager methods
+- Add search tests for display_name, alias, and display_group matching
+
 ## [0.1.7] - 2026-01-26
 
 ### ⚙️ Miscellaneous Tasks

@@ -232,15 +232,16 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Full history for git-cliff
+          ref: main       # Checkout main so we can push back
 
       - name: Install git-cliff
         run: cargo install git-cliff --locked
 
-      - name: Generate changelog
+      - name: Generate release notes
         run: |
           VERSION="${{ needs.verify.outputs.version }}"
-          # Generate changelog for this version only
-          git-cliff --current --strip header > release_notes.md
+          # Generate changelog for this version only (for GitHub Release body)
+          git-cliff --latest --strip header > release_notes.md
 
           # Fallback if empty
           if [ ! -s release_notes.md ]; then
@@ -249,6 +250,29 @@ jobs:
 
           echo "=== Release Notes ==="
           cat release_notes.md
+
+      - name: Update CHANGELOG.md
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          # Append-only: prepend this version's entry into the existing changelog
+          git-cliff --latest --prepend CHANGELOG.md
+
+          echo "=== CHANGELOG.md header ==="
+          head -6 CHANGELOG.md
+
+      - name: Commit and push changelog
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          # Only commit if the changelog actually changed
+          if git diff --cached --quiet; then
+            echo "CHANGELOG.md already up to date, skipping commit"
+          else
+            git commit -m "docs: update changelog for ${VERSION}"
+            git push origin main
+          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v7
