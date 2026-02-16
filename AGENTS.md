@@ -2,21 +2,17 @@
 
 This file provides guidance for AI agents working with the Aperture CLI codebase.
 
-## Primary Documentation
+## Development Workflow
 
-For comprehensive development guidance, please refer to [CLAUDE.md](CLAUDE.md), which contains:
+1. Use conventional commits for clear change tracking
+2. Run the full quality gate pipeline: `cargo test && cargo fmt && cargo clippy`
+3. Follow a Test-Driven Development approach
+4. Focus on the modular architecture with clear separation of concerns
 
-- Project overview and architecture
-- Development commands and workflows  
-- Testing strategies and tools
-- Configuration management details
-- Code quality standards
+## Agent-Friendly Features
 
-## Agent-Specific Notes
+Aperture is designed with an "agent-first" philosophy:
 
-Aperture is designed with an "agent-first" philosophy, making it particularly suitable for autonomous AI development:
-
-### Agent-Friendly Features
 - **Structured Output**: `--describe-json` provides machine-readable API capability manifests with response schemas
 - **Error Handling**: `--json-errors` outputs structured error information
 - **Safe Testing**: `--dry-run` allows request inspection without execution
@@ -31,15 +27,11 @@ The `--describe-json` manifest includes `response_schema` for each command:
 
 This enables agents to understand API response structure before execution, reducing hallucinations in data extraction.
 
-### Development Workflow for Agents
-1. Follow the Test-Driven Development approach outlined in CLAUDE.md
-2. Use conventional commits for clear change tracking
-3. Run the full quality gate pipeline: `cargo test && cargo fmt && cargo clippy`
-4. Focus on the modular architecture with clear separation of concerns
+## Key Architectural Concepts
 
-### Key Architectural Concepts
 - **Separation of Concerns**: Configuration (OpenAPI specs) and secrets are strictly separated
 - **Caching Strategy**: OpenAPI specs are validated once and cached for performance
 - **Agent-First Design**: All features optimized for programmatic use
+- **Executor/CLI Decoupling**: The execution core (`invocation.rs`, `engine/executor.rs`) is independent of the CLI framework
 
-For detailed implementation guidance, architecture decisions, and testing strategies, see [CLAUDE.md](CLAUDE.md).
+For architecture details, see [docs/architecture.md](docs/architecture.md). For user-facing documentation, see the [docs/](docs/) directory.

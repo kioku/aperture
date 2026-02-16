@@ -3,7 +3,6 @@
 ## **Aperture CLI: v0.1.x Core Enhancement Roadmap**
 
 - **Document Version:** 3.2
-- **Author:** Claudiu Ivan with Gemini 2.5 Pro
 - **Status:** Active Development Plan for Next Release Cycle
 
 ### **1. Introduction**

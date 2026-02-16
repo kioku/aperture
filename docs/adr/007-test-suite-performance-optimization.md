@@ -161,12 +161,7 @@ If optimizations cause issues:
 - Issue #32: "Optimize test suite performance"
 - cargo-nextest documentation: <https://nexte.st/>
 - Related ADRs: None
-
-## Authors
-
-- Implementation: Claude Code Assistant
-- Review: Development Team
-- Decision Date: 2025-08-22 (implementation date)
+- Decision Date: 2025-08-22
 
 ---
 
