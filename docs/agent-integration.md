@@ -55,7 +55,11 @@ aperture api my-api --describe-json
           "content_type": "application/json",
           "schema": {"type": "object", "properties": {"id": {"type": "integer"}}},
           "example": {"id": 123, "name": "Alice"}
-        }
+        },
+        "display_name": "fetch",
+        "display_group": "accounts",
+        "aliases": ["get", "show"],
+        "hidden": false
       }
     ]
   },
@@ -68,7 +72,18 @@ aperture api my-api --describe-json
 }
 ```
 
-*Note: This shows core fields. Actual output may include additional metadata such as `deprecated`, `external_docs_url`, `original_tags` on commands, and `description`, `x-aperture-secret` on security schemes.*
+**Command mapping fields in the manifest:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `display_name` | `string?` | Effective subcommand name (from command mapping). Omitted if no rename. |
+| `display_group` | `string?` | Effective group name (from command mapping). Omitted if no rename. |
+| `aliases` | `string[]` | Additional subcommand aliases. Omitted if empty. |
+| `hidden` | `boolean` | Whether the command is hidden from help output. Omitted if `false`. |
+
+When command mappings are configured, the manifest groups commands by their **effective** group name (i.e., `display_group` if set, otherwise the original tag). Agents should use the manifest's group keys and `name`/`display_name` fields to construct correct CLI invocations.
+
+*Note: Additional metadata fields such as `deprecated`, `external_docs_url`, `original_tags` on commands, and `description`, `x-aperture-secret` on security schemes may also be present.*
 
 ### Response Schema Limitations
 

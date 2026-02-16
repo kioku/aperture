@@ -1,7 +1,7 @@
 # **Software Design Document: Aperture CLI**
 
-- **Document Version:** 3.0 (Definitive Specification)
-- **Product Version:** 0.1.4
+- **Document Version:** 4.0
+- **Product Version:** 0.1.8
 - **Status:** Experimental - Core Features Implemented
 - **Author:** Claudiu Ivan with Gemini 2.5 Pro
 
@@ -149,6 +149,70 @@ If a process is killed between writing a temporary file and the atomic rename, a
 - **POSIX (Linux, macOS):** `rename(2)` is atomic within the same filesystem. `flock(2)` provides advisory locking.
 - **Windows:** `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING` provides atomic same-volume renames. `LockFileEx` provides advisory locking.
 
+### 4.4. Executor / CLI Decoupling
+
+As of v0.1.8, the execution core is decoupled from the CLI framework (clap) and direct I/O (stdout/stderr). This separation enables library/SDK usage, alternative frontends, and unit testing without CLI parsing dependencies.
+
+#### Module Structure
+
+```
+src/
+├── cli/                    # CLI-specific layer (clap)
+│   ├── mod.rs              # Clap command definitions
+│   ├── commands/           # Command handlers
+│   │   ├── api.rs          # API execution commands
+│   │   ├── config.rs       # Config management commands
+│   │   ├── docs.rs         # Documentation commands
+│   │   └── search.rs       # Search commands
+│   ├── translate.rs        # ArgMatches → domain types
+│   ├── render.rs           # ExecutionResult → formatted output
+│   └── tracing_init.rs     # Logging initialization
+├── invocation.rs           # CLI-agnostic domain types
+└── engine/
+    └── executor.rs         # Pure execution engine
+```
+
+#### Domain Types (`invocation.rs`)
+
+The execution engine accepts framework-agnostic types:
+
+- **`OperationCall`** — Describes a single API operation: `operation_id`, path/query/header parameters, request body, and custom headers.
+- **`ExecutionContext`** — Execution-time configuration: dry-run mode, idempotency key, cache config, retry context, base URL override.
+- **`ExecutionResult`** — The outcome: HTTP status, headers, body, duration, and retry information.
+
+#### Translation Layer (`cli/translate.rs`)
+
+Converts clap `ArgMatches` into domain types. This is the only module that depends on both clap and the domain model. It walks the subcommand hierarchy to identify the operation, extracts parameters by location, and builds an `OperationCall`.
+
+#### Rendering Layer (`cli/render.rs`)
+
+Converts `ExecutionResult` back into formatted CLI output (JSON, YAML, table). This layer handles JQ filtering, output format selection, and quiet mode. It is the only module that writes to stdout.
+
+#### Benefits
+
+- **Testability**: The executor can be tested with constructed `OperationCall` values, no CLI parsing required.
+- **SDK Path**: The domain types form a stable contract for future library/SDK usage.
+- **Separation of Concerns**: Parsing, execution, and rendering are independent.
+
+### 4.5. Command Mapping
+
+As of v0.1.8, Aperture supports config-based command mapping that customizes the CLI command tree without modifying the OpenAPI spec.
+
+Mappings are applied during cache generation (`config add` / `config reinit`) as a transformation step in the spec processing pipeline:
+
+```
+OpenAPI Spec → Parse → Validate → Transform → Apply Mappings → Cache
+```
+
+The mapping system supports:
+- **Group renames**: Tag-derived groups can be renamed
+- **Operation renames**: Operations can be renamed, aliased, moved between groups, or hidden
+- **Collision detection**: Validates that no two operations resolve to the same effective name
+
+Mapping data is stored in `config.toml` and baked into the binary cache. The `--describe-json` manifest reflects effective names, so agents always see the correct CLI interface.
+
+See [ADR 009](adr/009-custom-command-mapping.md) for the full design rationale.
+
 ## 5. OpenAPI Specification Support (v1.0)
 
 Aperture's v1.0 implementation will support a well-defined subset of the OpenAPI 3.x specification.
@@ -288,7 +352,8 @@ Aperture is **strict by default**. If an API returns a successful (2xx) status c
 This SDD describes Product v1.0. Future development will focus on:
 
 - **v1.1:** Introduce a generic pagination helper (`--auto-paginate`). ~~Custom HTTP scheme support~~ (COMPLETED in v0.1.4).
-- **v1.2:** Add a `aperture config set <key> <value>` command for managing `config.toml`. Expand command validation and error reporting capabilities.
+- **v1.2:** ~~Add a `aperture config set <key> <value>` command for managing `config.toml`.~~ (COMPLETED in v0.1.7). Expand command validation and error reporting capabilities.
+- **v1.3:** ~~Request/response logging with security redaction~~ (COMPLETED in v0.1.8). ~~Custom command mapping~~ (COMPLETED in v0.1.8). ~~Executor/CLI decoupling for SDK path~~ (COMPLETED in v0.1.8).
 - **v2.0:** Introduce keychain integration as an additional `SecretSource`. Expand OpenAPI support to include more complex features.
 
 ---

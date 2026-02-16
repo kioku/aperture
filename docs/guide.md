@@ -152,9 +152,83 @@ aperture config cache-stats my-api
 aperture config clear-cache my-api
 ```
 
+## Command Mapping
+
+Customize the CLI command tree without modifying the OpenAPI spec. Rename groups, rename operations, add aliases, or hide commands.
+
+### Rename a Tag Group
+
+```bash
+# Rename "User Management" to "users"
+aperture config set-mapping my-api --group "User Management" users
+aperture config reinit my-api
+```
+
+### Rename an Operation
+
+```bash
+# Rename getUserById to "fetch"
+aperture config set-mapping my-api --operation getUserById --name fetch
+aperture config reinit my-api
+
+# Now use the new name
+aperture api my-api users fetch --id 123
+```
+
+### Add Aliases
+
+```bash
+# Add "get" and "show" as aliases for an operation
+aperture config set-mapping my-api --operation getUserById --alias get
+aperture config set-mapping my-api --operation getUserById --alias show
+aperture config reinit my-api
+
+# All three work
+aperture api my-api users get-user-by-id --id 123
+aperture api my-api users get --id 123
+aperture api my-api users show --id 123
+```
+
+### Move an Operation to a Different Group
+
+```bash
+# Move getUserById from its original tag group to "accounts"
+aperture config set-mapping my-api --operation getUserById --op-group accounts
+aperture config reinit my-api
+```
+
+### Hide an Operation
+
+```bash
+# Hide a deprecated or internal operation from help output
+aperture config set-mapping my-api --operation deleteUser --hidden
+aperture config reinit my-api
+
+# The command still works but doesn't appear in --help
+aperture api my-api users delete-user --id 123
+```
+
+### View and Remove Mappings
+
+```bash
+# List all mappings
+aperture config list-mappings my-api
+
+# Remove an operation mapping
+aperture config remove-mapping my-api --operation getUserById
+
+# Remove a group mapping
+aperture config remove-mapping my-api --group "User Management"
+
+# Apply changes
+aperture config reinit my-api
+```
+
+> **Note:** All mapping changes require `aperture config reinit` to take effect. The mappings are applied during cache generation.
+
 ## Search Commands
 
-Find operations across all registered APIs:
+Find operations across all registered APIs. Search matches against operation names, descriptions, display names, and aliases from command mappings.
 
 ```bash
 # Search by keyword
@@ -165,6 +239,9 @@ aperture search "list" --api my-api
 
 # Regex search
 aperture search "get.*by.*id" --verbose
+
+# Finds operations by display name or alias
+aperture search "fetch"
 ```
 
 ## Shortcuts

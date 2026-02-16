@@ -172,6 +172,127 @@ aperture config remove my-api
 aperture config add my-api ./openapi.yaml
 ```
 
+## Command Mapping
+
+Customize the CLI command tree for any API specification without modifying the original OpenAPI spec. This is especially useful for third-party APIs with verbose operation names, inconsistent tagging, or deprecated endpoints.
+
+### How It Works
+
+Command mappings are stored in `config.toml` under `api_configs.<name>.command_mapping` and applied during cache generation (`config add` or `config reinit`). Agents see the effective names in `--describe-json`.
+
+### Group Renames
+
+Rename the tag-derived command groups:
+
+```bash
+# "User Management" tag becomes "users" group
+aperture config set-mapping my-api --group "User Management" users
+
+# "Organization Settings" becomes "orgs"
+aperture config set-mapping my-api --group "Organization Settings" orgs
+```
+
+### Operation Mappings
+
+Customize individual operations by their `operationId`:
+
+```bash
+# Rename the subcommand
+aperture config set-mapping my-api --operation getUserById --name fetch
+
+# Move to a different group
+aperture config set-mapping my-api --operation getUserById --op-group accounts
+
+# Add an alias
+aperture config set-mapping my-api --operation getUserById --alias get
+
+# Remove an alias
+aperture config set-mapping my-api --operation getUserById --remove-alias get
+
+# Hide from help output
+aperture config set-mapping my-api --operation deleteUser --hidden
+
+# Unhide
+aperture config set-mapping my-api --operation deleteUser --visible
+```
+
+### Viewing Mappings
+
+```bash
+aperture config list-mappings my-api
+```
+
+**Output:**
+
+```
+Command mappings for API 'my-api':
+
+  Group renames:
+    'User Management' → 'users'
+
+  Operation mappings:
+    'getUserById':
+      name: 'fetch'
+      group: 'accounts'
+      aliases: ['get', 'show']
+    'deleteUser':
+      hidden: true
+```
+
+### Removing Mappings
+
+```bash
+# Remove a group mapping
+aperture config remove-mapping my-api --group "User Management"
+
+# Remove an operation mapping
+aperture config remove-mapping my-api --operation getUserById
+```
+
+### Applying Changes
+
+Mappings take effect after rebuilding the cache:
+
+```bash
+aperture config reinit my-api
+```
+
+### Config File Format
+
+Mappings are stored in `config.toml`:
+
+```toml
+[api_configs.my-api.command_mapping]
+
+[api_configs.my-api.command_mapping.groups]
+"User Management" = "users"
+"Organization Settings" = "orgs"
+
+[api_configs.my-api.command_mapping.operations.getUserById]
+name = "fetch"
+group = "accounts"
+aliases = ["get", "show"]
+
+[api_configs.my-api.command_mapping.operations.deleteUser]
+hidden = true
+```
+
+### Collision Detection
+
+During cache generation, Aperture validates that:
+- No two operations resolve to the same `(group, name)` pair
+- No alias collides with another operation's name or alias in the same group
+- Customized group names don't conflict with built-in commands (`config`, `search`, `exec`, `docs`, `overview`)
+
+Collisions produce hard errors that prevent cache generation.
+
+### Stale Mapping Handling
+
+When a spec is updated and operations change:
+- Mappings referencing non-existent tags or operation IDs produce **warnings**, not errors
+- The spec is still processed with stale mappings ignored
+- Clean up stale mappings with `config remove-mapping`
+
 ## Global Settings Management
 
 Aperture provides commands to view and modify global settings without manually editing the config file.
@@ -357,6 +478,21 @@ Without the feature, 3.1 specs produce an error with instructions to enable it.
 |---------|-------------|
 | `config cache-stats <name>` | Show cache stats |
 | `config clear-cache <name>` | Clear response cache |
+
+### Command Mapping
+
+| Command | Description |
+|---------|-------------|
+| `config set-mapping <name> --group <original> <new>` | Rename a tag group |
+| `config set-mapping <name> --operation <id> --name <n>` | Rename an operation |
+| `config set-mapping <name> --operation <id> --op-group <g>` | Move operation to group |
+| `config set-mapping <name> --operation <id> --alias <a>` | Add an alias |
+| `config set-mapping <name> --operation <id> --remove-alias <a>` | Remove an alias |
+| `config set-mapping <name> --operation <id> --hidden` | Hide from help |
+| `config set-mapping <name> --operation <id> --visible` | Unhide |
+| `config list-mappings <name>` | List all mappings |
+| `config remove-mapping <name> --group <original>` | Remove group mapping |
+| `config remove-mapping <name> --operation <id>` | Remove operation mapping |
 
 ### Settings Management
 

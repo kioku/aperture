@@ -207,6 +207,35 @@ components:
         name: MY_TOKEN
 ```
 
+## Response Cache Security
+
+The response cache system is designed to prevent credential leakage to disk.
+
+### Default Behavior: Skip Authenticated Requests
+
+Responses from authenticated requests are **not cached**. This prevents authorization headers and tokens from being persisted in the file-based response cache.
+
+```bash
+# This request uses a Bearer token — response is NOT cached
+aperture api my-api --cache users list
+```
+
+When caching is enabled (`--cache`) and the request includes authentication headers, Aperture skips caching entirely and makes a fresh request every time. This is a deliberate security default.
+
+### Authentication Header Scrubbing
+
+As an additional defense-in-depth measure, authentication headers are scrubbed from any request metadata that does get stored in the cache. The following headers are automatically removed:
+
+- `Authorization` / `Proxy-Authorization`
+- `X-API-Key` / `X-API-Token` / `API-Key`
+- `Cookie` (may contain session tokens)
+
+This ensures that even if cache files are accessed by other processes or backed up, no credentials are exposed.
+
+### Context Name Validation
+
+API context names are validated to prevent path traversal attacks. Names containing `..`, `/`, `\`, or other path-separator characters are rejected. This ensures that API context names cannot be used to write cache or configuration files outside the expected directory.
+
 ## Best Practices
 
 ### 1. Use Descriptive Variable Names
