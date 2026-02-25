@@ -292,92 +292,27 @@ impl BatchProcessor {
 
         for &idx in &execution_order {
             let operation = &operations[idx];
-            let op_id = operation
-                .id
-                .as_deref()
-                .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME);
-
-            // Interpolate variables in args
-            let interpolated_args =
-                interpolation::interpolate_args(&operation.args, &store, op_id)?;
-
-            // Create a copy of the operation with interpolated args
-            let mut exec_op = operation.clone();
-            exec_op.args = interpolated_args;
-
-            let operation_start = std::time::Instant::now();
-
-            // Always suppress output and skip jq_filter in dependent mode: we
-            // need the raw response body for variable capture, not a rendered
-            // or filtered version.
-            let result = Self::execute_single_operation(
+            let result = Self::run_dependent_operation(
                 spec,
-                &exec_op,
+                operation,
+                &mut store,
                 global_config,
                 base_url,
                 dry_run,
                 output_format,
-                None, // no jq filter — capture needs unfiltered response
-                true, // suppress_output — capture needs the raw response
+                self.config.show_progress,
             )
             .await;
 
-            let duration = operation_start.elapsed();
+            let failed = !result.success;
+            results[idx] = Some(result);
 
-            match result {
-                Ok(response) => {
-                    // Extract captures from the response
-                    capture::extract_captures(operation, &response, &mut store)?;
-
-                    if self.config.show_progress {
-                        // ast-grep-ignore: no-println
-                        println!("Operation '{op_id}' completed");
-                    }
-
-                    results[idx] = Some(BatchOperationResult {
-                        operation: operation.clone(),
-                        success: true,
-                        error: None,
-                        response: Some(response),
-                        duration,
-                    });
-                }
-                Err(e) => {
-                    if self.config.show_progress {
-                        // ast-grep-ignore: no-println
-                        println!("Operation '{op_id}' failed: {e}");
-                    }
-
-                    results[idx] = Some(BatchOperationResult {
-                        operation: operation.clone(),
-                        success: false,
-                        error: Some(e.to_string()),
-                        response: None,
-                        duration,
-                    });
-
-                    // Atomic execution: halt on first failure
-                    // Fill remaining operations as not executed
-                    break;
-                }
+            if failed {
+                break; // Atomic execution: halt on first failure
             }
         }
 
-        // Collect results in original order, filling gaps for skipped operations
-        let final_results: Vec<BatchOperationResult> = results
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| {
-                r.unwrap_or_else(|| BatchOperationResult {
-                    operation: operations[i].clone(),
-                    success: false,
-                    error: Some("Skipped due to prior failure".into()),
-                    response: None,
-                    duration: std::time::Duration::ZERO,
-                })
-            })
-            .collect();
-
+        let final_results = Self::fill_skipped_results(results, &operations);
         let total_duration = start_time.elapsed();
         let success_count = final_results.iter().filter(|r| r.success).count();
         let failure_count = final_results.len() - success_count;
@@ -396,6 +331,128 @@ impl BatchProcessor {
             success_count,
             failure_count,
         })
+    }
+
+    /// Executes a single operation in the dependent pipeline: interpolate args,
+    /// call the API, and extract captures. Returns a `BatchOperationResult`
+    /// regardless of success or failure (capture failures are recorded as
+    /// operation failures, not propagated).
+    #[allow(clippy::too_many_arguments)]
+    async fn run_dependent_operation(
+        spec: &CachedSpec,
+        operation: &BatchOperation,
+        store: &mut interpolation::VariableStore,
+        global_config: Option<&GlobalConfig>,
+        base_url: Option<&str>,
+        dry_run: bool,
+        output_format: &crate::cli::OutputFormat,
+        show_progress: bool,
+    ) -> BatchOperationResult {
+        let op_id = operation
+            .id
+            .as_deref()
+            .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME);
+
+        // Interpolate variables in args — if this fails the operation cannot proceed
+        let interpolated_args = match interpolation::interpolate_args(&operation.args, store, op_id)
+        {
+            Ok(args) => args,
+            Err(e) => {
+                return BatchOperationResult {
+                    operation: operation.clone(),
+                    success: false,
+                    error: Some(e.to_string()),
+                    response: None,
+                    duration: std::time::Duration::ZERO,
+                };
+            }
+        };
+
+        let mut exec_op = operation.clone();
+        exec_op.args = interpolated_args;
+        let operation_start = std::time::Instant::now();
+
+        // Suppress output and skip jq_filter: capture needs the raw response body
+        let result = Self::execute_single_operation(
+            spec,
+            &exec_op,
+            global_config,
+            base_url,
+            dry_run,
+            output_format,
+            None,
+            true,
+        )
+        .await;
+
+        let duration = operation_start.elapsed();
+
+        let response = match result {
+            Ok(resp) => resp,
+            Err(e) => {
+                Self::log_progress(show_progress, || format!("Operation '{op_id}' failed: {e}"));
+                return BatchOperationResult {
+                    operation: operation.clone(),
+                    success: false,
+                    error: Some(e.to_string()),
+                    response: None,
+                    duration,
+                };
+            }
+        };
+
+        // Extract captures — failure is treated as an operation failure
+        let capture_result = capture::extract_captures(operation, &response, store);
+        let Err(capture_err) = capture_result else {
+            // Capture succeeded — fall through to success path below
+            Self::log_progress(show_progress, || format!("Operation '{op_id}' completed"));
+            return BatchOperationResult {
+                operation: operation.clone(),
+                success: true,
+                error: None,
+                response: Some(response),
+                duration,
+            };
+        };
+
+        Self::log_progress(show_progress, || {
+            format!("Operation '{op_id}' capture failed: {capture_err}")
+        });
+        BatchOperationResult {
+            operation: operation.clone(),
+            success: false,
+            error: Some(capture_err.to_string()),
+            response: Some(response),
+            duration,
+        }
+    }
+
+    /// Conditionally prints a progress message.
+    fn log_progress(show_progress: bool, msg: impl FnOnce() -> String) {
+        if show_progress {
+            // ast-grep-ignore: no-println
+            println!("{}", msg());
+        }
+    }
+
+    /// Fills `None` slots (skipped operations) with "Skipped due to prior failure".
+    fn fill_skipped_results(
+        results: Vec<Option<BatchOperationResult>>,
+        operations: &[BatchOperation],
+    ) -> Vec<BatchOperationResult> {
+        results
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.unwrap_or_else(|| BatchOperationResult {
+                    operation: operations[i].clone(),
+                    success: false,
+                    error: Some("Skipped due to prior failure".into()),
+                    response: None,
+                    duration: std::time::Duration::ZERO,
+                })
+            })
+            .collect()
     }
 
     /// Original concurrent execution strategy for independent operations.

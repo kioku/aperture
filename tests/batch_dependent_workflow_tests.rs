@@ -680,7 +680,7 @@ async fn dependent_batch_json_parsing() {
 }
 
 #[tokio::test]
-async fn dependent_dry_run_skips_capture() {
+async fn dependent_dry_run_capture_fails_gracefully() {
     let mock = wiremock::MockServer::start().await;
     let spec = test_spec(&mock.uri());
     let processor = BatchProcessor::new(quiet_config());
@@ -715,8 +715,8 @@ async fn dependent_dry_run_skips_capture() {
 
     // Dry-run renders a request-info JSON object instead of an API response.
     // The JQ capture query (`.id`) will not find the expected field, so
-    // the batch should return a structured result where the first operation
-    // fails capture. Critically, it must not panic.
+    // capture fails. This should produce a BatchResult (not a raw error)
+    // with the first operation marked as failed and the second as skipped.
     let result = processor
         .execute_batch(
             &spec,
@@ -727,17 +727,26 @@ async fn dependent_dry_run_skips_capture() {
             &OutputFormat::Json,
             None,
         )
-        .await;
+        .await
+        .expect("should return BatchResult, not a top-level error");
 
-    // The capture fails because the dry-run response has no `.id` field.
-    // This surfaces as a capture error propagated from execute_dependent_batch.
-    assert!(
-        result.is_err(),
-        "expected capture error in dry-run mode, got Ok"
-    );
-    let err = result.unwrap_err().to_string();
+    // First op: HTTP succeeded but capture failed → recorded as failure
+    assert!(!result.results[0].success);
+    let err = result.results[0].error.as_deref().unwrap_or("");
     assert!(
         err.contains("capture") || err.contains("null"),
         "expected capture-related error, got: {err}"
     );
+    // The response body is still available even though capture failed
+    assert!(result.results[0].response.is_some());
+
+    // Second op: skipped due to prior failure
+    assert!(!result.results[1].success);
+    assert_eq!(
+        result.results[1].error.as_deref(),
+        Some("Skipped due to prior failure")
+    );
+
+    assert_eq!(result.success_count, 0);
+    assert_eq!(result.failure_count, 2);
 }
