@@ -272,7 +272,7 @@ impl BatchProcessor {
         global_config: Option<&GlobalConfig>,
         base_url: Option<&str>,
         dry_run: bool,
-        output_format: &crate::cli::OutputFormat,
+        _output_format: &crate::cli::OutputFormat,
         _jq_filter: Option<&str>,
     ) -> Result<BatchResult, Error> {
         let start_time = std::time::Instant::now();
@@ -299,7 +299,6 @@ impl BatchProcessor {
                 global_config,
                 base_url,
                 dry_run,
-                output_format,
                 self.config.show_progress,
             )
             .await;
@@ -345,7 +344,6 @@ impl BatchProcessor {
         global_config: Option<&GlobalConfig>,
         base_url: Option<&str>,
         dry_run: bool,
-        output_format: &crate::cli::OutputFormat,
         show_progress: bool,
     ) -> BatchOperationResult {
         let op_id = operation
@@ -372,14 +370,15 @@ impl BatchProcessor {
         exec_op.args = interpolated_args;
         let operation_start = std::time::Instant::now();
 
-        // Suppress output and skip jq_filter: capture needs the raw response body
+        // Suppress output and skip jq_filter: capture needs JSON text that
+        // preserves the raw response structure regardless of caller formatting.
         let result = Self::execute_single_operation(
             spec,
             &exec_op,
             global_config,
             base_url,
             dry_run,
-            output_format,
+            &crate::cli::OutputFormat::Json,
             None,
             true,
         )
