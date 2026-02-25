@@ -232,9 +232,16 @@ fn topological_sort(
     }
 
     if order.len() != n {
-        // Cycle detected — report using operation IDs where available
-        let cycle_ids: Vec<String> = (0..n)
-            .filter(|&i| in_degree[i] > 0)
+        // Build the unresolved subgraph (nodes with in-degree > 0 after Kahn).
+        // This includes cycle members and possibly downstream nodes blocked by
+        // those cycles; we then extract one concrete cycle path from that subgraph.
+        let unresolved: Vec<bool> = in_degree.iter().map(|&d| d > 0).collect();
+
+        let cycle_indices = find_cycle_path(adj, &unresolved)
+            .unwrap_or_else(|| (0..n).filter(|&i| unresolved[i]).collect());
+
+        let cycle_ids: Vec<String> = cycle_indices
+            .into_iter()
             .map(|i| {
                 operations[i]
                     .id
@@ -242,10 +249,86 @@ fn topological_sort(
                     .unwrap_or_else(|| format!("index {i}"))
             })
             .collect();
+
         return Err(Error::batch_cycle_detected(&cycle_ids));
     }
 
     Ok(order)
+}
+
+/// Finds one concrete directed cycle in the unresolved subgraph.
+///
+/// Returns node indices describing the cycle path. The start node is repeated
+/// at the end (e.g., `[a, b, a]`) to make the loop explicit in error messages.
+fn find_cycle_path(adj: &[Vec<usize>], unresolved: &[bool]) -> Option<Vec<usize>> {
+    let n = adj.len();
+    let mut color = vec![0u8; n]; // 0 = unvisited, 1 = visiting, 2 = done
+    let mut stack = Vec::new();
+    let mut stack_pos: HashMap<usize, usize> = HashMap::new();
+
+    for start in 0..n {
+        if !unresolved[start] || color[start] != 0 {
+            continue;
+        }
+
+        if let Some(cycle) = dfs_cycle(
+            start,
+            adj,
+            unresolved,
+            &mut color,
+            &mut stack,
+            &mut stack_pos,
+        ) {
+            return Some(cycle);
+        }
+    }
+
+    None
+}
+
+fn dfs_cycle(
+    node: usize,
+    adj: &[Vec<usize>],
+    unresolved: &[bool],
+    color: &mut [u8],
+    stack: &mut Vec<usize>,
+    stack_pos: &mut HashMap<usize, usize>,
+) -> Option<Vec<usize>> {
+    color[node] = 1;
+    stack_pos.insert(node, stack.len());
+    stack.push(node);
+
+    let mut successors = adj[node].clone();
+    successors.sort_unstable();
+
+    for succ in successors {
+        if !unresolved[succ] {
+            continue;
+        }
+
+        match color[succ] {
+            0 => {
+                if let Some(cycle) = dfs_cycle(succ, adj, unresolved, color, stack, stack_pos) {
+                    return Some(cycle);
+                }
+            }
+            1 => {
+                // Back-edge to an ancestor in the DFS stack => concrete cycle.
+                let start = *stack_pos
+                    .get(&succ)
+                    .expect("visiting node must be present in DFS stack position map");
+                let mut cycle = stack[start..].to_vec();
+                cycle.push(succ);
+                return Some(cycle);
+            }
+            _ => {}
+        }
+    }
+
+    stack.pop();
+    stack_pos.remove(&node);
+    color[node] = 2;
+    None
 }
 
 #[cfg(test)]
@@ -359,6 +442,36 @@ mod tests {
         ];
         let result = resolve_execution_order(&ops);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn cycle_error_excludes_downstream_non_cycle_nodes() {
+        // a <-> b is the cycle; c depends on a but is not part of the cycle.
+        let ops = vec![
+            op_with_deps("a", &["b"]),
+            op_with_deps("b", &["a"]),
+            op_with_deps("c", &["a"]),
+        ];
+        let result = resolve_execution_order(&ops);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err().to_string();
+        let reported_cycle: Vec<&str> = err
+            .rsplit(':')
+            .next()
+            .unwrap_or_default()
+            .split('→')
+            .map(str::trim)
+            .collect();
+
+        assert!(
+            reported_cycle.contains(&"a") && reported_cycle.contains(&"b"),
+            "expected cycle members a and b, got: {err}"
+        );
+        assert!(
+            !reported_cycle.contains(&"c"),
+            "expected downstream node c to be excluded from cycle report, got: {err}"
+        );
     }
 
     #[test]
