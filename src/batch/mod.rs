@@ -1,3 +1,7 @@
+pub mod capture;
+pub mod graph;
+pub mod interpolation;
+
 use crate::cache::models::CachedSpec;
 use crate::config::models::GlobalConfig;
 use crate::duration::parse_duration;
@@ -41,7 +45,8 @@ impl Default for BatchConfig {
 /// A single batch operation definition
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BatchOperation {
-    /// Unique identifier for this operation (optional)
+    /// Unique identifier for this operation (optional for independent ops, required when
+    /// using `capture`, `capture_append`, or `depends_on`)
     pub id: Option<String>,
     /// The command arguments to execute (e.g., `["users", "get", "--user-id", "123"]`)
     pub args: Vec<String>,
@@ -64,6 +69,24 @@ pub struct BatchOperation {
     /// Force retry on non-idempotent requests without an idempotency key
     #[serde(default)]
     pub force_retry: bool,
+
+    /// Capture scalar values from the response using JQ syntax.
+    /// Maps variable name → JQ query (e.g., `{"user_id": ".id"}`).
+    /// Captured values are available for `{{variable}}` interpolation in subsequent operations.
+    #[serde(default)]
+    pub capture: Option<std::collections::HashMap<String, String>>,
+
+    /// Append extracted values to a named list using JQ syntax.
+    /// Maps list name → JQ query. The list interpolates as a JSON array literal.
+    /// Enables fan-out/aggregate patterns where N operations feed into a terminal call.
+    #[serde(default)]
+    pub capture_append: Option<std::collections::HashMap<String, String>>,
+
+    /// Explicit dependency on other operations by their `id`.
+    /// This operation will not execute until all dependencies have completed.
+    /// Dependencies can also be inferred from `{{variable}}` usage in `args`.
+    #[serde(default)]
+    pub depends_on: Option<Vec<String>>,
 }
 
 /// Batch file format containing multiple operations
