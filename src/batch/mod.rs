@@ -273,7 +273,7 @@ impl BatchProcessor {
         base_url: Option<&str>,
         dry_run: bool,
         output_format: &crate::cli::OutputFormat,
-        jq_filter: Option<&str>,
+        _jq_filter: Option<&str>,
     ) -> Result<BatchResult, Error> {
         let start_time = std::time::Instant::now();
         let operations = batch_file.operations;
@@ -307,6 +307,9 @@ impl BatchProcessor {
 
             let operation_start = std::time::Instant::now();
 
+            // Always suppress output and skip jq_filter in dependent mode: we
+            // need the raw response body for variable capture, not a rendered
+            // or filtered version.
             let result = Self::execute_single_operation(
                 spec,
                 &exec_op,
@@ -314,8 +317,8 @@ impl BatchProcessor {
                 base_url,
                 dry_run,
                 output_format,
-                jq_filter,
-                self.config.suppress_output,
+                None, // no jq filter — capture needs unfiltered response
+                true, // suppress_output — capture needs the raw response
             )
             .await;
 
