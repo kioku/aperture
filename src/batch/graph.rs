@@ -26,7 +26,7 @@ pub type ExecutionOrder = Vec<usize>;
 pub fn resolve_execution_order(operations: &[BatchOperation]) -> Result<ExecutionOrder, Error> {
     validate_ids(operations)?;
 
-    let id_to_index = build_id_index(operations);
+    let id_to_index = build_id_index(operations)?;
     let capture_var_to_op = build_capture_index(operations, &id_to_index);
 
     let adjacency = build_adjacency(operations, &id_to_index, &capture_var_to_op)?;
@@ -77,12 +77,23 @@ fn id_requirement_context(op: &BatchOperation) -> Option<&'static str> {
 }
 
 /// Builds a map from operation `id` → index in the operations slice.
-fn build_id_index(operations: &[BatchOperation]) -> HashMap<&str, usize> {
-    operations
-        .iter()
-        .enumerate()
-        .filter_map(|(i, op)| op.id.as_deref().map(|id| (id, i)))
-        .collect()
+///
+/// # Errors
+///
+/// Returns an error if two or more operations share the same `id`.
+fn build_id_index(operations: &[BatchOperation]) -> Result<HashMap<&str, usize>, Error> {
+    let mut map = HashMap::new();
+    for (i, op) in operations.iter().enumerate() {
+        let Some(id) = op.id.as_deref() else {
+            continue;
+        };
+        if let Some(existing_idx) = map.insert(id, i) {
+            return Err(Error::validation_error(format!(
+                "Duplicate operation id '{id}': found at index {existing_idx} and {i}"
+            )));
+        }
+    }
+    Ok(map)
 }
 
 /// Builds a map from captured variable name → index of the operation that captures it.
@@ -328,6 +339,18 @@ mod tests {
         assert!(
             err.contains("nonexistent"),
             "expected missing dep error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn duplicate_ids_rejected() {
+        let ops = vec![op("dup"), op("dup")];
+        let result = resolve_execution_order(&ops);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Duplicate operation id 'dup'"),
+            "expected duplicate id error, got: {err}"
         );
     }
 
