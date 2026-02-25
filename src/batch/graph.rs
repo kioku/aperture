@@ -34,11 +34,16 @@ pub fn resolve_execution_order(operations: &[BatchOperation]) -> Result<Executio
 }
 
 /// Checks whether the batch uses any dependency features.
+///
+/// Empty maps/vecs (e.g. `capture: {}`, `depends_on: []`) are treated as absent
+/// so they don't accidentally trigger dependent mode.
 #[must_use]
 pub fn has_dependencies(operations: &[BatchOperation]) -> bool {
-    operations
-        .iter()
-        .any(|op| op.depends_on.is_some() || op.capture.is_some() || op.capture_append.is_some())
+    operations.iter().any(|op| {
+        op.depends_on.as_ref().is_some_and(|d| !d.is_empty())
+            || op.capture.as_ref().is_some_and(|c| !c.is_empty())
+            || op.capture_append.as_ref().is_some_and(|c| !c.is_empty())
+    })
 }
 
 // ── Validation ──────────────────────────────────────────────────────
@@ -66,11 +71,15 @@ fn validate_ids(operations: &[BatchOperation]) -> Result<(), Error> {
 /// do not need an ID — implicit dependency edges use the operation's index, and
 /// omitting the ID requirement here avoids false positives when literal `{{`
 /// appears in argument strings (e.g. JSON bodies with template syntax).
-const fn id_requirement_context(op: &BatchOperation) -> Option<&'static str> {
-    if op.capture.is_some() || op.capture_append.is_some() {
+///
+/// Empty maps/vecs are treated as absent, consistent with [`has_dependencies`].
+fn id_requirement_context(op: &BatchOperation) -> Option<&'static str> {
+    let has_capture = op.capture.as_ref().is_some_and(|c| !c.is_empty());
+    let has_append = op.capture_append.as_ref().is_some_and(|c| !c.is_empty());
+    if has_capture || has_append {
         return Some("capture");
     }
-    if op.depends_on.is_some() {
+    if op.depends_on.as_ref().is_some_and(|d| !d.is_empty()) {
         return Some("depends_on");
     }
     None
@@ -448,6 +457,34 @@ mod tests {
         // for literal {{ in arguments.
         let ops = vec![op_with_var_ref("a", "{{some_var}}")];
         assert!(!has_dependencies(&ops));
+    }
+
+    #[test]
+    fn has_dependencies_returns_false_for_empty_maps_and_vecs() {
+        // Empty capture/capture_append/depends_on should not trigger dependent mode.
+        // This prevents confusing "missing id" errors when users write e.g. `capture: {}`.
+        let ops = vec![BatchOperation {
+            id: Some("a".into()),
+            args: vec![],
+            capture: Some(HashMap::new()),
+            capture_append: Some(HashMap::new()),
+            depends_on: Some(vec![]),
+            ..Default::default()
+        }];
+        assert!(!has_dependencies(&ops));
+    }
+
+    #[test]
+    fn empty_capture_does_not_require_id() {
+        // An operation with capture: {} (empty map) should not require an id.
+        let ops = vec![BatchOperation {
+            args: vec![],
+            capture: Some(HashMap::new()),
+            ..Default::default()
+        }];
+        // Should succeed — empty capture is treated as absent
+        let order = resolve_execution_order(&ops).unwrap();
+        assert_eq!(order, vec![0]);
     }
 
     #[test]
