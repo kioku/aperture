@@ -66,8 +66,17 @@ fn run_jq_capture(
         ));
     }
 
-    // Strip surrounding quotes from JSON string values
-    Ok(strip_json_quotes(trimmed))
+    // Strip surrounding quotes from JSON string values.
+    let value = strip_json_quotes(trimmed);
+    if value.is_empty() {
+        return Err(Error::batch_capture_failed(
+            operation_id,
+            var_name,
+            format!("JQ query '{jq_query}' returned null or empty"),
+        ));
+    }
+
+    Ok(value)
 }
 
 /// Converts JQ output into the scalar representation used by interpolation.
@@ -175,6 +184,22 @@ mod tests {
         assert!(
             err.contains("null or empty"),
             "expected null error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn empty_string_capture_returns_error() {
+        let op = op_with_capture("test-op", &[("val", ".id")]);
+        let response = r#"{"id": ""}"#;
+        let mut store = VariableStore::default();
+
+        let result = extract_captures(&op, response, &mut store);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("null or empty"),
+            "expected empty-capture error, got: {err}"
         );
     }
 
