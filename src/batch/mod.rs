@@ -207,20 +207,197 @@ impl BatchProcessor {
         )))
     }
 
-    /// Executes a batch of operations
+    /// Executes a batch of operations.
+    ///
+    /// If the batch uses dependency features (`capture`, `capture_append`, or
+    /// `depends_on`), operations are executed sequentially in topological order
+    /// with variable interpolation and atomic failure semantics.
+    ///
+    /// Otherwise, operations are executed concurrently using the original
+    /// parallel execution strategy.
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - Any operation fails and `continue_on_error` is false
-    /// - Task spawning fails
-    /// - Network or API errors occur during operation execution
+    /// - The dependency graph is invalid (cycles, missing refs)
+    /// - Any operation fails in dependent mode (atomic execution)
+    /// - Any operation fails and `continue_on_error` is false in concurrent mode
     ///
     /// # Panics
     ///
     /// Panics if the semaphore is poisoned (should not happen in normal operation)
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_batch(
+        &self,
+        spec: &CachedSpec,
+        batch_file: BatchFile,
+        global_config: Option<&GlobalConfig>,
+        base_url: Option<&str>,
+        dry_run: bool,
+        output_format: &crate::cli::OutputFormat,
+        jq_filter: Option<&str>,
+    ) -> Result<BatchResult, Error> {
+        if graph::has_dependencies(&batch_file.operations) {
+            self.execute_dependent_batch(
+                spec,
+                batch_file,
+                global_config,
+                base_url,
+                dry_run,
+                output_format,
+                jq_filter,
+            )
+            .await
+        } else {
+            self.execute_concurrent_batch(
+                spec,
+                batch_file,
+                global_config,
+                base_url,
+                dry_run,
+                output_format,
+                jq_filter,
+            )
+            .await
+        }
+    }
+
+    /// Executes operations sequentially in dependency order with variable capture
+    /// and interpolation. Halts immediately on first failure (atomic execution).
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_dependent_batch(
+        &self,
+        spec: &CachedSpec,
+        batch_file: BatchFile,
+        global_config: Option<&GlobalConfig>,
+        base_url: Option<&str>,
+        dry_run: bool,
+        output_format: &crate::cli::OutputFormat,
+        jq_filter: Option<&str>,
+    ) -> Result<BatchResult, Error> {
+        let start_time = std::time::Instant::now();
+        let operations = batch_file.operations;
+        let total_operations = operations.len();
+
+        let execution_order = graph::resolve_execution_order(&operations)?;
+
+        if self.config.show_progress {
+            // ast-grep-ignore: no-println
+            println!("Starting dependent batch execution: {total_operations} operations");
+        }
+
+        let mut store = interpolation::VariableStore::default();
+        let mut results: Vec<Option<BatchOperationResult>> =
+            (0..total_operations).map(|_| None).collect();
+
+        for &idx in &execution_order {
+            let operation = &operations[idx];
+            let op_id = operation
+                .id
+                .as_deref()
+                .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME);
+
+            // Interpolate variables in args
+            let interpolated_args =
+                interpolation::interpolate_args(&operation.args, &store, op_id)?;
+
+            // Create a copy of the operation with interpolated args
+            let mut exec_op = operation.clone();
+            exec_op.args = interpolated_args;
+
+            let operation_start = std::time::Instant::now();
+
+            let result = Self::execute_single_operation(
+                spec,
+                &exec_op,
+                global_config,
+                base_url,
+                dry_run,
+                output_format,
+                jq_filter,
+                self.config.suppress_output,
+            )
+            .await;
+
+            let duration = operation_start.elapsed();
+
+            match result {
+                Ok(response) => {
+                    // Extract captures from the response
+                    capture::extract_captures(operation, &response, &mut store)?;
+
+                    if self.config.show_progress {
+                        // ast-grep-ignore: no-println
+                        println!("Operation '{op_id}' completed");
+                    }
+
+                    results[idx] = Some(BatchOperationResult {
+                        operation: operation.clone(),
+                        success: true,
+                        error: None,
+                        response: Some(response),
+                        duration,
+                    });
+                }
+                Err(e) => {
+                    if self.config.show_progress {
+                        // ast-grep-ignore: no-println
+                        println!("Operation '{op_id}' failed: {e}");
+                    }
+
+                    results[idx] = Some(BatchOperationResult {
+                        operation: operation.clone(),
+                        success: false,
+                        error: Some(e.to_string()),
+                        response: None,
+                        duration,
+                    });
+
+                    // Atomic execution: halt on first failure
+                    // Fill remaining operations as not executed
+                    break;
+                }
+            }
+        }
+
+        // Collect results in original order, filling gaps for skipped operations
+        let final_results: Vec<BatchOperationResult> = results
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.unwrap_or_else(|| BatchOperationResult {
+                    operation: operations[i].clone(),
+                    success: false,
+                    error: Some("Skipped due to prior failure".into()),
+                    response: None,
+                    duration: std::time::Duration::ZERO,
+                })
+            })
+            .collect();
+
+        let total_duration = start_time.elapsed();
+        let success_count = final_results.iter().filter(|r| r.success).count();
+        let failure_count = final_results.len() - success_count;
+
+        if self.config.show_progress {
+            // ast-grep-ignore: no-println
+            println!(
+                "Dependent batch completed: {success_count}/{total_operations} operations successful in {:.2}s",
+                total_duration.as_secs_f64()
+            );
+        }
+
+        Ok(BatchResult {
+            results: final_results,
+            total_duration,
+            success_count,
+            failure_count,
+        })
+    }
+
+    /// Original concurrent execution strategy for independent operations.
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_concurrent_batch(
         &self,
         spec: &CachedSpec,
         batch_file: BatchFile,
