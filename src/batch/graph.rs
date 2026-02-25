@@ -128,7 +128,7 @@ fn build_capture_index<'a>(
 }
 
 /// Extracts variable names referenced in `{{name}}` patterns from a string.
-pub(crate) fn extract_variable_references(s: &str) -> Vec<&str> {
+fn extract_variable_references(s: &str) -> Vec<&str> {
     let mut vars = Vec::new();
     let mut remaining = s;
     while let Some(start) = remaining.find("{{") {
