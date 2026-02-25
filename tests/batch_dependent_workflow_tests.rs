@@ -8,6 +8,7 @@ use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
 use std::collections::HashMap;
 use std::io::Write;
+use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -295,6 +296,92 @@ async fn dependent_capture_works_with_non_json_output_format() {
     let received = mock.received_requests().await.unwrap();
     assert_eq!(received.len(), 2);
     assert_eq!(received[1].url.path(), "/users/user-99");
+}
+
+#[tokio::test]
+async fn dependent_mode_respects_batch_rate_limit() {
+    let mock = wiremock::MockServer::start().await;
+
+    mock.register(
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/users"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(201)
+                    .set_body_json(serde_json::json!({"id": "user-rl"}))
+                    .insert_header("content-type", constants::CONTENT_TYPE_JSON),
+            ),
+    )
+    .await;
+
+    mock.register(
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/users/user-rl"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"id": "user-rl"}))
+                    .insert_header("content-type", constants::CONTENT_TYPE_JSON),
+            ),
+    )
+    .await;
+
+    let spec = test_spec(&mock.uri());
+    let processor = BatchProcessor::new(BatchConfig {
+        max_concurrency: 1,
+        rate_limit: Some(1), // 1 request/second
+        continue_on_error: false,
+        show_progress: false,
+        suppress_output: true,
+    });
+
+    let batch = BatchFile {
+        metadata: None,
+        operations: vec![
+            BatchOperation {
+                id: Some("create".into()),
+                args: vec![
+                    "users".into(),
+                    "create-user".into(),
+                    "--body".into(),
+                    r#"{"name": "Alice"}"#.into(),
+                ],
+                capture: Some(HashMap::from([("user_id".into(), ".id".into())])),
+                ..Default::default()
+            },
+            BatchOperation {
+                id: Some("get".into()),
+                args: vec![
+                    "users".into(),
+                    "get-user-by-id".into(),
+                    "--id".into(),
+                    "{{user_id}}".into(),
+                ],
+                depends_on: Some(vec!["create".into()]),
+                ..Default::default()
+            },
+        ],
+    };
+
+    let started = Instant::now();
+    let result = processor
+        .execute_batch(
+            &spec,
+            batch,
+            None,
+            Some(&mock.uri()),
+            false,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.success_count, 2, "{result:#?}");
+    assert_eq!(result.failure_count, 0, "{result:#?}");
+    assert!(
+        started.elapsed() >= Duration::from_millis(900),
+        "expected dependent execution to respect 1 req/s limit; elapsed={:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]

@@ -292,6 +292,11 @@ impl BatchProcessor {
 
         for &idx in &execution_order {
             let operation = &operations[idx];
+
+            if let Some(limiter) = &self.rate_limiter {
+                limiter.until_ready().await;
+            }
+
             let result = Self::run_dependent_operation(
                 spec,
                 operation,
