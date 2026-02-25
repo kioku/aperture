@@ -36,12 +36,9 @@ pub fn resolve_execution_order(operations: &[BatchOperation]) -> Result<Executio
 /// Checks whether the batch uses any dependency features.
 #[must_use]
 pub fn has_dependencies(operations: &[BatchOperation]) -> bool {
-    operations.iter().any(|op| {
-        op.depends_on.is_some()
-            || op.capture.is_some()
-            || op.capture_append.is_some()
-            || op.args.iter().any(|a| a.contains("{{") && a.contains("}}"))
-    })
+    operations
+        .iter()
+        .any(|op| op.depends_on.is_some() || op.capture.is_some() || op.capture_append.is_some())
 }
 
 // ── Validation ──────────────────────────────────────────────────────
@@ -63,15 +60,18 @@ fn validate_ids(operations: &[BatchOperation]) -> Result<(), Error> {
 }
 
 /// Returns the reason an operation needs an `id`, or `None` if it doesn't.
-fn id_requirement_context(op: &BatchOperation) -> Option<&'static str> {
+///
+/// Only operations that *produce* captured values or declare explicit dependencies
+/// require an ID. Operations that merely *consume* variables via `{{var}}` in args
+/// do not need an ID — implicit dependency edges use the operation's index, and
+/// omitting the ID requirement here avoids false positives when literal `{{`
+/// appears in argument strings (e.g. JSON bodies with template syntax).
+const fn id_requirement_context(op: &BatchOperation) -> Option<&'static str> {
     if op.capture.is_some() || op.capture_append.is_some() {
         return Some("capture");
     }
     if op.depends_on.is_some() {
         return Some("depends_on");
-    }
-    if op.args.iter().any(|a| a.contains("{{") && a.contains("}}")) {
-        return Some("variable interpolation");
     }
     None
 }
@@ -404,6 +404,26 @@ mod tests {
     }
 
     #[test]
+    fn variable_consumer_without_id_is_valid() {
+        // An operation that references {{var}} without an id should pass
+        // validation — only producers (capture/capture_append) and explicit
+        // depends_on users need IDs.
+        let ops = vec![
+            op_with_capture("producer", &[("uid", ".id")]),
+            BatchOperation {
+                args: vec!["--id".into(), "{{uid}}".into()],
+                ..Default::default()
+            },
+        ];
+        let order = resolve_execution_order(&ops).unwrap();
+        // Producer before consumer
+        assert!(
+            order.iter().position(|&x| x == 0).unwrap()
+                < order.iter().position(|&x| x == 1).unwrap()
+        );
+    }
+
+    #[test]
     fn has_dependencies_returns_false_for_simple_batch() {
         let ops = vec![op("a"), op("b")];
         assert!(!has_dependencies(&ops));
@@ -422,8 +442,20 @@ mod tests {
     }
 
     #[test]
-    fn has_dependencies_returns_true_for_variable_ref() {
+    fn has_dependencies_returns_false_for_bare_variable_ref() {
+        // A {{var}} reference without any capture/capture_append/depends_on
+        // should NOT trigger the dependent path — preserves backward compat
+        // for literal {{ in arguments.
         let ops = vec![op_with_var_ref("a", "{{some_var}}")];
+        assert!(!has_dependencies(&ops));
+    }
+
+    #[test]
+    fn has_dependencies_returns_true_for_variable_ref_with_capture_provider() {
+        let ops = vec![
+            op_with_capture("producer", &[("some_var", ".id")]),
+            op_with_var_ref("consumer", "{{some_var}}"),
+        ];
         assert!(has_dependencies(&ops));
     }
 
