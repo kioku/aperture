@@ -713,9 +713,10 @@ async fn dependent_dry_run_skips_capture() {
         ],
     };
 
-    // Dry-run produces a success message string, not a JSON response.
-    // Capture will fail on that string, which is expected in dry-run mode.
-    // This test verifies that dry-run doesn't panic.
+    // Dry-run renders a request-info JSON object instead of an API response.
+    // The JQ capture query (`.id`) will not find the expected field, so
+    // the batch should return a structured result where the first operation
+    // fails capture. Critically, it must not panic.
     let result = processor
         .execute_batch(
             &spec,
@@ -728,10 +729,15 @@ async fn dependent_dry_run_skips_capture() {
         )
         .await;
 
-    // In dry-run mode the capture will fail because the response is not JSON,
-    // but we should get a clean error rather than a panic.
+    // The capture fails because the dry-run response has no `.id` field.
+    // This surfaces as a capture error propagated from execute_dependent_batch.
     assert!(
-        result.is_ok() || result.is_err(),
-        "should not panic in dry-run"
+        result.is_err(),
+        "expected capture error in dry-run mode, got Ok"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("capture") || err.contains("null"),
+        "expected capture-related error, got: {err}"
     );
 }
