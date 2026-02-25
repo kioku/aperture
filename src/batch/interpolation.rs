@@ -27,8 +27,9 @@ impl VariableStore {
             return Some(scalar.clone());
         }
         if let Some(list) = self.lists.get(name) {
-            let elements: Vec<String> = list.iter().map(|v| format!("\"{v}\"")).collect();
-            return Some(format!("[{}]", elements.join(",")));
+            let json_array = serde_json::to_string(list)
+                .expect("serializing Vec<String> to JSON should never fail");
+            return Some(json_array);
         }
         None
     }
@@ -132,6 +133,18 @@ mod tests {
         let args = vec!["{\"eventIds\": {{ids}}}".into()];
         let result = interpolate_args(&args, &store, "test-op").unwrap();
         assert_eq!(result, vec![r#"{"eventIds": ["id-a","id-b","id-c"]}"#]);
+    }
+
+    #[test]
+    fn list_interpolation_escapes_json_elements() {
+        let store = store_with_list("ids", &["a\"b", "line\nbreak"]);
+        let args = vec!["{\"eventIds\": {{ids}}}".into()];
+
+        let result = interpolate_args(&args, &store, "test-op").unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result[0]).unwrap();
+
+        assert_eq!(parsed["eventIds"][0], "a\"b");
+        assert_eq!(parsed["eventIds"][1], "line\nbreak");
     }
 
     #[test]

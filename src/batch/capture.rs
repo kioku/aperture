@@ -70,15 +70,16 @@ fn run_jq_capture(
     Ok(strip_json_quotes(trimmed))
 }
 
-/// Strips surrounding double-quotes from a JSON string literal.
+/// Converts JQ output into the scalar representation used by interpolation.
 ///
-/// `"abc-123"` → `abc-123`, but `42` → `42`.
+/// If the output is a JSON string literal, decode it so escape sequences are
+/// interpreted (`"a\\\"b"` → `a"b`). Non-string JSON values are preserved
+/// as their textual representation (`42` → `42`, `true` → `true`).
 fn strip_json_quotes(s: &str) -> String {
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
-        s[1..s.len() - 1].to_string()
-    } else {
-        s.to_string()
+        return serde_json::from_str::<String>(s).unwrap_or_else(|_| s[1..s.len() - 1].to_string());
     }
+    s.to_string()
 }
 
 #[cfg(test)]
@@ -128,6 +129,17 @@ mod tests {
         let mut store = VariableStore::default();
         extract_captures(&op, response, &mut store).unwrap();
         assert_eq!(store.scalars.get("count").unwrap(), "42");
+    }
+
+    #[test]
+    fn extract_string_scalar_unescapes_json_string() {
+        let op = op_with_capture("create-user", &[("user_id", ".id")]);
+        let response = r#"{"id": "a\"b"}"#;
+        let mut store = VariableStore::default();
+
+        extract_captures(&op, response, &mut store).unwrap();
+
+        assert_eq!(store.scalars.get("user_id").unwrap(), "a\"b");
     }
 
     #[test]
