@@ -96,13 +96,16 @@ fn build_id_index(operations: &[BatchOperation]) -> Result<HashMap<&str, usize>,
     Ok(map)
 }
 
-/// Builds a map from captured variable name → index of the operation that captures it.
-/// Covers both `capture` (scalar) and `capture_append` (list) variables.
+/// Builds a map from captured variable name → indices of all operations that capture it.
+///
+/// For `capture` (scalar) variables there is typically one provider.
+/// For `capture_append` (list) variables there may be many — all must complete
+/// before a consumer can safely interpolate the accumulated list.
 fn build_capture_index<'a>(
     operations: &'a [BatchOperation],
     id_to_index: &HashMap<&'a str, usize>,
-) -> HashMap<&'a str, usize> {
-    let mut map = HashMap::new();
+) -> HashMap<&'a str, Vec<usize>> {
+    let mut map: HashMap<&str, Vec<usize>> = HashMap::new();
     for op in operations {
         let Some(id) = op.id.as_deref() else {
             continue;
@@ -112,12 +115,12 @@ fn build_capture_index<'a>(
         };
         if let Some(captures) = &op.capture {
             for var_name in captures.keys() {
-                map.insert(var_name.as_str(), idx);
+                map.entry(var_name.as_str()).or_default().push(idx);
             }
         }
         if let Some(appends) = &op.capture_append {
             for var_name in appends.keys() {
-                map.insert(var_name.as_str(), idx);
+                map.entry(var_name.as_str()).or_default().push(idx);
             }
         }
     }
@@ -148,7 +151,7 @@ pub(crate) fn extract_variable_references(s: &str) -> Vec<&str> {
 fn build_adjacency(
     operations: &[BatchOperation],
     id_to_index: &HashMap<&str, usize>,
-    capture_var_to_op: &HashMap<&str, usize>,
+    capture_var_to_op: &HashMap<&str, Vec<usize>>,
 ) -> Result<Vec<Vec<usize>>, Error> {
     let n = operations.len();
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
@@ -166,12 +169,15 @@ fn build_adjacency(
             }
         }
 
-        // Implicit dependencies from variable references in args
+        // Implicit dependencies from variable references in args.
+        // For capture_append variables with multiple providers, this
+        // correctly adds edges from ALL providers to the consumer.
         let implicit_deps = op
             .args
             .iter()
             .flat_map(|arg| extract_variable_references(arg))
-            .filter_map(|var| capture_var_to_op.get(var).copied())
+            .filter_map(|var| capture_var_to_op.get(var))
+            .flat_map(|indices| indices.iter().copied())
             .filter(|&idx| idx != i);
         deps.extend(implicit_deps);
 
@@ -441,6 +447,31 @@ mod tests {
         let ops = vec![append_op, consumer];
         let order = resolve_execution_order(&ops).unwrap();
         assert_eq!(order, vec![0, 1]);
+    }
+
+    #[test]
+    fn capture_append_multiple_providers_all_become_implicit_deps() {
+        // Two providers capture_append into the same list; consumer references
+        // {{ids}} without explicit depends_on. Both providers must run first.
+        let beat_1 = BatchOperation {
+            id: Some("beat-1".into()),
+            args: vec![],
+            capture_append: Some(HashMap::from([("ids".into(), ".id".into())])),
+            ..Default::default()
+        };
+        let beat_2 = BatchOperation {
+            id: Some("beat-2".into()),
+            args: vec![],
+            capture_append: Some(HashMap::from([("ids".into(), ".id".into())])),
+            ..Default::default()
+        };
+        let consumer = op_with_var_ref("aggregate", "{{ids}}");
+        let ops = vec![beat_1, beat_2, consumer];
+        let order = resolve_execution_order(&ops).unwrap();
+        let pos = |idx: usize| order.iter().position(|&x| x == idx).unwrap();
+        // Both providers must appear before the consumer
+        assert!(pos(0) < pos(2), "beat-1 should precede aggregate");
+        assert!(pos(1) < pos(2), "beat-2 should precede aggregate");
     }
 
     #[test]
