@@ -387,12 +387,14 @@ impl BatchProcessor {
 
         let duration = operation_start.elapsed();
 
+        // From here on, store exec_op (with interpolated args) in results
+        // so callers see the actual values used, not {{templates}}.
         let response = match result {
             Ok(resp) => resp,
             Err(e) => {
                 Self::log_progress(show_progress, || format!("Operation '{op_id}' failed: {e}"));
                 return BatchOperationResult {
-                    operation: operation.clone(),
+                    operation: exec_op,
                     success: false,
                     error: Some(e.to_string()),
                     response: None,
@@ -401,13 +403,13 @@ impl BatchProcessor {
             }
         };
 
-        // Extract captures — failure is treated as an operation failure
+        // Extract captures — failure is treated as an operation failure.
+        // Note: capture queries are on the original operation, not exec_op.
         let capture_result = capture::extract_captures(operation, &response, store);
         let Err(capture_err) = capture_result else {
-            // Capture succeeded — fall through to success path below
             Self::log_progress(show_progress, || format!("Operation '{op_id}' completed"));
             return BatchOperationResult {
-                operation: operation.clone(),
+                operation: exec_op,
                 success: true,
                 error: None,
                 response: Some(response),
@@ -419,7 +421,7 @@ impl BatchProcessor {
             format!("Operation '{op_id}' capture failed: {capture_err}")
         });
         BatchOperationResult {
-            operation: operation.clone(),
+            operation: exec_op,
             success: false,
             error: Some(capture_err.to_string()),
             response: Some(response),
