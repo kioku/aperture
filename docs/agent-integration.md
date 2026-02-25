@@ -68,8 +68,27 @@ aperture api my-api --describe-json
       "type": "http",
       "scheme": "bearer"
     }
+  },
+  "batch": {
+    "file_formats": ["json", "yaml"],
+    "operation_schema": { "fields": ["..."] },
+    "dependent_workflows": {
+      "interpolation_syntax": "{{variable_name}}",
+      "execution_modes": { "concurrent": "...", "dependent": "..." },
+      "dependent_execution": { "ordering": "...", "failure_mode": "...", "implicit_dependencies": true, "variable_types": { "scalar": "...", "list": "..." } }
+    }
   }
 }
+```
+
+The `batch` section describes the batch file schema and dependent workflow capabilities. Agents can query it directly:
+
+```bash
+# Discover batch operation fields
+aperture api my-api --describe-json --jq '.batch.operation_schema'
+
+# Discover dependent workflow semantics
+aperture api my-api --describe-json --jq '.batch.dependent_workflows'
 ```
 
 **Command mapping fields in the manifest:**
