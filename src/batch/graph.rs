@@ -30,7 +30,7 @@ pub fn resolve_execution_order(operations: &[BatchOperation]) -> Result<Executio
     let capture_var_to_op = build_capture_index(operations, &id_to_index);
 
     let adjacency = build_adjacency(operations, &id_to_index, &capture_var_to_op)?;
-    topological_sort(operations.len(), &adjacency)
+    topological_sort(operations, &adjacency)
 }
 
 /// Checks whether the batch uses any dependency features.
@@ -193,7 +193,11 @@ fn build_adjacency(
 ///
 /// Returns indices in execution order. Operations with no dependencies
 /// preserve their original relative order.
-fn topological_sort(n: usize, adj: &[Vec<usize>]) -> Result<ExecutionOrder, Error> {
+fn topological_sort(
+    operations: &[BatchOperation],
+    adj: &[Vec<usize>],
+) -> Result<ExecutionOrder, Error> {
+    let n = operations.len();
     let mut in_degree = vec![0usize; n];
     for successors in adj {
         for &succ in successors {
@@ -219,9 +223,16 @@ fn topological_sort(n: usize, adj: &[Vec<usize>]) -> Result<ExecutionOrder, Erro
     }
 
     if order.len() != n {
-        // Cycle detected — find the nodes involved
-        let cycle_nodes: Vec<usize> = (0..n).filter(|&i| in_degree[i] > 0).collect();
-        let cycle_ids: Vec<String> = cycle_nodes.iter().map(|&i| format!("index {i}")).collect();
+        // Cycle detected — report using operation IDs where available
+        let cycle_ids: Vec<String> = (0..n)
+            .filter(|&i| in_degree[i] > 0)
+            .map(|i| {
+                operations[i]
+                    .id
+                    .clone()
+                    .unwrap_or_else(|| format!("index {i}"))
+            })
+            .collect();
         return Err(Error::batch_cycle_detected(&cycle_ids));
     }
 
@@ -323,6 +334,11 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("cycle"), "expected cycle error, got: {err}");
+        // Error should reference operation IDs, not just indices
+        assert!(
+            err.contains('a') && err.contains('b'),
+            "expected operation IDs in cycle error, got: {err}"
+        );
     }
 
     #[test]
