@@ -414,13 +414,23 @@ json_errors = true
 
 The batch processing system enables execution of multiple API operations from structured batch files with concurrency control and rate limiting.
 
-#### 9.1.1. Batch Module (`src/batch.rs`)
+#### 9.1.1. Batch Module (`src/batch/`)
+
+The batch module is organized as a multi-file module:
+
+```
+src/batch/
+├── mod.rs            # BatchProcessor, BatchOperation, BatchFile, execution orchestration
+├── graph.rs          # Dependency graph construction, validation, topological sort
+├── interpolation.rs  # {{variable}} replacement engine and VariableStore
+└── capture.rs        # JQ-based value extraction from responses
+```
 
 **Core Components:**
 
-- **`BatchProcessor`**: Main orchestrator for batch execution
-- **`BatchFile`**: Structured representation of batch operations
-- **`BatchOperation`**: Individual operation within a batch
+- **`BatchProcessor`**: Main orchestrator — detects whether the batch uses dependency features and routes to the appropriate execution path (concurrent or dependent)
+- **`BatchFile`**: Structured representation of batch operations (JSON or YAML)
+- **`BatchOperation`**: Individual operation — includes `capture`, `capture_append`, and `depends_on` fields for dependent workflows
 - **`BatchConfig`**: Configuration for concurrency and rate limiting
 
 **Key Features:**
@@ -429,16 +439,56 @@ The batch processing system enables execution of multiple API operations from st
 - **Rate Limiting**: Implements `governor` crate for request throttling
 - **Error Handling**: Configurable continue-on-error behavior
 - **Progress Reporting**: Optional progress display during execution
+- **Dependent Execution**: Sequential execution in topological order with variable capture and interpolation
+- **Automatic Path Selection**: Transparently chooses concurrent or dependent execution based on batch content
 
 **Architecture Pattern:**
 
 ```rust
+// execute_batch auto-selects the execution path
 BatchProcessor::new(config)
     .execute_batch(spec, batch_file, global_config, base_url, dry_run, format, jq_filter)
     -> BatchResult { results, total_duration, success_count, failure_count }
+
+// Internally:
+// - graph::has_dependencies() → true  → execute_dependent_batch()
+// - graph::has_dependencies() → false → execute_concurrent_batch()
 ```
 
-#### 9.1.2. Batch File Format
+#### 9.1.2. Dependency Graph (`src/batch/graph.rs`)
+
+Constructs and validates a directed acyclic graph (DAG) from batch operations:
+
+1. **ID validation**: Operations using `capture`, `capture_append`, or `depends_on` must have an `id`. Duplicate IDs are rejected.
+2. **Edge construction**: Explicit edges from `depends_on`, plus implicit edges inferred from `{{variable}}` references in args matched to capture providers.
+3. **Cycle detection**: Kahn's algorithm detects cycles and reports the involved operation IDs.
+4. **Topological sort**: Produces an execution order where operations without dependencies preserve their original relative order.
+
+```rust
+graph::resolve_execution_order(&operations) -> Result<Vec<usize>, Error>
+```
+
+#### 9.1.3. Variable Interpolation (`src/batch/interpolation.rs`)
+
+Replaces `{{variable}}` placeholders in operation argument strings:
+
+- **`VariableStore`**: Holds both scalar (`HashMap<String, String>`) and list (`HashMap<String, Vec<String>>`) variables.
+- **Scalar variables** (from `capture`): `{{name}}` → the captured string value.
+- **List variables** (from `capture_append`): `{{name}}` → a JSON array literal (e.g., `["a","b"]`).
+- Scalar values take precedence over list values when both exist for the same name.
+- Unclosed `{{` is treated as a literal (no error). Undefined variables produce an error before execution.
+
+#### 9.1.4. Value Capture (`src/batch/capture.rs`)
+
+Extracts values from operation responses using JQ queries:
+
+- Reuses the existing `apply_jq_filter` from `engine/executor.rs`.
+- Strips surrounding JSON quotes from string values so interpolation produces clean values (`abc-123`, not `"abc-123"`).
+- `null` or empty JQ results are treated as capture failures.
+- For `capture`: stores the result as a scalar in `VariableStore`.
+- For `capture_append`: appends the result to the named list in `VariableStore`.
+
+#### 9.1.5. Batch File Format
 
 Supports both JSON and YAML formats with the following structure:
 
@@ -454,6 +504,12 @@ operations:
     headers:
       X-Custom-Header: "value"
     use_cache: true
+    # Dependent workflow fields (all optional):
+    capture:
+      user_id: ".id"
+    capture_append:
+      all_ids: ".id"
+    depends_on: ["other-operation"]
 ```
 
 ### 9.2. Response Caching System
@@ -600,7 +656,7 @@ Provides detailed information about cache usage:
 Phase 3 architecture lays the foundation for future enhancements:
 
 - **Distributed Caching**: Shared cache across multiple Aperture instances
-- **Advanced Batching**: Support for conditional operations and dependencies
+- ~~**Advanced Batching**: Support for conditional operations and dependencies~~ (COMPLETED — see §9.1.2–9.1.4 and [ADR 010](adr/010-dependent-batch-workflows.md))
 - **Plugin System**: Extensible architecture for custom batch processors
 - **Stable Flag Syntax**: Migration path for experimental syntax to become default
 

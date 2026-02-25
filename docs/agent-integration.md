@@ -246,6 +246,159 @@ aperture api my-api --batch-file operations.json --json-errors
 }
 ```
 
+### Dependent Batch Workflows
+
+When operations depend on each other's results, Aperture supports **variable capture and interpolation** within batch files. This enables multi-step workflows like "Create User → capture ID → Get User by ID → Add to Group" in a single batch invocation.
+
+Aperture automatically detects when a batch uses dependency features and switches from concurrent to sequential execution. Existing batch files without dependency features continue to run concurrently with no changes required.
+
+#### Batch File Format
+
+Three optional fields on each operation enable dependent workflows:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `capture` | `map<string, string>` | Extract scalar values from the response via JQ queries. Maps variable name → JQ query. |
+| `capture_append` | `map<string, string>` | Append extracted values to a named list via JQ queries. Enables fan-out/aggregate patterns. |
+| `depends_on` | `string[]` | Explicit dependency on other operations by `id`. |
+
+Operations that use `capture`, `capture_append`, or `depends_on` **must** have an `id`.
+
+**Linear chain example (YAML):**
+
+```yaml
+operations:
+  - id: create-user
+    args: [users, create-user, --body, '{"name": "Alice"}']
+    capture:
+      user_id: ".id"
+
+  - id: get-user
+    args: [users, get-user-by-id, --id, "{{user_id}}"]
+    depends_on: [create-user]
+```
+
+1. `create-user` executes `POST /users`, receives `{"id": "abc-123", ...}`.
+2. The JQ query `.id` extracts `"abc-123"` and stores it as `user_id`.
+3. `get-user` waits for `create-user` to complete, then replaces `{{user_id}}` with `abc-123` in its args before executing `GET /users/abc-123`.
+
+**Fan-out/aggregate example:**
+
+```yaml
+operations:
+  - id: beat-1
+    args: [events, add, --body, '{"type": "start"}']
+    capture_append:
+      event_ids: ".id"
+
+  - id: beat-2
+    args: [events, add, --body, '{"type": "end"}']
+    capture_append:
+      event_ids: ".id"
+
+  - id: set-order
+    depends_on: [beat-1, beat-2]
+    args: [narrative, set, --body, '{"eventIds": {{event_ids}}}']
+```
+
+Both `beat-1` and `beat-2` append their extracted IDs to the `event_ids` list. `set-order` waits for both, then `{{event_ids}}` interpolates as a JSON array literal: `["id-1","id-2"]`.
+
+#### Variable Interpolation
+
+Captured values are interpolated into operation `args` using `{{variable}}` syntax:
+
+- **Scalar variables** (from `capture`): `{{name}}` is replaced with the captured string value.
+- **List variables** (from `capture_append`): `{{name}}` is replaced with a JSON array literal (e.g., `["a","b","c"]`).
+
+If a scalar and a list share the same name, the scalar takes precedence.
+
+#### Implicit Dependencies
+
+Operations that reference `{{variable}}` in their args automatically depend on the operation that captures that variable, even without an explicit `depends_on`. This means the following two batch files are equivalent:
+
+```yaml
+# Explicit dependency
+operations:
+  - id: create
+    args: [users, create-user, --body, '{"name": "Alice"}']
+    capture:
+      user_id: ".id"
+  - id: get
+    args: [users, get-user-by-id, --id, "{{user_id}}"]
+    depends_on: [create]
+```
+
+```yaml
+# Implicit dependency (inferred from {{user_id}})
+operations:
+  - id: create
+    args: [users, create-user, --body, '{"name": "Alice"}']
+    capture:
+      user_id: ".id"
+  - id: get
+    args: [users, get-user-by-id, --id, "{{user_id}}"]
+```
+
+For `capture_append` variables with multiple providers, the consumer implicitly depends on **all** providers.
+
+#### Execution Strategy
+
+Aperture automatically selects the execution path based on the batch content:
+
+| Condition | Execution Path | Behavior |
+|-----------|---------------|----------|
+| No operation uses `capture`, `capture_append`, or `depends_on` | **Concurrent** (original) | Parallel execution with concurrency/rate-limit controls |
+| Any operation uses `capture`, `capture_append`, or `depends_on` | **Dependent** (new) | Sequential in topological order with variable interpolation |
+
+The dependent path:
+1. Validates the dependency graph (cycle detection, missing references, required IDs, duplicate IDs).
+2. Topologically sorts operations (Kahn's algorithm). Operations without dependencies preserve their original relative order.
+3. Executes operations one at a time in sorted order.
+4. Before each operation: interpolates `{{variables}}` in args.
+5. After each operation: extracts captures into the variable store.
+
+#### Atomic Execution
+
+In dependent mode, execution halts immediately on the first failure. Subsequent operations are marked as **"Skipped due to prior failure"** and no further HTTP requests are made. This prevents cascading errors and ensures the agent receives a clear signal about which step failed.
+
+```
+Starting dependent batch execution: 3 operations
+Operation 'create' completed
+Operation 'get-user' failed: HttpError: HTTP 404 error for 'myapi': (empty response)
+Dependent batch completed: 1/3 operations successful in 0.11s
+```
+
+#### Dependency Errors
+
+All dependency-related errors produce structured output with `--json-errors`:
+
+| Error | Cause | Example |
+|-------|-------|---------|
+| Cycle detected | Circular `depends_on` references | `a → b → a` |
+| Missing dependency | `depends_on` references a non-existent `id` | `depends_on: [nonexistent]` |
+| Missing ID | Operation uses `capture`/`depends_on` but has no `id` | `capture` without `id` |
+| Undefined variable | `{{var}}` references a variable not captured by any operation | `{{typo}}` |
+| Capture failed | JQ query returned null/empty or failed | `.missing_field` on `{"id": 1}` |
+
+```bash
+aperture api my-api --json-errors --batch-file cycle.yaml
+```
+
+```json
+{
+  "error_type": "Validation",
+  "message": "Dependency cycle detected in batch operations: a → b",
+  "context": "Remove circular dependencies between batch operations.",
+  "details": {
+    "cycle": ["a", "b"]
+  }
+}
+```
+
+#### Dry-Run Behavior
+
+In `--dry-run` mode, the dependent execution path runs but receives dry-run output (request details) instead of real API responses. JQ capture queries will typically fail because the dry-run output does not match the expected response schema. The first operation is marked as a capture failure, and subsequent operations are skipped. This is expected behavior — dry-run validates request construction, not response processing.
+
 ## Automatic Retry with Exponential Backoff
 
 Aperture supports automatic retries for transient failures, with exponential backoff and jitter. This is essential for reliable agent workflows interacting with rate-limited or occasionally unavailable APIs.
