@@ -251,12 +251,12 @@ pub async fn execute_shortcut_command(
     let output = Output::new(cli.quiet, cli.json_errors);
 
     if args.is_empty() {
-        eprintln!("Error: No command specified");
-        eprintln!("Usage: aperture exec <shortcut> [args...]");
-        eprintln!("Examples:");
-        eprintln!("  aperture exec getUserById --id 123");
-        eprintln!("  aperture exec GET /users/123");
-        eprintln!("  aperture exec users list");
+        tracing::error!(
+            "No command specified. Usage: aperture exec <shortcut> [args...]\n  \
+             aperture exec getUserById --id 123\n  \
+             aperture exec GET /users/123\n  \
+             aperture exec users list"
+        );
         std::process::exit(1);
     }
 
@@ -273,7 +273,7 @@ pub async fn execute_shortcut_command(
             Ok(spec) => {
                 all_specs.insert(spec_name.clone(), spec);
             }
-            Err(e) => eprintln!("Warning: Could not load spec '{spec_name}': {e}"),
+            Err(e) => tracing::warn!(spec = spec_name, error = %e, "could not load spec"),
         }
     }
     if all_specs.is_empty() {
@@ -301,20 +301,22 @@ pub async fn execute_shortcut_command(
             execute_api_command(context, final_args, cli).await
         }
         ResolutionResult::Ambiguous(matches) => {
-            eprintln!("Ambiguous shortcut. Multiple commands match:");
-            eprintln!("{}", resolver.format_ambiguous_suggestions(&matches));
-            eprintln!("\nTip: Use 'aperture search <term>' to explore available commands");
+            tracing::error!(
+                suggestions = %resolver.format_ambiguous_suggestions(&matches),
+                "ambiguous shortcut — multiple commands match; \
+                 use 'aperture search <term>' to explore available commands"
+            );
             std::process::exit(1);
         }
         ResolutionResult::NotFound => {
-            eprintln!("No command found for shortcut: {}", args.join(" "));
-            eprintln!("Try one of these:");
-            eprintln!(
-                "  aperture search '{}'    # Search for similar commands",
-                args[0]
+            tracing::error!(
+                shortcut = %args.join(" "),
+                hint = %format!(
+                    "aperture search '{}' | aperture list-commands <api> | aperture api <api> --help",
+                    args[0]
+                ),
+                "no command found for shortcut"
             );
-            eprintln!("  aperture list-commands <api>  # List available commands for an API");
-            eprintln!("  aperture api <api> --help     # Show help for an API");
             std::process::exit(1);
         }
     }

@@ -71,16 +71,16 @@ pub fn execute_help_command(
                     }
                 }
                 _ => {
-                    eprintln!("Invalid docs command. Usage:");
-                    eprintln!("  aperture docs                        # Interactive menu");
-                    eprintln!("  aperture docs <api>                  # API overview");
-                    eprintln!("  aperture docs <api> <tag> <operation> # Command help");
+                    tracing::error!(
+                        "invalid docs command — usage: \
+                         aperture docs | aperture docs <api> | aperture docs <api> <tag> <operation>"
+                    );
                     std::process::exit(1);
                 }
             }
         }
         _ => {
-            eprintln!("Invalid help command arguments");
+            tracing::error!("invalid help command arguments");
             std::process::exit(1);
         }
     }
@@ -97,10 +97,10 @@ pub fn execute_overview_command(
 ) -> Result<(), Error> {
     if !all {
         let Some(api) = api_name else {
-            eprintln!("Error: Must specify API name or use --all flag");
-            eprintln!("Usage:");
-            eprintln!("  aperture overview <api>");
-            eprintln!("  aperture overview --all");
+            tracing::error!(
+                "must specify API name or use --all flag — \
+                 usage: aperture overview <api> | aperture overview --all"
+            );
             std::process::exit(1);
         };
         let specs = load_all_specs(manager)?;
@@ -163,7 +163,7 @@ pub fn load_all_specs(
             Ok(spec) => {
                 all_specs.insert(spec_name.clone(), spec);
             }
-            Err(e) => eprintln!("Warning: Could not load spec '{spec_name}': {e}"),
+            Err(e) => tracing::warn!(spec = spec_name, error = %e, "could not load spec"),
         }
     }
     Ok(all_specs)
