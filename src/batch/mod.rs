@@ -1,3 +1,7 @@
+pub mod capture;
+pub mod graph;
+pub mod interpolation;
+
 use crate::cache::models::CachedSpec;
 use crate::config::models::GlobalConfig;
 use crate::duration::parse_duration;
@@ -41,7 +45,8 @@ impl Default for BatchConfig {
 /// A single batch operation definition
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BatchOperation {
-    /// Unique identifier for this operation (optional)
+    /// Unique identifier for this operation (optional for independent ops, required when
+    /// using `capture`, `capture_append`, or `depends_on`)
     pub id: Option<String>,
     /// The command arguments to execute (e.g., `["users", "get", "--user-id", "123"]`)
     pub args: Vec<String>,
@@ -64,6 +69,24 @@ pub struct BatchOperation {
     /// Force retry on non-idempotent requests without an idempotency key
     #[serde(default)]
     pub force_retry: bool,
+
+    /// Capture scalar values from the response using JQ syntax.
+    /// Maps variable name → JQ query (e.g., `{"user_id": ".id"}`).
+    /// Captured values are available for `{{variable}}` interpolation in subsequent operations.
+    #[serde(default)]
+    pub capture: Option<std::collections::HashMap<String, String>>,
+
+    /// Append extracted values to a named list using JQ syntax.
+    /// Maps list name → JQ query. The list interpolates as a JSON array literal.
+    /// Enables fan-out/aggregate patterns where N operations feed into a terminal call.
+    #[serde(default)]
+    pub capture_append: Option<std::collections::HashMap<String, String>>,
+
+    /// Explicit dependency on other operations by their `id`.
+    /// This operation will not execute until all dependencies have completed.
+    /// Dependencies can also be inferred from `{{variable}}` usage in `args`.
+    #[serde(default)]
+    pub depends_on: Option<Vec<String>>,
 }
 
 /// Batch file format containing multiple operations
@@ -184,20 +207,263 @@ impl BatchProcessor {
         )))
     }
 
-    /// Executes a batch of operations
+    /// Executes a batch of operations.
+    ///
+    /// If the batch uses dependency features (`capture`, `capture_append`, or
+    /// `depends_on`), operations are executed sequentially in topological order
+    /// with variable interpolation and atomic failure semantics.
+    ///
+    /// Otherwise, operations are executed concurrently using the original
+    /// parallel execution strategy.
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - Any operation fails and `continue_on_error` is false
-    /// - Task spawning fails
-    /// - Network or API errors occur during operation execution
+    /// - The dependency graph is invalid (cycles, missing refs)
+    /// - Any operation fails in dependent mode (atomic execution)
+    /// - Any operation fails and `continue_on_error` is false in concurrent mode
     ///
     /// # Panics
     ///
     /// Panics if the semaphore is poisoned (should not happen in normal operation)
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_batch(
+        &self,
+        spec: &CachedSpec,
+        batch_file: BatchFile,
+        global_config: Option<&GlobalConfig>,
+        base_url: Option<&str>,
+        dry_run: bool,
+        output_format: &crate::cli::OutputFormat,
+        jq_filter: Option<&str>,
+    ) -> Result<BatchResult, Error> {
+        if graph::has_dependencies(&batch_file.operations) {
+            self.execute_dependent_batch(
+                spec,
+                batch_file,
+                global_config,
+                base_url,
+                dry_run,
+                output_format,
+                jq_filter,
+            )
+            .await
+        } else {
+            self.execute_concurrent_batch(
+                spec,
+                batch_file,
+                global_config,
+                base_url,
+                dry_run,
+                output_format,
+                jq_filter,
+            )
+            .await
+        }
+    }
+
+    /// Executes operations sequentially in dependency order with variable capture
+    /// and interpolation. Halts immediately on first failure (atomic execution).
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_dependent_batch(
+        &self,
+        spec: &CachedSpec,
+        batch_file: BatchFile,
+        global_config: Option<&GlobalConfig>,
+        base_url: Option<&str>,
+        dry_run: bool,
+        _output_format: &crate::cli::OutputFormat,
+        _jq_filter: Option<&str>,
+    ) -> Result<BatchResult, Error> {
+        let start_time = std::time::Instant::now();
+        let operations = batch_file.operations;
+        let total_operations = operations.len();
+
+        let execution_order = graph::resolve_execution_order(&operations)?;
+
+        if self.config.show_progress {
+            // ast-grep-ignore: no-println
+            println!("Starting dependent batch execution: {total_operations} operations");
+        }
+
+        let mut store = interpolation::VariableStore::default();
+        let mut results: Vec<Option<BatchOperationResult>> =
+            (0..total_operations).map(|_| None).collect();
+
+        for &idx in &execution_order {
+            let operation = &operations[idx];
+
+            if let Some(limiter) = &self.rate_limiter {
+                limiter.until_ready().await;
+            }
+
+            let result = Self::run_dependent_operation(
+                spec,
+                operation,
+                &mut store,
+                global_config,
+                base_url,
+                dry_run,
+                self.config.show_progress,
+            )
+            .await;
+
+            let failed = !result.success;
+            results[idx] = Some(result);
+
+            if failed {
+                break; // Atomic execution: halt on first failure
+            }
+        }
+
+        let final_results = Self::fill_skipped_results(results, &operations);
+        let total_duration = start_time.elapsed();
+        let success_count = final_results.iter().filter(|r| r.success).count();
+        let failure_count = final_results.len() - success_count;
+
+        if self.config.show_progress {
+            // ast-grep-ignore: no-println
+            println!(
+                "Dependent batch completed: {success_count}/{total_operations} operations successful in {:.2}s",
+                total_duration.as_secs_f64()
+            );
+        }
+
+        Ok(BatchResult {
+            results: final_results,
+            total_duration,
+            success_count,
+            failure_count,
+        })
+    }
+
+    /// Executes a single operation in the dependent pipeline: interpolate args,
+    /// call the API, and extract captures. Returns a `BatchOperationResult`
+    /// regardless of success or failure (capture failures are recorded as
+    /// operation failures, not propagated).
+    #[allow(clippy::too_many_arguments)]
+    async fn run_dependent_operation(
+        spec: &CachedSpec,
+        operation: &BatchOperation,
+        store: &mut interpolation::VariableStore,
+        global_config: Option<&GlobalConfig>,
+        base_url: Option<&str>,
+        dry_run: bool,
+        show_progress: bool,
+    ) -> BatchOperationResult {
+        let op_id = operation
+            .id
+            .as_deref()
+            .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME);
+
+        // Interpolate variables in args — if this fails the operation cannot proceed
+        let interpolated_args = match interpolation::interpolate_args(&operation.args, store, op_id)
+        {
+            Ok(args) => args,
+            Err(e) => {
+                return BatchOperationResult {
+                    operation: operation.clone(),
+                    success: false,
+                    error: Some(e.to_string()),
+                    response: None,
+                    duration: std::time::Duration::ZERO,
+                };
+            }
+        };
+
+        let mut exec_op = operation.clone();
+        exec_op.args = interpolated_args;
+        let operation_start = std::time::Instant::now();
+
+        // Suppress output and skip jq_filter: capture needs JSON text that
+        // preserves the raw response structure regardless of caller formatting.
+        let result = Self::execute_single_operation(
+            spec,
+            &exec_op,
+            global_config,
+            base_url,
+            dry_run,
+            &crate::cli::OutputFormat::Json,
+            None,
+            true,
+        )
+        .await;
+
+        let duration = operation_start.elapsed();
+
+        // From here on, store exec_op (with interpolated args) in results
+        // so callers see the actual values used, not {{templates}}.
+        let response = match result {
+            Ok(resp) => resp,
+            Err(e) => {
+                Self::log_progress(show_progress, || format!("Operation '{op_id}' failed: {e}"));
+                return BatchOperationResult {
+                    operation: exec_op,
+                    success: false,
+                    error: Some(e.to_string()),
+                    response: None,
+                    duration,
+                };
+            }
+        };
+
+        // Extract captures — failure is treated as an operation failure.
+        // Note: capture queries are on the original operation, not exec_op.
+        let capture_result = capture::extract_captures(operation, &response, store);
+        let Err(capture_err) = capture_result else {
+            Self::log_progress(show_progress, || format!("Operation '{op_id}' completed"));
+            return BatchOperationResult {
+                operation: exec_op,
+                success: true,
+                error: None,
+                response: Some(response),
+                duration,
+            };
+        };
+
+        Self::log_progress(show_progress, || {
+            format!("Operation '{op_id}' capture failed: {capture_err}")
+        });
+        BatchOperationResult {
+            operation: exec_op,
+            success: false,
+            error: Some(capture_err.to_string()),
+            response: Some(response),
+            duration,
+        }
+    }
+
+    /// Conditionally prints a progress message.
+    fn log_progress(show_progress: bool, msg: impl FnOnce() -> String) {
+        if show_progress {
+            // ast-grep-ignore: no-println
+            println!("{}", msg());
+        }
+    }
+
+    /// Fills `None` slots (skipped operations) with "Skipped due to prior failure".
+    fn fill_skipped_results(
+        results: Vec<Option<BatchOperationResult>>,
+        operations: &[BatchOperation],
+    ) -> Vec<BatchOperationResult> {
+        results
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.unwrap_or_else(|| BatchOperationResult {
+                    operation: operations[i].clone(),
+                    success: false,
+                    error: Some("Skipped due to prior failure".into()),
+                    response: None,
+                    duration: std::time::Duration::ZERO,
+                })
+            })
+            .collect()
+    }
+
+    /// Original concurrent execution strategy for independent operations.
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_concurrent_batch(
         &self,
         spec: &CachedSpec,
         batch_file: BatchFile,

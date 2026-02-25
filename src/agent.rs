@@ -33,6 +33,8 @@ pub struct ApiCapabilityManifest {
     pub commands: HashMap<String, Vec<CommandInfo>>,
     /// Security schemes available for this API
     pub security_schemes: HashMap<String, SecuritySchemeInfo>,
+    /// Batch processing capabilities
+    pub batch: BatchCapabilityInfo,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,6 +58,182 @@ pub struct EndpointStatistics {
     pub available: usize,
     /// Number of endpoints skipped due to unsupported features
     pub skipped: usize,
+}
+
+/// Describes the batch processing capabilities available via `--batch-file`.
+///
+/// This section enables agents to auto-discover the batch file schema and
+/// dependent workflow features without consulting external documentation.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchCapabilityInfo {
+    /// Accepted batch file formats
+    pub file_formats: Vec<String>,
+    /// Schema for a single batch operation entry
+    pub operation_schema: BatchOperationSchema,
+    /// Dependent workflow capabilities (variable capture, interpolation, ordering)
+    pub dependent_workflows: DependentWorkflowInfo,
+}
+
+/// Schema description for a single operation within a batch file.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchOperationSchema {
+    /// Field descriptions for batch operations
+    pub fields: Vec<BatchFieldInfo>,
+}
+
+/// A single field in the batch operation schema.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchFieldInfo {
+    /// Field name as it appears in the batch file
+    pub name: String,
+    /// Type description (e.g., "string", "string[]", "map<string, string>")
+    #[serde(rename = "type")]
+    pub field_type: String,
+    /// Whether the field is required
+    pub required: bool,
+    /// Human/agent-readable description
+    pub description: String,
+}
+
+/// Describes the dependent workflow system: capture, interpolation, and ordering.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DependentWorkflowInfo {
+    /// Interpolation syntax for referencing captured variables
+    pub interpolation_syntax: String,
+    /// How the execution path is selected
+    pub execution_modes: ExecutionModeInfo,
+    /// Details about the dependent (sequential) execution path
+    pub dependent_execution: DependentExecutionInfo,
+}
+
+/// Describes the two execution modes and when each is selected.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExecutionModeInfo {
+    /// When the concurrent (parallel) path is used
+    pub concurrent: String,
+    /// When the dependent (sequential) path is used
+    pub dependent: String,
+}
+
+/// Details about dependent execution behavior.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DependentExecutionInfo {
+    /// Ordering algorithm used
+    pub ordering: String,
+    /// What happens when an operation fails
+    pub failure_mode: String,
+    /// Whether `{{variable}}` references infer dependencies automatically
+    pub implicit_dependencies: bool,
+    /// Variable types supported by the capture/interpolation system
+    pub variable_types: VariableTypeInfo,
+}
+
+/// Describes the two variable types in the capture system.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VariableTypeInfo {
+    /// How scalar variables (from `capture`) behave
+    pub scalar: String,
+    /// How list variables (from `capture_append`) behave
+    pub list: String,
+}
+
+/// Builds the static `BatchCapabilityInfo` included in every capability manifest.
+fn build_batch_capability_info() -> BatchCapabilityInfo {
+    BatchCapabilityInfo {
+        file_formats: vec!["json".into(), "yaml".into()],
+        operation_schema: BatchOperationSchema {
+            fields: vec![
+                BatchFieldInfo {
+                    name: "id".into(),
+                    field_type: "string".into(),
+                    required: false,
+                    description: "Unique identifier. Required when using capture, capture_append, or depends_on.".into(),
+                },
+                BatchFieldInfo {
+                    name: "args".into(),
+                    field_type: "string[]".into(),
+                    required: true,
+                    description: "Command arguments (e.g. [\"users\", \"create-user\", \"--body\", \"{...}\"])".into(),
+                },
+                BatchFieldInfo {
+                    name: "description".into(),
+                    field_type: "string".into(),
+                    required: false,
+                    description: "Human-readable description of this operation.".into(),
+                },
+                BatchFieldInfo {
+                    name: "headers".into(),
+                    field_type: "map<string, string>".into(),
+                    required: false,
+                    description: "Custom HTTP headers for this operation.".into(),
+                },
+                BatchFieldInfo {
+                    name: "capture".into(),
+                    field_type: "map<string, string>".into(),
+                    required: false,
+                    description: "Extract scalar values from the response via JQ queries. Maps variable_name → jq_query (e.g. {\"user_id\": \".id\"}). Captured values are available as {{variable_name}} in subsequent operations.".into(),
+                },
+                BatchFieldInfo {
+                    name: "capture_append".into(),
+                    field_type: "map<string, string>".into(),
+                    required: false,
+                    description: "Append extracted values to a named list via JQ queries. Multiple operations can append to the same list. The list interpolates as a JSON array literal (e.g. [\"a\",\"b\"]).".into(),
+                },
+                BatchFieldInfo {
+                    name: "depends_on".into(),
+                    field_type: "string[]".into(),
+                    required: false,
+                    description: "Explicit dependency on other operations by id. This operation waits until all listed operations have completed. Dependencies can also be inferred from {{variable}} usage.".into(),
+                },
+                BatchFieldInfo {
+                    name: "use_cache".into(),
+                    field_type: "boolean".into(),
+                    required: false,
+                    description: "Enable response caching for this operation.".into(),
+                },
+                BatchFieldInfo {
+                    name: "retry".into(),
+                    field_type: "integer".into(),
+                    required: false,
+                    description: "Maximum retry attempts for this operation.".into(),
+                },
+                BatchFieldInfo {
+                    name: "retry_delay".into(),
+                    field_type: "string".into(),
+                    required: false,
+                    description: "Initial retry delay (e.g. \"500ms\", \"1s\").".into(),
+                },
+                BatchFieldInfo {
+                    name: "retry_max_delay".into(),
+                    field_type: "string".into(),
+                    required: false,
+                    description: "Maximum retry delay cap (e.g. \"30s\", \"1m\").".into(),
+                },
+                BatchFieldInfo {
+                    name: "force_retry".into(),
+                    field_type: "boolean".into(),
+                    required: false,
+                    description: "Allow retrying non-idempotent requests without an idempotency key.".into(),
+                },
+            ],
+        },
+        dependent_workflows: DependentWorkflowInfo {
+            interpolation_syntax: "{{variable_name}}".into(),
+            execution_modes: ExecutionModeInfo {
+                concurrent: "Used when no operation has capture, capture_append, or depends_on. Operations run in parallel with concurrency and rate-limit controls.".into(),
+                dependent: "Used when any operation has capture, capture_append, or depends_on. Operations run sequentially in topological order with variable interpolation.".into(),
+            },
+            dependent_execution: DependentExecutionInfo {
+                ordering: "Topological sort via Kahn's algorithm. Operations without dependencies preserve original file order.".into(),
+                failure_mode: "Atomic: halts on first failure. Subsequent operations are marked as skipped.".into(),
+                implicit_dependencies: true,
+                variable_types: VariableTypeInfo {
+                    scalar: "From capture — {{name}} interpolates as the extracted string value.".into(),
+                    list: "From capture_append — {{name}} interpolates as a JSON array literal (e.g. [\"a\",\"b\"]).".into(),
+                },
+            },
+        },
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -377,6 +555,7 @@ pub fn generate_capability_manifest_from_openapi(
         },
         commands: regrouped,
         security_schemes,
+        batch: build_batch_capability_info(),
     };
 
     // Serialize to JSON
@@ -449,6 +628,7 @@ pub fn generate_capability_manifest(
         },
         commands: command_groups,
         security_schemes: extract_security_schemes(spec),
+        batch: build_batch_capability_info(),
     };
 
     // Serialize to JSON
@@ -1029,6 +1209,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_generate_capability_manifest() {
         let mut security_schemes = HashMap::new();
         security_schemes.insert(
@@ -1117,5 +1298,30 @@ mod tests {
         let aperture_secret = bearer_auth.aperture_secret.as_ref().unwrap();
         assert_eq!(aperture_secret.name, "API_TOKEN");
         assert_eq!(aperture_secret.source, constants::SOURCE_ENV);
+
+        // Test batch capability info
+        assert_eq!(manifest.batch.file_formats, vec!["json", "yaml"]);
+        let field_names: Vec<&str> = manifest
+            .batch
+            .operation_schema
+            .fields
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect();
+        assert!(field_names.contains(&"capture"));
+        assert!(field_names.contains(&"capture_append"));
+        assert!(field_names.contains(&"depends_on"));
+        assert!(field_names.contains(&"args"));
+        assert_eq!(
+            manifest.batch.dependent_workflows.interpolation_syntax,
+            "{{variable_name}}"
+        );
+        assert!(
+            manifest
+                .batch
+                .dependent_workflows
+                .dependent_execution
+                .implicit_dependencies
+        );
     }
 }

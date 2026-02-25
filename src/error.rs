@@ -1181,4 +1181,108 @@ impl Error {
             )),
         }
     }
+
+    // ---- Batch Dependency Errors ----
+
+    /// Create a batch dependency cycle detected error
+    #[must_use]
+    pub fn batch_cycle_detected(cycle: &[String]) -> Self {
+        let cycle_str = cycle.join(" → ");
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!(
+                "Dependency cycle detected in batch operations: {cycle_str}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "cycle": cycle })),
+                Some(Cow::Borrowed(
+                    "Remove circular dependencies between batch operations.",
+                )),
+            )),
+        }
+    }
+
+    /// Create a batch missing dependency reference error
+    pub fn batch_missing_dependency(
+        operation_id: impl Into<String>,
+        missing_dep: impl Into<String>,
+    ) -> Self {
+        let operation_id = operation_id.into();
+        let missing_dep = missing_dep.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!(
+                "Operation '{operation_id}' depends on '{missing_dep}' which does not exist"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "operation_id": operation_id, "missing_dependency": missing_dep })),
+                Some(Cow::Borrowed(
+                    "Check that the depends_on references match existing operation ids.",
+                )),
+            )),
+        }
+    }
+
+    /// Create a batch undefined variable error
+    pub fn batch_undefined_variable(
+        operation_id: impl Into<String>,
+        variable: impl Into<String>,
+    ) -> Self {
+        let operation_id = operation_id.into();
+        let variable = variable.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!(
+                "Operation '{operation_id}' references undefined variable '{{{{{variable}}}}}'"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "operation_id": operation_id, "variable": variable })),
+                Some(Cow::Borrowed(
+                    "Ensure the variable is captured by a preceding operation.",
+                )),
+            )),
+        }
+    }
+
+    /// Create a batch capture failed error
+    pub fn batch_capture_failed(
+        operation_id: impl Into<String>,
+        variable: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        let operation_id = operation_id.into();
+        let variable = variable.into();
+        let reason = reason.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!(
+                "Failed to capture variable '{variable}' from operation '{operation_id}': {reason}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(
+                    json!({ "operation_id": operation_id, "variable": variable, "reason": reason }),
+                ),
+                Some(Cow::Borrowed(
+                    "Check the JQ query and ensure the response contains the expected data.",
+                )),
+            )),
+        }
+    }
+
+    /// Create a batch operation missing id error
+    pub fn batch_missing_id(context: impl Into<String>) -> Self {
+        let context = context.into();
+        Self::Internal {
+            kind: ErrorKind::Validation,
+            message: Cow::Owned(format!(
+                "Batch operation requires an id: {context}"
+            )),
+            context: Some(ErrorContext::new(
+                Some(json!({ "context": context })),
+                Some(Cow::Borrowed(
+                    "Add an 'id' field to operations that use capture, capture_append, or depends_on.",
+                )),
+            )),
+        }
+    }
 }
