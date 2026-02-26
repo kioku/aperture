@@ -36,7 +36,7 @@ pub fn init_tracing(verbosity: u8) {
             _ => "trace".to_string(),
         }
     } else {
-        std::env::var("APERTURE_LOG").unwrap_or_else(|_| "error".to_string())
+        std::env::var("APERTURE_LOG").unwrap_or_else(|_| "warn".to_string())
     };
 
     let env_filter = EnvFilter::try_new(&log_level_str)
