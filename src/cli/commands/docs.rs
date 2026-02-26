@@ -71,16 +71,17 @@ pub fn execute_help_command(
                     }
                 }
                 _ => {
-                    tracing::error!(
-                        "invalid docs command — usage: \
-                         aperture docs | aperture docs <api> | aperture docs <api> <tag> <operation>"
+                    // ast-grep-ignore: no-println
+                    eprintln!(
+                        "Invalid docs command. Usage:\n  aperture docs                         # Interactive menu\n  aperture docs <api>                   # API overview\n  aperture docs <api> <tag> <operation> # Command help"
                     );
                     std::process::exit(1);
                 }
             }
         }
         _ => {
-            tracing::error!("invalid help command arguments");
+            // ast-grep-ignore: no-println
+            eprintln!("Invalid help command arguments");
             std::process::exit(1);
         }
     }
@@ -97,9 +98,9 @@ pub fn execute_overview_command(
 ) -> Result<(), Error> {
     if !all {
         let Some(api) = api_name else {
-            tracing::error!(
-                "must specify API name or use --all flag — \
-                 usage: aperture overview <api> | aperture overview --all"
+            // ast-grep-ignore: no-println
+            eprintln!(
+                "Error: Must specify API name or use --all flag\nUsage:\n  aperture overview <api>\n  aperture overview --all"
             );
             std::process::exit(1);
         };

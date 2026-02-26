@@ -93,7 +93,8 @@ pub async fn execute_config_command(
                 return Ok(());
             }
             let Some(spec_name) = context else {
-                tracing::error!("either specify a spec name or use --all flag");
+                // ast-grep-ignore: no-println
+                eprintln!("Error: Either specify a spec name or use --all flag");
                 std::process::exit(1);
             };
             let spec_name = validate_api_name(&spec_name)?;
@@ -362,13 +363,15 @@ pub fn reinit_all_specs(
         let validated = match validate_api_name(spec_name) {
             Ok(v) => v,
             Err(e) => {
-                tracing::error!(spec = spec_name, error = %e, "reinit failed");
+                // ast-grep-ignore: no-println
+                eprintln!("  {spec_name}: {e}");
                 continue;
             }
         };
         match reinit_spec(manager, &validated, output) {
             Ok(()) => output.info(format!("  {spec_name}")),
-            Err(e) => tracing::error!(spec = spec_name, error = %e, "reinit failed"),
+            // ast-grep-ignore: no-println
+            Err(e) => eprintln!("  {spec_name}: {e}"),
         }
     }
     output.success("Reinitialization complete.");
@@ -473,7 +476,8 @@ pub async fn clear_response_cache(
         cache.clear_all().await?
     } else {
         let Some(api) = api_name else {
-            tracing::error!("either specify an API name or use --all flag");
+            // ast-grep-ignore: no-println
+            eprintln!("Error: Either specify an API name or use --all flag");
             std::process::exit(1);
         };
         cache.clear_api_cache(api).await?

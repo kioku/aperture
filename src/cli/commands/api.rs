@@ -251,8 +251,9 @@ pub async fn execute_shortcut_command(
     let output = Output::new(cli.quiet, cli.json_errors);
 
     if args.is_empty() {
-        tracing::error!(
-            "No command specified. Usage: aperture exec <shortcut> [args...]\n  \
+        // ast-grep-ignore: no-println
+        eprintln!(
+            "Error: No command specified\nUsage: aperture exec <shortcut> [args...]\nExamples:\n  \
              aperture exec getUserById --id 123\n  \
              aperture exec GET /users/123\n  \
              aperture exec users list"
@@ -301,21 +302,19 @@ pub async fn execute_shortcut_command(
             execute_api_command(context, final_args, cli).await
         }
         ResolutionResult::Ambiguous(matches) => {
-            tracing::error!(
-                suggestions = %resolver.format_ambiguous_suggestions(&matches),
-                "ambiguous shortcut — multiple commands match; \
-                 use 'aperture search <term>' to explore available commands"
+            // ast-grep-ignore: no-println
+            eprintln!(
+                "Ambiguous shortcut. Multiple commands match:\n{}\n\nTip: Use 'aperture search <term>' to explore available commands",
+                resolver.format_ambiguous_suggestions(&matches)
             );
             std::process::exit(1);
         }
         ResolutionResult::NotFound => {
-            tracing::error!(
-                shortcut = %args.join(" "),
-                hint = %format!(
-                    "aperture search '{}' | aperture list-commands <api> | aperture api <api> --help",
-                    args[0]
-                ),
-                "no command found for shortcut"
+            // ast-grep-ignore: no-println
+            eprintln!(
+                "No command found for shortcut: {}\nTry one of these:\n  aperture search '{}'    # Search for similar commands\n  aperture list-commands <api>  # List available commands for an API\n  aperture api <api> --help     # Show help for an API",
+                args.join(" "),
+                args[0]
             );
             std::process::exit(1);
         }
