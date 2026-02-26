@@ -21,6 +21,10 @@ ignores:
   - "**/examples/**"
   - "**/benches/**"
   - "**/interactive/mock.rs"
+  # Deliberate CLI error-display layer: eprintln! is required so output always
+  # appears on stderr regardless of the APERTURE_LOG level, and without
+  # tracing-subscriber formatting (timestamps, targets, etc.).
+  - "**/cli/errors.rs"
 
 rule:
   any:

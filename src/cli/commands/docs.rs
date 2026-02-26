@@ -71,15 +71,22 @@ pub fn execute_help_command(
                     }
                 }
                 _ => {
+                    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+                    // ast-grep-ignore: no-println
                     eprintln!("Invalid docs command. Usage:");
+                    // ast-grep-ignore: no-println
                     eprintln!("  aperture docs                        # Interactive menu");
+                    // ast-grep-ignore: no-println
                     eprintln!("  aperture docs <api>                  # API overview");
+                    // ast-grep-ignore: no-println
                     eprintln!("  aperture docs <api> <tag> <operation> # Command help");
                     std::process::exit(1);
                 }
             }
         }
         _ => {
+            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+            // ast-grep-ignore: no-println
             eprintln!("Invalid help command arguments");
             std::process::exit(1);
         }
@@ -97,9 +104,14 @@ pub fn execute_overview_command(
 ) -> Result<(), Error> {
     if !all {
         let Some(api) = api_name else {
+            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+            // ast-grep-ignore: no-println
             eprintln!("Error: Must specify API name or use --all flag");
+            // ast-grep-ignore: no-println
             eprintln!("Usage:");
+            // ast-grep-ignore: no-println
             eprintln!("  aperture overview <api>");
+            // ast-grep-ignore: no-println
             eprintln!("  aperture overview --all");
             std::process::exit(1);
         };
@@ -163,7 +175,7 @@ pub fn load_all_specs(
             Ok(spec) => {
                 all_specs.insert(spec_name.clone(), spec);
             }
-            Err(e) => eprintln!("Warning: Could not load spec '{spec_name}': {e}"),
+            Err(e) => tracing::warn!(spec = spec_name, error = %e, "could not load spec"),
         }
     }
     Ok(all_specs)

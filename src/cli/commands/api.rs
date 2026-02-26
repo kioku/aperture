@@ -251,11 +251,18 @@ pub async fn execute_shortcut_command(
     let output = Output::new(cli.quiet, cli.json_errors);
 
     if args.is_empty() {
+        // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+        // ast-grep-ignore: no-println
         eprintln!("Error: No command specified");
+        // ast-grep-ignore: no-println
         eprintln!("Usage: aperture exec <shortcut> [args...]");
+        // ast-grep-ignore: no-println
         eprintln!("Examples:");
+        // ast-grep-ignore: no-println
         eprintln!("  aperture exec getUserById --id 123");
+        // ast-grep-ignore: no-println
         eprintln!("  aperture exec GET /users/123");
+        // ast-grep-ignore: no-println
         eprintln!("  aperture exec users list");
         std::process::exit(1);
     }
@@ -273,7 +280,7 @@ pub async fn execute_shortcut_command(
             Ok(spec) => {
                 all_specs.insert(spec_name.clone(), spec);
             }
-            Err(e) => eprintln!("Warning: Could not load spec '{spec_name}': {e}"),
+            Err(e) => tracing::warn!(spec = spec_name, error = %e, "could not load spec"),
         }
     }
     if all_specs.is_empty() {
@@ -301,19 +308,29 @@ pub async fn execute_shortcut_command(
             execute_api_command(context, final_args, cli).await
         }
         ResolutionResult::Ambiguous(matches) => {
+            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+            // ast-grep-ignore: no-println
             eprintln!("Ambiguous shortcut. Multiple commands match:");
+            // ast-grep-ignore: no-println
             eprintln!("{}", resolver.format_ambiguous_suggestions(&matches));
+            // ast-grep-ignore: no-println
             eprintln!("\nTip: Use 'aperture search <term>' to explore available commands");
             std::process::exit(1);
         }
         ResolutionResult::NotFound => {
+            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+            // ast-grep-ignore: no-println
             eprintln!("No command found for shortcut: {}", args.join(" "));
+            // ast-grep-ignore: no-println
             eprintln!("Try one of these:");
+            // ast-grep-ignore: no-println
             eprintln!(
                 "  aperture search '{}'    # Search for similar commands",
                 args[0]
             );
+            // ast-grep-ignore: no-println
             eprintln!("  aperture list-commands <api>  # List available commands for an API");
+            // ast-grep-ignore: no-println
             eprintln!("  aperture api <api> --help     # Show help for an API");
             std::process::exit(1);
         }

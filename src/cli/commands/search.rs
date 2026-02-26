@@ -31,7 +31,7 @@ pub fn execute_search_command(
             Ok(spec) => {
                 all_specs.insert(spec_name.clone(), spec);
             }
-            Err(e) => eprintln!("Warning: Could not load spec '{spec_name}': {e}"),
+            Err(e) => tracing::warn!(spec = spec_name, error = %e, "could not load spec"),
         }
     }
 

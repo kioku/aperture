@@ -1,4 +1,10 @@
 //! Error display formatting for the CLI.
+//!
+//! `eprintln!` is used throughout this module intentionally. Routing through
+//! `tracing` would be incorrect: the subscriber may suppress output depending on
+//! the configured log level, and formatted output would gain unwanted structure
+//! (timestamps, targets, etc.). These call sites are excluded from the
+//! `no-println` lint via the rule's `ignores` list.
 
 use crate::constants;
 use crate::error::Error;

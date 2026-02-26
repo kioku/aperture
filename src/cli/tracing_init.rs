@@ -36,7 +36,7 @@ pub fn init_tracing(verbosity: u8) {
             _ => "trace".to_string(),
         }
     } else {
-        std::env::var("APERTURE_LOG").unwrap_or_else(|_| "error".to_string())
+        std::env::var("APERTURE_LOG").unwrap_or_else(|_| "warn".to_string())
     };
 
     let env_filter = EnvFilter::try_new(&log_level_str)
@@ -47,6 +47,8 @@ pub fn init_tracing(verbosity: u8) {
         .map_or_else(|_| "text".to_string(), |s| s.to_lowercase());
 
     if log_format != "json" && log_format != "text" {
+        // Tracing is not yet initialized; eprintln! is the only output channel available.
+        // ast-grep-ignore: no-println
         eprintln!(
             "Warning: Unrecognized APERTURE_LOG_FORMAT '{log_format}'. Valid values: 'json', 'text'. Using 'text'."
         );
@@ -59,6 +61,8 @@ pub fn init_tracing(verbosity: u8) {
                 file: Some(Mutex::new(file)),
             },
             Err(e) => {
+                // Tracing is not yet initialized; eprintln! is the only output channel available.
+                // ast-grep-ignore: no-println
                 eprintln!("Warning: Could not open log file '{path}': {e}. Using stderr.");
                 FileOrStderr { file: None }
             }

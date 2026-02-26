@@ -93,6 +93,8 @@ pub async fn execute_config_command(
                 return Ok(());
             }
             let Some(spec_name) = context else {
+                // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+                // ast-grep-ignore: no-println
                 eprintln!("Error: Either specify a spec name or use --all flag");
                 std::process::exit(1);
             };
@@ -362,12 +364,16 @@ pub fn reinit_all_specs(
         let validated = match validate_api_name(spec_name) {
             Ok(v) => v,
             Err(e) => {
+                // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+                // ast-grep-ignore: no-println
                 eprintln!("  {spec_name}: {e}");
                 continue;
             }
         };
         match reinit_spec(manager, &validated, output) {
             Ok(()) => output.info(format!("  {spec_name}")),
+            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+            // ast-grep-ignore: no-println
             Err(e) => eprintln!("  {spec_name}: {e}"),
         }
     }
@@ -473,6 +479,8 @@ pub async fn clear_response_cache(
         cache.clear_all().await?
     } else {
         let Some(api) = api_name else {
+            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+            // ast-grep-ignore: no-println
             eprintln!("Error: Either specify an API name or use --all flag");
             std::process::exit(1);
         };
