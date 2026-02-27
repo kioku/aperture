@@ -84,7 +84,7 @@ ctor = "0.6.3"
 wiremock = "0.6.5"
 aperture-cli = { path = "." }
 predicates = "3.1.4"
-tempfile = "3.25.0"
+tempfile = "3.26.0"
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["rt", "macros", "test-util"] }
 mockall = "0.14"
