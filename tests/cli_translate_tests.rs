@@ -534,3 +534,23 @@ fn required_body_rejected_when_neither_body_nor_body_file_provided() {
         "error should mention the missing body arg; got: {err}"
     );
 }
+
+#[test]
+fn body_file_trims_trailing_newline() {
+    // Text editors commonly write a trailing newline. The extracted body must
+    // equal the equivalent --body inline string (no trailing whitespace).
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(tmp.path(), "{\"key\":\"value\"}\n").unwrap();
+    let path = tmp.path().to_str().unwrap().to_string();
+
+    let spec = build_spec(vec![cached_parameter("id", "path", "string", true)], true);
+    let matches = build_matches_with_body_file(&path);
+
+    let call =
+        matches_to_operation_call(&spec, &matches).expect("trailing newline should be accepted");
+    assert_eq!(
+        call.body.as_deref(),
+        Some(r#"{"key":"value"}"#),
+        "body should have trailing whitespace stripped"
+    );
+}

@@ -228,7 +228,7 @@ fn extract_body(has_request_body: bool, matches: &ArgMatches) -> Result<Option<S
     // --body-file takes precedence when present (clap enforces mutual exclusion
     // with --body via conflicts_with, so only one can appear at a time).
     if let Ok(Some(path)) = matches.try_get_one::<String>("body-file") {
-        let content = if path == "-" {
+        let raw = if path == "-" {
             let mut buf = String::new();
             std::io::stdin()
                 .read_to_string(&mut buf)
@@ -238,9 +238,12 @@ fn extract_body(has_request_body: bool, matches: &ArgMatches) -> Result<Option<S
             std::fs::read_to_string(path)
                 .map_err(|e| Error::io_error(format!("Failed to read body file '{path}': {e}")))?
         };
+        // Trim trailing whitespace so files with a trailing newline are treated
+        // identically to the equivalent --body inline string.
+        let content = raw.trim_end();
         let _: serde_json::Value =
-            serde_json::from_str(&content).map_err(|e| Error::invalid_json_body(e.to_string()))?;
-        return Ok(Some(content));
+            serde_json::from_str(content).map_err(|e| Error::invalid_json_body(e.to_string()))?;
+        return Ok(Some(content.to_owned()));
     }
 
     matches
