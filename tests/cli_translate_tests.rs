@@ -7,6 +7,7 @@ use aperture_cli::cli::translate::{
 };
 use aperture_cli::cli::{Cli, Commands, OutputFormat};
 use aperture_cli::config::models::GlobalConfig;
+use aperture_cli::engine::generator::generate_command_tree_with_flags;
 use clap::{Arg, ArgAction, Command};
 use std::collections::HashMap;
 
@@ -443,5 +444,93 @@ fn body_file_returns_descriptive_error_for_missing_file() {
     assert!(
         msg.contains("/nonexistent/path/body.json"),
         "error should name the missing file; got: {msg}"
+    );
+}
+
+// ── Generator-level required-body regression ─────────────────────────────────
+
+/// Build a spec where the request body is required (`required: true`).
+fn build_spec_with_required_body() -> CachedSpec {
+    CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "events".to_string(),
+            description: None,
+            summary: None,
+            operation_id: "createEvent".to_string(),
+            method: "POST".to_string(),
+            path: "/events".to_string(),
+            parameters: vec![],
+            request_body: Some(CachedRequestBody {
+                content_type: "application/json".to_string(),
+                schema: "{\"type\":\"object\"}".to_string(),
+                required: true,
+                description: None,
+                example: None,
+            }),
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec!["events".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    }
+}
+
+#[test]
+fn body_file_accepted_when_body_is_required_in_spec() {
+    // Regression: when required=true, add_body_args used .required(true) on --body,
+    // causing clap to reject --body-file-only invocations even though the flag was
+    // present and valid. Fix uses required_unless_present("body-file").
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(tmp.path(), r#"{"event":"created"}"#).unwrap();
+    let path = tmp.path().to_str().unwrap();
+
+    let spec = build_spec_with_required_body();
+    let command = generate_command_tree_with_flags(&spec, false);
+
+    let matches = command
+        .try_get_matches_from(vec![
+            aperture_cli::constants::CLI_ROOT_COMMAND,
+            "events",
+            "create-event",
+            "--body-file",
+            path,
+        ])
+        .expect("--body-file should be accepted when body is required");
+
+    let call = matches_to_operation_call(&spec, &matches)
+        .expect("operation call should resolve with --body-file");
+    assert_eq!(call.body.as_deref(), Some(r#"{"event":"created"}"#));
+}
+
+#[test]
+fn required_body_rejected_when_neither_body_nor_body_file_provided() {
+    // Neither --body nor --body-file: clap should require at least one.
+    let spec = build_spec_with_required_body();
+    let command = generate_command_tree_with_flags(&spec, false);
+
+    let err = command
+        .try_get_matches_from(vec![
+            aperture_cli::constants::CLI_ROOT_COMMAND,
+            "events",
+            "create-event",
+        ])
+        .expect_err("missing required body should be rejected by clap");
+    assert!(
+        err.to_string().contains("body"),
+        "error should mention the missing body arg; got: {err}"
     );
 }

@@ -196,17 +196,28 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 }
 
 /// Attaches `--body` and `--body-file` args to a command that accepts a request body.
+///
+/// When the spec marks the body as required, `--body-file` is an equally valid way to
+/// satisfy that requirement. `required_unless_present` lets clap enforce "at least one
+/// of the two" without rejecting `--body-file` on its own.
 fn add_body_args(cmd: Command, required: bool) -> Command {
-    cmd.arg(
-        Arg::new("body")
-            .long("body")
-            .help("Request body as JSON")
-            .value_name("JSON")
-            .required(required)
-            .conflicts_with("body-file")
-            .action(ArgAction::Set),
-    )
-    .arg(
+    let body_arg = Arg::new("body")
+        .long("body")
+        .help("Request body as JSON")
+        .value_name("JSON")
+        .conflicts_with("body-file")
+        .action(ArgAction::Set);
+
+    // required_unless_present: --body is required UNLESS --body-file is present.
+    // Without this, clap enforces required(true) on --body independently of the
+    // conflicts_with guard, causing --body-file-only invocations to be rejected.
+    let body_arg = if required {
+        body_arg.required_unless_present("body-file")
+    } else {
+        body_arg
+    };
+
+    cmd.arg(body_arg).arg(
         Arg::new("body-file")
             .long("body-file")
             .help("Read request body from a file path, or - for stdin")
