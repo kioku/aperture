@@ -150,14 +150,7 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
 
             // Add request body argument if present
             if let Some(request_body) = &cached_command.request_body {
-                operation_command = operation_command.arg(
-                    Arg::new("body")
-                        .long("body")
-                        .help("Request body as JSON")
-                        .value_name("JSON")
-                        .required(request_body.required)
-                        .action(ArgAction::Set),
-                );
+                operation_command = add_body_args(operation_command, request_body.required);
             }
 
             // Add custom header support
@@ -200,6 +193,27 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
     }
 
     root_command
+}
+
+/// Attaches `--body` and `--body-file` args to a command that accepts a request body.
+fn add_body_args(cmd: Command, required: bool) -> Command {
+    cmd.arg(
+        Arg::new("body")
+            .long("body")
+            .help("Request body as JSON")
+            .value_name("JSON")
+            .required(required)
+            .conflicts_with("body-file")
+            .action(ArgAction::Set),
+    )
+    .arg(
+        Arg::new("body-file")
+            .long("body-file")
+            .help("Read request body from a file path, or - for stdin")
+            .value_name("PATH")
+            .conflicts_with("body")
+            .action(ArgAction::Set),
+    )
 }
 
 /// Returns the effective group name for a command, using `display_group` override if present.
