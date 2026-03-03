@@ -16,6 +16,7 @@ use crate::response_cache::CacheConfig;
 use crate::utils::to_kebab_case;
 use clap::ArgMatches;
 use std::collections::HashMap;
+use std::io::Read as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -215,9 +216,31 @@ fn extract_param(
 }
 
 /// Extracts the request body from matches.
+///
+/// Checks `--body-file` before `--body`. When the path is `"-"`, content is
+/// read from stdin; otherwise from the named file. Content is validated as
+/// JSON in both cases, matching the behaviour of `--body`.
 fn extract_body(has_request_body: bool, matches: &ArgMatches) -> Result<Option<String>, Error> {
     if !has_request_body {
         return Ok(None);
+    }
+
+    // --body-file takes precedence when present (clap enforces mutual exclusion
+    // with --body via conflicts_with, so only one can appear at a time).
+    if let Ok(Some(path)) = matches.try_get_one::<String>("body-file") {
+        let content = if path == "-" {
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| Error::io_error(format!("Failed to read body from stdin: {e}")))?;
+            buf
+        } else {
+            std::fs::read_to_string(path)
+                .map_err(|e| Error::io_error(format!("Failed to read body file '{path}': {e}")))?
+        };
+        let _: serde_json::Value =
+            serde_json::from_str(&content).map_err(|e| Error::invalid_json_body(e.to_string()))?;
+        return Ok(Some(content));
     }
 
     matches
