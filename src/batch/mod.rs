@@ -87,6 +87,13 @@ pub struct BatchOperation {
     /// Dependencies can also be inferred from `{{variable}}` usage in `args`.
     #[serde(default)]
     pub depends_on: Option<Vec<String>>,
+
+    /// Read the request body from this file path instead of embedding it in
+    /// `args`. Equivalent to passing `--body-file <path>` in `args`, but
+    /// avoids quoting issues with long or prose-heavy JSON payloads.
+    /// Mutually exclusive with a `--body` or `--body-file` entry in `args`.
+    #[serde(default)]
+    pub body_file: Option<String>,
 }
 
 /// Batch file format containing multiple operations
@@ -599,12 +606,20 @@ impl BatchProcessor {
         use crate::cli::translate;
         use crate::invocation::ExecutionContext;
 
-        // Generate the command tree and parse operation args into ArgMatches
+        // Generate the command tree and parse operation args into ArgMatches.
+        // If `body_file` is set, append `--body-file <path>` so the generator
+        // arg and translate layer handle it uniformly.
         let command = generator::generate_command_tree_with_flags(spec, false);
+        let extra_body_file: Vec<String> = operation
+            .body_file
+            .as_deref()
+            .map(|p| vec!["--body-file".to_string(), p.to_string()])
+            .unwrap_or_default();
         let matches = command
             .try_get_matches_from(
                 std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
-                    .chain(operation.args.clone()),
+                    .chain(operation.args.clone())
+                    .chain(extra_body_file),
             )
             .map_err(|e| Error::invalid_command(crate::constants::CONTEXT_BATCH, e.to_string()))?;
 
