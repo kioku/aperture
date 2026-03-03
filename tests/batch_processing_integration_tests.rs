@@ -615,3 +615,69 @@ async fn test_batch_operation_body_file_field_is_parsed() {
         "body_file field should be deserialised from the batch file"
     );
 }
+
+#[tokio::test]
+async fn test_batch_execution_with_body_file() {
+    // Verifies that a BatchOperation using `body_file` reads the JSON from the
+    // file and sends it as the HTTP request body, exercising the full path
+    // through execute_single_operation (not just deserialization).
+    let body_json = r#"{"name":"Alice","email":"alice@example.com"}"#;
+    let mut tmp = NamedTempFile::new().unwrap();
+    tmp.write_all(body_json.as_bytes()).unwrap();
+    tmp.flush().unwrap();
+
+    let mock_server = wiremock::MockServer::start().await;
+
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("POST"))
+                .and(wiremock::matchers::path("/users"))
+                .and(wiremock::matchers::body_json(serde_json::json!({
+                    "name": "Alice",
+                    "email": "alice@example.com"
+                })))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(201)
+                        .set_body_json(serde_json::json!({"id": 1}))
+                        .insert_header("content-type", constants::CONTENT_TYPE_JSON),
+                )
+                .expect(1),
+        )
+        .await;
+
+    let mut spec = create_test_spec();
+    spec.base_url = Some(mock_server.uri());
+    spec.servers = vec![mock_server.uri()];
+
+    let config = BatchConfig::default();
+    let processor = BatchProcessor::new(config);
+
+    let batch_file = BatchFile {
+        metadata: None,
+        operations: vec![BatchOperation {
+            id: Some("create-alice".to_string()),
+            args: vec!["users".to_string(), "create-user".to_string()],
+            body_file: Some(tmp.path().to_str().unwrap().to_string()),
+            ..Default::default()
+        }],
+    };
+
+    let result = processor
+        .execute_batch(
+            &spec,
+            batch_file,
+            None,
+            Some(&mock_server.uri()),
+            false,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .expect("batch execution with body_file should succeed");
+
+    assert_eq!(result.success_count, 1);
+    assert_eq!(result.failure_count, 0);
+
+    // Verify the mock received exactly one request with the expected body.
+    mock_server.verify().await;
+}
