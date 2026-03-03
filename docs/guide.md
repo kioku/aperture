@@ -53,8 +53,14 @@ aperture api my-api users get-user-by-id --id 123
 # Query parameters
 aperture api my-api users list --limit 10 --offset 0
 
-# Request body (JSON)
+# Request body (inline JSON)
 aperture api my-api users create --body '{"name": "John", "email": "john@example.com"}'
+
+# Request body from a file (avoids shell-quoting issues with large payloads)
+aperture api my-api users create --body-file ./payload.json
+
+# Request body from stdin
+echo '{"name": "John"}' | aperture api my-api users create --body-file -
 
 # Multiple parameters
 aperture api my-api orders search --status pending --created-after 2024-01-01
