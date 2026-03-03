@@ -633,11 +633,15 @@ impl BatchProcessor {
         // Guard: body_file must not coexist with --body or --body-file in args.
         // --body conflicts are caught by clap, but a duplicate --body-file would
         // silently pick the last value, making body_file win without any error.
+        // Both space-separated (`--body-file /p`) and equals-sign (`--body-file=/p`)
+        // forms must be detected since clap accepts either.
         let body_field_conflicts_with_args = operation.body_file.is_some()
-            && operation
-                .args
-                .iter()
-                .any(|a| a == "--body-file" || a == "--body");
+            && operation.args.iter().any(|a| {
+                a == "--body-file"
+                    || a.starts_with("--body-file=")
+                    || a == "--body"
+                    || a.starts_with("--body=")
+            });
         if body_field_conflicts_with_args {
             return Err(Error::invalid_config(
                 "body_file field conflicts with --body or --body-file in args; use one or the other",
