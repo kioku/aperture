@@ -1286,3 +1286,341 @@ impl Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // ---- Internal ErrorKind variants via to_json() ----
+
+    #[test]
+    fn test_to_json_specification_kind() {
+        let err = Error::spec_not_found("my-api");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Specification");
+        assert!(j.message.contains("my-api"));
+        assert!(j.context.is_some(), "spec_not_found carries a suggestion");
+        assert!(j.details.is_some());
+    }
+
+    #[test]
+    fn test_to_json_specification_cache_stale() {
+        let err = Error::cache_stale("stale-api");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Specification");
+        assert!(j.message.contains("stale-api"));
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_authentication_secret_not_set() {
+        let err = Error::secret_not_set("api-key", "MY_API_KEY");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Authentication");
+        assert!(j.message.contains("MY_API_KEY"));
+        assert!(j.context.is_some(), "secret_not_set carries a suggestion");
+        assert!(j.details.is_some());
+    }
+
+    #[test]
+    fn test_to_json_authentication_unsupported_scheme() {
+        let err = Error::unsupported_auth_scheme("digest");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Authentication");
+        assert!(j.message.contains("digest"));
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_validation_kind() {
+        let err = Error::invalid_config("bad value");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Validation");
+        assert!(j.message.contains("bad value"));
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_network_internal_kind() {
+        // ErrorKind::Network (internal) is produced by retry_limit_exceeded.
+        let err = Error::retry_limit_exceeded(3, "connection refused");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Network");
+        assert!(
+            j.context.is_some(),
+            "retry_limit_exceeded carries a suggestion"
+        );
+    }
+
+    #[test]
+    fn test_to_json_http_request_kind() {
+        let err = Error::request_failed(reqwest::StatusCode::UNPROCESSABLE_ENTITY, "bad body");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "HttpError");
+        assert!(j.context.is_some());
+        assert!(j.details.is_some());
+    }
+
+    #[test]
+    fn test_to_json_headers_invalid_header_name() {
+        let err = Error::invalid_header_name("X-Bad\0Header", "contains NUL");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Headers");
+        assert!(j.context.is_some(), "header errors carry suggestions");
+        assert!(j.details.is_some());
+    }
+
+    #[test]
+    fn test_to_json_headers_empty_header_name() {
+        let err = Error::empty_header_name();
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Headers");
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_headers_invalid_idempotency_key() {
+        let err = Error::invalid_idempotency_key();
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Headers");
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_interactive_timeout() {
+        let err = Error::interactive_timeout();
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Interactive");
+        assert!(j.context.is_some(), "interactive errors carry suggestions");
+    }
+
+    #[test]
+    fn test_to_json_interactive_input_too_long() {
+        let err = Error::interactive_input_too_long(256);
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Interactive");
+        assert!(j.context.is_some());
+        assert!(j.details.is_some());
+    }
+
+    #[test]
+    fn test_to_json_interactive_editor_not_set() {
+        let err = Error::editor_not_set();
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Interactive");
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_server_variable_missing() {
+        let err = Error::missing_server_variable("region");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "ServerVariable");
+        assert!(j.message.contains("region"));
+        assert!(
+            j.context.is_some(),
+            "server variable errors carry suggestions"
+        );
+        assert!(j.details.is_some());
+    }
+
+    #[test]
+    fn test_to_json_server_variable_unresolved_template() {
+        let err = Error::unresolved_template_variable("env", "https://api.{env}.example.com");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "ServerVariable");
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_runtime_kind() {
+        let err = Error::operation_not_found("unknown-op");
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Runtime");
+        assert!(j.message.contains("unknown-op"));
+        assert!(j.context.is_some());
+    }
+
+    // ---- External error variants via to_json() ----
+
+    #[test]
+    fn test_to_json_io_not_found() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        let err = Error::Io(io_err);
+        let j = err.to_json();
+        assert_eq!(j.error_type, "FileSystem");
+        assert!(j.context.is_some(), "NotFound carries a suggestion");
+    }
+
+    #[test]
+    fn test_to_json_io_permission_denied() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let err = Error::Io(io_err);
+        let j = err.to_json();
+        assert_eq!(j.error_type, "FileSystem");
+        assert!(j.context.is_some(), "PermissionDenied carries a suggestion");
+    }
+
+    #[test]
+    fn test_to_json_io_other_kind() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "broken pipe");
+        let err = Error::Io(io_err);
+        let j = err.to_json();
+        assert_eq!(j.error_type, "FileSystem");
+        assert!(j.context.is_none(), "generic IO kind carries no suggestion");
+    }
+
+    #[test]
+    fn test_to_json_yaml_error() {
+        let yaml_err = serde_yaml::from_str::<serde_yaml::Value>("key: - value").unwrap_err();
+        let err = Error::Yaml(yaml_err);
+        let j = err.to_json();
+        assert_eq!(j.error_type, "YAMLParsing");
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_json_error() {
+        let json_err = serde_json::from_str::<serde_json::Value>("{bad").unwrap_err();
+        let err = Error::Json(json_err);
+        let j = err.to_json();
+        assert_eq!(j.error_type, "JSONParsing");
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_toml_error() {
+        let toml_err = toml::from_str::<toml::Value>("key = ").unwrap_err();
+        let err = Error::Toml(toml_err);
+        let j = err.to_json();
+        assert_eq!(j.error_type, "TOMLParsing");
+        assert!(j.context.is_some());
+    }
+
+    #[test]
+    fn test_to_json_anyhow_error() {
+        let err = Error::Anyhow(anyhow::anyhow!("unexpected failure"));
+        let j = err.to_json();
+        assert_eq!(j.error_type, "Unknown");
+        assert!(j.message.contains("unexpected failure"));
+        assert!(j.context.is_none(), "anyhow errors carry no suggestion");
+    }
+
+    // ---- Error::Network (reqwest::Error) via to_json() ----
+    //
+    // These tests require a live socket to produce real reqwest::Error values.
+
+    async fn status_req_error(status: u16) -> reqwest::Error {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/err"))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        reqwest::Client::new()
+            .get(format!("{}/err", server.uri()))
+            .send()
+            .await
+            .expect("mock server must respond")
+            .error_for_status()
+            .expect_err("status >= 400 must produce an error")
+    }
+
+    #[tokio::test]
+    async fn test_to_json_network_connect_error() {
+        let req_err = reqwest::Client::new()
+            .get("http://127.0.0.1:1/")
+            .send()
+            .await
+            .expect_err("port 1 must refuse connections");
+        assert!(req_err.is_connect());
+        let j = Error::Network(req_err).to_json();
+        assert_eq!(j.error_type, "Network");
+        assert!(
+            j.context.is_some(),
+            "connect error carries ERR_CONNECTION hint"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_to_json_network_timeout_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/slow"))
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(10)))
+            .mount(&server)
+            .await;
+        let req_err = reqwest::Client::builder()
+            .timeout(Duration::from_millis(1))
+            .build()
+            .unwrap()
+            .get(format!("{}/slow", server.uri()))
+            .send()
+            .await
+            .expect_err("must time out");
+        assert!(req_err.is_timeout());
+        let j = Error::Network(req_err).to_json();
+        assert_eq!(j.error_type, "Network");
+        assert!(
+            j.context.is_some(),
+            "timeout error carries ERR_TIMEOUT hint"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_to_json_network_401() {
+        let req_err = status_req_error(401).await;
+        let j = Error::Network(req_err).to_json();
+        assert_eq!(j.error_type, "Network");
+        assert!(j.context.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_to_json_network_403() {
+        let req_err = status_req_error(403).await;
+        let j = Error::Network(req_err).to_json();
+        assert_eq!(j.error_type, "Network");
+        assert!(j.context.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_to_json_network_404() {
+        let req_err = status_req_error(404).await;
+        let j = Error::Network(req_err).to_json();
+        assert_eq!(j.error_type, "Network");
+        assert!(j.context.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_to_json_network_429() {
+        let req_err = status_req_error(429).await;
+        let j = Error::Network(req_err).to_json();
+        assert_eq!(j.error_type, "Network");
+        assert!(j.context.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_to_json_network_500() {
+        let req_err = status_req_error(500).await;
+        let j = Error::Network(req_err).to_json();
+        assert_eq!(j.error_type, "Network");
+        assert!(j.context.is_some());
+    }
+
+    /// Status code 300 is not in the explicit match arms — context must be None.
+    /// wiremock redirects are followed by reqwest by default, so we use 418
+    /// (I'm a teapot) which reqwest will not follow and which hits the `_ =>` arm.
+    #[tokio::test]
+    async fn test_to_json_network_status_fallback_no_context() {
+        let req_err = status_req_error(418).await;
+        let j = Error::Network(req_err).to_json();
+        assert_eq!(j.error_type, "Network");
+        assert!(
+            j.context.is_none(),
+            "unrecognised status code must produce no suggestion"
+        );
+    }
+}
