@@ -732,3 +732,111 @@ async fn test_body_file_field_conflicts_with_body_file_in_args() {
         "error should mention the conflict; got: {err}"
     );
 }
+
+#[tokio::test]
+async fn test_body_file_path_interpolated_in_dependent_batch() {
+    // Exercises the dependent batch path where body_file contains a {{variable}}
+    // placeholder. The variable is captured from the first operation's response
+    // and interpolated into the file path before the second operation reads it.
+    //
+    // Op 1: GET /users/1  — captures `.role` as `user_role`
+    // Op 2: POST /users   — body_file points to a pre-created file whose name
+    //                       embeds {{user_role}}, exercising interpolate_string.
+
+    let role = "admin";
+    let tmp_dir = tempfile::tempdir().unwrap();
+
+    // Pre-create the file that body_file will resolve to after interpolation.
+    let resolved_path = tmp_dir.path().join(format!("body-{role}.json"));
+    std::fs::write(&resolved_path, r#"{"name":"Eve","role":"admin"}"#).unwrap();
+
+    // Template path contains the placeholder; the batch engine will substitute it.
+    let body_file_template = format!("{}/body-{{{{user_role}}}}.json", tmp_dir.path().display());
+
+    let mock_server = wiremock::MockServer::start().await;
+
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .and(wiremock::matchers::path("/users/1"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"id": 1, "role": role}))
+                        .insert_header("content-type", constants::CONTENT_TYPE_JSON),
+                )
+                .expect(1),
+        )
+        .await;
+
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("POST"))
+                .and(wiremock::matchers::path("/users"))
+                .and(wiremock::matchers::body_json(serde_json::json!({
+                    "name": "Eve",
+                    "role": "admin"
+                })))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(201)
+                        .set_body_json(serde_json::json!({"id": 2}))
+                        .insert_header("content-type", constants::CONTENT_TYPE_JSON),
+                )
+                .expect(1),
+        )
+        .await;
+
+    let mut spec = create_test_spec();
+    spec.base_url = Some(mock_server.uri());
+    spec.servers = vec![mock_server.uri()];
+
+    let config = BatchConfig {
+        show_progress: false,
+        suppress_output: false,
+        ..BatchConfig::default()
+    };
+    let processor = BatchProcessor::new(config);
+
+    let batch_file = BatchFile {
+        metadata: None,
+        operations: vec![
+            BatchOperation {
+                id: Some("get-user".to_string()),
+                args: vec![
+                    "users".to_string(),
+                    "get-user-by-id".to_string(),
+                    "--id".to_string(),
+                    "1".to_string(),
+                ],
+                capture: Some(std::collections::HashMap::from([(
+                    "user_role".to_string(),
+                    ".role".to_string(),
+                )])),
+                ..Default::default()
+            },
+            BatchOperation {
+                id: Some("create-user".to_string()),
+                args: vec!["users".to_string(), "create-user".to_string()],
+                body_file: Some(body_file_template),
+                depends_on: Some(vec!["get-user".to_string()]),
+                ..Default::default()
+            },
+        ],
+    };
+
+    let result = processor
+        .execute_batch(
+            &spec,
+            batch_file,
+            None,
+            Some(&mock_server.uri()),
+            false,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .expect("dependent batch with body_file interpolation should succeed");
+
+    assert_eq!(result.success_count, 2, "both operations should succeed");
+    assert_eq!(result.failure_count, 0);
+    mock_server.verify().await;
+}
