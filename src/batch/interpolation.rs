@@ -67,6 +67,19 @@ fn interpolate_arg(arg: &str, store: &VariableStore, operation_id: &str) -> Resu
     Ok(result)
 }
 
+/// Interpolates `{{variable}}` references in a single string.
+///
+/// # Errors
+///
+/// Returns an error if the string references an undefined variable.
+pub fn interpolate_string(
+    s: &str,
+    store: &VariableStore,
+    operation_id: &str,
+) -> Result<String, Error> {
+    interpolate_arg(s, store, operation_id)
+}
+
 /// Interpolates all `{{variable}}` references in a list of arguments.
 ///
 /// # Errors

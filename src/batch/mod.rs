@@ -363,7 +363,8 @@ impl BatchProcessor {
             .as_deref()
             .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME);
 
-        // Interpolate variables in args — if this fails the operation cannot proceed
+        // Interpolate variables in args and body_file — if this fails the
+        // operation cannot proceed.
         let interpolated_args = match interpolation::interpolate_args(&operation.args, store, op_id)
         {
             Ok(args) => args,
@@ -378,8 +379,27 @@ impl BatchProcessor {
             }
         };
 
+        let interpolated_body_file = match operation
+            .body_file
+            .as_deref()
+            .map(|p| interpolation::interpolate_string(p, store, op_id))
+            .transpose()
+        {
+            Ok(path) => path,
+            Err(e) => {
+                return BatchOperationResult {
+                    operation: operation.clone(),
+                    success: false,
+                    error: Some(e.to_string()),
+                    response: None,
+                    duration: std::time::Duration::ZERO,
+                };
+            }
+        };
+
         let mut exec_op = operation.clone();
         exec_op.args = interpolated_args;
+        exec_op.body_file = interpolated_body_file;
         let operation_start = std::time::Instant::now();
 
         // Suppress output and skip jq_filter: capture needs JSON text that
