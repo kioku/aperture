@@ -629,6 +629,21 @@ impl BatchProcessor {
         // Generate the command tree and parse operation args into ArgMatches.
         // If `body_file` is set, append `--body-file <path>` so the generator
         // arg and translate layer handle it uniformly.
+        //
+        // Guard: body_file must not coexist with --body or --body-file in args.
+        // --body conflicts are caught by clap, but a duplicate --body-file would
+        // silently pick the last value, making body_file win without any error.
+        let body_field_conflicts_with_args = operation.body_file.is_some()
+            && operation
+                .args
+                .iter()
+                .any(|a| a == "--body-file" || a == "--body");
+        if body_field_conflicts_with_args {
+            return Err(Error::invalid_config(
+                "body_file field conflicts with --body or --body-file in args; use one or the other",
+            ));
+        }
+
         let command = generator::generate_command_tree_with_flags(spec, false);
         let extra_body_file: Vec<String> = operation
             .body_file

@@ -681,3 +681,54 @@ async fn test_batch_execution_with_body_file() {
     // Verify the mock received exactly one request with the expected body.
     mock_server.verify().await;
 }
+
+#[tokio::test]
+async fn test_body_file_field_conflicts_with_body_file_in_args() {
+    // body_file field + --body-file in args would silently discard the args
+    // entry because execute_single_operation appends --body-file last and
+    // clap's Set action picks the last value. The guard must catch this early.
+    let body_json = r#"{"name":"Alice"}"#;
+    let mut tmp = NamedTempFile::new().unwrap();
+    tmp.write_all(body_json.as_bytes()).unwrap();
+    tmp.flush().unwrap();
+
+    let spec = create_test_spec();
+    let config = BatchConfig::default();
+    let processor = BatchProcessor::new(config);
+
+    let batch_file = BatchFile {
+        metadata: None,
+        operations: vec![BatchOperation {
+            id: Some("create-alice".to_string()),
+            // Both body_file field and --body-file in args: should be rejected.
+            args: vec![
+                "users".to_string(),
+                "create-user".to_string(),
+                "--body-file".to_string(),
+                "/other.json".to_string(),
+            ],
+            body_file: Some(tmp.path().to_str().unwrap().to_string()),
+            ..Default::default()
+        }],
+    };
+
+    let result = processor
+        .execute_batch(
+            &spec,
+            batch_file,
+            None,
+            None,
+            false,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .expect("batch should not hard-fail; conflict is reported per-operation");
+
+    assert_eq!(result.failure_count, 1, "conflict should produce a failure");
+    let err = result.results[0].error.as_deref().unwrap_or("");
+    assert!(
+        err.contains("conflicts"),
+        "error should mention the conflict; got: {err}"
+    );
+}
