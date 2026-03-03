@@ -585,3 +585,33 @@ async fn test_batch_execution_with_error_handling() {
     // Verify that the mock server received the expected requests
     mock_server.verify().await;
 }
+
+#[tokio::test]
+async fn test_batch_operation_body_file_field_is_parsed() {
+    // `body_file` is a convenience field in BatchOperation.
+    // Verify that the batch parser deserialises it and makes it available.
+    let batch_content = r#"{
+        "operations": [
+            {
+                "id": "create-event",
+                "args": ["events", "add"],
+                "body_file": "/tmp/payload.json"
+            }
+        ]
+    }"#;
+
+    let mut temp_file = NamedTempFile::new().unwrap();
+    temp_file.write_all(batch_content.as_bytes()).unwrap();
+    temp_file.flush().unwrap();
+
+    let batch_file = BatchProcessor::parse_batch_file(temp_file.path())
+        .await
+        .unwrap();
+
+    assert_eq!(batch_file.operations.len(), 1);
+    assert_eq!(
+        batch_file.operations[0].body_file.as_deref(),
+        Some("/tmp/payload.json"),
+        "body_file field should be deserialised from the batch file"
+    );
+}

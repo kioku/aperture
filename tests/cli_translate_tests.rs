@@ -368,3 +368,80 @@ fn matches_to_operation_id_resolves_operation_aliases() {
         matches_to_operation_id(&spec, &matches).expect("operation resolution should succeed");
     assert_eq!(operation_id, "getUserById");
 }
+
+// ── --body-file tests ────────────────────────────────────────────────────────
+
+/// Build a minimal `ArgMatches` tree with `--body-file` for `extract_body` exercising.
+fn build_matches_with_body_file(path: &str) -> clap::ArgMatches {
+    Command::new("aperture")
+        .subcommand(
+            Command::new("users").subcommand(
+                Command::new("get-user-by-id")
+                    .arg(Arg::new("id").required(true))
+                    .arg(
+                        Arg::new("body")
+                            .long("body")
+                            .conflicts_with("body-file")
+                            .action(ArgAction::Set),
+                    )
+                    .arg(
+                        Arg::new("body-file")
+                            .long("body-file")
+                            .conflicts_with("body")
+                            .action(ArgAction::Set),
+                    ),
+            ),
+        )
+        .get_matches_from(vec![
+            "aperture",
+            "users",
+            "get-user-by-id",
+            "123",
+            "--body-file",
+            path,
+        ])
+}
+
+#[test]
+fn body_file_reads_json_from_file_path() {
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(tmp.path(), r#"{"key":"value"}"#).unwrap();
+    let path = tmp.path().to_str().unwrap().to_string();
+
+    let spec = build_spec(vec![cached_parameter("id", "path", "string", true)], true);
+    let matches = build_matches_with_body_file(&path);
+
+    let call = matches_to_operation_call(&spec, &matches).expect("body-file should resolve");
+    assert_eq!(call.body.as_deref(), Some(r#"{"key":"value"}"#));
+}
+
+#[test]
+fn body_file_rejects_invalid_json() {
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(tmp.path(), "not-json").unwrap();
+    let path = tmp.path().to_str().unwrap().to_string();
+
+    let spec = build_spec(vec![cached_parameter("id", "path", "string", true)], true);
+    let matches = build_matches_with_body_file(&path);
+
+    let err =
+        matches_to_operation_call(&spec, &matches).expect_err("invalid JSON should be rejected");
+    assert!(
+        err.to_string().contains("Invalid JSON body"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn body_file_returns_descriptive_error_for_missing_file() {
+    let spec = build_spec(vec![cached_parameter("id", "path", "string", true)], true);
+    let matches = build_matches_with_body_file("/nonexistent/path/body.json");
+
+    let err = matches_to_operation_call(&spec, &matches)
+        .expect_err("missing file should produce an error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("/nonexistent/path/body.json"),
+        "error should name the missing file; got: {msg}"
+    );
+}
