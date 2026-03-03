@@ -137,85 +137,96 @@ pub struct VariableTypeInfo {
     pub list: String,
 }
 
+/// Returns the field descriptors for the batch operation schema.
+fn batch_operation_fields() -> Vec<BatchFieldInfo> {
+    vec![
+        BatchFieldInfo {
+            name: "id".into(),
+            field_type: "string".into(),
+            required: false,
+            description: "Unique identifier. Required when using capture, capture_append, or depends_on.".into(),
+        },
+        BatchFieldInfo {
+            name: "args".into(),
+            field_type: "string[]".into(),
+            required: true,
+            description: "Command arguments (e.g. [\"users\", \"create-user\", \"--body\", \"{...}\"] or [\"users\", \"create-user\", \"--body-file\", \"/path/to/body.json\"]).".into(),
+        },
+        BatchFieldInfo {
+            name: "description".into(),
+            field_type: "string".into(),
+            required: false,
+            description: "Human-readable description of this operation.".into(),
+        },
+        BatchFieldInfo {
+            name: "headers".into(),
+            field_type: "map<string, string>".into(),
+            required: false,
+            description: "Custom HTTP headers for this operation.".into(),
+        },
+        BatchFieldInfo {
+            name: "capture".into(),
+            field_type: "map<string, string>".into(),
+            required: false,
+            description: "Extract scalar values from the response via JQ queries. Maps variable_name → jq_query (e.g. {\"user_id\": \".id\"}). Captured values are available as {{variable_name}} in subsequent operations.".into(),
+        },
+        BatchFieldInfo {
+            name: "capture_append".into(),
+            field_type: "map<string, string>".into(),
+            required: false,
+            description: "Append extracted values to a named list via JQ queries. Multiple operations can append to the same list. The list interpolates as a JSON array literal (e.g. [\"a\",\"b\"]).".into(),
+        },
+        BatchFieldInfo {
+            name: "depends_on".into(),
+            field_type: "string[]".into(),
+            required: false,
+            description: "Explicit dependency on other operations by id. This operation waits until all listed operations have completed. Dependencies can also be inferred from {{variable}} usage.".into(),
+        },
+        BatchFieldInfo {
+            name: "use_cache".into(),
+            field_type: "boolean".into(),
+            required: false,
+            description: "Enable response caching for this operation.".into(),
+        },
+        BatchFieldInfo {
+            name: "retry".into(),
+            field_type: "integer".into(),
+            required: false,
+            description: "Maximum retry attempts for this operation.".into(),
+        },
+        BatchFieldInfo {
+            name: "retry_delay".into(),
+            field_type: "string".into(),
+            required: false,
+            description: "Initial retry delay (e.g. \"500ms\", \"1s\").".into(),
+        },
+        BatchFieldInfo {
+            name: "retry_max_delay".into(),
+            field_type: "string".into(),
+            required: false,
+            description: "Maximum retry delay cap (e.g. \"30s\", \"1m\").".into(),
+        },
+        BatchFieldInfo {
+            name: "force_retry".into(),
+            field_type: "boolean".into(),
+            required: false,
+            description: "Allow retrying non-idempotent requests without an idempotency key.".into(),
+        },
+        BatchFieldInfo {
+            name: "body_file".into(),
+            field_type: "string".into(),
+            required: false,
+            description: "Read the request body from this file path instead of embedding JSON in args. Equivalent to --body-file in args; avoids quoting issues with large or complex JSON payloads. Mutually exclusive with --body or --body-file entries in args.".into(),
+        },
+    ]
+}
+
 /// Builds the static `BatchCapabilityInfo` included in every capability manifest.
 fn build_batch_capability_info() -> BatchCapabilityInfo {
     BatchCapabilityInfo {
         file_formats: vec!["json".into(), "yaml".into()],
         operation_schema: BatchOperationSchema {
-            fields: vec![
-                BatchFieldInfo {
-                    name: "id".into(),
-                    field_type: "string".into(),
-                    required: false,
-                    description: "Unique identifier. Required when using capture, capture_append, or depends_on.".into(),
-                },
-                BatchFieldInfo {
-                    name: "args".into(),
-                    field_type: "string[]".into(),
-                    required: true,
-                    description: "Command arguments (e.g. [\"users\", \"create-user\", \"--body\", \"{...}\"])".into(),
-                },
-                BatchFieldInfo {
-                    name: "description".into(),
-                    field_type: "string".into(),
-                    required: false,
-                    description: "Human-readable description of this operation.".into(),
-                },
-                BatchFieldInfo {
-                    name: "headers".into(),
-                    field_type: "map<string, string>".into(),
-                    required: false,
-                    description: "Custom HTTP headers for this operation.".into(),
-                },
-                BatchFieldInfo {
-                    name: "capture".into(),
-                    field_type: "map<string, string>".into(),
-                    required: false,
-                    description: "Extract scalar values from the response via JQ queries. Maps variable_name → jq_query (e.g. {\"user_id\": \".id\"}). Captured values are available as {{variable_name}} in subsequent operations.".into(),
-                },
-                BatchFieldInfo {
-                    name: "capture_append".into(),
-                    field_type: "map<string, string>".into(),
-                    required: false,
-                    description: "Append extracted values to a named list via JQ queries. Multiple operations can append to the same list. The list interpolates as a JSON array literal (e.g. [\"a\",\"b\"]).".into(),
-                },
-                BatchFieldInfo {
-                    name: "depends_on".into(),
-                    field_type: "string[]".into(),
-                    required: false,
-                    description: "Explicit dependency on other operations by id. This operation waits until all listed operations have completed. Dependencies can also be inferred from {{variable}} usage.".into(),
-                },
-                BatchFieldInfo {
-                    name: "use_cache".into(),
-                    field_type: "boolean".into(),
-                    required: false,
-                    description: "Enable response caching for this operation.".into(),
-                },
-                BatchFieldInfo {
-                    name: "retry".into(),
-                    field_type: "integer".into(),
-                    required: false,
-                    description: "Maximum retry attempts for this operation.".into(),
-                },
-                BatchFieldInfo {
-                    name: "retry_delay".into(),
-                    field_type: "string".into(),
-                    required: false,
-                    description: "Initial retry delay (e.g. \"500ms\", \"1s\").".into(),
-                },
-                BatchFieldInfo {
-                    name: "retry_max_delay".into(),
-                    field_type: "string".into(),
-                    required: false,
-                    description: "Maximum retry delay cap (e.g. \"30s\", \"1m\").".into(),
-                },
-                BatchFieldInfo {
-                    name: "force_retry".into(),
-                    field_type: "boolean".into(),
-                    required: false,
-                    description: "Allow retrying non-idempotent requests without an idempotency key.".into(),
-                },
-            ],
+            fields: batch_operation_fields(),
         },
         dependent_workflows: DependentWorkflowInfo {
             interpolation_syntax: "{{variable_name}}".into(),
