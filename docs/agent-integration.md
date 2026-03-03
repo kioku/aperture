@@ -233,6 +233,7 @@ For high-volume automation, batch processing executes multiple operations with c
 - `operations` is the only required field
 - `metadata` is optional, used for documentation
 - `id` within each operation is optional but recommended for tracking results
+- `body_file` on an operation reads the request body from a file path instead of embedding JSON in `args`. Equivalent to passing `--body-file <path>` in `args`, but avoids quoting issues with large or dynamically-generated payloads. Pass `"-"` to read from stdin. Mutually exclusive with `--body` or `--body-file` entries in `args`.
 
 **Execution:**
 
@@ -280,6 +281,7 @@ Three optional fields on each operation enable dependent workflows:
 | `capture` | `map<string, string>` | Extract scalar values from the response via JQ queries. Maps variable name → JQ query. |
 | `capture_append` | `map<string, string>` | Append extracted values to a named list via JQ queries. Enables fan-out/aggregate patterns. |
 | `depends_on` | `string[]` | Explicit dependency on other operations by `id`. |
+| `body_file` | `string` | Read the request body from this file path. Supports `{{variable}}` interpolation. Mutually exclusive with `--body`/`--body-file` in `args`. |
 
 Operations that use `capture`, `capture_append`, or `depends_on` **must** have an `id`.
 

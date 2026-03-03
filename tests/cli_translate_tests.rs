@@ -7,6 +7,7 @@ use aperture_cli::cli::translate::{
 };
 use aperture_cli::cli::{Cli, Commands, OutputFormat};
 use aperture_cli::config::models::GlobalConfig;
+use aperture_cli::engine::generator::generate_command_tree_with_flags;
 use clap::{Arg, ArgAction, Command};
 use std::collections::HashMap;
 
@@ -367,4 +368,189 @@ fn matches_to_operation_id_resolves_operation_aliases() {
     let operation_id =
         matches_to_operation_id(&spec, &matches).expect("operation resolution should succeed");
     assert_eq!(operation_id, "getUserById");
+}
+
+// ── --body-file tests ────────────────────────────────────────────────────────
+
+/// Build a minimal `ArgMatches` tree with `--body-file` for `extract_body` exercising.
+fn build_matches_with_body_file(path: &str) -> clap::ArgMatches {
+    Command::new("aperture")
+        .subcommand(
+            Command::new("users").subcommand(
+                Command::new("get-user-by-id")
+                    .arg(Arg::new("id").required(true))
+                    .arg(
+                        Arg::new("body")
+                            .long("body")
+                            .conflicts_with("body-file")
+                            .action(ArgAction::Set),
+                    )
+                    .arg(
+                        Arg::new("body-file")
+                            .long("body-file")
+                            .conflicts_with("body")
+                            .action(ArgAction::Set),
+                    ),
+            ),
+        )
+        .get_matches_from(vec![
+            "aperture",
+            "users",
+            "get-user-by-id",
+            "123",
+            "--body-file",
+            path,
+        ])
+}
+
+#[test]
+fn body_file_reads_json_from_file_path() {
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(tmp.path(), r#"{"key":"value"}"#).unwrap();
+    let path = tmp.path().to_str().unwrap().to_string();
+
+    let spec = build_spec(vec![cached_parameter("id", "path", "string", true)], true);
+    let matches = build_matches_with_body_file(&path);
+
+    let call = matches_to_operation_call(&spec, &matches).expect("body-file should resolve");
+    assert_eq!(call.body.as_deref(), Some(r#"{"key":"value"}"#));
+}
+
+#[test]
+fn body_file_rejects_invalid_json() {
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(tmp.path(), "not-json").unwrap();
+    let path = tmp.path().to_str().unwrap().to_string();
+
+    let spec = build_spec(vec![cached_parameter("id", "path", "string", true)], true);
+    let matches = build_matches_with_body_file(&path);
+
+    let err =
+        matches_to_operation_call(&spec, &matches).expect_err("invalid JSON should be rejected");
+    assert!(
+        err.to_string().contains("Invalid JSON body"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn body_file_returns_descriptive_error_for_missing_file() {
+    let spec = build_spec(vec![cached_parameter("id", "path", "string", true)], true);
+    let matches = build_matches_with_body_file("/nonexistent/path/body.json");
+
+    let err = matches_to_operation_call(&spec, &matches)
+        .expect_err("missing file should produce an error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("/nonexistent/path/body.json"),
+        "error should name the missing file; got: {msg}"
+    );
+}
+
+// ── Generator-level required-body regression ─────────────────────────────────
+
+/// Build a spec where the request body is required (`required: true`).
+fn build_spec_with_required_body() -> CachedSpec {
+    CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "events".to_string(),
+            description: None,
+            summary: None,
+            operation_id: "createEvent".to_string(),
+            method: "POST".to_string(),
+            path: "/events".to_string(),
+            parameters: vec![],
+            request_body: Some(CachedRequestBody {
+                content_type: "application/json".to_string(),
+                schema: "{\"type\":\"object\"}".to_string(),
+                required: true,
+                description: None,
+                example: None,
+            }),
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec!["events".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    }
+}
+
+#[test]
+fn body_file_accepted_when_body_is_required_in_spec() {
+    // Regression: when required=true, add_body_args used .required(true) on --body,
+    // causing clap to reject --body-file-only invocations even though the flag was
+    // present and valid. Fix uses required_unless_present("body-file").
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(tmp.path(), r#"{"event":"created"}"#).unwrap();
+    let path = tmp.path().to_str().unwrap();
+
+    let spec = build_spec_with_required_body();
+    let command = generate_command_tree_with_flags(&spec, false);
+
+    let matches = command
+        .try_get_matches_from(vec![
+            aperture_cli::constants::CLI_ROOT_COMMAND,
+            "events",
+            "create-event",
+            "--body-file",
+            path,
+        ])
+        .expect("--body-file should be accepted when body is required");
+
+    let call = matches_to_operation_call(&spec, &matches)
+        .expect("operation call should resolve with --body-file");
+    assert_eq!(call.body.as_deref(), Some(r#"{"event":"created"}"#));
+}
+
+#[test]
+fn required_body_rejected_when_neither_body_nor_body_file_provided() {
+    // Neither --body nor --body-file: clap should require at least one.
+    let spec = build_spec_with_required_body();
+    let command = generate_command_tree_with_flags(&spec, false);
+
+    let err = command
+        .try_get_matches_from(vec![
+            aperture_cli::constants::CLI_ROOT_COMMAND,
+            "events",
+            "create-event",
+        ])
+        .expect_err("missing required body should be rejected by clap");
+    assert!(
+        err.to_string().contains("body"),
+        "error should mention the missing body arg; got: {err}"
+    );
+}
+
+#[test]
+fn body_file_trims_trailing_newline() {
+    // Text editors commonly write a trailing newline. The extracted body must
+    // equal the equivalent --body inline string (no trailing whitespace).
+    let tmp = tempfile::NamedTempFile::new().expect("temp file");
+    std::fs::write(tmp.path(), "{\"key\":\"value\"}\n").unwrap();
+    let path = tmp.path().to_str().unwrap().to_string();
+
+    let spec = build_spec(vec![cached_parameter("id", "path", "string", true)], true);
+    let matches = build_matches_with_body_file(&path);
+
+    let call =
+        matches_to_operation_call(&spec, &matches).expect("trailing newline should be accepted");
+    assert_eq!(
+        call.body.as_deref(),
+        Some(r#"{"key":"value"}"#),
+        "body should have trailing whitespace stripped"
+    );
 }

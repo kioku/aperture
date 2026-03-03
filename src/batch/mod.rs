@@ -87,6 +87,13 @@ pub struct BatchOperation {
     /// Dependencies can also be inferred from `{{variable}}` usage in `args`.
     #[serde(default)]
     pub depends_on: Option<Vec<String>>,
+
+    /// Read the request body from this file path instead of embedding it in
+    /// `args`. Equivalent to passing `--body-file <path>` in `args`, but
+    /// avoids quoting issues with long or prose-heavy JSON payloads.
+    /// Mutually exclusive with a `--body` or `--body-file` entry in `args`.
+    #[serde(default)]
+    pub body_file: Option<String>,
 }
 
 /// Batch file format containing multiple operations
@@ -356,7 +363,8 @@ impl BatchProcessor {
             .as_deref()
             .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME);
 
-        // Interpolate variables in args — if this fails the operation cannot proceed
+        // Interpolate variables in args and body_file — if this fails the
+        // operation cannot proceed.
         let interpolated_args = match interpolation::interpolate_args(&operation.args, store, op_id)
         {
             Ok(args) => args,
@@ -371,8 +379,27 @@ impl BatchProcessor {
             }
         };
 
+        let interpolated_body_file = match operation
+            .body_file
+            .as_deref()
+            .map(|p| interpolation::interpolate_string(p, store, op_id))
+            .transpose()
+        {
+            Ok(path) => path,
+            Err(e) => {
+                return BatchOperationResult {
+                    operation: operation.clone(),
+                    success: false,
+                    error: Some(e.to_string()),
+                    response: None,
+                    duration: std::time::Duration::ZERO,
+                };
+            }
+        };
+
         let mut exec_op = operation.clone();
         exec_op.args = interpolated_args;
+        exec_op.body_file = interpolated_body_file;
         let operation_start = std::time::Instant::now();
 
         // Suppress output and skip jq_filter: capture needs JSON text that
@@ -599,12 +626,39 @@ impl BatchProcessor {
         use crate::cli::translate;
         use crate::invocation::ExecutionContext;
 
-        // Generate the command tree and parse operation args into ArgMatches
+        // Generate the command tree and parse operation args into ArgMatches.
+        // If `body_file` is set, append `--body-file <path>` so the generator
+        // arg and translate layer handle it uniformly.
+        //
+        // Guard: body_file must not coexist with --body or --body-file in args.
+        // --body conflicts are caught by clap, but a duplicate --body-file would
+        // silently pick the last value, making body_file win without any error.
+        // Both space-separated (`--body-file /p`) and equals-sign (`--body-file=/p`)
+        // forms must be detected since clap accepts either.
+        let body_field_conflicts_with_args = operation.body_file.is_some()
+            && operation.args.iter().any(|a| {
+                a == "--body-file"
+                    || a.starts_with("--body-file=")
+                    || a == "--body"
+                    || a.starts_with("--body=")
+            });
+        if body_field_conflicts_with_args {
+            return Err(Error::invalid_config(
+                "body_file field conflicts with --body or --body-file in args; use one or the other",
+            ));
+        }
+
         let command = generator::generate_command_tree_with_flags(spec, false);
+        let extra_body_file: Vec<String> = operation
+            .body_file
+            .as_deref()
+            .map(|p| vec!["--body-file".to_string(), p.to_string()])
+            .unwrap_or_default();
         let matches = command
             .try_get_matches_from(
                 std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
-                    .chain(operation.args.clone()),
+                    .chain(operation.args.clone())
+                    .chain(extra_body_file),
             )
             .map_err(|e| Error::invalid_command(crate::constants::CONTEXT_BATCH, e.to_string()))?;
 

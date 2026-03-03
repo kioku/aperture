@@ -585,3 +585,258 @@ async fn test_batch_execution_with_error_handling() {
     // Verify that the mock server received the expected requests
     mock_server.verify().await;
 }
+
+#[tokio::test]
+async fn test_batch_operation_body_file_field_is_parsed() {
+    // `body_file` is a convenience field in BatchOperation.
+    // Verify that the batch parser deserialises it and makes it available.
+    let batch_content = r#"{
+        "operations": [
+            {
+                "id": "create-event",
+                "args": ["events", "add"],
+                "body_file": "/tmp/payload.json"
+            }
+        ]
+    }"#;
+
+    let mut temp_file = NamedTempFile::new().unwrap();
+    temp_file.write_all(batch_content.as_bytes()).unwrap();
+    temp_file.flush().unwrap();
+
+    let batch_file = BatchProcessor::parse_batch_file(temp_file.path())
+        .await
+        .unwrap();
+
+    assert_eq!(batch_file.operations.len(), 1);
+    assert_eq!(
+        batch_file.operations[0].body_file.as_deref(),
+        Some("/tmp/payload.json"),
+        "body_file field should be deserialised from the batch file"
+    );
+}
+
+#[tokio::test]
+async fn test_batch_execution_with_body_file() {
+    // Verifies that a BatchOperation using `body_file` reads the JSON from the
+    // file and sends it as the HTTP request body, exercising the full path
+    // through execute_single_operation (not just deserialization).
+    let body_json = r#"{"name":"Alice","email":"alice@example.com"}"#;
+    let mut tmp = NamedTempFile::new().unwrap();
+    tmp.write_all(body_json.as_bytes()).unwrap();
+    tmp.flush().unwrap();
+
+    let mock_server = wiremock::MockServer::start().await;
+
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("POST"))
+                .and(wiremock::matchers::path("/users"))
+                .and(wiremock::matchers::body_json(serde_json::json!({
+                    "name": "Alice",
+                    "email": "alice@example.com"
+                })))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(201)
+                        .set_body_json(serde_json::json!({"id": 1}))
+                        .insert_header("content-type", constants::CONTENT_TYPE_JSON),
+                )
+                .expect(1),
+        )
+        .await;
+
+    let mut spec = create_test_spec();
+    spec.base_url = Some(mock_server.uri());
+    spec.servers = vec![mock_server.uri()];
+
+    let config = BatchConfig::default();
+    let processor = BatchProcessor::new(config);
+
+    let batch_file = BatchFile {
+        metadata: None,
+        operations: vec![BatchOperation {
+            id: Some("create-alice".to_string()),
+            args: vec!["users".to_string(), "create-user".to_string()],
+            body_file: Some(tmp.path().to_str().unwrap().to_string()),
+            ..Default::default()
+        }],
+    };
+
+    let result = processor
+        .execute_batch(
+            &spec,
+            batch_file,
+            None,
+            Some(&mock_server.uri()),
+            false,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .expect("batch execution with body_file should succeed");
+
+    assert_eq!(result.success_count, 1);
+    assert_eq!(result.failure_count, 0);
+
+    // Verify the mock received exactly one request with the expected body.
+    mock_server.verify().await;
+}
+
+#[tokio::test]
+async fn test_body_file_field_conflicts_with_body_file_in_args() {
+    // body_file field + --body-file in args would silently discard the args
+    // entry because execute_single_operation appends --body-file last and
+    // clap's Set action picks the last value. The guard must catch this early.
+    let body_json = r#"{"name":"Alice"}"#;
+    let mut tmp = NamedTempFile::new().unwrap();
+    tmp.write_all(body_json.as_bytes()).unwrap();
+    tmp.flush().unwrap();
+
+    let spec = create_test_spec();
+    let config = BatchConfig::default();
+    let processor = BatchProcessor::new(config);
+
+    let batch_file = BatchFile {
+        metadata: None,
+        operations: vec![BatchOperation {
+            id: Some("create-alice".to_string()),
+            // Both body_file field and --body-file in args: should be rejected.
+            args: vec![
+                "users".to_string(),
+                "create-user".to_string(),
+                "--body-file".to_string(),
+                "/other.json".to_string(),
+            ],
+            body_file: Some(tmp.path().to_str().unwrap().to_string()),
+            ..Default::default()
+        }],
+    };
+
+    let result = processor
+        .execute_batch(
+            &spec,
+            batch_file,
+            None,
+            None,
+            false,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .expect("batch should not hard-fail; conflict is reported per-operation");
+
+    assert_eq!(result.failure_count, 1, "conflict should produce a failure");
+    let err = result.results[0].error.as_deref().unwrap_or("");
+    assert!(
+        err.contains("conflicts"),
+        "error should mention the conflict; got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_body_file_path_interpolated_in_dependent_batch() {
+    // Exercises the dependent batch path where body_file contains a {{variable}}
+    // placeholder. The variable is captured from the first operation's response
+    // and interpolated into the file path before the second operation reads it.
+    //
+    // Op 1: GET /users/1  — captures `.role` as `user_role`
+    // Op 2: POST /users   — body_file points to a pre-created file whose name
+    //                       embeds {{user_role}}, exercising interpolate_string.
+
+    let role = "admin";
+    let tmp_dir = tempfile::tempdir().unwrap();
+
+    // Pre-create the file that body_file will resolve to after interpolation.
+    let resolved_path = tmp_dir.path().join(format!("body-{role}.json"));
+    std::fs::write(&resolved_path, r#"{"name":"Eve","role":"admin"}"#).unwrap();
+
+    // Template path contains the placeholder; the batch engine will substitute it.
+    let body_file_template = format!("{}/body-{{{{user_role}}}}.json", tmp_dir.path().display());
+
+    let mock_server = wiremock::MockServer::start().await;
+
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .and(wiremock::matchers::path("/users/1"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"id": 1, "role": role}))
+                        .insert_header("content-type", constants::CONTENT_TYPE_JSON),
+                )
+                .expect(1),
+        )
+        .await;
+
+    mock_server
+        .register(
+            wiremock::Mock::given(wiremock::matchers::method("POST"))
+                .and(wiremock::matchers::path("/users"))
+                .and(wiremock::matchers::body_json(serde_json::json!({
+                    "name": "Eve",
+                    "role": "admin"
+                })))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(201)
+                        .set_body_json(serde_json::json!({"id": 2}))
+                        .insert_header("content-type", constants::CONTENT_TYPE_JSON),
+                )
+                .expect(1),
+        )
+        .await;
+
+    let mut spec = create_test_spec();
+    spec.base_url = Some(mock_server.uri());
+    spec.servers = vec![mock_server.uri()];
+
+    let config = BatchConfig {
+        show_progress: false,
+        suppress_output: false,
+        ..BatchConfig::default()
+    };
+    let processor = BatchProcessor::new(config);
+
+    let batch_file = BatchFile {
+        metadata: None,
+        operations: vec![
+            BatchOperation {
+                id: Some("get-user".to_string()),
+                args: vec![
+                    "users".to_string(),
+                    "get-user-by-id".to_string(),
+                    "--id".to_string(),
+                    "1".to_string(),
+                ],
+                capture: Some(std::collections::HashMap::from([(
+                    "user_role".to_string(),
+                    ".role".to_string(),
+                )])),
+                ..Default::default()
+            },
+            BatchOperation {
+                id: Some("create-user".to_string()),
+                args: vec!["users".to_string(), "create-user".to_string()],
+                body_file: Some(body_file_template),
+                depends_on: Some(vec!["get-user".to_string()]),
+                ..Default::default()
+            },
+        ],
+    };
+
+    let result = processor
+        .execute_batch(
+            &spec,
+            batch_file,
+            None,
+            Some(&mock_server.uri()),
+            false,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .expect("dependent batch with body_file interpolation should succeed");
+
+    assert_eq!(result.success_count, 2, "both operations should succeed");
+    assert_eq!(result.failure_count, 0);
+    mock_server.verify().await;
+}
