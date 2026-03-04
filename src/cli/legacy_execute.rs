@@ -64,6 +64,7 @@ pub async fn execute_request(
         base_url: base_url.map(String::from),
         global_config: global_config.cloned(),
         server_var_args: translate::extract_server_var_args(matches),
+        auto_paginate: false,
     };
 
     // Execute using the new domain-type API

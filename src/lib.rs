@@ -14,6 +14,7 @@ pub mod interactive;
 pub mod invocation;
 pub mod logging;
 pub mod output;
+pub mod pagination;
 pub mod resilience;
 pub mod response_cache;
 pub mod search;

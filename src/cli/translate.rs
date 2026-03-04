@@ -322,6 +322,7 @@ pub fn cli_to_execution_context(
         base_url: None, // Resolved by BaseUrlResolver
         global_config,
         server_var_args: Vec::new(), // Populated from dynamic matches in the caller
+        auto_paginate: cli.auto_paginate,
     })
 }
 

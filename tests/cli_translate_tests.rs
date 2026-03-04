@@ -146,6 +146,7 @@ fn base_cli() -> Cli {
         no_cache: false,
         cache_ttl: None,
         positional_args: false,
+        auto_paginate: false,
         retry: None,
         retry_delay: None,
         retry_max_delay: None,

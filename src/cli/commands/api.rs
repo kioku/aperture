@@ -123,7 +123,27 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
     let mut ctx = crate::cli::translate::cli_to_execution_context(cli, global_config)?;
     ctx.server_var_args = crate::cli::translate::extract_server_var_args(&matches);
 
-    // Execute
+    // Route to pagination loop when --auto-paginate is set
+    if ctx.auto_paginate {
+        let mut stdout = std::io::stdout();
+        crate::pagination::execute_paginated(&spec, call, ctx, &mut stdout)
+            .await
+            .map_err(|e| {
+                let Error::Network(req_err) = &e else {
+                    return e;
+                };
+                if req_err.is_connect() {
+                    return e.with_context("Failed to connect to API server");
+                }
+                if req_err.is_timeout() {
+                    return e.with_context("Request timed out");
+                }
+                e
+            })?;
+        return Ok(());
+    }
+
+    // Single-page execute
     let result = executor::execute(&spec, call, ctx).await.map_err(|e| {
         let Error::Network(req_err) = &e else {
             return e;
