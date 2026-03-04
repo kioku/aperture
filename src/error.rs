@@ -1612,9 +1612,9 @@ mod tests {
         assert!(j.context.is_some());
     }
 
-    /// Status code 300 is not in the explicit match arms — context must be None.
-    /// wiremock redirects are followed by reqwest by default, so we use 418
-    /// (I'm a teapot) which reqwest will not follow and which hits the `_ =>` arm.
+    /// Exercises the `_ => None` fallback within the `is_status()` arm — context must be None.
+    /// Redirect codes (3xx) cannot be used because reqwest follows them automatically.
+    /// 418 (I'm a Teapot) is not followed by reqwest and is not matched by any explicit arm.
     #[tokio::test]
     async fn test_to_json_network_status_fallback_no_context() {
         let req_err = status_req_error(418).await;
