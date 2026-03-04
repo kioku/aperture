@@ -74,7 +74,7 @@ fn create_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
-            pagination: PaginationInfo::default(),
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "users".to_string(),
@@ -109,7 +109,7 @@ fn create_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
-            pagination: PaginationInfo::default(),
+                pagination: PaginationInfo::default(),
             },
         ],
     }
