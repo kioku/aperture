@@ -1,10 +1,15 @@
 //! Error display formatting for the CLI.
 //!
-//! `eprintln!` is used throughout this module intentionally. Routing through
-//! `tracing` would be incorrect: the subscriber may suppress output depending on
-//! the configured log level, and formatted output would gain unwanted structure
-//! (timestamps, targets, etc.). These call sites are excluded from the
-//! `no-println` lint via the rule's `ignores` list.
+//! Error output is written directly to `stderr` rather than routed through
+//! `tracing`. A tracing subscriber may suppress output depending on the
+//! configured log level and would add unwanted structure (timestamps, targets,
+//! etc.) to user-facing messages.
+//!
+//! The formatting logic lives in `write_error<W: Write>`, which accepts an
+//! arbitrary writer so tests can capture output without redirecting the
+//! process-global stderr. The public `print_error` function wires that writer
+//! to `stderr`. The `eprintln!` call in `print_error_with_json` is excluded
+//! from the `no-println` lint via the rule's `ignores` list.
 
 use crate::constants;
 use crate::error::Error;
