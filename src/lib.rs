@@ -21,3 +21,17 @@ pub mod shortcuts;
 pub mod spec;
 pub mod suggestions;
 pub mod utils;
+
+// Unit tests in src/ call reqwest::Client directly and have no access to
+// tests/test_helpers.rs. This block installs the platform provider once per
+// unit-test binary so those clients don't hit reqwest's no-provider panic.
+#[cfg(test)]
+mod test_crypto_init {
+    #[ctor::ctor]
+    fn init() {
+        #[cfg(not(windows))]
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        #[cfg(windows)]
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
+}

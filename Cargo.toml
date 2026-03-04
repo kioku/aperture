@@ -44,8 +44,7 @@ jaq-std = { version = "2.1.2", optional = true }
 oas3 = { version = "0.20", features = ["yaml-spec"], optional = true }
 openapiv3 = "2.2.0"
 regex = "1"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
-rustls = "0.23"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 serde = "1.0.228"
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
@@ -71,6 +70,14 @@ postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# ring: pure Rust/ASM — no bundled C library, eliminates aws-lc-sys on non-Windows builds.
+# aws_lc_rs: retained on Windows; ring requires NASM at build time on MSVC targets.
+[target.'cfg(not(windows))'.dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+
+[target.'cfg(windows)'.dependencies]
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
 
 [features]
 default = []
