@@ -38,14 +38,15 @@ jobs:
 
     outputs:
       # Each job exposes its byte count for the record job to collect.
-      # Output names must be static, so we use target-specific names via a
-      # per-matrix env var that maps to the output key below.
-      size_x86_64_linux_gnu:  ${{ steps.size.outputs.size_x86_64_linux_gnu }}
-      size_x86_64_linux_musl: ${{ steps.size.outputs.size_x86_64_linux_musl }}
-      size_aarch64_linux_gnu: ${{ steps.size.outputs.size_aarch64_linux_gnu }}
-      size_x86_64_darwin:     ${{ steps.size.outputs.size_x86_64_darwin }}
-      size_aarch64_darwin:    ${{ steps.size.outputs.size_aarch64_darwin }}
-      size_x86_64_windows:    ${{ steps.size.outputs.size_x86_64_windows }}
+      # Key names are the full target triple with non-alphanumeric chars replaced by '_',
+      # matching what the "Report size" steps write to GITHUB_OUTPUT via sed/replace.
+      size_x86_64_unknown_linux_gnu:  ${{ steps.size.outputs.size_x86_64_unknown_linux_gnu }}
+      size_x86_64_unknown_linux_musl: ${{ steps.size.outputs.size_x86_64_unknown_linux_musl }}
+      size_aarch64_unknown_linux_gnu: ${{ steps.size.outputs.size_aarch64_unknown_linux_gnu }}
+      size_x86_64_apple_darwin:       ${{ steps.size.outputs.size_x86_64_apple_darwin }}
+      size_aarch64_apple_darwin:      ${{ steps.size.outputs.size_aarch64_apple_darwin }}
+      # Windows uses a separate step ID (size_win) because the Unix step is skipped on Windows.
+      size_x86_64_pc_windows_msvc:    ${{ steps.size_win.outputs.size_x86_64_pc_windows_msvc }}
 
     steps:
       - uses: actions/checkout@v6
@@ -128,13 +129,12 @@ jobs:
         shell: bash
         env:
           VERSION:       ${{ steps.version.outputs.version }}
-          DATE:          ${{ github.event.repository.updated_at }}
-          SIZE_X86_64_LINUX_GNU:  ${{ needs.measure.outputs.size_x86_64_linux_gnu }}
-          SIZE_X86_64_LINUX_MUSL: ${{ needs.measure.outputs.size_x86_64_linux_musl }}
-          SIZE_AARCH64_LINUX_GNU: ${{ needs.measure.outputs.size_aarch64_linux_gnu }}
-          SIZE_X86_64_DARWIN:     ${{ needs.measure.outputs.size_x86_64_darwin }}
-          SIZE_AARCH64_DARWIN:    ${{ needs.measure.outputs.size_aarch64_darwin }}
-          SIZE_X86_64_WINDOWS:    ${{ needs.measure.outputs.size_x86_64_windows }}
+          SIZE_X86_64_LINUX_GNU:  ${{ needs.measure.outputs.size_x86_64_unknown_linux_gnu }}
+          SIZE_X86_64_LINUX_MUSL: ${{ needs.measure.outputs.size_x86_64_unknown_linux_musl }}
+          SIZE_AARCH64_LINUX_GNU: ${{ needs.measure.outputs.size_aarch64_unknown_linux_gnu }}
+          SIZE_X86_64_DARWIN:     ${{ needs.measure.outputs.size_x86_64_apple_darwin }}
+          SIZE_AARCH64_DARWIN:    ${{ needs.measure.outputs.size_aarch64_apple_darwin }}
+          SIZE_X86_64_WINDOWS:    ${{ needs.measure.outputs.size_x86_64_pc_windows_msvc }}
         run: |
           DATE=$(date -u +%Y-%m-%d)
           NEW_ENTRY=$(jq -n \
