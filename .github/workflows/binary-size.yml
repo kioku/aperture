@@ -33,18 +33,6 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
 
-    outputs:
-      # Each job exposes its byte count for the record job to collect.
-      # Key names are the full target triple with non-alphanumeric chars replaced by '_',
-      # matching what the "Report size" steps write to GITHUB_OUTPUT via sed/replace.
-      size_x86_64_unknown_linux_gnu:  ${{ steps.size.outputs.size_x86_64_unknown_linux_gnu }}
-      size_x86_64_unknown_linux_musl: ${{ steps.size.outputs.size_x86_64_unknown_linux_musl }}
-      size_aarch64_unknown_linux_gnu: ${{ steps.size.outputs.size_aarch64_unknown_linux_gnu }}
-      size_x86_64_apple_darwin:       ${{ steps.size.outputs.size_x86_64_apple_darwin }}
-      size_aarch64_apple_darwin:      ${{ steps.size.outputs.size_aarch64_apple_darwin }}
-      # Windows uses a separate step ID (size_win) because the Unix step is skipped on Windows.
-      size_x86_64_pc_windows_msvc:    ${{ steps.size_win.outputs.size_x86_64_pc_windows_msvc }}
-
     steps:
       - uses: actions/checkout@v6
 
@@ -64,8 +52,7 @@ jobs:
         if: "!matrix.cross"
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Report size (Unix)
-        id: size
+      - name: Record size (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -77,12 +64,9 @@ jobs:
           echo "| Binary | Bytes | MB |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|----|" >> $GITHUB_STEP_SUMMARY
           echo "| aperture | $SIZE | ${SIZE_MB} MB |" >> $GITHUB_STEP_SUMMARY
-          # Expose size under a stable key derived from the target triple.
-          KEY=$(echo "${{ matrix.target }}" | sed 's/[^a-z0-9]/_/g')
-          echo "size_${KEY}=${SIZE}" >> $GITHUB_OUTPUT
+          echo "{\"bytes\": $SIZE}" > measurement.json
 
-      - name: Report size (Windows)
-        id: size_win
+      - name: Record size (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -96,8 +80,13 @@ jobs:
           |--------|-------|----|
           | aperture.exe | $size | $sizeMB MB |
           "@ >> $env:GITHUB_STEP_SUMMARY
-          $key = "${{ matrix.target }}" -replace '[^a-z0-9]', '_'
-          "size_${key}=${size}" >> $env:GITHUB_OUTPUT
+          Set-Content -Path "measurement.json" -Value "{`"bytes`": $size}"
+
+      - name: Upload measurement
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-${{ matrix.target }}
+          path: measurement.json
 
   record:
     name: Update binary-sizes.json
@@ -111,6 +100,13 @@ jobs:
         with:
           # Push back to the triggering branch, not a detached HEAD.
           ref: ${{ github.ref }}
+
+      - name: Download all measurements
+        uses: actions/download-artifact@v4
+        with:
+          pattern: size-*
+          path: /tmp/measurements
+          merge-multiple: false
 
       - name: Resolve version
         id: version
@@ -126,23 +122,23 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          SIZE_X86_64_LINUX_GNU:  ${{ needs.measure.outputs.size_x86_64_unknown_linux_gnu }}
-          SIZE_X86_64_LINUX_MUSL: ${{ needs.measure.outputs.size_x86_64_unknown_linux_musl }}
-          SIZE_AARCH64_LINUX_GNU: ${{ needs.measure.outputs.size_aarch64_unknown_linux_gnu }}
-          SIZE_X86_64_DARWIN:     ${{ needs.measure.outputs.size_x86_64_apple_darwin }}
-          SIZE_AARCH64_DARWIN:    ${{ needs.measure.outputs.size_aarch64_apple_darwin }}
-          SIZE_X86_64_WINDOWS:    ${{ needs.measure.outputs.size_x86_64_pc_windows_msvc }}
         run: |
           DATE=$(date -u +%Y-%m-%d)
+          SIZE_GNU=$(jq  .bytes /tmp/measurements/size-x86_64-unknown-linux-gnu/measurement.json)
+          SIZE_MUSL=$(jq .bytes /tmp/measurements/size-x86_64-unknown-linux-musl/measurement.json)
+          SIZE_ARM=$(jq  .bytes /tmp/measurements/size-aarch64-unknown-linux-gnu/measurement.json)
+          SIZE_MAC=$(jq  .bytes /tmp/measurements/size-x86_64-apple-darwin/measurement.json)
+          SIZE_M1=$(jq   .bytes /tmp/measurements/size-aarch64-apple-darwin/measurement.json)
+          SIZE_WIN=$(jq  .bytes /tmp/measurements/size-x86_64-pc-windows-msvc/measurement.json)
           NEW_ENTRY=$(jq -n \
             --arg version  "$VERSION" \
             --arg date     "$DATE" \
-            --argjson gnu  "$SIZE_X86_64_LINUX_GNU" \
-            --argjson musl "$SIZE_X86_64_LINUX_MUSL" \
-            --argjson arm  "$SIZE_AARCH64_LINUX_GNU" \
-            --argjson mac  "$SIZE_X86_64_DARWIN" \
-            --argjson m1   "$SIZE_AARCH64_DARWIN" \
-            --argjson win  "$SIZE_X86_64_WINDOWS" \
+            --argjson gnu  "$SIZE_GNU" \
+            --argjson musl "$SIZE_MUSL" \
+            --argjson arm  "$SIZE_ARM" \
+            --argjson mac  "$SIZE_MAC" \
+            --argjson m1   "$SIZE_M1" \
+            --argjson win  "$SIZE_WIN" \
             '{
               version: $version,
               date: $date,
