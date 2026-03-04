@@ -2,6 +2,10 @@ name: Binary Size
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to record (e.g. 0.1.9). Defaults to Cargo.toml version.'
+        required: false
   push:
     branches:
       - '97/**'
@@ -32,6 +36,17 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
 
+    outputs:
+      # Each job exposes its byte count for the record job to collect.
+      # Output names must be static, so we use target-specific names via a
+      # per-matrix env var that maps to the output key below.
+      size_x86_64_linux_gnu:  ${{ steps.size.outputs.size_x86_64_linux_gnu }}
+      size_x86_64_linux_musl: ${{ steps.size.outputs.size_x86_64_linux_musl }}
+      size_aarch64_linux_gnu: ${{ steps.size.outputs.size_aarch64_linux_gnu }}
+      size_x86_64_darwin:     ${{ steps.size.outputs.size_x86_64_darwin }}
+      size_aarch64_darwin:    ${{ steps.size.outputs.size_aarch64_darwin }}
+      size_x86_64_windows:    ${{ steps.size.outputs.size_x86_64_windows }}
+
     steps:
       - uses: actions/checkout@v6
 
@@ -52,6 +67,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Report size (Unix)
+        id: size
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -63,8 +79,12 @@ jobs:
           echo "| Binary | Bytes | MB |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|----|" >> $GITHUB_STEP_SUMMARY
           echo "| aperture | $SIZE | ${SIZE_MB} MB |" >> $GITHUB_STEP_SUMMARY
+          # Expose size under a stable key derived from the target triple.
+          KEY=$(echo "${{ matrix.target }}" | sed 's/[^a-z0-9]/_/g')
+          echo "size_${KEY}=${SIZE}" >> $GITHUB_OUTPUT
 
       - name: Report size (Windows)
+        id: size_win
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -78,3 +98,81 @@ jobs:
           |--------|-------|----|
           | aperture.exe | $size | $sizeMB MB |
           "@ >> $env:GITHUB_STEP_SUMMARY
+          $key = "${{ matrix.target }}" -replace '[^a-z0-9]', '_'
+          "size_${key}=${size}" >> $env:GITHUB_OUTPUT
+
+  record:
+    name: Update binary-sizes.json
+    runs-on: ubuntu-latest
+    needs: measure
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Push back to the triggering branch, not a detached HEAD.
+          ref: ${{ github.ref }}
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Append measurement to binary-sizes.json
+        shell: bash
+        env:
+          VERSION:       ${{ steps.version.outputs.version }}
+          DATE:          ${{ github.event.repository.updated_at }}
+          SIZE_X86_64_LINUX_GNU:  ${{ needs.measure.outputs.size_x86_64_linux_gnu }}
+          SIZE_X86_64_LINUX_MUSL: ${{ needs.measure.outputs.size_x86_64_linux_musl }}
+          SIZE_AARCH64_LINUX_GNU: ${{ needs.measure.outputs.size_aarch64_linux_gnu }}
+          SIZE_X86_64_DARWIN:     ${{ needs.measure.outputs.size_x86_64_darwin }}
+          SIZE_AARCH64_DARWIN:    ${{ needs.measure.outputs.size_aarch64_darwin }}
+          SIZE_X86_64_WINDOWS:    ${{ needs.measure.outputs.size_x86_64_windows }}
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          NEW_ENTRY=$(jq -n \
+            --arg version  "$VERSION" \
+            --arg date     "$DATE" \
+            --argjson gnu  "$SIZE_X86_64_LINUX_GNU" \
+            --argjson musl "$SIZE_X86_64_LINUX_MUSL" \
+            --argjson arm  "$SIZE_AARCH64_LINUX_GNU" \
+            --argjson mac  "$SIZE_X86_64_DARWIN" \
+            --argjson m1   "$SIZE_AARCH64_DARWIN" \
+            --argjson win  "$SIZE_X86_64_WINDOWS" \
+            '{
+              version: $version,
+              date: $date,
+              targets: [
+                { target: "x86_64-unknown-linux-gnu",  provider: "ring",      bytes: $gnu  },
+                { target: "x86_64-unknown-linux-musl",  provider: "ring",      bytes: $musl },
+                { target: "aarch64-unknown-linux-gnu",  provider: "ring",      bytes: $arm  },
+                { target: "x86_64-apple-darwin",        provider: "ring",      bytes: $mac  },
+                { target: "aarch64-apple-darwin",       provider: "ring",      bytes: $m1   },
+                { target: "x86_64-pc-windows-msvc",     provider: "aws_lc_rs", bytes: $win  }
+              ]
+            }')
+          # Replace any existing entry for this version, then append the new one.
+          jq --argjson entry "$NEW_ENTRY" \
+            '.measurements = ([ .measurements[] | select(.version != $entry.version) ] + [$entry])' \
+            docs/binary-sizes.json > docs/binary-sizes.json.tmp
+          mv docs/binary-sizes.json.tmp docs/binary-sizes.json
+
+      - name: Commit updated binary-sizes.json
+        shell: bash
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/binary-sizes.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: record binary sizes for v${{ steps.version.outputs.version }}"
+            git push
+          fi
