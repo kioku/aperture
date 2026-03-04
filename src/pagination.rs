@@ -191,6 +191,9 @@ fn advance_cursor_strategy(
 
 /// Advances offset/page-number pagination. Returns `true` if the page was
 /// full (i.e., there may be more data).
+///
+/// `"offset"` and `"skip"` are zero-based record counts (advance by
+/// `page_len`); everything else (e.g. `"page"`) is a 1-based page number.
 fn advance_offset_strategy(
     call: &mut OperationCall,
     page_param: &str,
@@ -201,7 +204,8 @@ fn advance_offset_strategy(
         return false;
     }
 
-    let next_value = if page_param == "offset" {
+    let is_record_offset = page_param == "offset" || page_param == "skip";
+    let next_value = if is_record_offset {
         let current: usize = call
             .query_params
             .get(page_param)
@@ -496,5 +500,39 @@ mod tests {
         };
         let has_next = advance_offset_strategy(&mut call, "page", 3, 10);
         assert!(!has_next, "partial page should return false");
+    }
+
+    #[test]
+    fn test_advance_offset_strategy_skip_advances_by_page_len() {
+        let mut call = crate::invocation::OperationCall {
+            operation_id: "op".to_string(),
+            path_params: HashMap::new(),
+            query_params: HashMap::from([("skip".to_string(), "0".to_string())]),
+            header_params: HashMap::new(),
+            body: None,
+            custom_headers: vec![],
+        };
+        let has_next = advance_offset_strategy(&mut call, "skip", 10, 10);
+        assert!(has_next);
+        assert_eq!(call.query_params["skip"], "10");
+
+        let has_next = advance_offset_strategy(&mut call, "skip", 10, 10);
+        assert!(has_next);
+        assert_eq!(call.query_params["skip"], "20");
+    }
+
+    #[test]
+    fn test_advance_offset_strategy_offset_advances_by_page_len() {
+        let mut call = crate::invocation::OperationCall {
+            operation_id: "op".to_string(),
+            path_params: HashMap::new(),
+            query_params: HashMap::from([("offset".to_string(), "0".to_string())]),
+            header_params: HashMap::new(),
+            body: None,
+            custom_headers: vec![],
+        };
+        let has_next = advance_offset_strategy(&mut call, "offset", 5, 5);
+        assert!(has_next);
+        assert_eq!(call.query_params["offset"], "5");
     }
 }
