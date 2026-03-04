@@ -626,6 +626,26 @@ mod tests {
     // by a wiremock server, which is the only reliable way to obtain real
     // `reqwest::Error` values with specific characteristics.
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Wiremock responder that returns 503 for the first `fail_for` calls, then 200.
+    struct FailThenSucceed {
+        fail_for: usize,
+        count: Arc<AtomicUsize>,
+    }
+    impl wiremock::Respond for FailThenSucceed {
+        fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+            let n = self.count.fetch_add(1, Ordering::SeqCst);
+            if n < self.fail_for {
+                ResponseTemplate::new(503)
+            } else {
+                ResponseTemplate::new(200).set_body_string("done")
+            }
+        }
+    }
+
     fn no_jitter_config(max_attempts: usize) -> RetryConfig {
         RetryConfig {
             max_attempts,
@@ -673,10 +693,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_non_retryable_short_circuits() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
         use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let server = MockServer::start().await;
         // 400 is not retryable; the executor must stop after the first attempt.
@@ -709,25 +726,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_succeeds_after_transient_failures() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
         use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
-
-        struct FailThenSucceed {
-            fail_for: usize,
-            count: Arc<AtomicUsize>,
-        }
-        impl Respond for FailThenSucceed {
-            fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
-                let n = self.count.fetch_add(1, Ordering::SeqCst);
-                if n < self.fail_for {
-                    ResponseTemplate::new(503)
-                } else {
-                    ResponseTemplate::new(200).set_body_string("done")
-                }
-            }
-        }
 
         let server = MockServer::start().await;
         let count = Arc::new(AtomicUsize::new(0));
@@ -857,25 +856,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_tracking_records_history() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
         use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
-
-        struct FailThenSucceed {
-            fail_for: usize,
-            count: Arc<AtomicUsize>,
-        }
-        impl Respond for FailThenSucceed {
-            fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
-                let n = self.count.fetch_add(1, Ordering::SeqCst);
-                if n < self.fail_for {
-                    ResponseTemplate::new(503)
-                } else {
-                    ResponseTemplate::new(200).set_body_string("done")
-                }
-            }
-        }
 
         let server = MockServer::start().await;
         let count = Arc::new(AtomicUsize::new(0));
