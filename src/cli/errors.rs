@@ -8,8 +8,10 @@
 //! The formatting logic lives in `write_error<W: Write>`, which accepts an
 //! arbitrary writer so tests can capture output without redirecting the
 //! process-global stderr. The public `print_error` function wires that writer
-//! to `stderr`. The `eprintln!` call in `print_error_with_json` is excluded
-//! from the `no-println` lint via the rule's `ignores` list.
+//! to `stderr`. `write_error` is private; the test submodule accesses it
+//! directly as a child of this module. The `eprintln!` call in
+//! `print_error_with_json` is excluded from the `no-println` lint via the
+//! rule's `ignores` list.
 
 use crate::constants;
 use crate::error::Error;
@@ -38,7 +40,7 @@ pub fn print_error(error: &Error) {
 /// Extracted from `print_error` so that tests can capture output without
 /// redirecting the process-global stderr.
 #[allow(clippy::too_many_lines)]
-pub(crate) fn write_error<W: std::io::Write>(error: &Error, writer: &mut W) {
+fn write_error<W: std::io::Write>(error: &Error, writer: &mut W) {
     match error {
         Error::Internal {
             kind,
