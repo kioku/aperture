@@ -13,6 +13,31 @@ use crate::output::Output;
 use crate::shortcuts::{ResolutionResult, ShortcutResolver};
 use std::path::PathBuf;
 
+/// Adds connection/timeout context to network errors.
+fn enrich_network_error(e: Error) -> Error {
+    let Error::Network(ref req_err) = e else {
+        return e;
+    };
+    if req_err.is_connect() {
+        return e.with_context("Failed to connect to API server");
+    }
+    if req_err.is_timeout() {
+        return e.with_context("Request timed out");
+    }
+    e
+}
+
+/// Writes a structured JSON error as the final NDJSON line when `--json-errors` is active.
+fn emit_pagination_error_ndjson(cli: &Cli, writer: &mut impl std::io::Write, error: &Error) {
+    if !cli.json_errors {
+        return;
+    }
+    let Ok(json) = serde_json::to_string(&error.to_json()) else {
+        return;
+    };
+    let _ = writeln!(writer, "{json}");
+}
+
 /// Resolves the output format from dynamic matches vs CLI global flag.
 fn resolve_output_format(
     matches: &clap::ArgMatches,
@@ -126,36 +151,24 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
     // Route to pagination loop when --auto-paginate is set
     if ctx.auto_paginate {
         let mut stdout = std::io::stdout();
-        crate::pagination::execute_paginated(&spec, call, ctx, &mut stdout)
-            .await
-            .map_err(|e| {
-                let Error::Network(req_err) = &e else {
-                    return e;
-                };
-                if req_err.is_connect() {
-                    return e.with_context("Failed to connect to API server");
-                }
-                if req_err.is_timeout() {
-                    return e.with_context("Request timed out");
-                }
-                e
-            })?;
-        return Ok(());
+        let result = crate::pagination::execute_paginated(&spec, call, ctx, &mut stdout).await;
+        return match result {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let e = enrich_network_error(e);
+                // When --json-errors is active, emit the error as the final NDJSON
+                // line on stdout so pipeline consumers can detect mid-stream failure
+                // without inspecting stderr.
+                emit_pagination_error_ndjson(cli, &mut stdout, &e);
+                Err(e)
+            }
+        };
     }
 
     // Single-page execute
-    let result = executor::execute(&spec, call, ctx).await.map_err(|e| {
-        let Error::Network(req_err) = &e else {
-            return e;
-        };
-        if req_err.is_connect() {
-            return e.with_context("Failed to connect to API server");
-        }
-        if req_err.is_timeout() {
-            return e.with_context("Request timed out");
-        }
-        e
-    })?;
+    let result = executor::execute(&spec, call, ctx)
+        .await
+        .map_err(enrich_network_error)?;
 
     crate::cli::render::render_result(&result, &output_format, jq_filter)?;
     Ok(())
