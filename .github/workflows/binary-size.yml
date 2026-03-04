@@ -6,9 +6,6 @@ on:
       version:
         description: 'Version to record (e.g. 0.1.9). Defaults to Cargo.toml version.'
         required: false
-  push:
-    branches:
-      - '97/**'
 
 env:
   CARGO_TERM_COLOR: always
@@ -128,7 +125,7 @@ jobs:
       - name: Append measurement to binary-sizes.json
         shell: bash
         env:
-          VERSION:       ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
           SIZE_X86_64_LINUX_GNU:  ${{ needs.measure.outputs.size_x86_64_unknown_linux_gnu }}
           SIZE_X86_64_LINUX_MUSL: ${{ needs.measure.outputs.size_x86_64_unknown_linux_musl }}
           SIZE_AARCH64_LINUX_GNU: ${{ needs.measure.outputs.size_aarch64_unknown_linux_gnu }}
