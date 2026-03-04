@@ -1,5 +1,5 @@
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
 };
 use aperture_cli::engine::generator::generate_command_tree_with_flags;
 
@@ -69,6 +69,7 @@ fn create_test_spec_with_boolean_params() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -128,6 +129,7 @@ fn create_test_spec_with_examples_param() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -358,6 +360,7 @@ fn test_boolean_path_parameters() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     };

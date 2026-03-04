@@ -41,6 +41,42 @@ impl CachedSpec {
     }
 }
 
+/// Pagination strategy detected from the `OpenAPI` spec for an operation.
+///
+/// Stored at cache time to avoid re-parsing the spec on each request.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum PaginationStrategy {
+    /// No pagination detected; `--auto-paginate` will warn and execute once.
+    #[default]
+    None,
+    /// Cursor-based: a field in the response body carries the next-page token.
+    Cursor,
+    /// Offset/page-based: incrementing a `page` or `offset` query parameter.
+    Offset,
+    /// RFC 5988 `Link: <url>; rel="next"` header drives the next request URL.
+    LinkHeader,
+}
+
+/// Detected pagination configuration for a single operation.
+///
+/// All `Option` fields are serialized without `skip_serializing_if` so that
+/// postcard binary encoding remains position-stable across reads and writes.
+/// JSON compactness is handled by [`PaginationManifestInfo`] in the agent layer.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
+pub struct PaginationInfo {
+    /// How pagination is driven for this operation.
+    pub strategy: PaginationStrategy,
+    /// Response body field containing the next cursor (`cursor` strategy).
+    pub cursor_field: Option<String>,
+    /// Query parameter to inject the cursor into (`cursor` strategy).
+    pub cursor_param: Option<String>,
+    /// Query parameter to increment (`offset` strategy, e.g. `"page"`, `"offset"`).
+    pub page_param: Option<String>,
+    /// Query parameter carrying the page size (`offset` strategy).
+    pub limit_param: Option<String>,
+}
+
 /// Example usage for a command
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CommandExample {
@@ -67,7 +103,8 @@ pub struct SkippedEndpoint {
 /// Version 3: Added `server_variables` field to support `OpenAPI` server URL template variables
 /// Version 4: Added `example` field to `CachedResponse` for response schema examples
 /// Version 5: Added `display_group`, `display_name`, `aliases`, `hidden` fields for command mapping
-pub const CACHE_FORMAT_VERSION: u32 = 5;
+/// Version 6: Added `pagination` field to `CachedCommand` for auto-pagination support
+pub const CACHE_FORMAT_VERSION: u32 = 6;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -139,6 +176,9 @@ pub struct CachedCommand {
     /// Whether this command is hidden from help output, from command mapping (added in v5)
     #[serde(default)]
     pub hidden: bool,
+    /// Pagination configuration detected from the `OpenAPI` spec (added in v6)
+    #[serde(default)]
+    pub pagination: PaginationInfo,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

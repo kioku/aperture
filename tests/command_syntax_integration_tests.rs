@@ -1,6 +1,6 @@
 mod test_helpers;
 
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
 use aperture_cli::engine::executor::execute_request;
@@ -74,6 +74,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "posts".to_string(),
@@ -102,6 +103,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
         ],
         base_url: Some("https://api.example.com".to_string()),

@@ -13,7 +13,7 @@ mod test_helpers;
 /// 5. Work with kebab-case name conversion
 /// 6. Work alongside other parameter types
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
@@ -86,6 +86,7 @@ fn create_spec_with_boolean_headers(
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: HashMap::new(),
     }
@@ -373,6 +374,7 @@ async fn test_kebab_case_boolean_header_conversion() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: HashMap::new(),
     };
@@ -488,6 +490,7 @@ async fn test_boolean_header_with_query_and_path_params() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: HashMap::new(),
     };
@@ -607,6 +610,7 @@ async fn test_multiple_boolean_headers() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: HashMap::new(),
     };

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
+    CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, PaginationInfo,
 };
 use aperture_cli::constants;
 
@@ -74,5 +74,6 @@ pub fn test_command(name: &str, operation_id: &str, method: &str, path: &str) ->
         display_name: None,
         aliases: vec![],
         hidden: false,
+        pagination: PaginationInfo::default(),
     }
 }

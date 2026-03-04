@@ -699,6 +699,7 @@ impl BatchProcessor {
             base_url: base_url.map(String::from),
             global_config: global_config.cloned(),
             server_var_args: translate::extract_server_var_args(&matches),
+            auto_paginate: false,
         };
 
         // Execute

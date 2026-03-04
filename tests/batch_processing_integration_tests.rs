@@ -1,7 +1,7 @@
 mod test_helpers;
 
 use aperture_cli::batch::{BatchConfig, BatchFile, BatchMetadata, BatchOperation, BatchProcessor};
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
 use std::collections::HashMap;
@@ -44,6 +44,7 @@ fn create_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "users".to_string(),
@@ -72,6 +73,7 @@ fn create_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
         ],
         base_url: Some("https://api.example.com".to_string()),

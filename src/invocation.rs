@@ -64,6 +64,9 @@ pub struct ExecutionContext {
 
     /// Server template variable overrides (e.g., `["region=us", "env=prod"]`).
     pub server_var_args: Vec<String>,
+
+    /// If true, loop through all pages and stream results as NDJSON.
+    pub auto_paginate: bool,
 }
 
 /// Structured result returned by the executor. The CLI layer decides how

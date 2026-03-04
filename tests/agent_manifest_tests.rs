@@ -9,7 +9,7 @@ use aperture_cli::agent::{
 };
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
-    CachedSecurityScheme, CachedSpec,
+    CachedSecurityScheme, CachedSpec, PaginationInfo,
 };
 use aperture_cli::config::models::{ApiConfig, GlobalConfig};
 use aperture_cli::constants;
@@ -154,6 +154,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         },
         // Deprecated command with request body
         CachedCommand {
@@ -187,6 +188,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         },
         // Public endpoint with no auth
         CachedCommand {
@@ -214,6 +216,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         },
     ];
 
@@ -1023,6 +1026,7 @@ fn test_manifest_from_cached_with_response_schema() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -1165,6 +1169,7 @@ fn test_manifest_cached_status_code_fallback() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -1381,6 +1386,7 @@ fn test_manifest_from_openapi_includes_command_mappings() {
                 display_name: Some("fetch".to_string()),
                 aliases: vec!["get".to_string(), "show".to_string()],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "User Management".to_string(),
@@ -1401,6 +1407,7 @@ fn test_manifest_from_openapi_includes_command_mappings() {
                 display_name: None,
                 aliases: vec![],
                 hidden: true,
+                pagination: PaginationInfo::default(),
             },
         ],
         base_url: Some("https://api.example.com".to_string()),

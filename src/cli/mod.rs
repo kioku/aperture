@@ -163,6 +163,18 @@ pub struct Cli {
     )]
     pub positional_args: bool,
 
+    /// Automatically paginate through all pages, streaming results as NDJSON
+    ///
+    /// Detects the pagination strategy from the `OpenAPI` spec (cursor, offset,
+    /// or Link header) and loops until the last page, printing each page's
+    /// array items as newline-delimited JSON objects.
+    #[arg(
+        long,
+        global = true,
+        help = "Stream all pages as NDJSON (auto-detects pagination strategy)"
+    )]
+    pub auto_paginate: bool,
+
     /// Maximum number of retry attempts for failed requests
     #[arg(
         long,

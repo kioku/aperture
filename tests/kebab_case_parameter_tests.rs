@@ -1,6 +1,6 @@
 mod test_helpers;
 
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
 use aperture_cli::engine::executor::execute_request;
@@ -71,6 +71,7 @@ fn create_snake_case_spec() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: None,
         servers: vec!["https://api.example.com".to_string()],
@@ -242,6 +243,7 @@ fn test_mixed_case_parameters_normalization() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: None,
         servers: vec!["https://api.example.com".to_string()],

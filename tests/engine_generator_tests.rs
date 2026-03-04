@@ -1,5 +1,5 @@
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec,
+    CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, PaginationInfo,
 };
 use aperture_cli::constants;
 use aperture_cli::engine::generator::generate_command_tree;
@@ -91,6 +91,7 @@ macro_rules! cached_command {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }
     };
 }

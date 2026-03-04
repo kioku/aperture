@@ -182,7 +182,7 @@ fn validate_no_collisions(commands: &[CachedCommand]) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::models::CachedCommand;
+    use crate::cache::models::PaginationInfo;
     use crate::config::models::{CommandMapping, OperationMapping};
     use std::collections::HashMap;
 
@@ -206,6 +206,7 @@ mod tests {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }
     }
 

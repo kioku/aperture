@@ -3,7 +3,7 @@
 #![allow(clippy::match_same_arms)]
 #![allow(clippy::equatable_if_let)]
 
-use aperture_cli::cache::models::{CachedCommand, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedSpec, PaginationInfo};
 use aperture_cli::shortcuts::{ResolutionResult, ShortcutResolver};
 use std::collections::{BTreeMap, HashMap};
 
@@ -32,6 +32,7 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "pets".to_string(),
@@ -52,6 +53,7 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "users".to_string(),
@@ -72,6 +74,7 @@ fn create_test_spec_with_multiple_operations() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
         ],
         base_url: Some("https://api.petstore.com".to_string()),
@@ -320,6 +323,7 @@ fn test_shortcut_uses_display_names_in_full_command() {
             display_name: Some("fetch".to_string()),
             aliases: vec!["get".to_string()],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec![],

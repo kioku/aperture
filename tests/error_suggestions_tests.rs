@@ -1,4 +1,4 @@
-use aperture_cli::cache::models::{CachedCommand, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedSpec, PaginationInfo};
 use aperture_cli::suggestions::{
     suggest_auth_fix, suggest_parameter_format, suggest_similar_operations, suggest_valid_values,
 };
@@ -29,6 +29,7 @@ fn create_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "create-user".to_string(),
@@ -49,6 +50,7 @@ fn create_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "list-users".to_string(),
@@ -69,6 +71,7 @@ fn create_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
         ],
         base_url: Some("https://api.example.com".to_string()),

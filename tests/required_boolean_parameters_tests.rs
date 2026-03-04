@@ -13,7 +13,7 @@ mod test_helpers;
 /// 4. Required booleans work correctly when provided
 /// 5. Optional booleans continue to work as before (default to false when absent)
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
@@ -74,6 +74,7 @@ fn create_spec_with_required_boolean_path_param() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -118,6 +119,7 @@ fn create_spec_with_required_boolean_query_param() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -176,6 +178,7 @@ fn create_spec_with_mixed_boolean_params() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     }

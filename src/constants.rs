@@ -50,6 +50,34 @@ pub const CONTENT_TYPE_IDENTIFIER_TEXT: &str = "text";
 pub const EXT_APERTURE_SECRET: &str = "x-aperture-secret";
 pub const EXT_KEY_SOURCE: &str = "source";
 pub const EXT_KEY_NAME: &str = "name";
+pub const EXT_APERTURE_PAGINATION: &str = "x-aperture-pagination";
+
+// Pagination strategy identifiers (used in x-aperture-pagination and manifest output)
+pub const PAGINATION_STRATEGY_CURSOR: &str = "cursor";
+pub const PAGINATION_STRATEGY_OFFSET: &str = "offset";
+pub const PAGINATION_STRATEGY_LINK_HEADER: &str = "link-header";
+pub const PAGINATION_STRATEGY_NONE: &str = "none";
+
+/// Response body field names that indicate cursor-based pagination.
+/// Checked in order; the first match wins.
+pub const PAGINATION_CURSOR_FIELDS: &[&str] = &[
+    "next_cursor",
+    "after",
+    "continuation_token",
+    "next_page_token",
+    "nextCursor",
+    "nextPageToken",
+    "cursor",
+];
+
+/// Query parameter names that indicate offset/page-based pagination.
+pub const PAGINATION_PAGE_PARAMS: &[&str] = &["page", "offset", "skip"];
+
+/// Query parameter names that indicate a page-size limit (offset-based).
+pub const PAGINATION_LIMIT_PARAMS: &[&str] = &["limit", "per_page", "page_size", "pageSize"];
+
+/// HTTP `Link` header name (RFC 5988).
+pub const HEADER_LINK: &str = "link";
 
 // Authentication Schemes
 pub const AUTH_SCHEME_BEARER: &str = "bearer";

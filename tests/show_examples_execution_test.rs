@@ -6,7 +6,7 @@ mod test_helpers;
 /// by actually executing a command (not just parsing arguments). This catches bugs
 /// like incorrect Clap API usage or wrong `ArgMatches` level being passed to executor.
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
@@ -54,6 +54,7 @@ fn create_nested_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "getUser".to_string(),
@@ -99,6 +100,7 @@ fn create_nested_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
         ],
         security_schemes: std::collections::HashMap::new(),
@@ -293,6 +295,7 @@ async fn test_show_examples_does_not_require_valid_json_body() {
         display_name: None,
         aliases: vec![],
         hidden: false,
+        pagination: PaginationInfo::default(),
     });
 
     let cmd = generate_command_tree_with_flags(&spec, false);

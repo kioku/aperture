@@ -1,9 +1,11 @@
 // These lints are overly pedantic for test code
 #![allow(clippy::missing_panics_doc)]
+#![allow(clippy::too_many_lines)]
 #![allow(clippy::used_underscore_binding)]
 
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, CommandExample,
+    PaginationInfo,
 };
 use aperture_cli::docs::{DocumentationGenerator, HelpFormatter};
 use std::collections::{BTreeMap, HashMap};
@@ -72,6 +74,7 @@ fn create_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "users".to_string(),
@@ -106,6 +109,7 @@ fn create_test_spec() -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
         ],
     }

@@ -336,7 +336,20 @@ Aperture uses custom extensions to enrich the OpenAPI spec with agent-specific m
 
 ### 8.1. Pagination
 
-For v1.0, Aperture **does not** provide an automatic pagination mechanism. If an API's `list` operation includes pagination parameters (e.g., `page`, `limit`, `next_cursor`), they will be exposed as standard CLI flags. The agent or user is responsible for making subsequent calls with the appropriate pagination values. A generic helper is a high-priority roadmap item.
+Aperture provides automatic pagination via the `--auto-paginate` flag. When set, the CLI loops through all pages and streams each item as a line of NDJSON to stdout.
+
+**Strategy detection** happens once at spec-cache time (see `spec/transformer.rs`) using a 4-tier waterfall:
+
+1. **`x-aperture-pagination` extension** — explicit override on the operation object.
+2. **Link header** — RFC 5988 `Link` header declared in the operation's responses.
+3. **Cursor heuristic** — response schema contains a well-known cursor field (`next_cursor`, `after`, `continuation_token`, etc.).
+4. **Offset heuristic** — operation has `page`, `offset`, or `skip` query parameters.
+
+The detected `PaginationInfo` (strategy + field/param names) is stored in `CachedCommand` and exposed in the `--describe-json` manifest.
+
+**Runtime loop** (`src/pagination.rs`) calls `executor::execute` repeatedly, extracting items from each response (bare arrays or common wrapper fields: `data`, `items`, `results`, etc.) and writing one JSON object per line. A hard cap of 1000 pages prevents runaway loops.
+
+If no strategy is detected, `--auto-paginate` emits a warning and executes the operation once without looping.
 
 ### 8.2. Response Validation Failure Policy
 
@@ -350,7 +363,7 @@ Aperture is **strict by default**. If an API returns a successful (2xx) status c
 
 This SDD describes Product v1.0. Future development will focus on:
 
-- **v1.1:** Introduce a generic pagination helper (`--auto-paginate`). ~~Custom HTTP scheme support~~ (COMPLETED in v0.1.4).
+- **v1.1:** ~~Introduce a generic pagination helper (`--auto-paginate`)~~ (COMPLETED). ~~Custom HTTP scheme support~~ (COMPLETED in v0.1.4).
 - **v1.2:** ~~Add a `aperture config set <key> <value>` command for managing `config.toml`.~~ (COMPLETED in v0.1.7). Expand command validation and error reporting capabilities.
 - **v1.3:** ~~Request/response logging with security redaction~~ (COMPLETED in v0.1.8). ~~Custom command mapping~~ (COMPLETED in v0.1.8). ~~Executor/CLI decoupling for SDK path~~ (COMPLETED in v0.1.8).
 - **v2.0:** Introduce keychain integration as an additional `SecretSource`. Expand OpenAPI support to include more complex features.

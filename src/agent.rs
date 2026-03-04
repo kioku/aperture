@@ -296,6 +296,8 @@ pub struct CommandInfo {
     /// Whether this command is hidden from help output (from command mapping)
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub hidden: bool,
+    /// Pagination capability for this operation
+    pub pagination: PaginationManifestInfo,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -335,6 +337,67 @@ pub struct RequestBodyInfo {
     /// Example of the request body
     #[serde(skip_serializing_if = "Option::is_none")]
     pub example: Option<String>,
+}
+
+/// Pagination capability description for a single command in the manifest.
+///
+/// Agents use this to know whether `--auto-paginate` will work on this
+/// operation and how it will iterate.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PaginationManifestInfo {
+    /// Whether pagination is supported for this operation.
+    pub supported: bool,
+    /// The detected strategy: `"cursor"`, `"offset"`, `"link-header"`, or `"none"`.
+    pub strategy: String,
+    /// Response body field carrying the next cursor (cursor strategy only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor_field: Option<String>,
+    /// Query parameter injected with the cursor value (cursor strategy only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor_param: Option<String>,
+    /// Query parameter incremented per page (offset strategy only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_param: Option<String>,
+    /// Query parameter holding the page size (offset strategy only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_param: Option<String>,
+}
+
+impl Default for PaginationManifestInfo {
+    fn default() -> Self {
+        Self {
+            supported: false,
+            strategy: crate::constants::PAGINATION_STRATEGY_NONE.to_string(),
+            cursor_field: None,
+            cursor_param: None,
+            page_param: None,
+            limit_param: None,
+        }
+    }
+}
+
+impl PaginationManifestInfo {
+    /// Converts a cached `PaginationInfo` into manifest form.
+    fn from_cached(info: &crate::cache::models::PaginationInfo) -> Self {
+        use crate::cache::models::PaginationStrategy;
+        use crate::constants;
+
+        let (supported, strategy) = match info.strategy {
+            PaginationStrategy::None => (false, constants::PAGINATION_STRATEGY_NONE),
+            PaginationStrategy::Cursor => (true, constants::PAGINATION_STRATEGY_CURSOR),
+            PaginationStrategy::Offset => (true, constants::PAGINATION_STRATEGY_OFFSET),
+            PaginationStrategy::LinkHeader => (true, constants::PAGINATION_STRATEGY_LINK_HEADER),
+        };
+
+        Self {
+            supported,
+            strategy: strategy.to_string(),
+            cursor_field: info.cursor_field.clone(),
+            cursor_param: info.cursor_param.clone(),
+            page_param: info.page_param.clone(),
+            limit_param: info.limit_param.clone(),
+        }
+    }
 }
 
 /// Response schema information for successful responses (200/201/204)
@@ -526,6 +589,7 @@ pub fn generate_capability_manifest_from_openapi(
                 cmd_info.display_name.clone_from(&cached_cmd.display_name);
                 cmd_info.aliases.clone_from(&cached_cmd.aliases);
                 cmd_info.hidden = cached_cmd.hidden;
+                cmd_info.pagination = PaginationManifestInfo::from_cached(&cached_cmd.pagination);
             }
 
             // Determine the effective group key for manifest output
@@ -692,6 +756,7 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
         display_name: cached_command.display_name.clone(),
         aliases: cached_command.aliases.clone(),
         hidden: cached_command.hidden,
+        pagination: PaginationManifestInfo::from_cached(&cached_command.pagination),
     }
 }
 
@@ -903,6 +968,7 @@ fn convert_openapi_operation_to_info(
         display_name: None,
         aliases: vec![],
         hidden: false,
+        pagination: PaginationManifestInfo::default(),
     }
 }
 
@@ -1204,6 +1270,7 @@ mod tests {
     use super::*;
     use crate::cache::models::{
         CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
+        PaginationInfo,
     };
 
     #[test]
@@ -1274,6 +1341,7 @@ mod tests {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             }],
             base_url: Some("https://test-api.example.com".to_string()),
             servers: vec!["https://test-api.example.com".to_string()],
