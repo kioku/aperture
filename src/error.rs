@@ -1360,6 +1360,8 @@ mod tests {
         let err = Error::request_failed(reqwest::StatusCode::UNPROCESSABLE_ENTITY, "bad body");
         let j = err.to_json();
         assert_eq!(j.error_type, "HttpError");
+        assert!(j.message.contains("422") || j.message.contains("Unprocessable"));
+        assert!(j.message.contains("bad body"));
         assert!(j.context.is_some());
         assert!(j.details.is_some());
     }
