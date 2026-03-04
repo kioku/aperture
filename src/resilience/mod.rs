@@ -619,4 +619,283 @@ mod tests {
         assert!(!is_retryable_status(302));
         assert!(!is_retryable_status(304));
     }
+
+    // ---- execute_with_retry unit tests ----
+    //
+    // These tests drive the retry executor directly using a mock closure backed
+    // by a wiremock server, which is the only reliable way to obtain real
+    // `reqwest::Error` values with specific characteristics.
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Wiremock responder that returns 503 for the first `fail_for` calls, then 200.
+    struct FailThenSucceed {
+        fail_for: usize,
+        count: Arc<AtomicUsize>,
+    }
+    impl wiremock::Respond for FailThenSucceed {
+        fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+            let n = self.count.fetch_add(1, Ordering::SeqCst);
+            if n < self.fail_for {
+                ResponseTemplate::new(503)
+            } else {
+                ResponseTemplate::new(200).set_body_string("done")
+            }
+        }
+    }
+
+    fn no_jitter_config(max_attempts: usize) -> RetryConfig {
+        RetryConfig {
+            max_attempts,
+            initial_delay_ms: 1,
+            max_delay_ms: 10,
+            backoff_multiplier: 2.0,
+            jitter: false,
+        }
+    }
+
+    async fn make_request(client: &reqwest::Client, url: &str) -> Result<String, reqwest::Error> {
+        let resp = client.get(url).send().await?;
+        let resp = resp.error_for_status()?;
+        let body = resp.text().await?;
+        Ok(body)
+    }
+
+    #[tokio::test]
+    async fn test_execute_with_retry_immediate_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ok"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/ok", server.uri());
+        let config = no_jitter_config(3);
+
+        let result = execute_with_retry(&config, "test", || {
+            let client = client.clone();
+            let url = url.clone();
+            async move { make_request(&client, &url).await }
+        })
+        .await;
+
+        assert!(result.is_ok(), "should succeed on first attempt");
+        assert_eq!(result.unwrap(), "ok");
+    }
+
+    #[tokio::test]
+    async fn test_execute_with_retry_non_retryable_short_circuits() {
+        let server = MockServer::start().await;
+        // 400 is not retryable; the executor must stop after the first attempt.
+        Mock::given(method("GET"))
+            .and(path("/bad"))
+            .respond_with(ResponseTemplate::new(400))
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/bad", server.uri());
+        let config = no_jitter_config(3);
+        let call_count = Arc::new(AtomicUsize::new(0));
+
+        let cc = call_count.clone();
+        let result = execute_with_retry(&config, "test", || {
+            let client = client.clone();
+            let url = url.clone();
+            let cc = cc.clone();
+            async move {
+                cc.fetch_add(1, Ordering::SeqCst);
+                make_request(&client, &url).await
+            }
+        })
+        .await;
+
+        assert!(result.is_err(), "non-retryable error must propagate");
+        assert_eq!(call_count.load(Ordering::SeqCst), 1, "must not retry a 400");
+    }
+
+    #[tokio::test]
+    async fn test_execute_with_retry_succeeds_after_transient_failures() {
+        let server = MockServer::start().await;
+        let count = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("GET"))
+            .and(path("/flaky"))
+            .respond_with(FailThenSucceed {
+                fail_for: 2,
+                count: count.clone(),
+            })
+            .expect(3)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/flaky", server.uri());
+        let config = no_jitter_config(3);
+
+        let result = execute_with_retry(&config, "test", || {
+            let client = client.clone();
+            let url = url.clone();
+            async move { make_request(&client, &url).await }
+        })
+        .await;
+
+        assert!(result.is_ok(), "should succeed after two transient 503s");
+        assert_eq!(count.load(Ordering::SeqCst), 3, "must have made 3 calls");
+    }
+
+    #[tokio::test]
+    async fn test_execute_with_retry_exhaustion_returns_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/always-fail"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(3)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/always-fail", server.uri());
+        let config = no_jitter_config(3);
+
+        let result = execute_with_retry(&config, "test", || {
+            let client = client.clone();
+            let url = url.clone();
+            async move { make_request(&client, &url).await }
+        })
+        .await;
+
+        assert!(result.is_err(), "all attempts exhausted must return error");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("Retry limit exceeded"),
+            "error must mention retry exhaustion, got: {msg}"
+        );
+    }
+
+    // ---- execute_with_retry_tracking unit tests ----
+
+    #[tokio::test]
+    async fn test_execute_with_retry_tracking_immediate_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/ok"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/ok", server.uri());
+        let config = no_jitter_config(3);
+
+        let ret = execute_with_retry_tracking(&config, "test", || {
+            let client = client.clone();
+            let url = url.clone();
+            async move { make_request(&client, &url).await }
+        })
+        .await;
+
+        assert!(ret.result.is_ok());
+        assert_eq!(ret.total_attempts, 1);
+        assert!(
+            ret.retry_history.is_empty(),
+            "no retries on immediate success"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_with_retry_tracking_non_retryable_short_circuits() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/bad"))
+            .respond_with(ResponseTemplate::new(400))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/bad", server.uri());
+        let config = no_jitter_config(3);
+
+        let ret = execute_with_retry_tracking(&config, "test", || {
+            let client = client.clone();
+            let url = url.clone();
+            async move { make_request(&client, &url).await }
+        })
+        .await;
+
+        assert!(ret.result.is_err());
+        assert_eq!(ret.total_attempts, 1, "must stop after the first attempt");
+        assert!(
+            ret.retry_history.is_empty(),
+            "non-retryable error must not populate retry history"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_with_retry_tracking_records_history() {
+        let server = MockServer::start().await;
+        let count = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("GET"))
+            .and(path("/flaky"))
+            .respond_with(FailThenSucceed {
+                fail_for: 2,
+                count: count.clone(),
+            })
+            .expect(3)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/flaky", server.uri());
+        let config = no_jitter_config(3);
+
+        let ret = execute_with_retry_tracking(&config, "test-op", || {
+            let client = client.clone();
+            let url = url.clone();
+            async move { make_request(&client, &url).await }
+        })
+        .await;
+
+        assert!(ret.result.is_ok(), "should eventually succeed");
+        assert_eq!(ret.total_attempts, 3);
+        // Two failures → two retry history entries.
+        assert_eq!(ret.retry_history.len(), 2);
+        // History entries are 1-indexed attempt numbers.
+        assert_eq!(ret.retry_history[0].attempt, 1);
+        assert_eq!(ret.retry_history[1].attempt, 2);
+    }
+
+    #[tokio::test]
+    async fn test_execute_with_retry_tracking_exhaustion_total_attempts() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/always-fail"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(3)
+            .mount(&server)
+            .await;
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/always-fail", server.uri());
+        let config = no_jitter_config(3);
+
+        let ret = execute_with_retry_tracking(&config, "test-op", || {
+            let client = client.clone();
+            let url = url.clone();
+            async move { make_request(&client, &url).await }
+        })
+        .await;
+
+        assert!(ret.result.is_err(), "all attempts exhausted");
+        assert_eq!(ret.total_attempts, 3);
+        // Two retries recorded (the final exhausted attempt is not added to history).
+        assert_eq!(ret.retry_history.len(), 2);
+    }
 }

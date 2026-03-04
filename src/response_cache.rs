@@ -773,4 +773,222 @@ mod tests {
         // store(). Verify the file still exists on disk.
         assert!(cache_file.exists());
     }
+
+    // ---- Helper: store a minimal entry for a given (api_name, operation_id) ----
+
+    async fn store_entry(cache: &ResponseCache, api_name: &str, operation_id: &str) {
+        let key = CacheKey {
+            api_name: api_name.to_string(),
+            operation_id: operation_id.to_string(),
+            request_hash: format!("{api_name}_{operation_id}"),
+        };
+        let request_info = CachedRequestInfo {
+            method: constants::HTTP_METHOD_GET.to_string(),
+            url: "https://api.example.com/test".to_string(),
+            headers: HashMap::new(),
+            body_hash: None,
+        };
+        cache
+            .store(
+                &key,
+                r#"{"ok": true}"#,
+                200,
+                &HashMap::new(),
+                request_info,
+                Some(Duration::from_secs(300)),
+            )
+            .await
+            .unwrap();
+    }
+
+    // ---- clear_api_cache ----
+
+    #[tokio::test]
+    async fn test_clear_api_cache_removes_only_target_api() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+
+        // Populate two APIs with one entry each.
+        store_entry(&cache, "api_a", "op1").await;
+        store_entry(&cache, "api_b", "op2").await;
+
+        let cleared = cache.clear_api_cache("api_a").await.unwrap();
+        assert_eq!(
+            cleared, 1,
+            "should have cleared exactly one entry for api_a"
+        );
+
+        // api_b entry must survive.
+        let stats = cache.get_stats(Some("api_b")).await.unwrap();
+        assert_eq!(stats.total_entries, 1, "api_b entry must remain");
+
+        // api_a must be empty.
+        let stats_a = cache.get_stats(Some("api_a")).await.unwrap();
+        assert_eq!(stats_a.total_entries, 0, "api_a entries must be gone");
+    }
+
+    #[tokio::test]
+    async fn test_clear_api_cache_multiple_entries() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+
+        store_entry(&cache, "api_a", "op1").await;
+        store_entry(&cache, "api_a", "op2").await;
+        store_entry(&cache, "api_a", "op3").await;
+        store_entry(&cache, "api_b", "opX").await;
+
+        let cleared = cache.clear_api_cache("api_a").await.unwrap();
+        assert_eq!(cleared, 3, "should clear all three api_a entries");
+
+        let remaining = cache.get_stats(None).await.unwrap();
+        assert_eq!(remaining.total_entries, 1, "only api_b entry should remain");
+    }
+
+    // ---- clear_all ----
+
+    #[tokio::test]
+    async fn test_clear_all_empties_the_cache() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+
+        store_entry(&cache, "api_a", "op1").await;
+        store_entry(&cache, "api_b", "op2").await;
+        store_entry(&cache, "api_c", "op3").await;
+
+        let cleared = cache.clear_all().await.unwrap();
+        assert_eq!(cleared, 3);
+
+        let stats = cache.get_stats(None).await.unwrap();
+        assert_eq!(
+            stats.total_entries, 0,
+            "cache must be empty after clear_all"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_clear_all_on_empty_cache() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+
+        let cleared = cache.clear_all().await.unwrap();
+        assert_eq!(cleared, 0, "clearing an empty cache returns 0");
+    }
+
+    // ---- get_stats ----
+
+    #[tokio::test]
+    async fn test_get_stats_no_filter_counts_all_entries() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+
+        store_entry(&cache, "api_a", "op1").await;
+        store_entry(&cache, "api_b", "op2").await;
+
+        let stats = cache.get_stats(None).await.unwrap();
+        assert_eq!(stats.total_entries, 2);
+        assert_eq!(stats.valid_entries, 2);
+        assert_eq!(stats.expired_entries, 0);
+        assert!(stats.total_size_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_with_api_filter() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+
+        store_entry(&cache, "api_a", "op1").await;
+        store_entry(&cache, "api_a", "op2").await;
+        store_entry(&cache, "api_b", "opX").await;
+
+        let stats = cache.get_stats(Some("api_a")).await.unwrap();
+        assert_eq!(stats.total_entries, 2, "filter must restrict to api_a");
+        assert_eq!(stats.valid_entries, 2);
+
+        let stats_b = cache.get_stats(Some("api_b")).await.unwrap();
+        assert_eq!(stats_b.total_entries, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_counts_expired_entries() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+
+        let key = CacheKey {
+            api_name: "api_a".to_string(),
+            operation_id: "expiredOp".to_string(),
+            request_hash: "expiredhash".to_string(),
+        };
+        let request_info = CachedRequestInfo {
+            method: constants::HTTP_METHOD_GET.to_string(),
+            url: "https://api.example.com/test".to_string(),
+            headers: HashMap::new(),
+            body_hash: None,
+        };
+        cache
+            .store(
+                &key,
+                "body",
+                200,
+                &HashMap::new(),
+                request_info,
+                Some(Duration::from_secs(1)),
+            )
+            .await
+            .unwrap();
+
+        // Backdate cached_at so the entry is expired.
+        let cache_file = cache.config.cache_dir.join(key.to_filename());
+        let json = tokio::fs::read_to_string(&cache_file).await.unwrap();
+        let mut entry: CachedResponse = serde_json::from_str(&json).unwrap();
+        entry.cached_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 10; // 10 seconds in the past, past the 1-second TTL
+        tokio::fs::write(&cache_file, serde_json::to_string_pretty(&entry).unwrap())
+            .await
+            .unwrap();
+
+        // Add one valid entry for the same API.
+        store_entry(&cache, "api_a", "validOp").await;
+
+        let stats = cache.get_stats(Some("api_a")).await.unwrap();
+        assert_eq!(stats.total_entries, 2);
+        assert_eq!(stats.expired_entries, 1);
+        assert_eq!(stats.valid_entries, 1);
+    }
+
+    // ---- cleanup_old_entries temp-file sweep ----
+
+    /// Verify that a stale `.*.tmp` file left by a crashed atomic write is removed
+    /// by the next `store()` call, which internally runs `cleanup_old_entries`.
+    #[tokio::test]
+    async fn test_cleanup_removes_stale_tmp_files() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config.clone()).unwrap();
+
+        // Place a fake orphaned temp file in the cache directory.
+        let tmp_path = config.cache_dir.join(".orphaned.1a2b3c.tmp");
+        tokio::fs::write(&tmp_path, b"partial write").await.unwrap();
+        assert!(tmp_path.exists(), "temp file must exist before cleanup");
+
+        // Set the temp file's mtime to Unix epoch (well over 1 hour old) so
+        // the sweep considers it stale. FileTimes is used instead of `touch`
+        // to avoid platform-specific CLI syntax differences (GNU vs BSD).
+        let epoch = std::time::SystemTime::UNIX_EPOCH;
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&tmp_path)
+            .expect("temp file must be openable");
+        file.set_modified(epoch)
+            .expect("setting mtime to epoch must succeed");
+
+        // A store() call triggers cleanup_old_entries for "api_sweep".
+        store_entry(&cache, "api_sweep", "op1").await;
+
+        assert!(
+            !tmp_path.exists(),
+            "stale temp file must be removed by cleanup_old_entries"
+        );
+    }
 }
