@@ -974,10 +974,14 @@ mod tests {
 
         // Set the temp file's mtime to epoch (well over 1 hour old) so the
         // sweep considers it stale.
-        std::process::Command::new("touch")
+        let touch_status = std::process::Command::new("touch")
             .args(["-d", "1970-01-01", tmp_path.to_str().unwrap()])
             .status()
-            .expect("touch command must succeed on this platform");
+            .expect("touch must be available on this platform");
+        assert!(
+            touch_status.success(),
+            "touch -d must succeed to backdate the mtime"
+        );
 
         // A store() call triggers cleanup_old_entries for "api_sweep".
         store_entry(&cache, "api_sweep", "op1").await;
