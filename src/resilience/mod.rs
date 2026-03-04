@@ -772,9 +772,8 @@ mod tests {
 
         assert!(result.is_err(), "all attempts exhausted must return error");
         let msg = result.unwrap_err().to_string();
-        // Must mention the retry limit in the error message.
         assert!(
-            msg.contains("Retry limit exceeded") || msg.contains("retry"),
+            msg.contains("Retry limit exceeded"),
             "error must mention retry exhaustion, got: {msg}"
         );
     }
