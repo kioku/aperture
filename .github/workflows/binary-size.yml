@@ -1,0 +1,78 @@
+name: Binary Size
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - '97/**'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  measure:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked
+
+      - name: Build release (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Build release (native)
+        if: "!matrix.cross"
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Report size (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          BIN=target/${{ matrix.target }}/release/aperture
+          SIZE=$(wc -c < "$BIN")
+          SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
+          echo "### ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Binary | Bytes | MB |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|----|" >> $GITHUB_STEP_SUMMARY
+          echo "| aperture | $SIZE | ${SIZE_MB} MB |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Report size (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "target\${{ matrix.target }}\release\aperture.exe"
+          $size = (Get-Item $bin).Length
+          $sizeMB = [math]::Round($size / 1MB, 2)
+          @"
+          ### ${{ matrix.target }}
+          | Binary | Bytes | MB |
+          |--------|-------|----|
+          | aperture.exe | $size | $sizeMB MB |
+          "@ >> $env:GITHUB_STEP_SUMMARY
