@@ -200,6 +200,49 @@ Content-Type: application/json
 {"name": "Test User"}
 ```
 
+## Automatic Pagination
+
+The `--auto-paginate` flag loops through all pages of a paginated API endpoint and streams each item as a line of NDJSON (newline-delimited JSON) to stdout.
+
+```bash
+# Stream all users as NDJSON
+aperture --auto-paginate api myapi users list-users
+
+# Pipe to jq for processing
+aperture --auto-paginate api myapi issues list-issues | jq '.title'
+```
+
+**Strategy detection** is automatic — Aperture inspects the OpenAPI spec at cache time and selects the appropriate strategy:
+
+| Strategy | Detection | Loop Mechanism |
+|----------|-----------|----------------|
+| Cursor | Response schema contains `next_cursor`, `after`, `continuation_token`, etc. | Extracts cursor from response body, injects as query param |
+| Offset | Operation has `page`, `offset`, or `skip` query parameter | Increments page/offset param, stops on partial page |
+| Link header | Response declares a `Link` header | Follows RFC 5988 `rel="next"` URL |
+| None | No signals detected | Warns and executes once |
+
+To override detection, add `x-aperture-pagination` to the operation in the OpenAPI spec:
+
+```yaml
+paths:
+  /items:
+    get:
+      x-aperture-pagination:
+        strategy: cursor
+        cursor_field: next_cursor
+        cursor_param: after
+```
+
+**Discovering pagination support per operation:**
+
+```bash
+aperture api myapi --describe-json | jq '.commands[][] | select(.pagination.supported) | {name, pagination}'
+```
+
+**Mid-stream error handling:** when `--json-errors` is active and an error occurs after partial output has been emitted, a structured JSON error object is written as the final NDJSON line on stdout. Consumers can detect failure by checking the last line for an `error_type` key.
+
+**Batch interaction:** `--auto-paginate` is not applied inside batch operations. Each batch operation executes as a single request. To paginate within a batch workflow, use `capture` / `capture_append` with explicit cursor forwarding across dependent operations.
+
 ## Batch Operations
 
 For high-volume automation, batch processing executes multiple operations with concurrency control and rate limiting.
