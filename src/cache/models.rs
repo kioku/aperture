@@ -44,7 +44,7 @@ impl CachedSpec {
 /// Pagination strategy detected from the `OpenAPI` spec for an operation.
 ///
 /// Stored at cache time to avoid re-parsing the spec on each request.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum PaginationStrategy {
     /// No pagination detected; `--auto-paginate` will warn and execute once.

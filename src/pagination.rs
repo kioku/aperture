@@ -51,7 +51,7 @@ pub async fn execute_paginated(
         .find(|c| c.operation_id == call.operation_id)
         .ok_or_else(|| Error::operation_not_found(&call.operation_id))?;
 
-    let strategy = operation.pagination.strategy.clone();
+    let strategy = operation.pagination.strategy;
 
     if matches!(strategy, PaginationStrategy::None) {
         tracing::warn!(
@@ -123,7 +123,7 @@ pub async fn execute_paginated(
 
         // Determine next page coordinates; break if this was the last one.
         let has_next = advance_cursor(
-            &strategy,
+            strategy,
             &mut call,
             &json,
             &response_headers,
@@ -147,7 +147,7 @@ pub async fn execute_paginated(
 /// if there is a next page. Returns `false` when the caller should stop.
 #[allow(clippy::too_many_arguments)]
 fn advance_cursor(
-    strategy: &PaginationStrategy,
+    strategy: PaginationStrategy,
     call: &mut OperationCall,
     json: &Value,
     response_headers: &HashMap<String, String>,
