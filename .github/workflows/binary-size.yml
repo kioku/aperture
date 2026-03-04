@@ -58,6 +58,7 @@ jobs:
           BIN=target/${{ matrix.target }}/release/aperture
           SIZE=$(wc -c < "$BIN")
           SIZE_MB=$(echo "scale=2; $SIZE / 1048576" | bc)
+          echo "${{ matrix.target }}: $SIZE bytes (${SIZE_MB} MB)"
           echo "### ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
           echo "| Binary | Bytes | MB |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|----|" >> $GITHUB_STEP_SUMMARY
@@ -70,6 +71,7 @@ jobs:
           $bin = "target\${{ matrix.target }}\release\aperture.exe"
           $size = (Get-Item $bin).Length
           $sizeMB = [math]::Round($size / 1MB, 2)
+          Write-Host "${{ matrix.target }}: $size bytes ($sizeMB MB)"
           @"
           ### ${{ matrix.target }}
           | Binary | Bytes | MB |
