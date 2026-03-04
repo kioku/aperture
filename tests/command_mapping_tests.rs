@@ -4,7 +4,7 @@
 //! applied via `CommandMapping` correctly flow through to the generated CLI
 //! command tree.
 
-use aperture_cli::cache::models::{CachedCommand, CachedResponse, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedResponse, CachedSpec, PaginationInfo};
 use aperture_cli::config::mapping::apply_command_mapping;
 use aperture_cli::config::models::{CommandMapping, OperationMapping};
 use aperture_cli::constants;
@@ -39,6 +39,7 @@ fn make_command(tag: &str, operation_id: &str, method: &str, path: &str) -> Cach
         display_name: None,
         aliases: vec![],
         hidden: false,
+        pagination: PaginationInfo::default(),
     }
 }
 

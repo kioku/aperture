@@ -1,5 +1,5 @@
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec,
+    CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, PaginationInfo,
 };
 use aperture_cli::cli::translate::{
     cli_to_execution_context, extract_server_var_args, has_show_examples_flag,
@@ -67,6 +67,7 @@ fn build_spec(parameters: Vec<CachedParameter>, with_body: bool) -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -480,6 +481,7 @@ fn build_spec_with_required_body() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],

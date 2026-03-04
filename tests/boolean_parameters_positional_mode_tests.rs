@@ -13,7 +13,7 @@ mod test_helpers;
 /// 4. Mixed boolean and non-boolean parameters work together
 /// 5. URL substitution works correctly with boolean flags in positional mode
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
@@ -75,6 +75,7 @@ fn create_spec_with_mixed_path_params() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -134,6 +135,7 @@ fn create_spec_with_boolean_query_param() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     }
@@ -450,6 +452,7 @@ fn test_multiple_boolean_path_params_in_positional_mode() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     };
@@ -558,6 +561,7 @@ async fn test_mixed_boolean_flags_url_substitution_positional_mode() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         security_schemes: std::collections::HashMap::new(),
     };

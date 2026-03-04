@@ -1,6 +1,7 @@
 use crate::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
-    CachedSecurityScheme, CachedSpec, CommandExample, SkippedEndpoint, CACHE_FORMAT_VERSION,
+    CachedSecurityScheme, CachedSpec, CommandExample, PaginationInfo, PaginationStrategy,
+    SkippedEndpoint, CACHE_FORMAT_VERSION,
 };
 use crate::constants;
 use crate::error::Error;
@@ -340,6 +341,9 @@ impl SpecTransformer {
             request_body.as_ref(),
         );
 
+        // Detect pagination strategy from the spec.
+        let pagination = Self::detect_pagination(operation, spec);
+
         Ok(CachedCommand {
             name,
             description: operation.description.clone(),
@@ -362,6 +366,7 @@ impl SpecTransformer {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination,
         })
     }
 
@@ -898,12 +903,253 @@ impl SpecTransformer {
 
         examples
     }
+
+    /// Detects the pagination strategy for an operation from the `OpenAPI` spec.
+    ///
+    /// Priority order:
+    /// 1. Explicit `x-aperture-pagination` extension on the operation object.
+    /// 2. RFC 5988 `Link` header declared in the operation's successful responses.
+    /// 3. Cursor heuristic: response schema contains a known cursor field name.
+    /// 4. Offset heuristic: operation has a `page`, `offset`, or `skip` query parameter.
+    fn detect_pagination(operation: &Operation, spec: &OpenAPI) -> PaginationInfo {
+        // 1. Explicit x-aperture-pagination extension
+        let explicit = operation
+            .extensions
+            .get(constants::EXT_APERTURE_PAGINATION)
+            .and_then(parse_aperture_pagination_extension);
+        if let Some(info) = explicit {
+            return info;
+        }
+
+        // 2. RFC 5988 Link header declared in successful responses
+        if has_link_header_in_responses(&operation.responses, spec) {
+            return PaginationInfo {
+                strategy: PaginationStrategy::LinkHeader,
+                ..Default::default()
+            };
+        }
+
+        // 3. Cursor heuristic: check response schemas for well-known cursor fields
+        if let Some(info) = detect_cursor_from_responses(&operation.responses, spec) {
+            return info;
+        }
+
+        // 4. Offset heuristic: look for page/offset/skip query parameters
+        if let Some(info) = detect_offset_from_parameters(&operation.parameters, spec) {
+            return info;
+        }
+
+        PaginationInfo::default()
+    }
 }
 
 impl Default for SpecTransformer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ── Pagination detection helpers ─────────────────────────────────────────────
+
+/// Parses the `x-aperture-pagination` extension object into a `PaginationInfo`.
+///
+/// Expected JSON shape:
+/// ```json
+/// {
+///   "strategy": "cursor",
+///   "cursor_field": "next_cursor",
+///   "cursor_param": "after"
+/// }
+/// ```
+/// or for offset:
+/// ```json
+/// { "strategy": "offset", "page_param": "page", "limit_param": "limit" }
+/// ```
+fn parse_aperture_pagination_extension(value: &serde_json::Value) -> Option<PaginationInfo> {
+    let obj = value.as_object()?;
+    let strategy_str = obj.get("strategy")?.as_str()?;
+
+    match strategy_str {
+        constants::PAGINATION_STRATEGY_CURSOR => {
+            let cursor_field = obj
+                .get("cursor_field")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let cursor_param = obj
+                .get("cursor_param")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            // Default cursor_param to the cursor_field name when not specified
+            let cursor_param = cursor_param.or_else(|| cursor_field.clone());
+            Some(PaginationInfo {
+                strategy: PaginationStrategy::Cursor,
+                cursor_field,
+                cursor_param,
+                ..Default::default()
+            })
+        }
+        constants::PAGINATION_STRATEGY_OFFSET => {
+            let page_param = obj
+                .get("page_param")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let limit_param = obj
+                .get("limit_param")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            Some(PaginationInfo {
+                strategy: PaginationStrategy::Offset,
+                page_param,
+                limit_param,
+                ..Default::default()
+            })
+        }
+        constants::PAGINATION_STRATEGY_LINK_HEADER => Some(PaginationInfo {
+            strategy: PaginationStrategy::LinkHeader,
+            ..Default::default()
+        }),
+        _ => None,
+    }
+}
+
+/// Returns `true` if any successful response for this operation declares a
+/// `Link` header, which indicates RFC 5988 Link-header-based pagination.
+fn has_link_header_in_responses(responses: &openapiv3::Responses, _spec: &OpenAPI) -> bool {
+    constants::SUCCESS_STATUS_CODES.iter().any(|code| {
+        let status =
+            openapiv3::StatusCode::Code(code.parse().expect("hard-coded status codes are valid"));
+        responses
+            .responses
+            .get(&status)
+            .and_then(|r| {
+                let openapiv3::ReferenceOr::Item(resp) = r else {
+                    return None;
+                };
+                Some(
+                    resp.headers
+                        .keys()
+                        .any(|k| k.eq_ignore_ascii_case(constants::HEADER_LINK)),
+                )
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// Checks the response schemas for well-known cursor field names.
+///
+/// Returns `Some(PaginationInfo)` with `strategy = Cursor` on the first match.
+fn detect_cursor_from_responses(
+    responses: &openapiv3::Responses,
+    spec: &OpenAPI,
+) -> Option<PaginationInfo> {
+    for code in constants::SUCCESS_STATUS_CODES {
+        let status =
+            openapiv3::StatusCode::Code(code.parse().expect("hard-coded status codes are valid"));
+        let Some(response_ref) = responses.responses.get(&status) else {
+            continue;
+        };
+        let openapiv3::ReferenceOr::Item(response) = response_ref else {
+            continue;
+        };
+
+        // Prefer JSON; fall back to first available content type.
+        let content_type = response
+            .content
+            .contains_key(constants::CONTENT_TYPE_JSON)
+            .then_some(constants::CONTENT_TYPE_JSON)
+            .or_else(|| response.content.keys().next().map(String::as_str));
+        let Some(content_type) = content_type else {
+            continue;
+        };
+
+        let Some(media_type) = response.content.get(content_type) else {
+            continue;
+        };
+        let Some(schema_ref) = &media_type.schema else {
+            continue;
+        };
+
+        // Resolve $ref if necessary
+        let schema = match schema_ref {
+            openapiv3::ReferenceOr::Item(s) => std::borrow::Cow::Borrowed(s),
+            openapiv3::ReferenceOr::Reference { reference } => {
+                let Ok(resolved) = crate::spec::resolve_schema_reference(spec, reference) else {
+                    continue;
+                };
+                std::borrow::Cow::Owned(resolved)
+            }
+        };
+
+        // Look for cursor fields in the object's properties.
+        if let Some(found) = find_cursor_field_in_schema(&schema.schema_kind) {
+            return Some(PaginationInfo {
+                strategy: PaginationStrategy::Cursor,
+                cursor_field: Some(found.to_string()),
+                cursor_param: Some(found.to_string()),
+                ..Default::default()
+            });
+        }
+    }
+    None
+}
+
+/// Returns the first matching cursor field name found in an object schema, or `None`.
+fn find_cursor_field_in_schema(schema_kind: &openapiv3::SchemaKind) -> Option<&'static str> {
+    let openapiv3::SchemaKind::Type(openapiv3::Type::Object(obj)) = schema_kind else {
+        return None;
+    };
+    constants::PAGINATION_CURSOR_FIELDS
+        .iter()
+        .copied()
+        .find(|field| obj.properties.contains_key(*field))
+}
+
+/// Checks operation query parameters for offset/page-based pagination signals.
+fn detect_offset_from_parameters(
+    params: &[openapiv3::ReferenceOr<openapiv3::Parameter>],
+    spec: &OpenAPI,
+) -> Option<PaginationInfo> {
+    let mut page_param: Option<String> = None;
+    let mut limit_param: Option<String> = None;
+
+    for param_ref in params {
+        let param = match param_ref {
+            openapiv3::ReferenceOr::Item(p) => std::borrow::Cow::Borrowed(p),
+            openapiv3::ReferenceOr::Reference { reference } => {
+                let Ok(resolved) = crate::spec::resolve_parameter_reference(spec, reference) else {
+                    continue;
+                };
+                std::borrow::Cow::Owned(resolved)
+            }
+        };
+
+        // Only consider query parameters
+        let openapiv3::Parameter::Query { parameter_data, .. } = param.as_ref() else {
+            continue;
+        };
+
+        let name = parameter_data.name.as_str();
+        match () {
+            () if constants::PAGINATION_PAGE_PARAMS.contains(&name) => {
+                page_param = Some(name.to_string());
+            }
+            () if constants::PAGINATION_LIMIT_PARAMS.contains(&name) => {
+                limit_param = Some(name.to_string());
+            }
+            () => {}
+        }
+    }
+
+    if page_param.is_some() {
+        return Some(PaginationInfo {
+            strategy: PaginationStrategy::Offset,
+            page_param,
+            limit_param,
+            ..Default::default()
+        });
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -1513,5 +1759,172 @@ mod tests {
             }
             _ => panic!("Expected Validation error for depth limit"),
         }
+    }
+
+    // ── detect_pagination tests ────────────────────────────────────────────
+
+    fn make_operation_with_x_aperture_pagination(value: serde_json::Value) -> Operation {
+        let mut ext = indexmap::IndexMap::new();
+        ext.insert(constants::EXT_APERTURE_PAGINATION.to_string(), value);
+        Operation {
+            extensions: ext,
+            responses: Responses::default(),
+            ..Default::default()
+        }
+    }
+
+    fn make_spec() -> OpenAPI {
+        create_test_spec()
+    }
+
+    #[test]
+    fn test_detect_pagination_explicit_cursor_extension() {
+        let ext = serde_json::json!({
+            "strategy": "cursor",
+            "cursor_field": "next_cursor",
+            "cursor_param": "after"
+        });
+        let op = make_operation_with_x_aperture_pagination(ext);
+        let spec = make_spec();
+        let info = SpecTransformer::detect_pagination(&op, &spec);
+
+        assert_eq!(info.strategy, PaginationStrategy::Cursor);
+        assert_eq!(info.cursor_field.as_deref(), Some("next_cursor"));
+        assert_eq!(info.cursor_param.as_deref(), Some("after"));
+    }
+
+    #[test]
+    fn test_detect_pagination_explicit_cursor_extension_defaults_cursor_param() {
+        // When cursor_param is omitted, it defaults to cursor_field
+        let ext = serde_json::json!({ "strategy": "cursor", "cursor_field": "after" });
+        let op = make_operation_with_x_aperture_pagination(ext);
+        let spec = make_spec();
+        let info = SpecTransformer::detect_pagination(&op, &spec);
+
+        assert_eq!(info.strategy, PaginationStrategy::Cursor);
+        assert_eq!(info.cursor_field.as_deref(), Some("after"));
+        assert_eq!(info.cursor_param.as_deref(), Some("after"));
+    }
+
+    #[test]
+    fn test_detect_pagination_explicit_offset_extension() {
+        let ext = serde_json::json!({
+            "strategy": "offset",
+            "page_param": "page",
+            "limit_param": "limit"
+        });
+        let op = make_operation_with_x_aperture_pagination(ext);
+        let spec = make_spec();
+        let info = SpecTransformer::detect_pagination(&op, &spec);
+
+        assert_eq!(info.strategy, PaginationStrategy::Offset);
+        assert_eq!(info.page_param.as_deref(), Some("page"));
+        assert_eq!(info.limit_param.as_deref(), Some("limit"));
+    }
+
+    #[test]
+    fn test_detect_pagination_explicit_link_header_extension() {
+        let ext = serde_json::json!({ "strategy": "link-header" });
+        let op = make_operation_with_x_aperture_pagination(ext);
+        let spec = make_spec();
+        let info = SpecTransformer::detect_pagination(&op, &spec);
+
+        assert_eq!(info.strategy, PaginationStrategy::LinkHeader);
+    }
+
+    #[test]
+    fn test_detect_pagination_link_header_in_response() {
+        use openapiv3::{
+            Header, HeaderStyle, ParameterSchemaOrContent, Response, SchemaData, SchemaKind,
+            StringType, Type,
+        };
+        let header = Header {
+            description: None,
+            style: HeaderStyle::Simple,
+            required: false,
+            deprecated: None,
+            format: ParameterSchemaOrContent::Schema(ReferenceOr::Item(openapiv3::Schema {
+                schema_data: SchemaData::default(),
+                schema_kind: SchemaKind::Type(Type::String(StringType::default())),
+            })),
+            example: None,
+            examples: Default::default(),
+            extensions: Default::default(),
+        };
+        let mut response = Response::default();
+        response
+            .headers
+            .insert("Link".to_string(), ReferenceOr::Item(header));
+
+        let mut responses = Responses::default();
+        responses.responses.insert(
+            openapiv3::StatusCode::Code(200),
+            ReferenceOr::Item(response),
+        );
+
+        let op = Operation {
+            responses,
+            ..Default::default()
+        };
+        let spec = make_spec();
+        let info = SpecTransformer::detect_pagination(&op, &spec);
+
+        assert_eq!(info.strategy, PaginationStrategy::LinkHeader);
+    }
+
+    fn make_string_schema_param(name: &str) -> openapiv3::Parameter {
+        use openapiv3::{
+            Parameter, ParameterData, ParameterSchemaOrContent, SchemaData, SchemaKind, StringType,
+            Type,
+        };
+        Parameter::Query {
+            parameter_data: ParameterData {
+                name: name.to_string(),
+                description: None,
+                required: false,
+                deprecated: None,
+                format: ParameterSchemaOrContent::Schema(ReferenceOr::Item(openapiv3::Schema {
+                    schema_data: SchemaData::default(),
+                    schema_kind: SchemaKind::Type(Type::String(StringType::default())),
+                })),
+                example: None,
+                examples: Default::default(),
+                explode: None,
+                extensions: Default::default(),
+            },
+            allow_reserved: false,
+            style: Default::default(),
+            allow_empty_value: None,
+        }
+    }
+
+    #[test]
+    fn test_detect_pagination_offset_heuristic_page_param() {
+        let op = Operation {
+            parameters: vec![
+                ReferenceOr::Item(make_string_schema_param("page")),
+                ReferenceOr::Item(make_string_schema_param("limit")),
+            ],
+            responses: Responses::default(),
+            ..Default::default()
+        };
+        let spec = make_spec();
+        let info = SpecTransformer::detect_pagination(&op, &spec);
+
+        assert_eq!(info.strategy, PaginationStrategy::Offset);
+        assert_eq!(info.page_param.as_deref(), Some("page"));
+        assert_eq!(info.limit_param.as_deref(), Some("limit"));
+    }
+
+    #[test]
+    fn test_detect_pagination_no_strategy() {
+        let op = Operation {
+            responses: Responses::default(),
+            ..Default::default()
+        };
+        let spec = make_spec();
+        let info = SpecTransformer::detect_pagination(&op, &spec);
+
+        assert_eq!(info.strategy, PaginationStrategy::None);
     }
 }

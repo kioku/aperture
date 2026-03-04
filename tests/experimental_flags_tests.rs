@@ -1,4 +1,4 @@
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
 use aperture_cli::constants;
 use aperture_cli::engine::generator::{generate_command_tree, generate_command_tree_with_flags};
 use std::collections::HashMap;
@@ -52,6 +52,7 @@ fn create_test_spec() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],

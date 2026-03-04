@@ -1,6 +1,6 @@
 mod test_helpers;
 
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::{execute_request, RetryContext};
 use clap::{Arg, Command};
@@ -49,6 +49,7 @@ macro_rules! cached_command {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }
     };
 }

@@ -1,6 +1,6 @@
 mod test_helpers;
 
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
 use aperture_cli::engine::executor::execute;
 use aperture_cli::invocation::{ExecutionContext, ExecutionResult, OperationCall};
 use aperture_cli::response_cache::CacheConfig;
@@ -45,6 +45,7 @@ fn test_spec() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],

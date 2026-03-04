@@ -2,7 +2,7 @@
 #![allow(clippy::needless_collect)]
 
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
 };
 use aperture_cli::search::{format_search_results, CommandSearcher};
 use std::collections::{BTreeMap, HashMap};
@@ -45,6 +45,7 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 operation_id: "listUsers".to_string(),
@@ -65,6 +66,7 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 operation_id: "createUser".to_string(),
@@ -85,6 +87,7 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 operation_id: "getIssue".to_string(),
@@ -105,6 +108,7 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
         ],
         servers: vec![],
@@ -316,6 +320,7 @@ fn test_search_finds_by_display_name() {
             display_name: Some("fetch".to_string()),
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec![],
@@ -366,6 +371,7 @@ fn test_search_finds_by_alias() {
             display_name: None,
             aliases: vec!["lookup".to_string()],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec![],
@@ -409,6 +415,7 @@ fn test_search_suggestions_include_display_names() {
             display_name: Some("fetch".to_string()),
             aliases: vec!["show".to_string()],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec![],

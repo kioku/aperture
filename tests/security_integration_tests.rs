@@ -2,6 +2,7 @@ mod test_helpers;
 
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
+    PaginationInfo,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
@@ -50,6 +51,7 @@ macro_rules! cached_command {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }
     };
 }

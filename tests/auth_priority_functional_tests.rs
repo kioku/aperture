@@ -2,7 +2,7 @@ mod test_helpers;
 
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
-    CACHE_FORMAT_VERSION,
+    PaginationInfo, CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
@@ -109,6 +109,7 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: None,
         servers: vec![],
@@ -591,6 +592,7 @@ async fn test_no_authentication_configured() {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: None,
         servers: vec![],

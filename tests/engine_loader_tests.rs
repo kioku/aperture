@@ -1,4 +1,6 @@
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedResponse, CachedSpec};
+use aperture_cli::cache::models::{
+    CachedCommand, CachedParameter, CachedResponse, CachedSpec, PaginationInfo,
+};
 use aperture_cli::constants;
 use aperture_cli::engine::loader::load_cached_spec;
 use aperture_cli::error::{Error, ErrorKind};
@@ -47,6 +49,7 @@ fn create_test_cached_spec() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],

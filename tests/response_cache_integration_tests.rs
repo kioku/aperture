@@ -2,6 +2,7 @@ mod test_helpers;
 
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
+    PaginationInfo,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
@@ -49,6 +50,7 @@ fn create_test_spec() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],
@@ -445,6 +447,7 @@ fn create_authenticated_test_spec() -> CachedSpec {
             display_name: None,
             aliases: vec![],
             hidden: false,
+            pagination: PaginationInfo::default(),
         }],
         base_url: Some("https://api.example.com".to_string()),
         servers: vec!["https://api.example.com".to_string()],

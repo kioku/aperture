@@ -1,4 +1,4 @@
-use aperture_cli::cache::models::{CachedCommand, CachedResponse, CachedSpec};
+use aperture_cli::cache::models::{CachedCommand, CachedResponse, CachedSpec, PaginationInfo};
 use std::collections::HashMap;
 
 mod test_helpers;
@@ -33,6 +33,7 @@ fn test_cached_spec_serialization_deserialization() {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
             CachedCommand {
                 name: "create-user".to_string(),
@@ -59,6 +60,7 @@ fn test_cached_spec_serialization_deserialization() {
                 display_name: None,
                 aliases: vec![],
                 hidden: false,
+                pagination: PaginationInfo::default(),
             },
         ],
         base_url: Some("https://api.example.com".to_string()),
@@ -75,4 +77,60 @@ fn test_cached_spec_serialization_deserialization() {
     // Test deserialization
     let deserialized: CachedSpec = serde_json::from_str(&serialized).unwrap();
     assert_eq!(spec, deserialized);
+}
+
+#[test]
+fn test_postcard_roundtrip_with_pagination() {
+    use aperture_cli::cache::models::*;
+
+    let spec = CachedSpec {
+        cache_format_version: CACHE_FORMAT_VERSION,
+        name: "test".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "users".to_string(),
+            description: None,
+            summary: None,
+            operation_id: "listUsers".to_string(),
+            method: "GET".to_string(),
+            path: "/users".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec![],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
+            pagination: PaginationInfo {
+                strategy: PaginationStrategy::Cursor,
+                cursor_field: Some("next_cursor".to_string()),
+                cursor_param: Some("after".to_string()),
+                page_param: None,
+                limit_param: None,
+            },
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec!["https://api.example.com".to_string()],
+        security_schemes: std::collections::HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: std::collections::HashMap::new(),
+    };
+
+    let bytes = postcard::to_allocvec(&spec).expect("postcard serialize should not fail");
+    let recovered: CachedSpec =
+        postcard::from_bytes(&bytes).expect("postcard deserialize should not fail");
+    assert_eq!(recovered.name, "test");
+    assert_eq!(
+        recovered.commands[0].pagination.strategy,
+        PaginationStrategy::Cursor
+    );
+    assert_eq!(
+        recovered.commands[0].pagination.cursor_field.as_deref(),
+        Some("next_cursor")
+    );
 }
