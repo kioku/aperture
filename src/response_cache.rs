@@ -972,16 +972,16 @@ mod tests {
         tokio::fs::write(&tmp_path, b"partial write").await.unwrap();
         assert!(tmp_path.exists(), "temp file must exist before cleanup");
 
-        // Set the temp file's mtime to epoch (well over 1 hour old) so the
-        // sweep considers it stale.
-        let touch_status = std::process::Command::new("touch")
-            .args(["-d", "1970-01-01", tmp_path.to_str().unwrap()])
-            .status()
-            .expect("touch must be available on this platform");
-        assert!(
-            touch_status.success(),
-            "touch -d must succeed to backdate the mtime"
-        );
+        // Set the temp file's mtime to Unix epoch (well over 1 hour old) so
+        // the sweep considers it stale. FileTimes is used instead of `touch`
+        // to avoid platform-specific CLI syntax differences (GNU vs BSD).
+        let epoch = std::time::SystemTime::UNIX_EPOCH;
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&tmp_path)
+            .expect("temp file must be openable");
+        file.set_modified(epoch)
+            .expect("setting mtime to epoch must succeed");
 
         // A store() call triggers cleanup_old_entries for "api_sweep".
         store_entry(&cache, "api_sweep", "op1").await;
