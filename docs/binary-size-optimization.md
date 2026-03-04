@@ -12,7 +12,18 @@ This document tracks the binary size history and optimization strategies for Ape
 | + Compiler optimizations | 4.0 MB | Release profile: `opt-level = "z"`, LTO, strip |
 | + native-tls → reqwest 0.12 default | 3.6 MB | Removed bundled OpenSSL |
 | reqwest 0.12 → 0.13 (aws-lc-rs) | 7.6 MB | aws-lc-rs became default rustls provider; aws-lc-sys contributes ~1.2 MB of compiled C |
-| + Platform-conditional TLS (current) | **5.8 MB** | ring on non-Windows eliminates aws-lc-sys |
+| v0.1.9: platform-conditional TLS | see below | ring on non-Windows eliminates aws-lc-sys |
+
+### v0.1.9 per-platform measurements
+
+| Target | Provider | Size |
+|--------|----------|------|
+| `x86_64-unknown-linux-gnu` | ring | 5.79 MB |
+| `x86_64-unknown-linux-musl` | ring | 5.91 MB |
+| `aarch64-unknown-linux-gnu` | ring | 4.92 MB |
+| `x86_64-apple-darwin` | ring | 4.84 MB |
+| `aarch64-apple-darwin` | ring | 3.91 MB |
+| `x86_64-pc-windows-msvc` | aws_lc_rs | 5.63 MB |
 
 ## Applied Optimizations
 
@@ -61,7 +72,7 @@ let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 ### 3. Build Profiles
 
 ```bash
-# Default release (5.8 MB on Linux x86_64)
+# Default release (5.79 MB on x86_64-unknown-linux-gnu as of v0.1.9)
 cargo build --release
 
 # Minimal profile — same flags, explicit alias
