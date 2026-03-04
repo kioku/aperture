@@ -148,6 +148,13 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
     let mut ctx = crate::cli::translate::cli_to_execution_context(cli, global_config)?;
     ctx.server_var_args = crate::cli::translate::extract_server_var_args(&matches);
 
+    if ctx.auto_paginate && jq_filter.is_some() {
+        tracing::warn!(
+            "--jq is ignored with --auto-paginate; \
+             pipe NDJSON output through an external jq process instead"
+        );
+    }
+
     // Route to pagination loop when --auto-paginate is set
     if ctx.auto_paginate {
         let mut stdout = std::io::stdout();

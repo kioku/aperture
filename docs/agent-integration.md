@@ -241,6 +241,8 @@ aperture api myapi --describe-json | jq '.commands[][] | select(.pagination.supp
 
 **Mid-stream error handling:** when `--json-errors` is active and an error occurs after partial output has been emitted, a structured JSON error object is written as the final NDJSON line on stdout. Consumers can detect failure by checking the last line for an `error_type` key.
 
+**Flag interactions:** `--jq` and `--format` are ignored when `--auto-paginate` is active (a warning is emitted for `--jq`). Output is always NDJSON — apply jq externally via pipe: `aperture --auto-paginate api myapi users list | jq '.name'`.
+
 **Batch interaction:** `--auto-paginate` is not applied inside batch operations. Each batch operation executes as a single request. To paginate within a batch workflow, use `capture` / `capture_append` with explicit cursor forwarding across dependent operations.
 
 ## Batch Operations
