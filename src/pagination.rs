@@ -233,10 +233,7 @@ fn advance_link_header_strategy(
         .find(|(k, _)| k.to_lowercase() == constants::HEADER_LINK)
         .map_or("", |(_, v)| v.as_str());
 
-    parse_link_next(link_value).is_some_and(|next_url| {
-        apply_next_url(call, &next_url);
-        true
-    })
+    parse_link_next(link_value).is_some_and(|next_url| apply_next_url(call, &next_url))
 }
 
 // ── Item extraction ──────────────────────────────────────────────────────
@@ -310,7 +307,10 @@ pub fn parse_link_next(header_value: &str) -> Option<String> {
 
 /// Updates `call.query_params` from the query string of a fully-qualified next
 /// URL, keeping the rest of the call unchanged.
-fn apply_next_url(call: &mut OperationCall, next_url: &str) {
+///
+/// Returns `true` if the call was successfully updated with new parameters,
+/// `false` if the URL had no usable query string (caller should stop paginating).
+fn apply_next_url(call: &mut OperationCall, next_url: &str) -> bool {
     let query_str = if let Some(pos) = next_url.find('?') {
         &next_url[pos + 1..]
     } else {
@@ -318,7 +318,7 @@ fn apply_next_url(call: &mut OperationCall, next_url: &str) {
             next_url,
             "Link next URL has no query string; stopping pagination"
         );
-        return;
+        return false;
     };
 
     let new_params: HashMap<String, String> = query_str
@@ -334,9 +334,12 @@ fn apply_next_url(call: &mut OperationCall, next_url: &str) {
         })
         .collect();
 
-    if !new_params.is_empty() {
-        call.query_params = new_params;
+    if new_params.is_empty() {
+        return false;
     }
+
+    call.query_params = new_params;
+    true
 }
 
 // ── Parameter detection heuristics ───────────────────────────────────────
