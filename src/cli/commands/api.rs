@@ -154,6 +154,9 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
              pipe NDJSON output through an external jq process instead"
         );
     }
+    if ctx.auto_paginate && !matches!(output_format, crate::cli::OutputFormat::Json) {
+        tracing::warn!("--format is ignored with --auto-paginate; output is always NDJSON");
+    }
 
     // Route to pagination loop when --auto-paginate is set
     if ctx.auto_paginate {
