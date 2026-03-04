@@ -9,6 +9,9 @@ use aperture_cli::constants;
 /// This runs once per test binary when `test_helpers` is included.
 #[ctor::ctor]
 fn init_crypto_provider() {
+    #[cfg(not(windows))]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    #[cfg(windows)]
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 

@@ -10,6 +10,9 @@ use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() {
+    #[cfg(not(windows))]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    #[cfg(windows)]
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let cli = Cli::parse();
     aperture_cli::cli::tracing_init::init_tracing(cli.verbosity);

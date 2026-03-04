@@ -1,3 +1,5 @@
+mod test_helpers;
+
 use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use aperture_cli::engine::executor::execute;
 use aperture_cli::invocation::{ExecutionContext, ExecutionResult, OperationCall};
