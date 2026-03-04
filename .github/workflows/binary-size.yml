@@ -83,7 +83,7 @@ jobs:
           Set-Content -Path "measurement.json" -Value "{`"bytes`": $size}"
 
       - name: Upload measurement
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: size-${{ matrix.target }}
           path: measurement.json
@@ -102,7 +102,7 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Download all measurements
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: size-*
           path: /tmp/measurements
