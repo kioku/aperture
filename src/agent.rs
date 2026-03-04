@@ -343,7 +343,7 @@ pub struct RequestBodyInfo {
 ///
 /// Agents use this to know whether `--auto-paginate` will work on this
 /// operation and how it will iterate.
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PaginationManifestInfo {
     /// Whether pagination is supported for this operation.
     pub supported: bool,
@@ -361,6 +361,19 @@ pub struct PaginationManifestInfo {
     /// Query parameter holding the page size (offset strategy only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit_param: Option<String>,
+}
+
+impl Default for PaginationManifestInfo {
+    fn default() -> Self {
+        Self {
+            supported: false,
+            strategy: crate::constants::PAGINATION_STRATEGY_NONE.to_string(),
+            cursor_field: None,
+            cursor_param: None,
+            page_param: None,
+            limit_param: None,
+        }
+    }
 }
 
 impl PaginationManifestInfo {
