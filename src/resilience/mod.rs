@@ -628,6 +628,7 @@ mod tests {
 
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     /// Wiremock responder that returns 503 for the first `fail_for` calls, then 200.
@@ -665,9 +666,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_immediate_success() {
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/ok"))
@@ -693,8 +691,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_non_retryable_short_circuits() {
-        use wiremock::matchers::{method, path};
-
         let server = MockServer::start().await;
         // 400 is not retryable; the executor must stop after the first attempt.
         Mock::given(method("GET"))
@@ -726,8 +722,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_succeeds_after_transient_failures() {
-        use wiremock::matchers::{method, path};
-
         let server = MockServer::start().await;
         let count = Arc::new(AtomicUsize::new(0));
         Mock::given(method("GET"))
@@ -757,9 +751,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_exhaustion_returns_error() {
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/always-fail"))
@@ -792,9 +783,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_tracking_immediate_success() {
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/ok"))
@@ -824,9 +812,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_tracking_non_retryable_short_circuits() {
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/bad"))
@@ -856,8 +841,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_tracking_records_history() {
-        use wiremock::matchers::{method, path};
-
         let server = MockServer::start().await;
         let count = Arc::new(AtomicUsize::new(0));
         Mock::given(method("GET"))
@@ -892,9 +875,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_with_retry_tracking_exhaustion_total_attempts() {
-        use wiremock::matchers::{method, path};
-        use wiremock::{Mock, MockServer, ResponseTemplate};
-
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/always-fail"))
