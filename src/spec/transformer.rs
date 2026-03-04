@@ -1014,6 +1014,9 @@ fn parse_aperture_pagination_extension(value: &serde_json::Value) -> Option<Pagi
 
 /// Returns `true` if any successful response for this operation declares a
 /// `Link` header, which indicates RFC 5988 Link-header-based pagination.
+///
+/// Only inline response objects are inspected; `$ref` responses are skipped.
+/// Use `x-aperture-pagination` for specs that define shared response components.
 fn has_link_header_in_responses(responses: &openapiv3::Responses, _spec: &OpenAPI) -> bool {
     constants::SUCCESS_STATUS_CODES.iter().any(|code| {
         let status =
@@ -1038,6 +1041,10 @@ fn has_link_header_in_responses(responses: &openapiv3::Responses, _spec: &OpenAP
 /// Checks the response schemas for well-known cursor field names.
 ///
 /// Returns `Some(PaginationInfo)` with `strategy = Cursor` on the first match.
+///
+/// Schema `$ref`s within a response are resolved, but `$ref` response objects
+/// themselves are skipped. Use `x-aperture-pagination` for specs that reference
+/// shared response components.
 fn detect_cursor_from_responses(
     responses: &openapiv3::Responses,
     spec: &OpenAPI,
