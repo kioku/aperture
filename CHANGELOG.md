@@ -2,6 +2,107 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.9] - 2026-03-04
+
+### ⚙️ Miscellaneous Tasks
+
+- Batch update cargo dependencies (#112)
+- Trigger binary-size workflow on push to feature branch
+- Echo binary sizes to stdout for log capture
+- Correct job output names and Windows step ID in binary-size workflow
+- Remove dead push trigger and unused DATE env var from binary-size workflow
+- Fix matrix output aggregation in binary-size workflow
+- Align artifact action versions with rest of project
+- Bump version to 0.1.9
+
+### 🐛 Bug Fixes
+
+- Ensure dependent batch captures raw unfiltered response
+- Validate duplicate operation IDs in batch dependency graph
+- Track all capture_append providers for implicit dependencies
+- Include operation IDs in cycle detection error messages
+- Replace tautological assertion in dry-run integration test
+- Treat capture failure as operation failure in batch result
+- Store interpolated args in dependent batch operation results
+- Remove false-positive dependency detection from literal {{ in args
+- Reduce extract_variable_references visibility to module-private
+- Treat empty capture/depends_on as absent in dependency detection
+- Preserve JSON capture semantics for dependent workflows
+- Preserve captured string values and JSON-escape list interpolation
+- Apply batch rate limits in dependent execution mode
+- Reject empty-string capture results
+- Report concrete dependency cycle paths
+- Resolve ast-grep no-println lint warnings
+- Raise default log level to warn so spec-load warnings are visible
+- Revert tracing::error! to eprintln! for user-facing usage errors
+- Suppress no-println for errors.rs via rule ignores instead of per-call comments
+- Restore multi-line eprintln! and add constraint rationale to ignores
+- Use required_unless_present so --body-file satisfies required body
+- Add body_file to --describe-json batch manifest
+- Interpolate body_file path in dependent batch operations
+- Reject body_file field when --body-file or --body appears in args
+- Trim trailing whitespace from body read via --body-file
+- Catch --body-file= equals-sign form in body_file conflict guard
+- Restrict write_error visibility to private — test submodule accesses it as a child module
+- Hoist wiremock imports to module level in resilience tests — remove redundant inner use statements
+- Assert touch exit code in test_cleanup_removes_stale_tmp_files — distinguish spawn failure from non-zero exit
+- Replace touch -d with File::set_modified for cross-platform mtime backdating
+- Switch to platform-conditional TLS crypto provider
+- Install platform-specific rustls crypto provider before client creation
+- Correct PaginationInfo serde attrs and add PaginationInfo imports
+- Prevent infinite loop when Link header URL has no query string
+- Set PaginationManifestInfo default strategy to "none"
+- Align pagination field indentation in docs_tests.rs
+- Emit structured NDJSON error on mid-stream pagination failure
+- Derive Copy on PaginationStrategy (fieldless enum)
+- Warn when --jq is combined with --auto-paginate
+- Document $ref response limitation in pagination heuristics
+- Treat "skip" as record-offset in advance_offset_strategy
+- Warn when --format is ignored with --auto-paginate
+
+### 📚 Documentation
+
+- Update changelog for v0.1.8 and automate via release CI
+- Add documentation for v0.1.8 features
+- Remove author attributions and agent-specific guidance files
+- Update README performance claims to match measured values
+- Add documentation for dependent batch workflows
+- Document --body-file flag and body_file batch field
+- Update cli/errors module comment to reflect writer-injection design
+- Update binary size optimization doc for platform-conditional TLS
+- Record v0.1.9 per-platform binary size measurements
+- Update binary size claim to < 6 MB (default features, all platforms)
+- Add --auto-paginate section to agent integration guide
+
+### 🚀 Features
+
+- Extend BatchOperation with capture, capture_append, and depends_on fields
+- Implement dependency graph validation and topological sort
+- Implement variable interpolation engine
+- Implement JQ-based value extraction for batch captures
+- Wire dependent batch execution with topological ordering
+- Expose batch schema and dependent workflow capabilities in --describe-json
+- Add --body-file arg to generator command tree
+- Extend extract_body to handle --body-file
+- Add body_file field to BatchOperation
+- Add binary-sizes.json and automate population from CI
+- Implement --auto-paginate flag with cursor, offset, and link-header strategies
+
+### 🧪 Testing
+
+- Add integration tests for dependent batch workflows
+- Add coverage for --body-file flag
+- Verify batch execution reads request body from body_file
+- Cover body_file path interpolation in dependent batch
+- Cover all print_error network branches via write_error
+- Unit tests for execute_with_retry and execute_with_retry_tracking
+- Cover cache management methods and temp-file cleanup
+- To_json() coverage for all ErrorKind variants and external error types
+- Extract FailThenSucceed responder to module level in resilience tests
+- Add message assertion to test_to_json_http_request_kind
+- Clarify doc comment on test_to_json_network_status_fallback_no_context
+- Tighten retry exhaustion assertion — drop dead disjunct
+
 ## [0.1.8] - 2026-02-15
 
 ### ⚙️ Miscellaneous Tasks
