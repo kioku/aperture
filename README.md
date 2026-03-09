@@ -4,7 +4,8 @@ A CLI that generates commands from OpenAPI specifications.
 
 Aperture parses OpenAPI 3.x specs once, caches them, and exposes every operation as a CLI command with structured JSON output. Built for automation: AI agents, scripts, CI/CD pipelines.
 
-https://github.com/user-attachments/assets/a10fe8cd-3990-4ec4-b332-cae6903940a1
+
+https://github.com/user-attachments/assets/5fe746e4-3a44-4f3b-801d-249df4901bd0
 
 
 ## Why Aperture?
