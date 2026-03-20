@@ -1,0 +1,33 @@
+id: no-unsafe
+
+valid:
+  # Unsafe block preceded by a SAFETY comment (expression statement)
+  - |
+    fn read_raw(ptr: *const u8) -> u8 {
+      // SAFETY: caller guarantees ptr is valid and aligned
+      unsafe { *ptr }
+    }
+
+  # Unsafe block preceded by a SAFETY comment (let binding)
+  - |
+    fn read_raw(ptr: *const u8) -> u8 {
+      // SAFETY: caller guarantees ptr is valid and aligned
+      let val = unsafe { *ptr };
+      val
+    }
+
+  # Inside a #[cfg(test)] module
+  - |
+    #[cfg(test)]
+    mod tests {
+      fn test_helper() {
+        unsafe { std::ptr::null::<u8>().read() };
+      }
+    }
+
+invalid:
+  # Bare unsafe with no SAFETY comment
+  - |
+    fn do_something(ptr: *const u8) -> u8 {
+      unsafe { *ptr }
+    }

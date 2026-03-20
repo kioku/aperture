@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# Conventional Commit message linter.
+# Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+# Format:  "type: description"  or  "type!: description" (breaking change)
+# Scopes are not used in this project.
+
+set -euo pipefail
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+commit_msg_file="${1:?usage: commit-msg <commit-msg-file>}"
+
+# Strip comment lines, take the first non-empty line.
+msg="$(grep -v '^#' "$commit_msg_file" | head -1)"
+
+if [ -z "$msg" ]; then
+    echo -e "${RED}Error: Empty commit message.${NC}" >&2
+    exit 1
+fi
+
+# ── Allowed bypasses ──────────────────────────────────────────────────────────
+
+# Merge commits
+[[ "$msg" =~ ^Merge\  ]] && exit 0
+
+# Git-generated reverts
+[[ "$msg" =~ ^Revert\ \" ]] && exit 0
+
+# Interactive rebase: fixup, squash, amend
+[[ "$msg" =~ ^(fixup|squash|amend)!\  ]] && exit 0
+
+# ── Conventional Commits validation ──────────────────────────────────────────
+
+types="feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"
+pattern="^($types)!?: .+$"
+
+if ! [[ "$msg" =~ $pattern ]]; then
+    echo -e "${RED}Error: commit message does not follow Conventional Commits format.${NC}" >&2
+    echo "" >&2
+    echo -e "  Expected:  ${GREEN}<type>: <description>${NC}" >&2
+    echo -e "  Received:  ${YELLOW}$msg${NC}" >&2
+    echo "" >&2
+    echo "  Allowed types: feat fix docs style refactor perf test build ci chore revert" >&2
+    echo "  Example:       feat: add retry logic to executor" >&2
+    echo "" >&2
+    echo "  Other valid formats:" >&2
+    echo "    Merge ...                    (merge commits)" >&2
+    echo "    Revert \"...\"                 (revert commits)" >&2
+    echo "    fixup! / squash! / amend!    (rebase commits)" >&2
+    exit 1
+fi
+
+# ── Subject line length ──────────────────────────────────────────────────────
+
+if [ ${#msg} -gt 72 ]; then
+    echo -e "${YELLOW}Warning: subject line is ${#msg} characters (recommended max: 72).${NC}" >&2
+fi

@@ -19,7 +19,7 @@ exclude = [
     "deny.toml",
     "cliff.toml",
     ".config/",
-    ".pre-commit-config.yaml",
+
     "docs/",
     "CLAUDE.md",
     "GEMINI.md",

@@ -13,6 +13,5 @@ languageGlobs:
   rust:
     - "**/*.rs"
 
-# Test file patterns (optional, for test-specific rules)
 testConfigs:
-  - testDir: tests
+  - testDir: .ast-grep/tests
