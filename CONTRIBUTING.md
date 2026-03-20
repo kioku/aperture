@@ -39,13 +39,22 @@ cargo clippy -- -D warnings
 cargo test --test '*'
 ```
 
-### Pre-commit Hooks
+### Git Hooks
 
-This project uses pre-commit hooks to ensure code quality. The hooks will run automatically on commit and check:
+This project uses git hooks (`.github/hooks/`) to ensure code quality. Activate them once after cloning:
 
-- Code formatting (`cargo fmt --check`)
-- Linting (`cargo clippy -- -D warnings`)
-- Tests (`cargo test`)
+```bash
+git config core.hooksPath .github/hooks
+```
+
+The pre-commit hook will automatically:
+
+- Format code (`cargo fmt`) and re-stage fixed files
+- Lint (`cargo clippy -- -D warnings`)
+- Run structural linting (`ast-grep scan`) on staged files
+- Run tests (`cargo test`)
+
+The commit-msg hook enforces [Conventional Commits](https://www.conventionalcommits.org/) format.
 
 ## Code Guidelines
 

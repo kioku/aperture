@@ -17,7 +17,11 @@ message: "Avoid println!/dbg! in library code. Use a structured logger (tracing,
 ignores:
   - "**/main.rs"
   - "**/bin/**"
+  - "**/build.rs"
   - "**/tests/**"
+  - "**/test_*.rs"
+  - "**/*_test.rs"
+  - "**/*_tests.rs"
   - "**/examples/**"
   - "**/benches/**"
   - "**/interactive/mock.rs"
@@ -33,6 +37,13 @@ rule:
     - pattern: dbg!($$$)
     - pattern: eprintln!($$$)
     - pattern: eprint!($$$)
+  not:
+    inside:
+      stopBy: end
+      kind: mod_item
+      follows:
+        stopBy: end
+        pattern: "#[cfg(test)]"
 
 note: |
   println! and dbg! are for quick debugging, not production code.

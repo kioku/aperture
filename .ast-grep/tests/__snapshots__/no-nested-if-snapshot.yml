@@ -1,0 +1,54 @@
+id: no-nested-if
+snapshots:
+  ? |
+    fn check(user: Option<&User>) {
+      if user.is_some() {
+        if user.unwrap().is_active {
+          do_something();
+        }
+      }
+    }
+  : labels:
+    - source: |-
+        if user.unwrap().is_active {
+              do_something();
+            }
+      style: primary
+      start: 58
+      end: 114
+    - source: |-
+        if user.is_some() {
+            if user.unwrap().is_active {
+              do_something();
+            }
+          }
+      style: secondary
+      start: 34
+      end: 118
+  ? |
+    fn process(title: Option<&str>) {
+      if let Some(t) = title {
+        let trimmed = t.trim();
+        if !trimmed.is_empty() {
+          emit(trimmed);
+        }
+      }
+    }
+  : labels:
+    - source: |-
+        if !trimmed.is_empty() {
+              emit(trimmed);
+            }
+      style: primary
+      start: 93
+      end: 144
+    - source: |-
+        if let Some(t) = title {
+            let trimmed = t.trim();
+            if !trimmed.is_empty() {
+              emit(trimmed);
+            }
+          }
+      style: secondary
+      start: 36
+      end: 148

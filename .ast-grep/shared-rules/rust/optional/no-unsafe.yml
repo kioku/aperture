@@ -3,14 +3,45 @@
 #
 # This rule highlights unsafe code for careful review.
 # Unsafe code is sometimes necessary but should be minimized.
+#
+# Blocks preceded by a "// SAFETY:" comment are considered documented
+# and won't trigger this rule. The comment must immediately precede
+# the statement containing the unsafe block (expression_statement or
+# let_declaration).
 
 id: no-unsafe
 language: rust
 severity: warning
 message: "Unsafe block detected. Ensure this is necessary and well-documented with a SAFETY comment."
 
+ignores:
+  - "**/tests/**"
+  - "**/test_*.rs"
+  - "**/*_test.rs"
+  - "**/*_tests.rs"
+  - "**/benches/**"
+  - "**/examples/**"
+
 rule:
   kind: unsafe_block
+  not:
+    any:
+      - inside:
+          kind: expression_statement
+          follows:
+            kind: line_comment
+            regex: "SAFETY:"
+      - inside:
+          kind: let_declaration
+          follows:
+            kind: line_comment
+            regex: "SAFETY:"
+      - inside:
+          stopBy: end
+          kind: mod_item
+          follows:
+            stopBy: end
+            pattern: "#[cfg(test)]"
 
 note: |
   Unsafe code requires extra scrutiny. For each unsafe block:

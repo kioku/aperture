@@ -1,0 +1,87 @@
+id: max-nesting-depth
+
+valid:
+  # Three CF levels — exactly at the limit
+  - |
+    fn validate(data: &Data) {
+      if data.items.is_some() {
+        for item in data.items.iter() {
+          if item.is_active() {
+            process(item);
+          }
+        }
+      }
+    }
+
+  # Extracted helper breaks the depth chain — each fn stays at depth ≤ 2
+  - |
+    fn process_items(items: &[Item]) {
+      for group in items {
+        if group.is_active() {
+          process_group(group);
+        }
+      }
+    }
+
+    fn process_group(group: &Group) {
+      for item in &group.items {
+        if item.is_valid() {
+          transform(item);
+        }
+      }
+    }
+
+  # One CF + one closure = depth 2; a CF inside the closure is depth 3 — at the limit
+  - |
+    fn process(items: &[Item]) {
+      if condition {
+        items.iter().for_each(|item| {
+          if item.is_active() {
+            do_something(item);
+          }
+        });
+      }
+    }
+
+invalid:
+  # Four nested if expressions
+  - |
+    fn process(a: bool, b: bool, c: bool, d: bool) {
+      if a {
+        if b {
+          if c {
+            if d {
+              do_something();
+            }
+          }
+        }
+      }
+    }
+
+  # Mixed control flow: if → for → while → if
+  - |
+    fn scan(groups: &[Group]) {
+      if !groups.is_empty() {
+        for group in groups {
+          while group.has_next() {
+            if group.peek().is_active() {
+              process(group.next());
+            }
+          }
+        }
+      }
+    }
+
+  # Pure closure nesting — four closures, no control flow
+  - |
+    fn process() {
+      outer.iter().for_each(|a| {
+        inner1.iter().for_each(|b| {
+          inner2.iter().for_each(|c| {
+            inner3.iter().for_each(|d| {
+              do_something();
+            });
+          });
+        });
+      });
+    }

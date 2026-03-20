@@ -2,6 +2,7 @@
 # Prevents doubly nested if statements to encourage flatter code
 #
 # This rule only catches direct nesting in block bodies, NOT:
+# - else-if chains (flat alternatives, not nesting)
 # - If expressions used as values (let x = if cond { a } else { b })
 # - If expressions inside closures
 # - If expressions inside match arms
@@ -39,6 +40,7 @@ rule:
         - kind: assignment_expression
         - kind: return_expression
         - kind: call_expression
+        - kind: else_clause
     kind: if_expression
 
 note: |

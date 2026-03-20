@@ -1,0 +1,11 @@
+id: no-unsafe
+snapshots:
+  ? |
+    fn do_something(ptr: *const u8) -> u8 {
+      unsafe { *ptr }
+    }
+  : labels:
+    - source: unsafe { *ptr }
+      style: primary
+      start: 42
+      end: 57

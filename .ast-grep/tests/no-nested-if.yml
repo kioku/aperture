@@ -1,0 +1,80 @@
+id: no-nested-if
+
+valid:
+  # Flat guard clauses — no nesting
+  - |
+    fn validate(user: Option<&User>) -> bool {
+      let Some(user) = user else { return false };
+      if !user.is_active { return false };
+      true
+    }
+
+  # else-if chains are flat alternatives, not nesting
+  - |
+    fn classify(status: &str) -> &str {
+      if status == "ok" {
+        "success"
+      } else if status == "warn" {
+        "warning"
+      } else {
+        "error"
+      }
+    }
+
+  # If inside a closure inside an if — closure resets scope
+  - |
+    fn outer() {
+      if condition {
+        items.iter().for_each(|item| {
+          if item.is_active() {
+            process(item);
+          }
+        });
+      }
+    }
+
+  # If inside a match arm inside an if — match arm resets scope
+  - |
+    fn dispatch(cmd: Command) {
+      if cmd.is_valid() {
+        match cmd.kind() {
+          Kind::A => {
+            if cmd.needs_auth() {
+              authenticate();
+            }
+          }
+          _ => {}
+        }
+      }
+    }
+
+  # If expression used as a value in let binding
+  - |
+    fn example() {
+      if outer_cond {
+        let x = if inner_cond { 1 } else { 2 };
+        process(x);
+      }
+    }
+
+invalid:
+  # Simple nested if
+  - |
+    fn check(user: Option<&User>) {
+      if user.is_some() {
+        if user.unwrap().is_active {
+          do_something();
+        }
+      }
+    }
+
+  # Nested if with intermediate statements
+  - |
+    fn process(title: Option<&str>) {
+      if let Some(t) = title {
+        let trimmed = t.trim();
+        if !trimmed.is_empty() {
+          emit(trimmed);
+        }
+      }
+    }

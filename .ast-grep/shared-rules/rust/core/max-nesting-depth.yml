@@ -1,5 +1,5 @@
 # Rule: max-nesting-depth
-# Prevents control flow blocks nested more than 3 levels deep
+# Prevents control flow blocks or closures nested more than 3 levels deep
 #
 # Bad:
 #   if a {
@@ -11,8 +11,20 @@
 #       }
 #   }
 #
+#   outer.iter().for_each(|a| {
+#       inner.iter().for_each(|b| {
+#           deep.iter().for_each(|c| {
+#               deeper.iter().for_each(|d| { // 4th closure - violation
+#               });
+#           });
+#       });
+#   });
+#
 # Good:
 #   Extract deeply nested logic into helper functions
+#
+# Note: closure_expression counts as a nesting contributor alongside control
+# flow forms. fn items (fn_item) do not — named functions reset scope.
 
 id: max-nesting-depth
 language: rust
@@ -26,6 +38,7 @@ rule:
     - kind: while_expression
     - kind: loop_expression
     - kind: match_expression
+    - kind: closure_expression
   inside:
     stopBy: end
     any:
@@ -34,6 +47,7 @@ rule:
       - kind: while_expression
       - kind: loop_expression
       - kind: match_expression
+      - kind: closure_expression
     inside:
       stopBy: end
       any:
@@ -42,6 +56,7 @@ rule:
         - kind: while_expression
         - kind: loop_expression
         - kind: match_expression
+        - kind: closure_expression
       inside:
         stopBy: end
         any:
@@ -50,6 +65,7 @@ rule:
           - kind: while_expression
           - kind: loop_expression
           - kind: match_expression
+          - kind: closure_expression
 
 note: |
   Deep nesting makes code hard to read and maintain.

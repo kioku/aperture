@@ -1,0 +1,161 @@
+id: max-nesting-depth
+snapshots:
+  ? |
+    fn process() {
+      outer.iter().for_each(|a| {
+        inner1.iter().for_each(|b| {
+          inner2.iter().for_each(|c| {
+            inner3.iter().for_each(|d| {
+              do_something();
+            });
+          });
+        });
+      });
+    }
+  : labels:
+    - source: |-
+        |d| {
+                  do_something();
+                }
+      style: primary
+      start: 144
+      end: 185
+    - source: |-
+        |a| {
+            inner1.iter().for_each(|b| {
+              inner2.iter().for_each(|c| {
+                inner3.iter().for_each(|d| {
+                  do_something();
+                });
+              });
+            });
+          }
+      style: secondary
+      start: 39
+      end: 209
+    - source: |-
+        |b| {
+              inner2.iter().for_each(|c| {
+                inner3.iter().for_each(|d| {
+                  do_something();
+                });
+              });
+            }
+      style: secondary
+      start: 72
+      end: 203
+    - source: |-
+        |c| {
+                inner3.iter().for_each(|d| {
+                  do_something();
+                });
+              }
+      style: secondary
+      start: 107
+      end: 195
+  ? |
+    fn process(a: bool, b: bool, c: bool, d: bool) {
+      if a {
+        if b {
+          if c {
+            if d {
+              do_something();
+            }
+          }
+        }
+      }
+    }
+  : labels:
+    - source: |-
+        if d {
+                  do_something();
+                }
+      style: primary
+      start: 90
+      end: 132
+    - source: |-
+        if a {
+            if b {
+              if c {
+                if d {
+                  do_something();
+                }
+              }
+            }
+          }
+      style: secondary
+      start: 51
+      end: 150
+    - source: |-
+        if b {
+              if c {
+                if d {
+                  do_something();
+                }
+              }
+            }
+      style: secondary
+      start: 62
+      end: 146
+    - source: |-
+        if c {
+                if d {
+                  do_something();
+                }
+              }
+      style: secondary
+      start: 75
+      end: 140
+  ? |
+    fn scan(groups: &[Group]) {
+      if !groups.is_empty() {
+        for group in groups {
+          while group.has_next() {
+            if group.peek().is_active() {
+              process(group.next());
+            }
+          }
+        }
+      }
+    }
+  : labels:
+    - source: |-
+        if group.peek().is_active() {
+                  process(group.next());
+                }
+      style: primary
+      start: 119
+      end: 191
+    - source: |-
+        if !groups.is_empty() {
+            for group in groups {
+              while group.has_next() {
+                if group.peek().is_active() {
+                  process(group.next());
+                }
+              }
+            }
+          }
+      style: secondary
+      start: 30
+      end: 209
+    - source: |-
+        for group in groups {
+              while group.has_next() {
+                if group.peek().is_active() {
+                  process(group.next());
+                }
+              }
+            }
+      style: secondary
+      start: 58
+      end: 205
+    - source: |-
+        while group.has_next() {
+                if group.peek().is_active() {
+                  process(group.next());
+                }
+              }
+      style: secondary
+      start: 86
+      end: 199
