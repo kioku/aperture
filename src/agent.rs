@@ -592,16 +592,7 @@ pub fn generate_capability_manifest_from_openapi(
                 cmd_info.pagination = PaginationManifestInfo::from_cached(&cached_cmd.pagination);
             }
 
-            // Determine the effective group key for manifest output
-            let effective_group = cmd_info.display_group.as_ref().map_or_else(
-                || {
-                    cmd_info.original_tags.first().map_or_else(
-                        || constants::DEFAULT_GROUP.to_string(),
-                        |tag| to_kebab_case(tag),
-                    )
-                },
-                |g| to_kebab_case(g),
-            );
+            let effective_group = effective_group_key(&cmd_info);
 
             regrouped.entry(effective_group).or_default().push(cmd_info);
         }
@@ -818,31 +809,32 @@ fn extract_response_schema_from_cached(
     })
 }
 
+/// Resolves the manifest group key: `display_group` > first tag > default.
+fn effective_group_key(cmd: &CommandInfo) -> String {
+    cmd.display_group
+        .as_ref()
+        .or_else(|| cmd.original_tags.first())
+        .map_or_else(
+            || constants::DEFAULT_GROUP.to_string(),
+            |s| to_kebab_case(s),
+        )
+}
+
 /// Extracts security schemes from the cached spec for the capability manifest
 fn extract_security_schemes(spec: &CachedSpec) -> HashMap<String, SecuritySchemeInfo> {
     let mut security_schemes = HashMap::new();
 
     for (name, scheme) in &spec.security_schemes {
         let details = match scheme.scheme_type.as_str() {
-            constants::SECURITY_TYPE_HTTP => {
-                scheme.scheme.as_ref().map_or(
-                    SecuritySchemeDetails::HttpBearer {
-                        bearer_format: None,
-                    },
-                    |http_scheme| match http_scheme.as_str() {
-                        constants::AUTH_SCHEME_BEARER => SecuritySchemeDetails::HttpBearer {
-                            bearer_format: scheme.bearer_format.clone(),
-                        },
-                        constants::AUTH_SCHEME_BASIC => SecuritySchemeDetails::HttpBasic,
-                        _ => {
-                            // For other HTTP schemes, default to bearer
-                            SecuritySchemeDetails::HttpBearer {
-                                bearer_format: None,
-                            }
-                        }
-                    },
-                )
-            }
+            constants::SECURITY_TYPE_HTTP => match scheme.scheme.as_deref() {
+                Some(constants::AUTH_SCHEME_BEARER) => SecuritySchemeDetails::HttpBearer {
+                    bearer_format: scheme.bearer_format.clone(),
+                },
+                Some(constants::AUTH_SCHEME_BASIC) => SecuritySchemeDetails::HttpBasic,
+                _ => SecuritySchemeDetails::HttpBearer {
+                    bearer_format: None,
+                },
+            },
             constants::AUTH_SCHEME_APIKEY => SecuritySchemeDetails::ApiKey {
                 location: scheme
                     .location
@@ -1084,6 +1076,10 @@ fn extract_schema_info_from_parameter(
     }
 }
 
+fn serialize_enum_value(v: &String) -> String {
+    serde_json::to_string(v).unwrap_or_else(|_| v.clone())
+}
+
 /// Extracts type information from a schema kind
 fn extract_schema_type_from_schema_kind(
     schema_kind: &openapiv3::SchemaKind,
@@ -1095,7 +1091,7 @@ fn extract_schema_type_from_schema_kind(
                     .enumeration
                     .iter()
                     .filter_map(|v| v.as_ref())
-                    .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.clone()))
+                    .map(serialize_enum_value)
                     .collect();
                 (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
             }

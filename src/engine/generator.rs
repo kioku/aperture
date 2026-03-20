@@ -172,12 +172,12 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
             );
 
             // Apply command mapping: aliases
-            if !cached_command.aliases.is_empty() {
-                let alias_strs: Vec<&'static str> = cached_command
-                    .aliases
-                    .iter()
-                    .map(|a| to_static_str(to_kebab_case(a)))
-                    .collect();
+            let alias_strs: Vec<&'static str> = cached_command
+                .aliases
+                .iter()
+                .map(|a| to_static_str(to_kebab_case(a)))
+                .collect();
+            if !alias_strs.is_empty() {
                 operation_command = operation_command.visible_aliases(alias_strs);
             }
 

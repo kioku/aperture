@@ -137,15 +137,13 @@ impl ShortcutResolver {
                 }
 
                 // Index by tags (and display_group override)
-                let effective_tags: Vec<String> = command.display_group.as_ref().map_or_else(
-                    || command.tags.iter().map(|t| to_kebab_case(t)).collect(),
-                    |dg| {
-                        let mut tags: Vec<String> =
-                            command.tags.iter().map(|t| to_kebab_case(t)).collect();
-                        tags.push(to_kebab_case(dg));
-                        tags
-                    },
-                );
+                let mut effective_tags: Vec<String> =
+                    command.tags.iter().map(|t| to_kebab_case(t)).collect();
+                if let Some(dg) = &command.display_group {
+                    effective_tags.push(to_kebab_case(dg));
+                }
+
+                let effective_name = command.display_name.as_deref().unwrap_or(&operation_kebab);
 
                 for tag_key in &effective_tags {
                     self.tag_map.entry(tag_key.clone()).or_default().push((
@@ -155,10 +153,6 @@ impl ShortcutResolver {
                     ));
 
                     // Also index tag + operation combinations (with effective name)
-                    let effective_name = command
-                        .display_name
-                        .as_ref()
-                        .map_or(&operation_kebab, |n| n);
                     let tag_operation_key = format!("{tag_key} {}", to_kebab_case(effective_name));
                     self.tag_map.entry(tag_operation_key).or_default().push((
                         api_name.clone(),
