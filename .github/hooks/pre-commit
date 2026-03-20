@@ -97,8 +97,12 @@ run_step "cargo clippy" \
 # ── ast-grep (staged files only) ─────────────────────────────────────────────
 
 if command -v ast-grep &> /dev/null && [ -f "sgconfig.yml" ]; then
-    # shellcheck disable=SC2086
-    run_step "ast-grep scan" ast-grep scan $RUST_FILES
+    if [ "${SKIP_ASTGREP:-0}" = "1" ]; then
+        echo -e "  ${YELLOW}⚠${NC} ast-grep scan skipped (SKIP_ASTGREP=1)"
+    else
+        # shellcheck disable=SC2086
+        run_step "ast-grep scan" ast-grep scan $RUST_FILES
+    fi
 fi
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
