@@ -357,13 +357,13 @@ fn effective_command_path(command: &CachedCommand) -> String {
     format!("{group} {name}")
 }
 
-/// Format search results for display
-#[must_use]
 fn format_param_flag(p: &CachedParameter) -> String {
     let required = if p.required { "*" } else { "" };
     format!("--{}{}", p.name, required)
 }
 
+/// Format search results for display
+#[must_use]
 pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> Vec<String> {
     let mut lines = Vec::new();
 
