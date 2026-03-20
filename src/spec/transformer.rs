@@ -588,19 +588,12 @@ impl SpecTransformer {
         let (content_type, schema, example) =
             preferred_content_type.map_or((None, None, None), |ct| {
                 let media_type = response.content.get(ct);
-                let schema = media_type.and_then(|mt| {
-                    mt.schema
-                        .as_ref()
-                        .and_then(|schema_ref| Self::resolve_and_serialize_schema(spec, schema_ref))
-                });
-
-                // Extract example from media type
-                let example = media_type.and_then(|mt| {
-                    mt.example
-                        .as_ref()
-                        .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()))
-                });
-
+                let schema = media_type
+                    .and_then(|mt| mt.schema.as_ref())
+                    .and_then(|schema_ref| Self::resolve_and_serialize_schema(spec, schema_ref));
+                let example = media_type
+                    .and_then(|mt| mt.example.as_ref())
+                    .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
                 (Some(ct.to_string()), schema, example)
             });
 

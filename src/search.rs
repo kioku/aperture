@@ -4,7 +4,7 @@
 //! API operations across registered specifications using fuzzy matching
 //! and keyword search.
 
-use crate::cache::models::{CachedCommand, CachedSpec};
+use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use crate::constants;
 use crate::error::Error;
 use crate::utils::to_kebab_case;
@@ -357,6 +357,11 @@ fn effective_command_path(command: &CachedCommand) -> String {
     format!("{group} {name}")
 }
 
+fn format_param_flag(p: &CachedParameter) -> String {
+    let required = if p.required { "*" } else { "" };
+    format!("--{}{}", p.name, required)
+}
+
 /// Format search results for display
 #[must_use]
 pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> Vec<String> {
@@ -407,10 +412,7 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
                 .command
                 .parameters
                 .iter()
-                .map(|p| {
-                    let required = if p.required { "*" } else { "" };
-                    format!("--{}{}", p.name, required)
-                })
+                .map(format_param_flag)
                 .collect();
             lines.push(format!("   Parameters: {}", params.join(" ")));
         }

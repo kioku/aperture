@@ -167,6 +167,29 @@ pub struct JsonError {
     pub details: Option<serde_json::Value>,
 }
 
+fn network_error_context(err: &reqwest::Error) -> Option<Cow<'static, str>> {
+    if err.is_connect() {
+        Some(Cow::Borrowed(constants::ERR_CONNECTION))
+    } else if err.is_timeout() {
+        Some(Cow::Borrowed(constants::ERR_TIMEOUT))
+    } else if err.is_status() {
+        err.status().and_then(http_status_context)
+    } else {
+        None
+    }
+}
+
+const fn http_status_context(status: reqwest::StatusCode) -> Option<Cow<'static, str>> {
+    match status.as_u16() {
+        401 => Some(Cow::Borrowed(constants::ERR_API_CREDENTIALS)),
+        403 => Some(Cow::Borrowed(constants::ERR_PERMISSION_DENIED)),
+        404 => Some(Cow::Borrowed(constants::ERR_ENDPOINT_NOT_FOUND)),
+        429 => Some(Cow::Borrowed(constants::ERR_RATE_LIMITED)),
+        500..=599 => Some(Cow::Borrowed(constants::ERR_SERVER_ERROR)),
+        _ => None,
+    }
+}
+
 impl Error {
     /// Add context to an error for better user messaging
     #[must_use]
@@ -256,21 +279,7 @@ impl Error {
                 ("FileSystem", io_err.to_string(), context, None)
             }
             Self::Network(req_err) => {
-                let context = match () {
-                    () if req_err.is_connect() => Some(Cow::Borrowed(constants::ERR_CONNECTION)),
-                    () if req_err.is_timeout() => Some(Cow::Borrowed(constants::ERR_TIMEOUT)),
-                    () if req_err.is_status() => {
-                        req_err.status().and_then(|status| match status.as_u16() {
-                            401 => Some(Cow::Borrowed(constants::ERR_API_CREDENTIALS)),
-                            403 => Some(Cow::Borrowed(constants::ERR_PERMISSION_DENIED)),
-                            404 => Some(Cow::Borrowed(constants::ERR_ENDPOINT_NOT_FOUND)),
-                            429 => Some(Cow::Borrowed(constants::ERR_RATE_LIMITED)),
-                            500..=599 => Some(Cow::Borrowed(constants::ERR_SERVER_ERROR)),
-                            _ => None,
-                        })
-                    }
-                    () => None,
-                };
+                let context = network_error_context(req_err);
                 ("Network", req_err.to_string(), context, None)
             }
             Self::Yaml(yaml_err) => (

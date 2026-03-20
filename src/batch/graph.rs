@@ -169,13 +169,11 @@ fn build_adjacency(
         let mut deps: HashSet<usize> = HashSet::new();
 
         // Explicit depends_on
-        if let Some(dep_ids) = &op.depends_on {
-            for dep_id in dep_ids {
-                let &dep_idx = id_to_index.get(dep_id.as_str()).ok_or_else(|| {
-                    Error::batch_missing_dependency(op.id.as_deref().unwrap_or("<unnamed>"), dep_id)
-                })?;
-                deps.insert(dep_idx);
-            }
+        for dep_id in op.depends_on.iter().flatten() {
+            let &dep_idx = id_to_index.get(dep_id.as_str()).ok_or_else(|| {
+                Error::batch_missing_dependency(op.id.as_deref().unwrap_or("<unnamed>"), dep_id)
+            })?;
+            deps.insert(dep_idx);
         }
 
         // Implicit dependencies from variable references in args.
