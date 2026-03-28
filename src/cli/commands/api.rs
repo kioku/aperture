@@ -64,8 +64,13 @@ fn resolve_output_format(
     }
 }
 
-#[allow(clippy::too_many_lines)]
-pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
+struct ApiCommandContext {
+    config_dir: PathBuf,
+    spec: CachedSpec,
+    global_config: Option<GlobalConfig>,
+}
+
+fn load_api_command_context(context: &str) -> Result<ApiCommandContext, Error> {
     let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
     } else {
@@ -81,72 +86,91 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
         _ => e,
     })?;
 
-    // Handle --describe-json flag
-    if cli.describe_json {
-        let specs_dir = config_dir.join(constants::DIR_SPECS);
-        let spec_path = specs_dir.join(format!("{context}.yaml"));
-        // ast-grep-ignore: no-nested-if
-        if !spec_path.exists() {
-            return Err(Error::spec_not_found(context));
-        }
-        let spec_content = std::fs::read_to_string(&spec_path)?;
-        let openapi_spec = crate::spec::parse_openapi(&spec_content)
-            .map_err(|e| Error::invalid_config(format!("Failed to parse OpenAPI spec: {e}")))?;
-        let manifest = crate::agent::generate_capability_manifest_from_openapi(
-            context,
-            &openapi_spec,
-            &spec,
-            global_config.as_ref(),
-        )?;
-        let output = match &cli.jq {
-            Some(jq_filter) => executor::apply_jq_filter(&manifest, jq_filter)?,
-            None => manifest,
-        };
-        // ast-grep-ignore: no-println
-        println!("{output}");
-        return Ok(());
+    Ok(ApiCommandContext {
+        config_dir,
+        spec,
+        global_config,
+    })
+}
+
+fn handle_describe_json_command(
+    context: &str,
+    command_context: &ApiCommandContext,
+    cli: &Cli,
+) -> Result<(), Error> {
+    let specs_dir = command_context.config_dir.join(constants::DIR_SPECS);
+    let spec_path = specs_dir.join(format!("{context}.yaml"));
+    // ast-grep-ignore: no-nested-if
+    if !spec_path.exists() {
+        return Err(Error::spec_not_found(context));
     }
+    let spec_content = std::fs::read_to_string(&spec_path)?;
+    let openapi_spec = crate::spec::parse_openapi(&spec_content)
+        .map_err(|e| Error::invalid_config(format!("Failed to parse OpenAPI spec: {e}")))?;
+    let manifest = crate::agent::generate_capability_manifest_from_openapi(
+        context,
+        &openapi_spec,
+        &command_context.spec,
+        command_context.global_config.as_ref(),
+    )?;
+    let output = match &cli.jq {
+        Some(jq_filter) => executor::apply_jq_filter(&manifest, jq_filter)?,
+        None => manifest,
+    };
+    // ast-grep-ignore: no-println
+    println!("{output}");
+    Ok(())
+}
 
-    // Handle --batch-file flag
-    if let Some(batch_file_path) = &cli.batch_file {
-        return execute_batch_operations(
-            context,
-            batch_file_path,
-            &spec,
-            global_config.as_ref(),
-            cli,
-        )
-        .await;
-    }
+async fn handle_batch_file_command(
+    context: &str,
+    batch_file_path: &str,
+    command_context: &ApiCommandContext,
+    cli: &Cli,
+) -> Result<(), Error> {
+    execute_batch_operations(
+        context,
+        batch_file_path,
+        &command_context.spec,
+        command_context.global_config.as_ref(),
+        cli,
+    )
+    .await
+}
 
-    // Generate the dynamic command tree and parse arguments
-    let command = generator::generate_command_tree_with_flags(&spec, cli.positional_args);
-    let matches = command
-        .try_get_matches_from(std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args))
-        .map_err(|e| Error::invalid_command(context, e.to_string()))?;
+fn handle_show_examples_command(
+    context: &str,
+    matches: &clap::ArgMatches,
+    command_context: &ApiCommandContext,
+) -> Result<(), Error> {
+    let operation_id =
+        crate::cli::translate::matches_to_operation_id(&command_context.spec, matches)?;
+    let operation = command_context
+        .spec
+        .commands
+        .iter()
+        .find(|cmd| cmd.operation_id == operation_id)
+        .ok_or_else(|| Error::spec_not_found(context))?;
+    crate::cli::render::render_examples(operation);
+    Ok(())
+}
 
-    // Check --show-examples flag
-    if crate::cli::translate::has_show_examples_flag(&matches) {
-        let operation_id = crate::cli::translate::matches_to_operation_id(&spec, &matches)?;
-        let operation = spec
-            .commands
-            .iter()
-            .find(|cmd| cmd.operation_id == operation_id)
-            .ok_or_else(|| Error::spec_not_found(context))?;
-        crate::cli::render::render_examples(operation);
-        return Ok(());
-    }
-
+async fn execute_api_runtime(
+    spec: &CachedSpec,
+    matches: &clap::ArgMatches,
+    cli: &Cli,
+    global_config: Option<GlobalConfig>,
+) -> Result<(), Error> {
     let jq_filter = matches
         .get_one::<String>("jq")
         .map(String::as_str)
         .or(cli.jq.as_deref());
-    let output_format = resolve_output_format(&matches, &cli.format);
+    let output_format = resolve_output_format(matches, &cli.format);
 
     // Translate ArgMatches → domain types
-    let call = crate::cli::translate::matches_to_operation_call(&spec, &matches)?;
+    let call = crate::cli::translate::matches_to_operation_call(spec, matches)?;
     let mut ctx = crate::cli::translate::cli_to_execution_context(cli, global_config)?;
-    ctx.server_var_args = crate::cli::translate::extract_server_var_args(&matches);
+    ctx.server_var_args = crate::cli::translate::extract_server_var_args(matches);
 
     if ctx.auto_paginate && jq_filter.is_some() {
         tracing::warn!(
@@ -158,10 +182,9 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
         tracing::warn!("--format is ignored with --auto-paginate; output is always NDJSON");
     }
 
-    // Route to pagination loop when --auto-paginate is set
     if ctx.auto_paginate {
         let mut stdout = std::io::stdout();
-        let result = crate::pagination::execute_paginated(&spec, call, ctx, &mut stdout).await;
+        let result = crate::pagination::execute_paginated(spec, call, ctx, &mut stdout).await;
         return match result {
             Ok(_) => Ok(()),
             Err(e) => {
@@ -175,13 +198,46 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
         };
     }
 
-    // Single-page execute
-    let result = executor::execute(&spec, call, ctx)
+    let result = executor::execute(spec, call, ctx)
         .await
         .map_err(enrich_network_error)?;
 
     crate::cli::render::render_result(&result, &output_format, jq_filter)?;
     Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
+    let command_context = load_api_command_context(context)?;
+
+    if cli.describe_json {
+        return handle_describe_json_command(context, &command_context, cli);
+    }
+
+    if let Some(batch_file_path) = &cli.batch_file {
+        return handle_batch_file_command(context, batch_file_path, &command_context, cli).await;
+    }
+
+    // Generate the dynamic command tree and parse arguments
+    let command =
+        generator::generate_command_tree_with_flags(&command_context.spec, cli.positional_args);
+    let matches = command
+        .try_get_matches_from(std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args))
+        .map_err(|e| Error::invalid_command(context, e.to_string()))?;
+
+    // Check --show-examples flag
+    if crate::cli::translate::has_show_examples_flag(&matches) {
+        handle_show_examples_command(context, &matches, &command_context)?;
+        return Ok(());
+    }
+
+    execute_api_runtime(
+        &command_context.spec,
+        &matches,
+        cli,
+        command_context.global_config.clone(),
+    )
+    .await
 }
 
 /// Executes batch operations from a batch file
