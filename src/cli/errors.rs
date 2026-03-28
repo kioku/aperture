@@ -39,6 +39,104 @@ pub fn print_error(error: &Error) {
 ///
 /// Extracted from `print_error` so that tests can capture output without
 /// redirecting the process-global stderr.
+fn write_internal_error<W: std::io::Write>(
+    writer: &mut W,
+    kind: &crate::error::ErrorKind,
+    message: &str,
+    context: Option<&crate::error::ErrorContext>,
+) {
+    let _ = writeln!(writer, "{kind}: {message}");
+    let Some(ctx) = context else {
+        return;
+    };
+    if let Some(suggestion) = &ctx.suggestion {
+        let _ = writeln!(writer, "\nHint: {suggestion}");
+    }
+}
+
+fn write_io_error<W: std::io::Write>(writer: &mut W, io_err: &std::io::Error) {
+    match io_err.kind() {
+        std::io::ErrorKind::NotFound => {
+            let _ = writeln!(
+                writer,
+                "File Not Found\n{io_err}\n\nHint: {}",
+                constants::ERR_FILE_NOT_FOUND
+            );
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            let _ = writeln!(
+                writer,
+                "Permission Denied\n{io_err}\n\nHint: {}",
+                constants::ERR_PERMISSION
+            );
+        }
+        _ => {
+            let _ = writeln!(writer, "File System Error\n{io_err}");
+        }
+    }
+}
+
+fn write_error_with_hint<W: std::io::Write, E: std::fmt::Display>(
+    writer: &mut W,
+    title: &str,
+    error: &E,
+    hint: &str,
+) {
+    let _ = writeln!(writer, "{title}\n{error}\n\nHint: {hint}");
+}
+
+fn write_network_error<W: std::io::Write>(writer: &mut W, req_err: &reqwest::Error) {
+    if req_err.is_connect() {
+        write_error_with_hint(
+            writer,
+            "Connection Error",
+            req_err,
+            constants::ERR_CONNECTION,
+        );
+        return;
+    }
+    if req_err.is_timeout() {
+        write_error_with_hint(writer, "Timeout Error", req_err, constants::ERR_TIMEOUT);
+        return;
+    }
+    if !req_err.is_status() {
+        let _ = writeln!(writer, "Network Error\n{req_err}");
+        return;
+    }
+    let Some(status) = req_err.status() else {
+        let _ = writeln!(writer, "Network Error\n{req_err}");
+        return;
+    };
+
+    match status.as_u16() {
+        401 => write_error_with_hint(
+            writer,
+            "Authentication Error",
+            req_err,
+            constants::ERR_API_CREDENTIALS,
+        ),
+        403 => write_error_with_hint(
+            writer,
+            "Permission Error",
+            req_err,
+            constants::ERR_PERMISSION_DENIED,
+        ),
+        404 => write_error_with_hint(
+            writer,
+            "Not Found Error",
+            req_err,
+            constants::ERR_ENDPOINT_NOT_FOUND,
+        ),
+        429 => write_error_with_hint(writer, "Rate Limited", req_err, constants::ERR_RATE_LIMITED),
+        500..=599 => {
+            write_error_with_hint(writer, "Server Error", req_err, constants::ERR_SERVER_ERROR);
+        }
+        _ => {
+            let _ = writeln!(writer, "HTTP Error\n{req_err}");
+        }
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn write_error<W: std::io::Write>(error: &Error, writer: &mut W) {
     match error {
@@ -46,119 +144,27 @@ fn write_error<W: std::io::Write>(error: &Error, writer: &mut W) {
             kind,
             message,
             context,
-        } => {
-            let _ = writeln!(writer, "{kind}: {message}");
-            let Some(ctx) = context else { return };
-            if let Some(suggestion) = &ctx.suggestion {
-                let _ = writeln!(writer, "\nHint: {suggestion}");
-            }
-        }
-        Error::Io(io_err) => match io_err.kind() {
-            std::io::ErrorKind::NotFound => {
-                let _ = writeln!(
-                    writer,
-                    "File Not Found\n{io_err}\n\nHint: {}",
-                    constants::ERR_FILE_NOT_FOUND
-                );
-            }
-            std::io::ErrorKind::PermissionDenied => {
-                let _ = writeln!(
-                    writer,
-                    "Permission Denied\n{io_err}\n\nHint: {}",
-                    constants::ERR_PERMISSION
-                );
-            }
-            _ => {
-                let _ = writeln!(writer, "File System Error\n{io_err}");
-            }
-        },
-        Error::Network(req_err) => {
-            if req_err.is_connect() {
-                let _ = writeln!(
-                    writer,
-                    "Connection Error\n{req_err}\n\nHint: {}",
-                    constants::ERR_CONNECTION
-                );
-                return;
-            }
-            if req_err.is_timeout() {
-                let _ = writeln!(
-                    writer,
-                    "Timeout Error\n{req_err}\n\nHint: {}",
-                    constants::ERR_TIMEOUT
-                );
-                return;
-            }
-            if !req_err.is_status() {
-                let _ = writeln!(writer, "Network Error\n{req_err}");
-                return;
-            }
-            let Some(status) = req_err.status() else {
-                let _ = writeln!(writer, "Network Error\n{req_err}");
-                return;
-            };
-            match status.as_u16() {
-                401 => {
-                    let _ = writeln!(
-                        writer,
-                        "Authentication Error\n{req_err}\n\nHint: {}",
-                        constants::ERR_API_CREDENTIALS
-                    );
-                }
-                403 => {
-                    let _ = writeln!(
-                        writer,
-                        "Permission Error\n{req_err}\n\nHint: {}",
-                        constants::ERR_PERMISSION_DENIED
-                    );
-                }
-                404 => {
-                    let _ = writeln!(
-                        writer,
-                        "Not Found Error\n{req_err}\n\nHint: {}",
-                        constants::ERR_ENDPOINT_NOT_FOUND
-                    );
-                }
-                429 => {
-                    let _ = writeln!(
-                        writer,
-                        "Rate Limited\n{req_err}\n\nHint: {}",
-                        constants::ERR_RATE_LIMITED
-                    );
-                }
-                500..=599 => {
-                    let _ = writeln!(
-                        writer,
-                        "Server Error\n{req_err}\n\nHint: {}",
-                        constants::ERR_SERVER_ERROR
-                    );
-                }
-                _ => {
-                    let _ = writeln!(writer, "HTTP Error\n{req_err}");
-                }
-            }
-        }
-        Error::Yaml(yaml_err) => {
-            let _ = writeln!(
-                writer,
-                "YAML Parsing Error\n{yaml_err}\n\nHint: {}",
-                constants::ERR_YAML_SYNTAX
-            );
-        }
-        Error::Json(json_err) => {
-            let _ = writeln!(
-                writer,
-                "JSON Parsing Error\n{json_err}\n\nHint: {}",
-                constants::ERR_JSON_SYNTAX
-            );
-        }
-        Error::Toml(toml_err) => {
-            let _ = writeln!(
-                writer,
-                "TOML Parsing Error\n{toml_err}\n\nHint: {}",
-                constants::ERR_TOML_SYNTAX
-            );
-        }
+        } => write_internal_error(writer, kind, message, context.as_ref()),
+        Error::Io(io_err) => write_io_error(writer, io_err),
+        Error::Network(req_err) => write_network_error(writer, req_err),
+        Error::Yaml(yaml_err) => write_error_with_hint(
+            writer,
+            "YAML Parsing Error",
+            yaml_err,
+            constants::ERR_YAML_SYNTAX,
+        ),
+        Error::Json(json_err) => write_error_with_hint(
+            writer,
+            "JSON Parsing Error",
+            json_err,
+            constants::ERR_JSON_SYNTAX,
+        ),
+        Error::Toml(toml_err) => write_error_with_hint(
+            writer,
+            "TOML Parsing Error",
+            toml_err,
+            constants::ERR_TOML_SYNTAX,
+        ),
         Error::Anyhow(anyhow_err) => {
             let _ = writeln!(writer, "Error\n{anyhow_err}");
         }

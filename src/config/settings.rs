@@ -163,6 +163,57 @@ const MAX_INITIAL_DELAY_MS: u64 = 60_000;
 /// Maximum delay cap in milliseconds (5 minutes).
 const MAX_DELAY_CAP_MS: u64 = 300_000;
 
+fn parse_u64_setting(key: SettingKey, value: &str) -> Result<u64, Error> {
+    value
+        .parse::<u64>()
+        .map_err(|_| Error::invalid_setting_value(key, value))
+}
+
+fn parse_positive_u64_setting(
+    key: SettingKey,
+    value: &str,
+    zero_message: &'static str,
+    max: u64,
+    max_message: &str,
+) -> Result<SettingValue, Error> {
+    let parsed = parse_u64_setting(key, value)?;
+
+    if parsed == 0 {
+        return Err(Error::setting_value_out_of_range(key, value, zero_message));
+    }
+
+    if parsed > max {
+        return Err(Error::setting_value_out_of_range(key, value, max_message));
+    }
+
+    Ok(SettingValue::U64(parsed))
+}
+
+fn parse_non_negative_u64_setting(
+    key: SettingKey,
+    value: &str,
+    max: u64,
+    max_message: &str,
+) -> Result<SettingValue, Error> {
+    let parsed = parse_u64_setting(key, value)?;
+
+    if parsed > max {
+        return Err(Error::setting_value_out_of_range(key, value, max_message));
+    }
+
+    Ok(SettingValue::U64(parsed))
+}
+
+fn parse_bool_setting(key: SettingKey, value: &str) -> Result<SettingValue, Error> {
+    let parsed = match value.to_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => true,
+        "false" | "0" | "no" | "off" => false,
+        _ => return Err(Error::invalid_setting_value(key, value)),
+    };
+
+    Ok(SettingValue::Bool(parsed))
+}
+
 impl SettingValue {
     /// Parse a string value into the appropriate type for the given key.
     ///
@@ -172,98 +223,34 @@ impl SettingValue {
     /// or if the value is outside the allowed range for the setting.
     pub fn parse_for_key(key: SettingKey, value: &str) -> Result<Self, Error> {
         match key {
-            SettingKey::DefaultTimeoutSecs => {
-                let parsed = value
-                    .parse::<u64>()
-                    .map_err(|_| Error::invalid_setting_value(key, value))?;
-
-                // Validate range: must be > 0 and <= MAX_TIMEOUT_SECS
-                if parsed == 0 {
-                    return Err(Error::setting_value_out_of_range(
-                        key,
-                        value,
-                        "timeout must be greater than 0",
-                    ));
-                }
-                if parsed > MAX_TIMEOUT_SECS {
-                    return Err(Error::setting_value_out_of_range(
-                        key,
-                        value,
-                        &format!("timeout cannot exceed {MAX_TIMEOUT_SECS} seconds (1 year)"),
-                    ));
-                }
-
-                Ok(Self::U64(parsed))
-            }
-            SettingKey::AgentDefaultsJsonErrors => {
-                let parsed = match value.to_lowercase().as_str() {
-                    "true" | "1" | "yes" | "on" => true,
-                    "false" | "0" | "no" | "off" => false,
-                    _ => return Err(Error::invalid_setting_value(key, value)),
-                };
-                Ok(Self::Bool(parsed))
-            }
-            SettingKey::RetryDefaultsMaxAttempts => {
-                let parsed = value
-                    .parse::<u64>()
-                    .map_err(|_| Error::invalid_setting_value(key, value))?;
-
-                if parsed > MAX_RETRY_ATTEMPTS {
-                    return Err(Error::setting_value_out_of_range(
-                        key,
-                        value,
-                        &format!("max_attempts cannot exceed {MAX_RETRY_ATTEMPTS}"),
-                    ));
-                }
-
-                Ok(Self::U64(parsed))
-            }
-            SettingKey::RetryDefaultsInitialDelayMs => {
-                let parsed = value
-                    .parse::<u64>()
-                    .map_err(|_| Error::invalid_setting_value(key, value))?;
-
-                if parsed == 0 {
-                    return Err(Error::setting_value_out_of_range(
-                        key,
-                        value,
-                        "initial_delay_ms must be greater than 0",
-                    ));
-                }
-                if parsed > MAX_INITIAL_DELAY_MS {
-                    return Err(Error::setting_value_out_of_range(
-                        key,
-                        value,
-                        &format!(
-                            "initial_delay_ms cannot exceed {MAX_INITIAL_DELAY_MS}ms (1 minute)"
-                        ),
-                    ));
-                }
-
-                Ok(Self::U64(parsed))
-            }
-            SettingKey::RetryDefaultsMaxDelayMs => {
-                let parsed = value
-                    .parse::<u64>()
-                    .map_err(|_| Error::invalid_setting_value(key, value))?;
-
-                if parsed == 0 {
-                    return Err(Error::setting_value_out_of_range(
-                        key,
-                        value,
-                        "max_delay_ms must be greater than 0",
-                    ));
-                }
-                if parsed > MAX_DELAY_CAP_MS {
-                    return Err(Error::setting_value_out_of_range(
-                        key,
-                        value,
-                        &format!("max_delay_ms cannot exceed {MAX_DELAY_CAP_MS}ms (5 minutes)"),
-                    ));
-                }
-
-                Ok(Self::U64(parsed))
-            }
+            SettingKey::DefaultTimeoutSecs => parse_positive_u64_setting(
+                key,
+                value,
+                "timeout must be greater than 0",
+                MAX_TIMEOUT_SECS,
+                &format!("timeout cannot exceed {MAX_TIMEOUT_SECS} seconds (1 year)"),
+            ),
+            SettingKey::AgentDefaultsJsonErrors => parse_bool_setting(key, value),
+            SettingKey::RetryDefaultsMaxAttempts => parse_non_negative_u64_setting(
+                key,
+                value,
+                MAX_RETRY_ATTEMPTS,
+                &format!("max_attempts cannot exceed {MAX_RETRY_ATTEMPTS}"),
+            ),
+            SettingKey::RetryDefaultsInitialDelayMs => parse_positive_u64_setting(
+                key,
+                value,
+                "initial_delay_ms must be greater than 0",
+                MAX_INITIAL_DELAY_MS,
+                &format!("initial_delay_ms cannot exceed {MAX_INITIAL_DELAY_MS}ms (1 minute)"),
+            ),
+            SettingKey::RetryDefaultsMaxDelayMs => parse_positive_u64_setting(
+                key,
+                value,
+                "max_delay_ms must be greater than 0",
+                MAX_DELAY_CAP_MS,
+                &format!("max_delay_ms cannot exceed {MAX_DELAY_CAP_MS}ms (5 minutes)"),
+            ),
         }
     }
 

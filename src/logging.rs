@@ -130,38 +130,11 @@ impl SecretContext {
 
 /// Returns the canonical status text for an HTTP status code
 #[must_use]
-const fn http_status_text(status: u16) -> &'static str {
-    match status {
-        // 2xx Success
-        200 => "OK",
-        201 => "Created",
-        202 => "Accepted",
-        204 => "No Content",
-        // 3xx Redirection
-        301 => "Moved Permanently",
-        302 => "Found",
-        304 => "Not Modified",
-        307 => "Temporary Redirect",
-        308 => "Permanent Redirect",
-        // 4xx Client Error
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        409 => "Conflict",
-        410 => "Gone",
-        422 => "Unprocessable Entity",
-        429 => "Too Many Requests",
-        // 5xx Server Error
-        500 => "Internal Server Error",
-        501 => "Not Implemented",
-        502 => "Bad Gateway",
-        503 => "Service Unavailable",
-        504 => "Gateway Timeout",
-        // Default fallback
-        _ => "",
-    }
+fn http_status_text(status: u16) -> &'static str {
+    reqwest::StatusCode::from_u16(status)
+        .ok()
+        .and_then(|status_code| status_code.canonical_reason())
+        .unwrap_or("")
 }
 
 /// Redacts sensitive values from strings

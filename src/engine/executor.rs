@@ -3,6 +3,7 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
 use crate::error::Error;
+use crate::invocation::ExecutionResult;
 use crate::logging;
 use crate::resilience::{
     calculate_retry_delay_with_header, is_retryable_status, parse_retry_after_value,
@@ -556,8 +557,99 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
     Ok((name.to_string(), expanded_value))
 }
 
+struct ResolvedAuthenticationSecret {
+    value: String,
+    env_var_name: String,
+    source: &'static str,
+}
+
+fn resolve_authentication_secret(
+    security_scheme: &CachedSecurityScheme,
+    api_name: &str,
+    global_config: Option<&GlobalConfig>,
+) -> Result<Option<ResolvedAuthenticationSecret>, Error> {
+    let secret_config = global_config
+        .and_then(|config| config.api_configs.get(api_name))
+        .and_then(|api_config| api_config.secrets.get(&security_scheme.name));
+
+    match (secret_config, &security_scheme.aperture_secret) {
+        (Some(config_secret), _) => {
+            let value = std::env::var(&config_secret.name)
+                .map_err(|_| Error::secret_not_set(&security_scheme.name, &config_secret.name))?;
+            Ok(Some(ResolvedAuthenticationSecret {
+                value,
+                env_var_name: config_secret.name.clone(),
+                source: "config",
+            }))
+        }
+        (None, Some(aperture_secret)) => {
+            let value = std::env::var(&aperture_secret.name)
+                .map_err(|_| Error::secret_not_set(&security_scheme.name, &aperture_secret.name))?;
+            Ok(Some(ResolvedAuthenticationSecret {
+                value,
+                env_var_name: aperture_secret.name.clone(),
+                source: "x-aperture-secret",
+            }))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn insert_api_key_header(
+    headers: &mut HeaderMap,
+    security_scheme: &CachedSecurityScheme,
+    secret_value: &str,
+) -> Result<(), Error> {
+    let (Some(location), Some(param_name)) =
+        (&security_scheme.location, &security_scheme.parameter_name)
+    else {
+        return Ok(());
+    };
+
+    if location == "header" {
+        let header_name = HeaderName::from_str(param_name)
+            .map_err(|e| Error::invalid_header_name(param_name, e.to_string()))?;
+        let header_value = HeaderValue::from_str(secret_value)
+            .map_err(|e| Error::invalid_header_value(param_name, e.to_string()))?;
+        headers.insert(header_name, header_value);
+    }
+
+    Ok(())
+}
+
+fn build_http_authorization_value(scheme_str: &str, secret_value: &str) -> String {
+    let auth_scheme: AuthScheme = AuthScheme::from(scheme_str);
+    match &auth_scheme {
+        AuthScheme::Bearer => format!("Bearer {secret_value}"),
+        AuthScheme::Basic => {
+            let encoded = general_purpose::STANDARD.encode(secret_value);
+            format!("Basic {encoded}")
+        }
+        AuthScheme::Token | AuthScheme::DSN | AuthScheme::ApiKey | AuthScheme::Custom(_) => {
+            format!("{scheme_str} {secret_value}")
+        }
+    }
+}
+
+fn insert_http_authorization_header(
+    headers: &mut HeaderMap,
+    security_scheme: &CachedSecurityScheme,
+    secret_value: &str,
+) -> Result<(), Error> {
+    let Some(scheme_str) = &security_scheme.scheme else {
+        return Ok(());
+    };
+
+    let auth_value = build_http_authorization_value(scheme_str, secret_value);
+    let header_value = HeaderValue::from_str(&auth_value)
+        .map_err(|e| Error::invalid_header_value(constants::HEADER_AUTHORIZATION, e.to_string()))?;
+    headers.insert(constants::HEADER_AUTHORIZATION, header_value);
+
+    tracing::debug!(scheme = %scheme_str, "Added HTTP authentication header");
+    Ok(())
+}
+
 /// Adds an authentication header based on a security scheme
-#[allow(clippy::too_many_lines)]
 fn add_authentication_header(
     headers: &mut HeaderMap,
     security_scheme: &CachedSecurityScheme,
@@ -570,97 +662,27 @@ fn add_authentication_header(
         "Adding authentication header"
     );
 
-    // Priority 1: Check config-based secrets first
-    let secret_config = global_config
-        .and_then(|config| config.api_configs.get(api_name))
-        .and_then(|api_config| api_config.secrets.get(&security_scheme.name));
-
-    let (secret_value, env_var_name) = match (secret_config, &security_scheme.aperture_secret) {
-        (Some(config_secret), _) => {
-            // Use config-based secret
-            let secret_value = std::env::var(&config_secret.name)
-                .map_err(|_| Error::secret_not_set(&security_scheme.name, &config_secret.name))?;
-            (secret_value, config_secret.name.clone())
-        }
-        (None, Some(aperture_secret)) => {
-            // Priority 2: Fall back to x-aperture-secret extension
-            let secret_value = std::env::var(&aperture_secret.name)
-                .map_err(|_| Error::secret_not_set(&security_scheme.name, &aperture_secret.name))?;
-            (secret_value, aperture_secret.name.clone())
-        }
-        (None, None) => {
-            // No authentication configuration found - skip this scheme
-            return Ok(());
-        }
+    let Some(resolved_secret) =
+        resolve_authentication_secret(security_scheme, api_name, global_config)?
+    else {
+        return Ok(());
     };
 
-    let source = if secret_config.is_some() {
-        "config"
-    } else {
-        "x-aperture-secret"
-    };
     tracing::debug!(
-        source,
+        source = resolved_secret.source,
         scheme_name = %security_scheme.name,
-        env_var = %env_var_name,
+        env_var = %resolved_secret.env_var_name,
         "Resolved secret"
     );
 
-    // Validate the secret doesn't contain control characters
-    validate_header_value(constants::HEADER_AUTHORIZATION, &secret_value)?;
+    validate_header_value(constants::HEADER_AUTHORIZATION, &resolved_secret.value)?;
 
-    // Build the appropriate header based on scheme type
     match security_scheme.scheme_type.as_str() {
         constants::AUTH_SCHEME_APIKEY => {
-            let (Some(location), Some(param_name)) =
-                (&security_scheme.location, &security_scheme.parameter_name)
-            else {
-                return Ok(());
-            };
-
-            if location == "header" {
-                let header_name = HeaderName::from_str(param_name)
-                    .map_err(|e| Error::invalid_header_name(param_name, e.to_string()))?;
-                let header_value = HeaderValue::from_str(&secret_value)
-                    .map_err(|e| Error::invalid_header_value(param_name, e.to_string()))?;
-                headers.insert(header_name, header_value);
-            }
-            // Note: query and cookie locations are handled differently in request building
+            insert_api_key_header(headers, security_scheme, &resolved_secret.value)?;
         }
         "http" => {
-            let Some(scheme_str) = &security_scheme.scheme else {
-                return Ok(());
-            };
-
-            let auth_scheme: AuthScheme = scheme_str.as_str().into();
-            let auth_value = match &auth_scheme {
-                AuthScheme::Bearer => {
-                    format!("Bearer {secret_value}")
-                }
-                AuthScheme::Basic => {
-                    // Basic auth expects "username:password" format in the secret
-                    // The secret should contain the raw "username:password" string
-                    // We'll base64 encode it before adding to the header
-                    let encoded = general_purpose::STANDARD.encode(&secret_value);
-                    format!("Basic {encoded}")
-                }
-                AuthScheme::Token
-                | AuthScheme::DSN
-                | AuthScheme::ApiKey
-                | AuthScheme::Custom(_) => {
-                    // Treat any other HTTP scheme as a bearer-like token
-                    // Format: "Authorization: <scheme> <token>"
-                    // This supports Token, ApiKey, DSN, and any custom schemes
-                    format!("{scheme_str} {secret_value}")
-                }
-            };
-
-            let header_value = HeaderValue::from_str(&auth_value).map_err(|e| {
-                Error::invalid_header_value(constants::HEADER_AUTHORIZATION, e.to_string())
-            })?;
-            headers.insert(constants::HEADER_AUTHORIZATION, header_value);
-
-            tracing::debug!(scheme = %scheme_str, "Added HTTP authentication header");
+            insert_http_authorization_header(headers, security_scheme, &resolved_secret.value)?;
         }
         _ => {
             return Err(Error::unsupported_security_scheme(
@@ -673,6 +695,121 @@ fn add_authentication_header(
 }
 
 // ── New domain-type-based API ───────────────────────────────────────
+
+fn resolve_base_url_resolver<'a>(
+    spec: &'a CachedSpec,
+    global_config: Option<&'a GlobalConfig>,
+) -> BaseUrlResolver<'a> {
+    let resolver = BaseUrlResolver::new(spec);
+    if let Some(config) = global_config {
+        resolver.with_global_config(config)
+    } else {
+        resolver
+    }
+}
+
+fn add_idempotency_key(
+    headers: &mut HeaderMap,
+    idempotency_key: Option<&String>,
+) -> Result<(), Error> {
+    if let Some(key) = idempotency_key {
+        headers.insert(
+            HeaderName::from_static("idempotency-key"),
+            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
+        );
+    }
+    Ok(())
+}
+
+async fn cached_execution_result(
+    cache_context: Option<&(CacheKey, ResponseCache)>,
+) -> Result<Option<ExecutionResult>, Error> {
+    if let Some(cached_response) = check_cache(cache_context).await? {
+        return Ok(Some(ExecutionResult::Cached {
+            body: cached_response.body,
+        }));
+    }
+
+    Ok(None)
+}
+
+fn build_dry_run_result(
+    dry_run: bool,
+    method: &Method,
+    url: &str,
+    headers: &HeaderMap,
+    body: Option<&str>,
+    operation_id: &str,
+) -> Option<ExecutionResult> {
+    if !dry_run {
+        return None;
+    }
+
+    let headers_map: HashMap<String, String> = headers
+        .iter()
+        .map(|(k, v)| {
+            let value = if logging::should_redact_header(k.as_str()) {
+                "[REDACTED]".to_string()
+            } else {
+                v.to_str().unwrap_or("<binary>").to_string()
+            };
+            (k.as_str().to_string(), value)
+        })
+        .collect();
+
+    let request_info = serde_json::json!({
+        "dry_run": true,
+        "method": method.to_string(),
+        "url": url,
+        "headers": headers_map,
+        "body": body,
+        "operation_id": operation_id
+    });
+
+    Some(ExecutionResult::DryRun { request_info })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn finalize_execution_result(
+    status: reqwest::StatusCode,
+    response_headers: HashMap<String, String>,
+    response_text: String,
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+    method: Method,
+    url: String,
+    headers: &HeaderMap,
+    body: Option<&str>,
+    cache_context: Option<(CacheKey, ResponseCache)>,
+    cache_config: Option<&CacheConfig>,
+) -> Result<ExecutionResult, Error> {
+    if !status.is_success() {
+        return Err(handle_http_error(status, response_text, spec, operation));
+    }
+
+    store_in_cache(
+        cache_context,
+        &response_text,
+        status,
+        &response_headers,
+        method,
+        url,
+        headers,
+        body,
+        cache_config,
+    )
+    .await?;
+
+    if response_text.is_empty() {
+        Ok(ExecutionResult::Empty)
+    } else {
+        Ok(ExecutionResult::Success {
+            body: response_text,
+            status: status.as_u16(),
+            headers: response_headers,
+        })
+    }
+}
 
 /// Executes an API operation using CLI-agnostic domain types.
 ///
@@ -691,33 +828,17 @@ pub async fn execute(
     call: crate::invocation::OperationCall,
     ctx: crate::invocation::ExecutionContext,
 ) -> Result<crate::invocation::ExecutionResult, Error> {
-    use crate::invocation::ExecutionResult;
-
-    // Find the operation by operation_id
     let operation = find_operation_by_id(spec, &call.operation_id)?;
-
-    // Resolve base URL
-    let resolver = BaseUrlResolver::new(spec);
-    let resolver = if let Some(ref config) = ctx.global_config {
-        resolver.with_global_config(config)
-    } else {
-        resolver
-    };
+    let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
     let base_url =
         resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
-
-    // Build the full URL from pre-extracted parameters
     let url = build_url_from_params(
         &base_url,
         &operation.path,
         &call.path_params,
         &call.query_params,
     )?;
-
-    // Create HTTP client
     let client = build_http_client()?;
-
-    // Build headers from pre-extracted parameters
     let mut headers = build_headers_from_params(
         spec,
         operation,
@@ -726,22 +847,10 @@ pub async fn execute(
         &spec.name,
         ctx.global_config.as_ref(),
     )?;
-
-    // Add idempotency key if provided
-    if let Some(ref key) = ctx.idempotency_key {
-        headers.insert(
-            HeaderName::from_static("idempotency-key"),
-            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
-        );
-    }
-
-    // Determine HTTP method
+    add_idempotency_key(&mut headers, ctx.idempotency_key.as_ref())?;
     let method = Method::from_str(&operation.method)
         .map_err(|_| Error::invalid_http_method(&operation.method))?;
-
     let headers_clone = headers.clone();
-
-    // Prepare cache context
     let cache_context = prepare_cache_context(
         ctx.cache_config.as_ref(),
         &spec.name,
@@ -752,50 +861,27 @@ pub async fn execute(
         call.body.as_deref(),
     )?;
 
-    // Check cache for existing response
-    if let Some(cached_response) = check_cache(cache_context.as_ref()).await? {
-        return Ok(ExecutionResult::Cached {
-            body: cached_response.body,
-        });
+    if let Some(result) = cached_execution_result(cache_context.as_ref()).await? {
+        return Ok(result);
     }
 
-    // Handle dry-run mode
-    if ctx.dry_run {
-        let headers_map: HashMap<String, String> = headers_clone
-            .iter()
-            .map(|(k, v)| {
-                let value = if logging::should_redact_header(k.as_str()) {
-                    "[REDACTED]".to_string()
-                } else {
-                    v.to_str().unwrap_or("<binary>").to_string()
-                };
-                (k.as_str().to_string(), value)
-            })
-            .collect();
-
-        let request_info = serde_json::json!({
-            "dry_run": true,
-            "method": method.to_string(),
-            "url": url,
-            "headers": headers_map,
-            "body": call.body,
-            "operation_id": operation.operation_id
-        });
-
-        return Ok(ExecutionResult::DryRun { request_info });
+    if let Some(result) = build_dry_run_result(
+        ctx.dry_run,
+        &method,
+        &url,
+        &headers_clone,
+        call.body.as_deref(),
+        &operation.operation_id,
+    ) {
+        return Ok(result);
     }
 
-    // Build retry context with method information
     let retry_ctx = ctx.retry_context.map(|mut rc| {
         rc.method = Some(method.to_string());
         rc
     });
-
-    // Build secret context for dynamic secret redaction in logs
     let secret_ctx =
         logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref());
-
-    // Send request with retry support
     let (status, response_headers, response_text) = send_request_with_retry(
         &client,
         method.clone(),
@@ -808,34 +894,20 @@ pub async fn execute(
     )
     .await?;
 
-    // Check if request was successful
-    if !status.is_success() {
-        return Err(handle_http_error(status, response_text, spec, operation));
-    }
-
-    // Store response in cache
-    store_in_cache(
-        cache_context,
-        &response_text,
+    finalize_execution_result(
         status,
-        &response_headers,
+        response_headers,
+        response_text,
+        spec,
+        operation,
         method,
         url,
         &headers_clone,
         call.body.as_deref(),
+        cache_context,
         ctx.cache_config.as_ref(),
     )
-    .await?;
-
-    if response_text.is_empty() {
-        Ok(ExecutionResult::Empty)
-    } else {
-        Ok(ExecutionResult::Success {
-            body: response_text,
-            status: status.as_u16(),
-            headers: response_headers,
-        })
-    }
+    .await
 }
 
 /// Finds an operation by its `operation_id` in the spec.
@@ -1051,19 +1123,65 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
 }
 
 #[cfg(not(feature = "jq"))]
+const BASIC_JQ_ADVANCED_FEATURES: &[&str] = &["[", "]", "|", "(", ")", "select", "map", "length"];
+
+#[cfg(not(feature = "jq"))]
+fn uses_advanced_jq_features(filter: &str) -> bool {
+    BASIC_JQ_ADVANCED_FEATURES
+        .iter()
+        .any(|needle| filter.contains(needle))
+}
+
+#[cfg(not(feature = "jq"))]
+fn array_iteration_value(json_value: &Value) -> Value {
+    match json_value {
+        Value::Array(arr) => Value::Array(arr.clone()),
+        Value::Object(obj) => Value::Array(obj.values().cloned().collect()),
+        _ => Value::Null,
+    }
+}
+
+#[cfg(not(feature = "jq"))]
+fn length_value(json_value: &Value) -> Value {
+    match json_value {
+        Value::Array(arr) => Value::Number(arr.len().into()),
+        Value::Object(obj) => Value::Number(obj.len().into()),
+        Value::String(s) => Value::Number(s.len().into()),
+        _ => Value::Null,
+    }
+}
+
+#[cfg(not(feature = "jq"))]
+fn map_array_field(json_value: &Value, field_path: &str) -> Value {
+    match json_value {
+        Value::Array(arr) => Value::Array(
+            arr.iter()
+                .map(|item| get_nested_field(item, field_path))
+                .collect(),
+        ),
+        _ => Value::Null,
+    }
+}
+
+#[cfg(not(feature = "jq"))]
+fn basic_jq_filter_value(json_value: &Value, filter: &str) -> Result<Value, Error> {
+    match filter {
+        "." => Ok(json_value.clone()),
+        ".[]" => Ok(array_iteration_value(json_value)),
+        ".length" => Ok(length_value(json_value)),
+        filter if filter.starts_with(".[].") => Ok(map_array_field(json_value, &filter[4..])),
+        filter if filter.starts_with('.') => Ok(get_nested_field(json_value, &filter[1..])),
+        _ => Err(Error::jq_filter_error(
+            filter,
+            "Unsupported JQ filter. Only basic field access like '.name' or '.metadata.role' is supported without the full jq library.",
+        )),
+    }
+}
+
+#[cfg(not(feature = "jq"))]
 /// Basic JQ-like functionality for common cases
 fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Error> {
-    // Check if the filter uses advanced features
-    let uses_advanced_features = filter.contains('[')
-        || filter.contains(']')
-        || filter.contains('|')
-        || filter.contains('(')
-        || filter.contains(')')
-        || filter.contains("select")
-        || filter.contains("map")
-        || filter.contains("length");
-
-    if uses_advanced_features {
+    if uses_advanced_jq_features(filter) {
         tracing::warn!(
             "Advanced JQ features require building with --features jq. \
              Currently only basic field access is supported (e.g., '.field', '.nested.field'). \
@@ -1071,54 +1189,7 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
         );
     }
 
-    let result = match filter {
-        "." => json_value.clone(),
-        ".[]" => {
-            // Handle array iteration
-            match json_value {
-                Value::Array(arr) => {
-                    // Return array elements as a JSON array
-                    Value::Array(arr.clone())
-                }
-                Value::Object(obj) => {
-                    // Return object values as an array
-                    Value::Array(obj.values().cloned().collect())
-                }
-                _ => Value::Null,
-            }
-        }
-        ".length" => {
-            // Handle length operation
-            match json_value {
-                Value::Array(arr) => Value::Number(arr.len().into()),
-                Value::Object(obj) => Value::Number(obj.len().into()),
-                Value::String(s) => Value::Number(s.len().into()),
-                _ => Value::Null,
-            }
-        }
-        filter if filter.starts_with(".[].") => {
-            // Handle array map like .[].name
-            let field_path = &filter[4..]; // Remove ".[].""
-            match json_value {
-                Value::Array(arr) => {
-                    let mapped: Vec<Value> = arr
-                        .iter()
-                        .map(|item| get_nested_field(item, field_path))
-                        .collect();
-                    Value::Array(mapped)
-                }
-                _ => Value::Null,
-            }
-        }
-        filter if filter.starts_with('.') => {
-            // Handle simple field access like .name, .metadata.role
-            let field_path = &filter[1..]; // Remove the leading dot
-            get_nested_field(json_value, field_path)
-        }
-        _ => {
-            return Err(Error::jq_filter_error(filter, "Unsupported JQ filter. Only basic field access like '.name' or '.metadata.role' is supported without the full jq library."));
-        }
-    };
+    let result = basic_jq_filter_value(json_value, filter)?;
 
     serde_json::to_string_pretty(&result).map_err(|e| {
         Error::serialization_error(format!("Failed to serialize filtered result: {e}"))

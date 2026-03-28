@@ -866,21 +866,15 @@ fn extract_security_schemes(spec: &CachedSpec) -> HashMap<String, SecurityScheme
     security_schemes
 }
 
-/// Converts an `OpenAPI` operation to `CommandInfo` with full metadata
-fn convert_openapi_operation_to_info(
-    method: &str,
-    path: &str,
-    operation: &Operation,
-    spec: &OpenAPI,
-    global_security: Option<&Vec<openapiv3::SecurityRequirement>>,
-) -> CommandInfo {
-    let command_name = operation
+fn operation_command_name(operation: &Operation, method: &str) -> String {
+    operation
         .operation_id
         .as_ref()
-        .map_or_else(|| method.to_lowercase(), |op_id| to_kebab_case(op_id));
+        .map_or_else(|| method.to_lowercase(), |op_id| to_kebab_case(op_id))
+}
 
-    // Extract parameters with full metadata, resolving references
-    let parameters: Vec<ParameterInfo> = operation
+fn extract_operation_parameters(operation: &Operation, spec: &OpenAPI) -> Vec<ParameterInfo> {
+    operation
         .parameters
         .iter()
         .filter_map(|param_ref| match param_ref {
@@ -889,51 +883,60 @@ fn convert_openapi_operation_to_info(
                 .ok()
                 .map(|param| convert_openapi_parameter_to_info(&param)),
         })
-        .collect();
+        .collect()
+}
 
-    // Extract request body info
-    let request_body = operation.request_body.as_ref().and_then(|rb_ref| {
-        let ReferenceOr::Item(body) = rb_ref else {
-            return None;
-        };
+fn extract_request_body_info(operation: &Operation) -> Option<RequestBodyInfo> {
+    let Some(ReferenceOr::Item(body)) = operation.request_body.as_ref() else {
+        return None;
+    };
 
-        // Prefer JSON content if available
-        let content_type = if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
-            constants::CONTENT_TYPE_JSON
-        } else {
-            body.content.keys().next().map(String::as_str)?
-        };
+    let content_type = if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
+        constants::CONTENT_TYPE_JSON
+    } else {
+        body.content.keys().next().map(String::as_str)?
+    };
 
-        let media_type = body.content.get(content_type)?;
-        let example = media_type
-            .example
-            .as_ref()
-            .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
+    let media_type = body.content.get(content_type)?;
+    let example = media_type
+        .example
+        .as_ref()
+        .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
 
-        Some(RequestBodyInfo {
-            required: body.required,
-            content_type: content_type.to_string(),
-            description: body.description.clone(),
-            example,
+    Some(RequestBodyInfo {
+        required: body.required,
+        content_type: content_type.to_string(),
+        description: body.description.clone(),
+        example,
+    })
+}
+
+fn extract_security_requirements(
+    operation: &Operation,
+    global_security: Option<&[openapiv3::SecurityRequirement]>,
+) -> Vec<String> {
+    operation
+        .security
+        .as_deref()
+        .or(global_security)
+        .map_or_else(Vec::new, |reqs| {
+            reqs.iter().flat_map(|req| req.keys().cloned()).collect()
         })
-    });
+}
 
-    // Extract security requirements
-    let security_requirements = operation.security.as_ref().map_or_else(
-        || {
-            global_security.map_or(vec![], |reqs| {
-                reqs.iter().flat_map(|req| req.keys().cloned()).collect()
-            })
-        },
-        |op_security| {
-            op_security
-                .iter()
-                .flat_map(|req| req.keys().cloned())
-                .collect()
-        },
-    );
-
-    // Extract response schema from successful responses (200, 201, 204)
+/// Converts an `OpenAPI` operation to `CommandInfo` with full metadata
+fn convert_openapi_operation_to_info(
+    method: &str,
+    path: &str,
+    operation: &Operation,
+    spec: &OpenAPI,
+    global_security: Option<&Vec<openapiv3::SecurityRequirement>>,
+) -> CommandInfo {
+    let command_name = operation_command_name(operation, method);
+    let parameters = extract_operation_parameters(operation, spec);
+    let request_body = extract_request_body_info(operation);
+    let security_requirements =
+        extract_security_requirements(operation, global_security.map(std::vec::Vec::as_slice));
     let response_schema = extract_response_schema_from_operation(operation, spec);
 
     CommandInfo {

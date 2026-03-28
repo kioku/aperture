@@ -362,9 +362,41 @@ fn handle_settings(
     print_settings_list(settings, json, output)
 }
 
-/// Execute `aperture config <subcommand>`.
-#[allow(clippy::too_many_lines)]
-pub async fn execute_config_command(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigCommandFamily {
+    Specs,
+    Cache,
+    Secrets,
+    Settings,
+    Mappings,
+}
+
+const fn config_command_family(command: &crate::cli::ConfigCommands) -> ConfigCommandFamily {
+    match command {
+        crate::cli::ConfigCommands::Add { .. }
+        | crate::cli::ConfigCommands::List { .. }
+        | crate::cli::ConfigCommands::Remove { .. }
+        | crate::cli::ConfigCommands::Edit { .. }
+        | crate::cli::ConfigCommands::SetUrl { .. }
+        | crate::cli::ConfigCommands::GetUrl { .. }
+        | crate::cli::ConfigCommands::ListUrls {}
+        | crate::cli::ConfigCommands::Reinit { .. } => ConfigCommandFamily::Specs,
+        crate::cli::ConfigCommands::ClearCache { .. }
+        | crate::cli::ConfigCommands::CacheStats { .. } => ConfigCommandFamily::Cache,
+        crate::cli::ConfigCommands::SetSecret { .. }
+        | crate::cli::ConfigCommands::ListSecrets { .. }
+        | crate::cli::ConfigCommands::RemoveSecret { .. }
+        | crate::cli::ConfigCommands::ClearSecrets { .. } => ConfigCommandFamily::Secrets,
+        crate::cli::ConfigCommands::Set { .. }
+        | crate::cli::ConfigCommands::Get { .. }
+        | crate::cli::ConfigCommands::Settings { .. } => ConfigCommandFamily::Settings,
+        crate::cli::ConfigCommands::SetMapping { .. }
+        | crate::cli::ConfigCommands::ListMappings { .. }
+        | crate::cli::ConfigCommands::RemoveMapping { .. } => ConfigCommandFamily::Mappings,
+    }
+}
+
+async fn execute_specs_config_command(
     manager: &ConfigManager<OsFileSystem>,
     command: crate::cli::ConfigCommands,
     output: &Output,
@@ -393,12 +425,32 @@ pub async fn execute_config_command(
         crate::cli::ConfigCommands::Reinit { context, all } => {
             handle_reinit(manager, context, all, output)
         }
+        _ => unreachable!("command family routing must be exhaustive"),
+    }
+}
+
+async fn execute_cache_config_command(
+    manager: &ConfigManager<OsFileSystem>,
+    command: crate::cli::ConfigCommands,
+    output: &Output,
+) -> Result<(), Error> {
+    match command {
         crate::cli::ConfigCommands::ClearCache { api_name, all } => {
             handle_clear_cache(manager, api_name, all, output).await
         }
         crate::cli::ConfigCommands::CacheStats { api_name } => {
             handle_cache_stats(manager, api_name, output).await
         }
+        _ => unreachable!("command family routing must be exhaustive"),
+    }
+}
+
+fn execute_secret_config_command(
+    manager: &ConfigManager<OsFileSystem>,
+    command: crate::cli::ConfigCommands,
+    output: &Output,
+) -> Result<(), Error> {
+    match command {
         crate::cli::ConfigCommands::SetSecret {
             api_name,
             scheme_name,
@@ -415,11 +467,31 @@ pub async fn execute_config_command(
         crate::cli::ConfigCommands::ClearSecrets { api_name, force } => {
             handle_clear_secrets(manager, api_name, force, output)
         }
+        _ => unreachable!("command family routing must be exhaustive"),
+    }
+}
+
+fn execute_settings_config_command(
+    manager: &ConfigManager<OsFileSystem>,
+    command: crate::cli::ConfigCommands,
+    output: &Output,
+) -> Result<(), Error> {
+    match command {
         crate::cli::ConfigCommands::Set { key, value } => {
             handle_set_setting_command(manager, key, value, output)
         }
         crate::cli::ConfigCommands::Get { key, json } => handle_get_setting(manager, key, json),
         crate::cli::ConfigCommands::Settings { json } => handle_settings(manager, json, output),
+        _ => unreachable!("command family routing must be exhaustive"),
+    }
+}
+
+fn execute_mapping_config_command(
+    manager: &ConfigManager<OsFileSystem>,
+    command: crate::cli::ConfigCommands,
+    output: &Output,
+) -> Result<(), Error> {
+    match command {
         crate::cli::ConfigCommands::SetMapping {
             api_name,
             group,
@@ -451,6 +523,23 @@ pub async fn execute_config_command(
             group,
             operation,
         } => handle_remove_mapping_command(manager, api_name, group, operation, output),
+        _ => unreachable!("command family routing must be exhaustive"),
+    }
+}
+
+/// Execute `aperture config <subcommand>`.
+#[allow(clippy::too_many_lines)]
+pub async fn execute_config_command(
+    manager: &ConfigManager<OsFileSystem>,
+    command: crate::cli::ConfigCommands,
+    output: &Output,
+) -> Result<(), Error> {
+    match config_command_family(&command) {
+        ConfigCommandFamily::Specs => execute_specs_config_command(manager, command, output).await,
+        ConfigCommandFamily::Cache => execute_cache_config_command(manager, command, output).await,
+        ConfigCommandFamily::Secrets => execute_secret_config_command(manager, command, output),
+        ConfigCommandFamily::Settings => execute_settings_config_command(manager, command, output),
+        ConfigCommandFamily::Mappings => execute_mapping_config_command(manager, command, output),
     }
 }
 

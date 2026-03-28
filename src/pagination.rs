@@ -29,6 +29,56 @@ const DATA_ARRAY_FIELDS: &[&str] = &["data", "items", "results", "entries", "rec
 
 // ── Public entry point ────────────────────────────────────────────────────
 
+struct PagePayload {
+    body: String,
+    response_headers: HashMap<String, String>,
+}
+
+fn write_json_line<W: std::io::Write + ?Sized, T: serde::Serialize>(
+    writer: &mut W,
+    value: &T,
+) -> Result<(), Error> {
+    let line = serde_json::to_string(value)
+        .map_err(|e| Error::serialization_error(format!("Failed to serialize output line: {e}")))?;
+    writeln!(writer, "{line}").map_err(|e| Error::io_error(format!("Failed to write output: {e}")))
+}
+
+async fn fetch_page_payload<W: std::io::Write + ?Sized>(
+    spec: &CachedSpec,
+    call: OperationCall,
+    ctx: ExecutionContext,
+    writer: &mut W,
+) -> Result<Option<PagePayload>, Error> {
+    let result = executor::execute(spec, call, ctx).await?;
+
+    match result {
+        ExecutionResult::Success { body, headers, .. } => Ok(Some(PagePayload {
+            body,
+            response_headers: headers,
+        })),
+        ExecutionResult::Cached { body } => Ok(Some(PagePayload {
+            body,
+            response_headers: HashMap::new(),
+        })),
+        ExecutionResult::DryRun { request_info } => {
+            write_json_line(writer, &request_info)?;
+            Ok(None)
+        }
+        ExecutionResult::Empty => Ok(None),
+    }
+}
+
+fn emit_items<W: std::io::Write + ?Sized>(json: &Value, writer: &mut W) -> Result<usize, Error> {
+    let items = extract_items(json);
+    let page_len = items.len();
+
+    for item in items {
+        write_json_line(writer, item)?;
+    }
+
+    Ok(page_len)
+}
+
 /// Runs the pagination loop, writing each result item as a NDJSON line to
 /// `writer`.
 ///
@@ -89,37 +139,20 @@ pub async fn execute_paginated(
     let mut total_items: u64 = 0;
 
     for _page_num in 0..MAX_PAGES {
-        let result = executor::execute(spec, call.clone(), ctx.clone()).await?;
-
-        let (body, response_headers) = match result {
-            ExecutionResult::Success { body, headers, .. } => (body, headers),
-            ExecutionResult::Cached { body } => (body, HashMap::new()),
-            ExecutionResult::DryRun { request_info } => {
-                let line = serde_json::to_string(&request_info).map_err(|e| {
-                    Error::serialization_error(format!("Failed to serialize dry-run info: {e}"))
-                })?;
-                writeln!(writer, "{line}")
-                    .map_err(|e| Error::io_error(format!("Failed to write output: {e}")))?;
-                break;
-            }
-            ExecutionResult::Empty => break,
+        let Some(PagePayload {
+            body,
+            response_headers,
+        }) = fetch_page_payload(spec, call.clone(), ctx.clone(), writer).await?
+        else {
+            break;
         };
 
         let json: Value = serde_json::from_str(&body).map_err(|e| {
             Error::invalid_json_body(format!("Page response is not valid JSON: {e}"))
         })?;
 
-        let items = extract_items(&json);
-        let page_len = items.len();
-
-        for item in items {
-            let line = serde_json::to_string(item).map_err(|e| {
-                Error::serialization_error(format!("Failed to serialize item: {e}"))
-            })?;
-            writeln!(writer, "{line}")
-                .map_err(|e| Error::io_error(format!("Failed to write output: {e}")))?;
-            total_items += 1;
-        }
+        let page_len = emit_items(&json, writer)?;
+        total_items += page_len as u64;
 
         // Determine next page coordinates; break if this was the last one.
         let has_next = advance_cursor(
