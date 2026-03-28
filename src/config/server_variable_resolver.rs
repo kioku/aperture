@@ -221,40 +221,18 @@ impl<'a> ServerVariableResolver<'a> {
     /// Encodes a server variable value for safe inclusion in URLs
     /// This performs selective encoding to preserve URL structure while escaping problematic characters
     fn encode_server_variable(value: &str) -> String {
-        // Characters that should be encoded in server variable values
-        // We preserve forward slashes as they're often used in path segments
-        // but encode other special characters that could break URL parsing
         value
             .chars()
-            .map(|c| match c {
-                // Preserve forward slashes and common URL-safe characters
-                '/' | '-' | '_' | '.' | '~' => c.to_string(),
-                // Encode spaces and other special characters
-                ' ' => "%20".to_string(),
-                '?' => "%3F".to_string(),
-                '#' => "%23".to_string(),
-                '[' => "%5B".to_string(),
-                ']' => "%5D".to_string(),
-                '@' => "%40".to_string(),
-                '!' => "%21".to_string(),
-                '$' => "%24".to_string(),
-                '&' => "%26".to_string(),
-                '\'' => "%27".to_string(),
-                '(' => "%28".to_string(),
-                ')' => "%29".to_string(),
-                '*' => "%2A".to_string(),
-                '+' => "%2B".to_string(),
-                ',' => "%2C".to_string(),
-                ';' => "%3B".to_string(),
-                '=' => "%3D".to_string(),
-                '{' => "%7B".to_string(),
-                '}' => "%7D".to_string(),
-                // Keep alphanumeric and other unreserved characters as-is
-                c if c.is_ascii_alphanumeric() => c.to_string(),
-                // Encode any other characters
-                c => urlencoding::encode(&c.to_string()).to_string(),
-            })
+            .map(Self::encode_server_variable_char)
             .collect()
+    }
+
+    fn encode_server_variable_char(c: char) -> String {
+        if c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.' | '~') {
+            c.to_string()
+        } else {
+            urlencoding::encode(&c.to_string()).to_string()
+        }
     }
 }
 

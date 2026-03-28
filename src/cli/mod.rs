@@ -340,7 +340,7 @@ pub enum Commands {
     },
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum ConfigCommands {
     /// Add a new API specification from a file
     #[command(

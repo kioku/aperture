@@ -210,12 +210,8 @@ impl SpecValidator {
     }
 
     /// Validates a single security scheme and returns the scheme type for tracking
-    fn validate_security_scheme(
-        name: &str,
-        scheme: &SecurityScheme,
-    ) -> Result<Option<String>, Error> {
-        // First validate the scheme type and identify if it's unsupported
-        let unsupported_reason = match scheme {
+    fn unsupported_security_scheme_reason(scheme: &SecurityScheme) -> Option<String> {
+        match scheme {
             SecurityScheme::APIKey { .. } => None, // API Key schemes are supported
             SecurityScheme::HTTP {
                 scheme: http_scheme,
@@ -238,71 +234,10 @@ impl SpecValidator {
             SecurityScheme::OpenIDConnect { .. } => {
                 Some("OpenID Connect authentication is not supported".to_string())
             }
-        };
-
-        // If we found an unsupported scheme, return it as an error (to be converted to warning later)
-        if let Some(reason) = unsupported_reason {
-            return Err(Error::validation_error(format!(
-                "Security scheme '{name}' uses unsupported authentication: {reason}"
-            )));
         }
+    }
 
-        // Now validate x-aperture-secret extension if present
-        let (SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. }) =
-            scheme
-        else {
-            return Ok(None);
-        };
-
-        let Some(aperture_secret) = extensions.get(crate::constants::EXT_APERTURE_SECRET) else {
-            return Ok(None);
-        };
-
-        // Validate that it's an object
-        let secret_obj = aperture_secret.as_object().ok_or_else(|| {
-            Error::validation_error(format!(
-                "Invalid x-aperture-secret in security scheme '{name}': must be an object"
-            ))
-        })?;
-
-        // Validate required 'source' field
-        let source = secret_obj
-            .get(crate::constants::EXT_KEY_SOURCE)
-            .ok_or_else(|| {
-                Error::validation_error(format!(
-                    "Missing 'source' field in x-aperture-secret for security scheme '{name}'"
-                ))
-            })?
-            .as_str()
-            .ok_or_else(|| {
-                Error::validation_error(format!(
-                    "Invalid 'source' field in x-aperture-secret for security scheme '{name}': must be a string"
-                ))
-            })?;
-
-        // Currently only 'env' source is supported
-        if source != crate::constants::SOURCE_ENV {
-            return Err(Error::validation_error(format!(
-                "Unsupported source '{source}' in x-aperture-secret for security scheme '{name}'. Only 'env' is supported."
-            )));
-        }
-
-        // Validate required 'name' field
-        let env_name = secret_obj
-            .get(crate::constants::EXT_KEY_NAME)
-            .ok_or_else(|| {
-                Error::validation_error(format!(
-                    "Missing 'name' field in x-aperture-secret for security scheme '{name}'"
-                ))
-            })?
-            .as_str()
-            .ok_or_else(|| {
-                Error::validation_error(format!(
-                    "Invalid 'name' field in x-aperture-secret for security scheme '{name}': must be a string"
-                ))
-            })?;
-
-        // Validate environment variable name format
+    fn validate_env_var_name(name: &str, env_name: &str) -> Result<(), Error> {
         if env_name.is_empty() {
             return Err(Error::validation_error(format!(
                 "Empty 'name' field in x-aperture-secret for security scheme '{name}'"
@@ -317,6 +252,78 @@ impl SpecValidator {
                 "Invalid environment variable name '{env_name}' in x-aperture-secret for security scheme '{name}'. Must contain only alphanumeric characters and underscores, and not start with a digit."
             )));
         }
+
+        Ok(())
+    }
+
+    fn validate_aperture_secret_extension(
+        name: &str,
+        scheme: &SecurityScheme,
+    ) -> Result<(), Error> {
+        let (SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. }) =
+            scheme
+        else {
+            return Ok(());
+        };
+
+        let Some(aperture_secret) = extensions.get(crate::constants::EXT_APERTURE_SECRET) else {
+            return Ok(());
+        };
+
+        let secret_obj = aperture_secret.as_object().ok_or_else(|| {
+            Error::validation_error(format!(
+                "Invalid x-aperture-secret in security scheme '{name}': must be an object"
+            ))
+        })?;
+
+        let source = secret_obj
+            .get(crate::constants::EXT_KEY_SOURCE)
+            .ok_or_else(|| {
+                Error::validation_error(format!(
+                    "Missing 'source' field in x-aperture-secret for security scheme '{name}'"
+                ))
+            })?
+            .as_str()
+            .ok_or_else(|| {
+                Error::validation_error(format!(
+                    "Invalid 'source' field in x-aperture-secret for security scheme '{name}': must be a string"
+                ))
+            })?;
+
+        if source != crate::constants::SOURCE_ENV {
+            return Err(Error::validation_error(format!(
+                "Unsupported source '{source}' in x-aperture-secret for security scheme '{name}'. Only 'env' is supported."
+            )));
+        }
+
+        let env_name = secret_obj
+            .get(crate::constants::EXT_KEY_NAME)
+            .ok_or_else(|| {
+                Error::validation_error(format!(
+                    "Missing 'name' field in x-aperture-secret for security scheme '{name}'"
+                ))
+            })?
+            .as_str()
+            .ok_or_else(|| {
+                Error::validation_error(format!(
+                    "Invalid 'name' field in x-aperture-secret for security scheme '{name}': must be a string"
+                ))
+            })?;
+
+        Self::validate_env_var_name(name, env_name)
+    }
+
+    fn validate_security_scheme(
+        name: &str,
+        scheme: &SecurityScheme,
+    ) -> Result<Option<String>, Error> {
+        if let Some(reason) = Self::unsupported_security_scheme_reason(scheme) {
+            return Err(Error::validation_error(format!(
+                "Security scheme '{name}' uses unsupported authentication: {reason}"
+            )));
+        }
+
+        Self::validate_aperture_secret_extension(name, scheme)?;
 
         Ok(None)
     }

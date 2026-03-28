@@ -36,65 +36,120 @@ async fn main() {
     }
 }
 
+fn run_list_commands(context: &str, output: &Output) -> Result<(), Error> {
+    let context = validate_api_name(context)?;
+    aperture_cli::cli::commands::docs::list_commands(&context, output)
+}
+
+async fn run_api_command(cli: &Cli, context: &str, args: &[String]) -> Result<(), Error> {
+    let context = validate_api_name(context)?;
+    aperture_cli::cli::commands::api::execute_api_command(&context, args.to_vec(), cli).await
+}
+
+fn run_search_command(
+    manager: &ConfigManager<OsFileSystem>,
+    query: &str,
+    api: Option<&str>,
+    verbose: bool,
+    output: &Output,
+) -> Result<(), Error> {
+    let validated_api = api.map(validate_api_name).transpose()?;
+    aperture_cli::cli::commands::search::execute_search_command(
+        manager,
+        query,
+        validated_api.as_deref(),
+        verbose,
+        output,
+    )
+}
+
+async fn run_shortcut_command(
+    manager: &ConfigManager<OsFileSystem>,
+    args: &[String],
+    cli: &Cli,
+) -> Result<(), Error> {
+    aperture_cli::cli::commands::api::execute_shortcut_command(manager, args.to_vec(), cli).await
+}
+
+fn run_docs_command(
+    manager: &ConfigManager<OsFileSystem>,
+    api: Option<&str>,
+    tag: Option<&str>,
+    operation: Option<&str>,
+    enhanced: bool,
+    output: &Output,
+) -> Result<(), Error> {
+    let validated_api = api.map(validate_api_name).transpose()?;
+    aperture_cli::cli::commands::docs::execute_help_command(
+        manager,
+        validated_api.as_deref(),
+        tag,
+        operation,
+        enhanced,
+        output,
+    )
+}
+
+fn run_overview_command(
+    manager: &ConfigManager<OsFileSystem>,
+    api: Option<&str>,
+    all: bool,
+    output: &Output,
+) -> Result<(), Error> {
+    let validated_api = api.map(validate_api_name).transpose()?;
+    aperture_cli::cli::commands::docs::execute_overview_command(
+        manager,
+        validated_api.as_deref(),
+        all,
+        output,
+    )
+}
+
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
 async fn run_command(
     cli: Cli,
     manager: &ConfigManager<OsFileSystem>,
     output: &Output,
 ) -> Result<(), Error> {
-    use aperture_cli::cli::commands::{api, config, docs, search};
+    use aperture_cli::cli::commands::config;
 
-    match cli.command {
+    match &cli.command {
         Commands::Config { command } => {
-            config::execute_config_command(manager, command, output).await?;
+            config::execute_config_command(manager, command.clone(), output).await?;
         }
-        Commands::ListCommands { ref context } => {
-            let context = validate_api_name(context)?;
-            docs::list_commands(&context, output)?;
+        Commands::ListCommands { context } => {
+            run_list_commands(context, output)?;
         }
-        Commands::Api {
-            ref context,
-            ref args,
-        } => {
-            let context = validate_api_name(context)?;
-            api::execute_api_command(&context, args.clone(), &cli).await?;
+        Commands::Api { context, args } => {
+            run_api_command(&cli, context, args).await?;
         }
         Commands::Search {
-            ref query,
-            ref api,
+            query,
+            api,
             verbose,
         } => {
-            let validated_api = api.as_deref().map(validate_api_name).transpose()?;
-            search::execute_search_command(
-                manager,
-                query,
-                validated_api.as_deref(),
-                verbose,
-                output,
-            )?;
+            run_search_command(manager, query, api.as_deref(), *verbose, output)?;
         }
-        Commands::Exec { ref args } => {
-            api::execute_shortcut_command(manager, args.clone(), &cli).await?;
+        Commands::Exec { args } => {
+            run_shortcut_command(manager, args, &cli).await?;
         }
         Commands::Docs {
-            ref api,
-            ref tag,
-            ref operation,
+            api,
+            tag,
+            operation,
             enhanced,
         } => {
-            let validated_api = api.as_deref().map(validate_api_name).transpose()?;
-            docs::execute_help_command(
+            run_docs_command(
                 manager,
-                validated_api.as_deref(),
+                api.as_deref(),
                 tag.as_deref(),
                 operation.as_deref(),
-                enhanced,
+                *enhanced,
                 output,
             )?;
         }
-        Commands::Overview { ref api, all } => {
-            let validated_api = api.as_deref().map(validate_api_name).transpose()?;
-            docs::execute_overview_command(manager, validated_api.as_deref(), all, output)?;
+        Commands::Overview { api, all } => {
+            run_overview_command(manager, api.as_deref(), *all, output)?;
         }
     }
     Ok(())
