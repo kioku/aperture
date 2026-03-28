@@ -105,23 +105,17 @@ fn run_overview_command(
     )
 }
 
-#[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
-async fn run_command(
-    cli: Cli,
+async fn run_non_config_command(
+    cli: &Cli,
     manager: &ConfigManager<OsFileSystem>,
     output: &Output,
 ) -> Result<(), Error> {
-    use aperture_cli::cli::commands::config;
-
     match &cli.command {
-        Commands::Config { command } => {
-            config::execute_config_command(manager, command.clone(), output).await?;
-        }
         Commands::ListCommands { context } => {
             run_list_commands(context, output)?;
         }
         Commands::Api { context, args } => {
-            run_api_command(&cli, context, args).await?;
+            run_api_command(cli, context, args).await?;
         }
         Commands::Search {
             query,
@@ -131,7 +125,7 @@ async fn run_command(
             run_search_command(manager, query, api.as_deref(), *verbose, output)?;
         }
         Commands::Exec { args } => {
-            run_shortcut_command(manager, args, &cli).await?;
+            run_shortcut_command(manager, args, cli).await?;
         }
         Commands::Docs {
             api,
@@ -151,6 +145,24 @@ async fn run_command(
         Commands::Overview { api, all } => {
             run_overview_command(manager, api.as_deref(), *all, output)?;
         }
+        Commands::Config { .. } => unreachable!("config commands are handled separately"),
     }
+
     Ok(())
+}
+
+#[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
+async fn run_command(
+    cli: Cli,
+    manager: &ConfigManager<OsFileSystem>,
+    output: &Output,
+) -> Result<(), Error> {
+    use aperture_cli::cli::commands::config;
+
+    if let Commands::Config { command } = &cli.command {
+        config::execute_config_command(manager, command.clone(), output).await?;
+        return Ok(());
+    }
+
+    run_non_config_command(&cli, manager, output).await
 }

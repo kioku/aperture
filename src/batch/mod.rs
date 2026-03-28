@@ -611,6 +611,72 @@ impl BatchProcessor {
         })
     }
 
+    fn validate_batch_body_file_args(operation: &BatchOperation) -> Result<(), Error> {
+        let body_field_conflicts_with_args = operation.body_file.is_some()
+            && operation.args.iter().any(|a| {
+                a == "--body-file"
+                    || a.starts_with("--body-file=")
+                    || a == "--body"
+                    || a.starts_with("--body=")
+            });
+
+        if body_field_conflicts_with_args {
+            return Err(Error::invalid_config(
+                "body_file field conflicts with --body or --body-file in args; use one or the other",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn build_batch_cache_config(
+        use_cache: Option<bool>,
+    ) -> Result<Option<crate::response_cache::CacheConfig>, Error> {
+        if !use_cache.unwrap_or(false) {
+            return Ok(None);
+        }
+
+        let config_dir = if let Ok(dir) = std::env::var(crate::constants::ENV_APERTURE_CONFIG_DIR) {
+            std::path::PathBuf::from(dir)
+        } else {
+            crate::config::manager::get_config_dir()?
+        };
+
+        Ok(Some(crate::response_cache::CacheConfig {
+            cache_dir: config_dir
+                .join(crate::constants::DIR_CACHE)
+                .join(crate::constants::DIR_RESPONSES),
+            default_ttl: std::time::Duration::from_secs(300),
+            max_entries: 1000,
+            enabled: true,
+            allow_authenticated: false,
+        }))
+    }
+
+    fn render_batch_execution_result(
+        result: &crate::invocation::ExecutionResult,
+        output_format: &crate::cli::OutputFormat,
+        jq_filter: Option<&str>,
+        suppress_output: bool,
+        operation: &BatchOperation,
+    ) -> Result<String, Error> {
+        if suppress_output {
+            let output =
+                crate::cli::render::render_result_to_string(result, output_format, jq_filter)?;
+            return Ok(output.unwrap_or_default());
+        }
+
+        crate::cli::render::render_result(result, output_format, jq_filter)?;
+
+        Ok(format!(
+            "Successfully executed operation: {}",
+            operation
+                .id
+                .as_deref()
+                .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME)
+        ))
+    }
+
     /// Executes a single operation from a batch
     #[allow(clippy::too_many_arguments)]
     async fn execute_single_operation(
@@ -626,27 +692,7 @@ impl BatchProcessor {
         use crate::cli::translate;
         use crate::invocation::ExecutionContext;
 
-        // Generate the command tree and parse operation args into ArgMatches.
-        // If `body_file` is set, append `--body-file <path>` so the generator
-        // arg and translate layer handle it uniformly.
-        //
-        // Guard: body_file must not coexist with --body or --body-file in args.
-        // --body conflicts are caught by clap, but a duplicate --body-file would
-        // silently pick the last value, making body_file win without any error.
-        // Both space-separated (`--body-file /p`) and equals-sign (`--body-file=/p`)
-        // forms must be detected since clap accepts either.
-        let body_field_conflicts_with_args = operation.body_file.is_some()
-            && operation.args.iter().any(|a| {
-                a == "--body-file"
-                    || a.starts_with("--body-file=")
-                    || a == "--body"
-                    || a.starts_with("--body=")
-            });
-        if body_field_conflicts_with_args {
-            return Err(Error::invalid_config(
-                "body_file field conflicts with --body or --body-file in args; use one or the other",
-            ));
-        }
+        Self::validate_batch_body_file_args(operation)?;
 
         let command = generator::generate_command_tree_with_flags(spec, false);
         let extra_body_file: Vec<String> = operation
@@ -662,35 +708,10 @@ impl BatchProcessor {
             )
             .map_err(|e| Error::invalid_command(crate::constants::CONTEXT_BATCH, e.to_string()))?;
 
-        // Translate ArgMatches → OperationCall
         let call = translate::matches_to_operation_call(spec, &matches)?;
-
-        // Build cache configuration
-        let cache_enabled = operation.use_cache.unwrap_or(false);
-        let cache_config = if cache_enabled {
-            let config_dir =
-                if let Ok(dir) = std::env::var(crate::constants::ENV_APERTURE_CONFIG_DIR) {
-                    std::path::PathBuf::from(dir)
-                } else {
-                    crate::config::manager::get_config_dir()?
-                };
-            Some(crate::response_cache::CacheConfig {
-                cache_dir: config_dir
-                    .join(crate::constants::DIR_CACHE)
-                    .join(crate::constants::DIR_RESPONSES),
-                default_ttl: std::time::Duration::from_secs(300),
-                max_entries: 1000,
-                enabled: true,
-                allow_authenticated: false,
-            })
-        } else {
-            None
-        };
-
-        // Build retry context from operation settings and global config defaults
+        let cache_config = Self::build_batch_cache_config(operation.use_cache)?;
         let retry_context = build_batch_retry_context(operation, global_config)?;
 
-        // Build ExecutionContext
         let ctx = ExecutionContext {
             dry_run,
             idempotency_key: None,
@@ -702,25 +723,15 @@ impl BatchProcessor {
             auto_paginate: false,
         };
 
-        // Execute
         let result = crate::engine::executor::execute(spec, call, ctx).await?;
 
-        // Render based on suppress_output flag
-        if suppress_output {
-            let output =
-                crate::cli::render::render_result_to_string(&result, output_format, jq_filter)?;
-            return Ok(output.unwrap_or_default());
-        }
-
-        crate::cli::render::render_result(&result, output_format, jq_filter)?;
-
-        Ok(format!(
-            "Successfully executed operation: {}",
-            operation
-                .id
-                .as_deref()
-                .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME)
-        ))
+        Self::render_batch_execution_result(
+            &result,
+            output_format,
+            jq_filter,
+            suppress_output,
+            operation,
+        )
     }
 }
 

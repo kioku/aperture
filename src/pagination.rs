@@ -34,6 +34,14 @@ struct PagePayload {
     response_headers: HashMap<String, String>,
 }
 
+struct PaginationState {
+    strategy: PaginationStrategy,
+    cursor_field: Option<String>,
+    cursor_param: Option<String>,
+    page_param: String,
+    limit: usize,
+}
+
 fn write_json_line<W: std::io::Write + ?Sized, T: serde::Serialize>(
     writer: &mut W,
     value: &T,
@@ -79,6 +87,75 @@ fn emit_items<W: std::io::Write + ?Sized>(json: &Value, writer: &mut W) -> Resul
     Ok(page_len)
 }
 
+fn resolve_pagination_state(
+    operation: &crate::cache::models::CachedCommand,
+    call: &OperationCall,
+) -> PaginationState {
+    let cursor_field = operation.pagination.cursor_field.clone();
+    let cursor_param = operation
+        .pagination
+        .cursor_param
+        .clone()
+        .or_else(|| cursor_field.clone());
+    let page_param = operation
+        .pagination
+        .page_param
+        .clone()
+        .unwrap_or_else(|| detect_page_param(&call.query_params));
+    let limit_param = operation
+        .pagination
+        .limit_param
+        .clone()
+        .unwrap_or_else(|| detect_limit_param(&call.query_params));
+    let limit: usize = call
+        .query_params
+        .get(&limit_param)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20);
+
+    PaginationState {
+        strategy: operation.pagination.strategy,
+        cursor_field,
+        cursor_param,
+        page_param,
+        limit,
+    }
+}
+
+async fn process_paginated_page<W: std::io::Write + ?Sized>(
+    spec: &CachedSpec,
+    call: &mut OperationCall,
+    ctx: ExecutionContext,
+    writer: &mut W,
+    state: &PaginationState,
+) -> Result<Option<(usize, bool)>, Error> {
+    let Some(PagePayload {
+        body,
+        response_headers,
+    }) = fetch_page_payload(spec, call.clone(), ctx, writer).await?
+    else {
+        return Ok(None);
+    };
+
+    let json: Value = serde_json::from_str(&body)
+        .map_err(|e| Error::invalid_json_body(format!("Page response is not valid JSON: {e}")))?;
+
+    let page_len = emit_items(&json, writer)?;
+    let has_next = advance_cursor(
+        state.strategy,
+        call,
+        &json,
+        &response_headers,
+        state.cursor_field.as_ref(),
+        state.cursor_param.as_ref(),
+        &state.page_param,
+        page_len,
+        state.limit,
+    );
+
+    Ok(Some((page_len, has_next)))
+}
+
 /// Runs the pagination loop, writing each result item as a NDJSON line to
 /// `writer`.
 ///
@@ -101,9 +178,9 @@ pub async fn execute_paginated(
         .find(|c| c.operation_id == call.operation_id)
         .ok_or_else(|| Error::operation_not_found(&call.operation_id))?;
 
-    let strategy = operation.pagination.strategy;
+    let state = resolve_pagination_state(operation, &call);
 
-    if matches!(strategy, PaginationStrategy::None) {
+    if matches!(state.strategy, PaginationStrategy::None) {
         tracing::warn!(
             operation_id = %call.operation_id,
             "No pagination metadata detected for this operation; executing once. \
@@ -111,61 +188,17 @@ pub async fn execute_paginated(
         );
     }
 
-    let cursor_field = operation.pagination.cursor_field.clone();
-    let cursor_param = operation
-        .pagination
-        .cursor_param
-        .clone()
-        .or_else(|| cursor_field.clone());
-
-    let page_param = operation
-        .pagination
-        .page_param
-        .clone()
-        .unwrap_or_else(|| detect_page_param(&call.query_params));
-
-    let limit_param = operation
-        .pagination
-        .limit_param
-        .clone()
-        .unwrap_or_else(|| detect_limit_param(&call.query_params));
-
-    let limit: usize = call
-        .query_params
-        .get(&limit_param)
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(20);
-
     let mut total_items: u64 = 0;
 
     for _page_num in 0..MAX_PAGES {
-        let Some(PagePayload {
-            body,
-            response_headers,
-        }) = fetch_page_payload(spec, call.clone(), ctx.clone(), writer).await?
+        let Some((page_len, has_next)) =
+            process_paginated_page(spec, &mut call, ctx.clone(), writer, &state).await?
         else {
             break;
         };
 
-        let json: Value = serde_json::from_str(&body).map_err(|e| {
-            Error::invalid_json_body(format!("Page response is not valid JSON: {e}"))
-        })?;
-
-        let page_len = emit_items(&json, writer)?;
         total_items += page_len as u64;
 
-        // Determine next page coordinates; break if this was the last one.
-        let has_next = advance_cursor(
-            strategy,
-            &mut call,
-            &json,
-            &response_headers,
-            cursor_field.as_ref(),
-            cursor_param.as_ref(),
-            &page_param,
-            page_len,
-            limit,
-        );
         if !has_next {
             break;
         }

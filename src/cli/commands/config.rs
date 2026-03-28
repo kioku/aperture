@@ -837,53 +837,24 @@ pub async fn show_cache_stats(
 
 // ── Command Mapping Handlers ──
 
-/// Handle the `config set-mapping` command
-#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
-pub fn handle_set_mapping(
-    manager: &ConfigManager<OsFileSystem>,
-    api_name: &crate::config::context_name::ApiContextName,
-    group: Option<&[String]>,
-    operation: Option<&str>,
+const fn resolve_hidden_flag(hidden: bool, visible: bool) -> Option<bool> {
+    match (hidden, visible) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
+    }
+}
+
+fn describe_mapping_changes(
     name: Option<&str>,
     op_group: Option<&str>,
     alias: Option<&str>,
     remove_alias: Option<&str>,
     hidden: bool,
     visible: bool,
-    output: &Output,
-) -> Result<(), Error> {
-    // Handle group rename
-    if let Some([original, new_name, ..]) = group {
-        manager.set_group_mapping(api_name, original, new_name)?;
-        output.success(format!(
-            "Set group mapping for '{api_name}': '{original}' → '{new_name}'"
-        ));
-        output.info("Run 'aperture config reinit' to apply changes.");
-        return Ok(());
-    }
-
-    // Handle operation mapping
-    let Some(op_id) = operation else {
-        return Err(Error::invalid_config(
-            "Either --group or --operation must be specified",
-        ));
-    };
-
-    let hidden_flag = match (hidden, visible) {
-        (true, _) => Some(true),
-        (_, true) => Some(false),
-        _ => None,
-    };
-
-    manager.set_operation_mapping(api_name, op_id, name, op_group, alias, hidden_flag)?;
-
-    // Handle alias removal (after set, so add + remove in one call is remove-wins)
-    if let Some(alias_to_remove) = remove_alias {
-        manager.remove_alias(api_name, op_id, alias_to_remove)?;
-    }
-
-    // Build a descriptive message
+) -> String {
     let mut changes = Vec::new();
+
     if let Some(n) = name {
         changes.push(format!("name='{n}'"));
     }
@@ -903,14 +874,53 @@ pub fn handle_set_mapping(
         changes.push("hidden=false".to_string());
     }
 
-    let change_desc = if changes.is_empty() {
+    if changes.is_empty() {
         "(no changes)".to_string()
     } else {
         changes.join(", ")
+    }
+}
+
+/// Handle the `config set-mapping` command
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
+pub fn handle_set_mapping(
+    manager: &ConfigManager<OsFileSystem>,
+    api_name: &crate::config::context_name::ApiContextName,
+    group: Option<&[String]>,
+    operation: Option<&str>,
+    name: Option<&str>,
+    op_group: Option<&str>,
+    alias: Option<&str>,
+    remove_alias: Option<&str>,
+    hidden: bool,
+    visible: bool,
+    output: &Output,
+) -> Result<(), Error> {
+    if let Some([original, new_name, ..]) = group {
+        manager.set_group_mapping(api_name, original, new_name)?;
+        output.success(format!(
+            "Set group mapping for '{api_name}': '{original}' → '{new_name}'"
+        ));
+        output.info("Run 'aperture config reinit' to apply changes.");
+        return Ok(());
+    }
+
+    let Some(op_id) = operation else {
+        return Err(Error::invalid_config(
+            "Either --group or --operation must be specified",
+        ));
     };
 
+    let hidden_flag = resolve_hidden_flag(hidden, visible);
+    manager.set_operation_mapping(api_name, op_id, name, op_group, alias, hidden_flag)?;
+
+    if let Some(alias_to_remove) = remove_alias {
+        manager.remove_alias(api_name, op_id, alias_to_remove)?;
+    }
+
     output.success(format!(
-        "Set operation mapping for '{api_name}': '{op_id}' → {change_desc}"
+        "Set operation mapping for '{api_name}': '{op_id}' → {}",
+        describe_mapping_changes(name, op_group, alias, remove_alias, hidden, visible)
     ));
     output.info("Run 'aperture config reinit' to apply changes.");
     Ok(())

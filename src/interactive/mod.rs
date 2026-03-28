@@ -275,6 +275,45 @@ pub fn select_from_options_with_io<T: InputOutput>(
 ///
 /// # Errors
 /// Returns an error if no options provided, input operations fail, maximum retries exceeded, or timeout occurs
+fn resolve_selection_by_number(options: &[(String, String)], selection: &str) -> Option<String> {
+    let num = selection.parse::<usize>().ok()?;
+    (num > 0 && num <= options.len()).then(|| options[num - 1].0.clone())
+}
+
+fn resolve_selection_by_name(options: &[(String, String)], selection: &str) -> Option<String> {
+    let selection_lower = selection.to_lowercase();
+    options
+        .iter()
+        .find(|(key, _)| key.to_lowercase() == selection_lower)
+        .map(|(key, _)| key.clone())
+}
+
+fn build_selection_suggestions(options: &[(String, String)]) -> Vec<String> {
+    vec![
+        format!(
+            "Valid options: {}",
+            options
+                .iter()
+                .map(|(k, _)| k.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        "You can enter either a number or the exact name".to_string(),
+        "Leave empty and answer 'no' to cancel the operation".to_string(),
+    ]
+}
+
+fn resolve_selection_choice(options: &[(String, String)], selection: &str) -> Option<String> {
+    resolve_selection_by_number(options, selection)
+        .or_else(|| resolve_selection_by_name(options, selection))
+}
+
+/// Testable version of `select_from_options` with configurable timeout.
+///
+/// # Errors
+///
+/// Returns an error if no options are available, input operations fail,
+/// maximum retries are exceeded, or the user cancels the selection.
 pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
     prompt: &str,
     options: &[(String, String)],
@@ -297,32 +336,16 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
             timeout,
         )?;
 
-        // Handle empty input - prompt to continue or cancel
-        let proceed_with_selection = handle_empty_selection(&selection, io, timeout)?;
-        match proceed_with_selection {
+        match handle_empty_selection(&selection, io, timeout)? {
             EmptySelectionResult::Continue => continue,
             EmptySelectionResult::Cancel => {
                 return Err(Error::invalid_config("Selection cancelled by user"))
             }
-            EmptySelectionResult::ProcessSelection => {} // Fall through to process selection
+            EmptySelectionResult::ProcessSelection => {}
         }
 
-        // Try parsing as a number first - use match to avoid nested if
-        match selection.parse::<usize>() {
-            Ok(num) if num > 0 && num <= options.len() => {
-                return Ok(options[num - 1].0.clone());
-            }
-            _ => {
-                // Invalid number or parse error, fall through to name matching
-            }
-        }
-
-        // Try matching by name (case insensitive)
-        let selection_lower = selection.to_lowercase();
-        for (key, _) in options {
-            if key.to_lowercase() == selection_lower {
-                return Ok(key.clone());
-            }
+        if let Some(choice) = resolve_selection_choice(options, &selection) {
+            return Ok(choice);
         }
 
         if attempt < MAX_RETRIES {
@@ -333,22 +356,10 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
         }
     }
 
-    let suggestions = vec![
-        format!(
-            "Valid options: {}",
-            options
-                .iter()
-                .map(|(k, _)| k.clone())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        "You can enter either a number or the exact name".to_string(),
-        "Leave empty and answer 'no' to cancel the operation".to_string(),
-    ];
     Err(Error::interactive_retries_exhausted(
         MAX_RETRIES,
         "Invalid selection",
-        &suggestions,
+        &build_selection_suggestions(options),
     ))
 }
 

@@ -163,13 +163,58 @@ pub fn render_examples(operation: &CachedCommand) {
 // ── Internal helpers ────────────────────────────────────────────────
 
 /// Core formatting logic shared by `render_result` and `render_result_to_string`.
+fn render_json_output(processed_text: &str, capture_output: bool) -> Option<String> {
+    let output = serde_json::from_str::<Value>(processed_text)
+        .ok()
+        .and_then(|json_value| serde_json::to_string_pretty(&json_value).ok())
+        .unwrap_or_else(|| processed_text.to_string());
+
+    if capture_output {
+        return Some(output);
+    }
+
+    // ast-grep-ignore: no-println
+    println!("{output}");
+    None
+}
+
+fn render_yaml_output(processed_text: &str, capture_output: bool) -> Option<String> {
+    let output = serde_json::from_str::<Value>(processed_text)
+        .ok()
+        .and_then(|json_value| serde_yaml::to_string(&json_value).ok())
+        .unwrap_or_else(|| processed_text.to_string());
+
+    if capture_output {
+        return Some(output);
+    }
+
+    // ast-grep-ignore: no-println
+    println!("{output}");
+    None
+}
+
+fn render_table_output(
+    processed_text: &str,
+    capture_output: bool,
+) -> Result<Option<String>, Error> {
+    let Ok(json_value) = serde_json::from_str::<Value>(processed_text) else {
+        return Ok(output_or_capture(processed_text, capture_output));
+    };
+
+    let table_output = print_as_table(&json_value, capture_output)?;
+    if capture_output {
+        return Ok(table_output);
+    }
+
+    Ok(None)
+}
+
 fn format_and_print(
     response_text: &str,
     output_format: &OutputFormat,
     jq_filter: Option<&str>,
     capture_output: bool,
 ) -> Result<Option<String>, Error> {
-    // Apply JQ filter if provided
     let processed_text = if let Some(filter) = jq_filter {
         apply_jq_filter(response_text, filter)?
     } else {
@@ -177,48 +222,10 @@ fn format_and_print(
     };
 
     match output_format {
-        OutputFormat::Json => {
-            let output = serde_json::from_str::<Value>(&processed_text)
-                .ok()
-                .and_then(|json_value| serde_json::to_string_pretty(&json_value).ok())
-                .unwrap_or_else(|| processed_text.clone());
-
-            if capture_output {
-                return Ok(Some(output));
-            }
-            // ast-grep-ignore: no-println
-            println!("{output}");
-        }
-        OutputFormat::Yaml => {
-            let output = serde_json::from_str::<Value>(&processed_text)
-                .ok()
-                .and_then(|json_value| serde_yaml::to_string(&json_value).ok())
-                .unwrap_or_else(|| processed_text.clone());
-
-            if capture_output {
-                return Ok(Some(output));
-            }
-            // ast-grep-ignore: no-println
-            println!("{output}");
-        }
-        OutputFormat::Table => {
-            let Ok(json_value) = serde_json::from_str::<Value>(&processed_text) else {
-                if capture_output {
-                    return Ok(Some(processed_text));
-                }
-                // ast-grep-ignore: no-println
-                println!("{processed_text}");
-                return Ok(None);
-            };
-
-            let table_output = print_as_table(&json_value, capture_output)?;
-            if capture_output {
-                return Ok(table_output);
-            }
-        }
+        OutputFormat::Json => Ok(render_json_output(&processed_text, capture_output)),
+        OutputFormat::Yaml => Ok(render_yaml_output(&processed_text, capture_output)),
+        OutputFormat::Table => render_table_output(&processed_text, capture_output),
     }
-
-    Ok(None)
 }
 
 /// Prints items as a numbered list.

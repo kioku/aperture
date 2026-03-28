@@ -170,55 +170,43 @@ impl ShortcutResolver {
     ///
     /// Panics if candidates is empty when exactly one match is expected.
     /// This should not happen in practice due to the length check.
-    #[must_use]
-    pub fn resolve_shortcut(&self, args: &[String]) -> ResolutionResult {
-        if args.is_empty() {
-            return ResolutionResult::NotFound;
-        }
-
+    fn collect_resolution_candidates(&self, args: &[String]) -> Vec<ResolvedShortcut> {
         let mut candidates = Vec::new();
 
-        // Try different resolution strategies in order of preference
-
-        // 1. Direct operation ID match
         if let Some(matches) = self.try_operation_id_resolution(args) {
             candidates.extend(matches);
         }
 
-        // 2. HTTP method + path resolution
         if let Some(matches) = self.try_method_path_resolution(args) {
             candidates.extend(matches);
         }
 
-        // 3. Tag-based resolution
         if let Some(matches) = self.try_tag_resolution(args) {
             candidates.extend(matches);
         }
 
-        // 4. Partial matching (fuzzy) - only if no candidates found yet
         if candidates.is_empty() {
             candidates.extend(self.try_partial_matching(args).unwrap_or_default());
         }
 
+        candidates
+    }
+
+    fn resolve_from_candidates(mut candidates: Vec<ResolvedShortcut>) -> ResolutionResult {
         match candidates.len() {
             0 => ResolutionResult::NotFound,
-            1 => {
-                // Handle the single candidate case safely
-                candidates.into_iter().next().map_or_else(
-                    || {
-                        // This should never happen given len() == 1, but handle defensively
-                        // ast-grep-ignore: no-println
-                        eprintln!("Warning: Expected exactly one candidate but found none");
-                        ResolutionResult::NotFound
-                    },
-                    |candidate| ResolutionResult::Resolved(Box::new(candidate)),
-                )
-            }
+            1 => candidates.into_iter().next().map_or_else(
+                || {
+                    // This should never happen given len() == 1, but handle defensively
+                    // ast-grep-ignore: no-println
+                    eprintln!("Warning: Expected exactly one candidate but found none");
+                    ResolutionResult::NotFound
+                },
+                |candidate| ResolutionResult::Resolved(Box::new(candidate)),
+            ),
             _ => {
-                // Sort by confidence score (descending)
                 candidates.sort_by(|a, b| b.confidence.cmp(&a.confidence));
 
-                // Check if the top candidate has significantly higher confidence
                 let has_high_confidence = candidates[0].confidence >= 85
                     && (candidates.len() == 1
                         || candidates[0].confidence > candidates[1].confidence + 10);
@@ -227,7 +215,6 @@ impl ShortcutResolver {
                     return ResolutionResult::Ambiguous(candidates);
                 }
 
-                // Handle the high-confidence candidate case safely
                 candidates.into_iter().next().map_or_else(
                     || {
                         // This should never happen given we just accessed candidates[0], but handle defensively
@@ -239,6 +226,15 @@ impl ShortcutResolver {
                 )
             }
         }
+    }
+
+    #[must_use]
+    pub fn resolve_shortcut(&self, args: &[String]) -> ResolutionResult {
+        if args.is_empty() {
+            return ResolutionResult::NotFound;
+        }
+
+        Self::resolve_from_candidates(self.collect_resolution_candidates(args))
     }
 
     /// Try to resolve using direct operation ID matching
