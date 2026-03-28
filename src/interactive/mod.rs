@@ -347,6 +347,7 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
     for attempt in 1..=MAX_RETRIES {
         match resolve_selection_attempt(options, io, timeout)? {
             SelectionOutcome::Selected(choice) => return Ok(choice),
+            SelectionOutcome::Continue => {}
             SelectionOutcome::Retry => {
                 if attempt < MAX_RETRIES {
                     io.println(&format!(
@@ -377,6 +378,7 @@ fn print_selection_options<T: InputOutput>(
 
 enum SelectionOutcome {
     Selected(String),
+    Continue,
     Retry,
 }
 
@@ -389,7 +391,7 @@ fn resolve_selection_attempt<T: InputOutput>(
         prompt_for_input_with_io_and_timeout("Enter your choice (number or name): ", io, timeout)?;
 
     match handle_empty_selection(&selection, io, timeout)? {
-        EmptySelectionResult::Continue => return Ok(SelectionOutcome::Retry),
+        EmptySelectionResult::Continue => return Ok(SelectionOutcome::Continue),
         EmptySelectionResult::Cancel => {
             return Err(Error::invalid_config("Selection cancelled by user"));
         }
