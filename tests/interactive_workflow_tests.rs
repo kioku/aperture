@@ -222,53 +222,7 @@ fn test_select_from_options_with_empty_input_continue() {
     let mut mock = MockInputOutputImpl::new();
     let options = vec![("option1".to_string(), "First option".to_string())];
 
-    mock.expect_println()
-        .with(eq("Choose:"))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_println()
-        .with(eq("  1: option1 - First option"))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    // First attempt - empty input
-    mock.expect_print()
-        .with(eq("Enter your choice (number or name): "))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_flush().times(1).returning(|| Ok(()));
-
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("\n".to_string()));
-
-    // Confirmation to continue
-    mock.expect_print()
-        .with(eq(
-            "Do you want to continue with the current operation? (y/n): ",
-        ))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_flush().times(1).returning(|| Ok(()));
-
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("y\n".to_string()));
-
-    // Second attempt - valid input after continuing
-    mock.expect_print()
-        .with(eq("Enter your choice (number or name): "))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_flush().times(1).returning(|| Ok(()));
-
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("1\n".to_string()));
+    expect_empty_selection_continue(&mut mock);
 
     let result = select_from_options_with_io("Choose:", &options, &mock);
     assert!(result.is_ok());
@@ -534,6 +488,66 @@ fn expect_invalid_selection_attempt(
             .times(1)
             .returning(|_| Ok(()));
     }
+}
+
+fn expect_empty_selection_continue(mock: &mut MockInputOutputImpl) {
+    expect_selection_prompt(mock);
+    expect_empty_selection_attempt(mock);
+    expect_continue_confirmation(mock);
+    expect_valid_selection_attempt(mock);
+}
+
+fn expect_selection_prompt(mock: &mut MockInputOutputImpl) {
+    mock.expect_println()
+        .with(eq("Choose:"))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_println()
+        .with(eq("  1: option1 - First option"))
+        .times(1)
+        .returning(|_| Ok(()));
+}
+
+fn expect_empty_selection_attempt(mock: &mut MockInputOutputImpl) {
+    mock.expect_print()
+        .with(eq("Enter your choice (number or name): "))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_flush().times(1).returning(|| Ok(()));
+
+    mock.expect_read_line_with_timeout()
+        .times(1)
+        .returning(|_| Ok("\n".to_string()));
+}
+
+fn expect_continue_confirmation(mock: &mut MockInputOutputImpl) {
+    mock.expect_print()
+        .with(eq(
+            "Do you want to continue with the current operation? (y/n): ",
+        ))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_flush().times(1).returning(|| Ok(()));
+
+    mock.expect_read_line_with_timeout()
+        .times(1)
+        .returning(|_| Ok("y\n".to_string()));
+}
+
+fn expect_valid_selection_attempt(mock: &mut MockInputOutputImpl) {
+    mock.expect_print()
+        .with(eq("Enter your choice (number or name): "))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_flush().times(1).returning(|| Ok(()));
+
+    mock.expect_read_line_with_timeout()
+        .times(1)
+        .returning(|_| Ok("1\n".to_string()));
 }
 
 #[test]
