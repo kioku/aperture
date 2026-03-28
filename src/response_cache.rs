@@ -378,11 +378,15 @@ impl ResponseCache {
 
             stats.total_entries += 1;
 
-            let Some((size_bytes, is_expired)) = Self::inspect_stats_entry(&entry).await? else {
+            let Ok(metadata) = entry.metadata().await else {
+                continue;
+            };
+            stats.total_size_bytes += metadata.len();
+
+            let Some(is_expired) = Self::inspect_stats_entry(&entry).await? else {
                 continue;
             };
 
-            stats.total_size_bytes += size_bytes;
             if is_expired {
                 stats.expired_entries += 1;
             } else {
@@ -398,13 +402,7 @@ impl ResponseCache {
             && api_name.is_none_or(|target| filename.starts_with(&format!("{target}_")))
     }
 
-    async fn inspect_stats_entry(
-        entry: &tokio::fs::DirEntry,
-    ) -> Result<Option<(u64, bool)>, Error> {
-        let Ok(metadata) = entry.metadata().await else {
-            return Ok(None);
-        };
-
+    async fn inspect_stats_entry(entry: &tokio::fs::DirEntry) -> Result<Option<bool>, Error> {
         let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
             return Ok(None);
         };
@@ -418,10 +416,9 @@ impl ResponseCache {
             .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
             .as_secs();
 
-        Ok(Some((
-            metadata.len(),
+        Ok(Some(
             now > cached_response.cached_at + cached_response.ttl_seconds,
-        )))
+        ))
     }
 
     /// Check whether a directory entry is a stale temp file (older than 1 hour)
@@ -884,6 +881,29 @@ mod tests {
         assert_eq!(stats.valid_entries, 2);
         assert_eq!(stats.expired_entries, 0);
         assert!(stats.total_size_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_counts_corrupted_entry_size() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+
+        let key = CacheKey {
+            api_name: "api_corrupt".to_string(),
+            operation_id: "broken".to_string(),
+            request_hash: "hash".to_string(),
+        };
+        let cache_file = cache.config.cache_dir.join(key.to_filename());
+        tokio::fs::write(&cache_file, b"not valid json")
+            .await
+            .unwrap();
+
+        let expected_size = tokio::fs::metadata(&cache_file).await.unwrap().len();
+        let stats = cache.get_stats(Some("api_corrupt")).await.unwrap();
+        assert_eq!(stats.total_entries, 1);
+        assert_eq!(stats.valid_entries, 0);
+        assert_eq!(stats.expired_entries, 0);
+        assert_eq!(stats.total_size_bytes, expected_size);
     }
 
     #[tokio::test]
