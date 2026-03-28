@@ -348,14 +348,7 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
         match resolve_selection_attempt(options, io, timeout)? {
             SelectionOutcome::Selected(choice) => return Ok(choice),
             SelectionOutcome::Continue => {}
-            SelectionOutcome::Retry => {
-                if attempt < MAX_RETRIES {
-                    io.println(&format!(
-                        "Invalid selection. Please enter a number (1-{}) or a valid name. (Attempt {attempt} of {MAX_RETRIES})",
-                        options.len()
-                    ))?;
-                }
-            }
+            SelectionOutcome::Retry => report_invalid_selection(attempt, options, io)?,
         }
     }
 
@@ -364,6 +357,21 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
         "Invalid selection",
         &build_selection_suggestions(options),
     ))
+}
+
+fn report_invalid_selection<T: InputOutput>(
+    attempt: usize,
+    options: &[(String, String)],
+    io: &T,
+) -> Result<(), Error> {
+    if attempt < MAX_RETRIES {
+        io.println(&format!(
+            "Invalid selection. Please enter a number (1-{}) or a valid name. (Attempt {attempt} of {MAX_RETRIES})",
+            options.len()
+        ))?;
+    }
+
+    Ok(())
 }
 
 fn print_selection_options<T: InputOutput>(

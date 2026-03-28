@@ -1021,11 +1021,59 @@ struct PreparedExecution<'a> {
     cache_config: Option<&'a CacheConfig>,
 }
 
+struct PreparedRequest<'a> {
+    operation: &'a CachedCommand,
+    method: Method,
+    url: String,
+    client: reqwest::Client,
+    headers: HeaderMap,
+    headers_clone: HeaderMap,
+    body: Option<String>,
+}
+
+struct PreparedRuntimeContext<'a> {
+    cache_context: Option<(CacheKey, ResponseCache)>,
+    retry_ctx: Option<RetryContext>,
+    secret_ctx: logging::SecretContext,
+    cache_config: Option<&'a CacheConfig>,
+}
+
 fn prepare_execution<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
 ) -> Result<PreparedExecution<'a>, Error> {
+    let request = prepare_request(spec, call, ctx)?;
+    let runtime = prepare_runtime_context(
+        spec,
+        request.operation,
+        &request.method,
+        &request.url,
+        &request.headers_clone,
+        request.body.as_deref(),
+        ctx,
+    )?;
+
+    Ok(PreparedExecution {
+        operation: request.operation,
+        method: request.method,
+        url: request.url,
+        client: request.client,
+        headers: request.headers,
+        headers_clone: request.headers_clone,
+        cache_context: runtime.cache_context,
+        retry_ctx: runtime.retry_ctx,
+        secret_ctx: runtime.secret_ctx,
+        body: request.body,
+        cache_config: runtime.cache_config,
+    })
+}
+
+fn prepare_request<'a>(
+    spec: &'a CachedSpec,
+    call: crate::invocation::OperationCall,
+    ctx: &'a crate::invocation::ExecutionContext,
+) -> Result<PreparedRequest<'a>, Error> {
     let operation = find_operation_by_id(spec, &call.operation_id)?;
     let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
     let base_url =
@@ -1049,14 +1097,35 @@ fn prepare_execution<'a>(
     let method = Method::from_str(&operation.method)
         .map_err(|_| Error::invalid_http_method(&operation.method))?;
     let headers_clone = headers.clone();
+
+    Ok(PreparedRequest {
+        operation,
+        method,
+        url,
+        client,
+        headers,
+        headers_clone,
+        body: call.body,
+    })
+}
+
+fn prepare_runtime_context<'a>(
+    spec: &'a CachedSpec,
+    operation: &'a CachedCommand,
+    method: &Method,
+    url: &str,
+    headers: &HeaderMap,
+    body: Option<&str>,
+    ctx: &'a crate::invocation::ExecutionContext,
+) -> Result<PreparedRuntimeContext<'a>, Error> {
     let cache_context = prepare_cache_context(
         ctx.cache_config.as_ref(),
         &spec.name,
         &operation.operation_id,
-        &method,
-        &url,
-        &headers_clone,
-        call.body.as_deref(),
+        method,
+        url,
+        headers,
+        body,
     )?;
     let retry_ctx = ctx.retry_context.clone().map(|mut rc| {
         rc.method = Some(method.to_string());
@@ -1065,17 +1134,10 @@ fn prepare_execution<'a>(
     let secret_ctx =
         logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref());
 
-    Ok(PreparedExecution {
-        operation,
-        method,
-        url,
-        client,
-        headers,
-        headers_clone,
+    Ok(PreparedRuntimeContext {
         cache_context,
         retry_ctx,
         secret_ctx,
-        body: call.body,
         cache_config: ctx.cache_config.as_ref(),
     })
 }
@@ -1240,25 +1302,14 @@ fn apply_jq_filter_value(json_value: Value, filter: &str) -> Result<String, Erro
     let loader = Loader::new(defs);
     let arena = Arena::default();
 
-    let modules = match loader.load(&arena, program) {
-        Ok(modules) => modules,
-        Err(errs) => {
-            return Err(Error::jq_filter_error(
-                filter,
-                format!("Parse error: {errs:?}"),
-            ));
-        }
-    };
+    let modules = loader
+        .load(&arena, program)
+        .map_err(|errs| Error::jq_filter_error(filter, format!("Parse error: {errs:?}")))?;
 
-    let filter_fn = match Compiler::default().with_funs(funs).compile(modules) {
-        Ok(filter) => filter,
-        Err(errs) => {
-            return Err(Error::jq_filter_error(
-                filter,
-                format!("Compilation error: {errs:?}"),
-            ));
-        }
-    };
+    let filter_fn = Compiler::default()
+        .with_funs(funs)
+        .compile(modules)
+        .map_err(|errs| Error::jq_filter_error(filter, format!("Compilation error: {errs:?}")))?;
 
     let jaq_value = Val::from(json_value);
     let inputs = RcIter::new(core::iter::empty());
@@ -1266,19 +1317,22 @@ fn apply_jq_filter_value(json_value: Value, filter: &str) -> Result<String, Erro
     let output = filter_fn.run((ctx, jaq_value));
     let results: Result<Vec<Val>, _> = output.collect();
 
+    format_jaq_results(results, filter)
+}
+
+#[cfg(feature = "jq")]
+fn format_jaq_results<E: std::fmt::Display>(
+    results: Result<Vec<Val>, E>,
+    filter: &str,
+) -> Result<String, Error> {
     match results {
+        Ok(vals) if vals.is_empty() => Ok(constants::NULL_VALUE.to_string()),
+        Ok(vals) if vals.len() == 1 => {
+            let json_val = serde_json::Value::from(vals[0].clone());
+            serde_json::to_string_pretty(&json_val)
+                .map_err(|e| Error::serialization_error(format!("Failed to serialize result: {e}")))
+        }
         Ok(vals) => {
-            if vals.is_empty() {
-                return Ok(constants::NULL_VALUE.to_string());
-            }
-
-            if vals.len() == 1 {
-                let json_val = serde_json::Value::from(vals[0].clone());
-                return serde_json::to_string_pretty(&json_val).map_err(|e| {
-                    Error::serialization_error(format!("Failed to serialize result: {e}"))
-                });
-            }
-
             let json_vals: Vec<Value> = vals.into_iter().map(serde_json::Value::from).collect();
             let array = Value::Array(json_vals);
             serde_json::to_string_pretty(&array).map_err(|e| {
@@ -1375,57 +1429,34 @@ fn apply_basic_jq_filter(json_value: &Value, filter: &str) -> Result<String, Err
 #[cfg(not(feature = "jq"))]
 /// Get a nested field from JSON using dot notation
 fn get_nested_field(json_value: &Value, field_path: &str) -> Value {
-    let parts: Vec<&str> = field_path.split('.').collect();
-    let mut current = json_value;
+    field_path
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .try_fold(json_value, resolve_nested_field_segment)
+        .cloned()
+        .unwrap_or(Value::Null)
+}
 
-    for part in parts {
-        if part.is_empty() {
-            continue;
-        }
-
-        // Handle array index notation like [0]
-        if part.starts_with('[') && part.ends_with(']') {
-            let index_str = &part[1..part.len() - 1];
-            let Ok(index) = index_str.parse::<usize>() else {
-                return Value::Null;
-            };
-
-            match current {
-                Value::Array(arr) => {
-                    let Some(item) = arr.get(index) else {
-                        return Value::Null;
-                    };
-                    current = item;
-                }
-                _ => return Value::Null,
-            }
-            continue;
-        }
-
-        match current {
-            Value::Object(obj) => {
-                if let Some(field) = obj.get(part) {
-                    current = field;
-                } else {
-                    return Value::Null;
-                }
-            }
-            Value::Array(arr) => {
-                // Handle numeric string as array index
-                let Ok(index) = part.parse::<usize>() else {
-                    return Value::Null;
-                };
-
-                let Some(item) = arr.get(index) else {
-                    return Value::Null;
-                };
-                current = item;
-            }
-            _ => return Value::Null,
-        }
+#[cfg(not(feature = "jq"))]
+fn resolve_nested_field_segment<'a>(current: &'a Value, part: &str) -> Option<&'a Value> {
+    if let Some(index) = parse_bracket_index(part) {
+        return current.as_array().and_then(|arr| arr.get(index));
     }
 
-    current.clone()
+    match current {
+        Value::Object(obj) => obj.get(part),
+        Value::Array(arr) => part.parse::<usize>().ok().and_then(|index| arr.get(index)),
+        _ => None,
+    }
+}
+
+#[cfg(not(feature = "jq"))]
+fn parse_bracket_index(part: &str) -> Option<usize> {
+    if part.starts_with('[') && part.ends_with(']') {
+        part[1..part.len() - 1].parse::<usize>().ok()
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

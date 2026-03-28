@@ -1007,37 +1007,46 @@ fn extract_response_schema_from_response(
         return None;
     };
 
-    // Prefer application/json content type
-    let content_type = if response.content.contains_key(constants::CONTENT_TYPE_JSON) {
-        constants::CONTENT_TYPE_JSON
-    } else {
-        // Fall back to first available content type
-        response.content.keys().next().map(String::as_str)?
-    };
-
+    let content_type = select_response_content_type(response)?;
     let media_type = response.content.get(content_type)?;
-    let schema_ref = media_type.schema.as_ref()?;
-
-    // Resolve schema reference if necessary
-    let schema_value = match schema_ref {
-        ReferenceOr::Item(schema) => serde_json::to_value(schema).ok()?,
-        ReferenceOr::Reference { reference } => {
-            let resolved = resolve_schema_reference(spec, reference).ok()?;
-            serde_json::to_value(&resolved).ok()?
-        }
-    };
-
-    // Extract example if available
-    let example = media_type
-        .example
-        .as_ref()
-        .and_then(|ex| serde_json::to_value(ex).ok());
+    let schema_value = extract_schema_value(media_type, spec)?;
+    let example = extract_response_example(media_type);
 
     Some(ResponseSchemaInfo {
         content_type: content_type.to_string(),
         schema: schema_value,
         example,
     })
+}
+
+fn select_response_content_type(response: &openapiv3::Response) -> Option<&str> {
+    response
+        .content
+        .get(constants::CONTENT_TYPE_JSON)
+        .map(|_| constants::CONTENT_TYPE_JSON)
+        .or_else(|| response.content.keys().next().map(String::as_str))
+}
+
+fn extract_schema_value(
+    media_type: &openapiv3::MediaType,
+    spec: &OpenAPI,
+) -> Option<serde_json::Value> {
+    let schema_ref = media_type.schema.as_ref()?;
+
+    match schema_ref {
+        ReferenceOr::Item(schema) => serde_json::to_value(schema).ok(),
+        ReferenceOr::Reference { reference } => {
+            let resolved = resolve_schema_reference(spec, reference).ok()?;
+            serde_json::to_value(&resolved).ok()
+        }
+    }
+}
+
+fn extract_response_example(media_type: &openapiv3::MediaType) -> Option<serde_json::Value> {
+    media_type
+        .example
+        .as_ref()
+        .and_then(|ex| serde_json::to_value(ex).ok())
 }
 
 /// Extracts schema information from a parameter format

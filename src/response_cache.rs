@@ -303,11 +303,7 @@ impl ResponseCache {
             .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?
         {
             let filename = entry.file_name();
-            let filename_str = filename.to_string_lossy();
-
-            if filename_str.starts_with(&format!("{api_name}_"))
-                && filename_str.ends_with(constants::CACHE_FILE_SUFFIX)
-            {
+            if Self::is_api_cache_entry(api_name, &filename) {
                 tokio::fs::remove_file(entry.path())
                     .await
                     .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
@@ -316,6 +312,12 @@ impl ResponseCache {
         }
 
         Ok(cleared_count)
+    }
+
+    fn is_api_cache_entry(api_name: &str, filename: &std::ffi::OsStr) -> bool {
+        let filename = filename.to_string_lossy();
+        filename.starts_with(&format!("{api_name}_"))
+            && filename.ends_with(constants::CACHE_FILE_SUFFIX)
     }
 
     /// Clear all cached responses

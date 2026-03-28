@@ -341,30 +341,20 @@ fn build_retry_context(
     global_config: Option<&GlobalConfig>,
 ) -> Result<Option<RetryContext>, Error> {
     let defaults = global_config.map(|c| &c.retry_defaults);
-
-    let max_attempts = cli
-        .retry
-        .or_else(|| defaults.map(|d| d.max_attempts))
-        .unwrap_or(0);
+    let max_attempts = resolve_retry_attempts(cli.retry, defaults.map(|d| d.max_attempts));
 
     if max_attempts == 0 {
         return Ok(None);
     }
 
-    // Truncation is safe: delay values in practice are well under u64::MAX milliseconds
-    let initial_delay_ms = if let Some(ref delay_str) = cli.retry_delay {
-        parse_duration(delay_str)?.as_millis() as u64
-    } else {
-        defaults.map_or(500, |d| d.initial_delay_ms)
-    };
-
-    let max_delay_ms = if let Some(ref delay_str) = cli.retry_max_delay {
-        parse_duration(delay_str)?.as_millis() as u64
-    } else {
-        defaults.map_or(30_000, |d| d.max_delay_ms)
-    };
-
-    let has_idempotency_key = cli.idempotency_key.is_some();
+    let initial_delay_ms = resolve_retry_delay_ms(
+        cli.retry_delay.as_deref(),
+        defaults.map_or(500, |d| d.initial_delay_ms),
+    )?;
+    let max_delay_ms = resolve_retry_delay_ms(
+        cli.retry_max_delay.as_deref(),
+        defaults.map_or(30_000, |d| d.max_delay_ms),
+    )?;
 
     Ok(Some(RetryContext {
         max_attempts,
@@ -372,6 +362,18 @@ fn build_retry_context(
         max_delay_ms,
         force_retry: cli.force_retry,
         method: None, // Determined by executor at execution time
-        has_idempotency_key,
+        has_idempotency_key: cli.idempotency_key.is_some(),
     }))
+}
+
+fn resolve_retry_attempts(explicit: Option<u32>, default: Option<u32>) -> u32 {
+    explicit.or(default).unwrap_or(0)
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn resolve_retry_delay_ms(delay: Option<&str>, default_ms: u64) -> Result<u64, Error> {
+    match delay {
+        Some(delay_str) => Ok(parse_duration(delay_str)?.as_millis() as u64),
+        None => Ok(default_ms),
+    }
 }

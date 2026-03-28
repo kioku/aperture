@@ -4,6 +4,8 @@ use crate::error::{Error, ErrorKind};
 use openapiv3::{OpenAPI, Operation, Parameter, ReferenceOr, RequestBody, SecurityScheme};
 use std::collections::HashMap;
 
+type ContentTypeReasonRule = (fn(&str) -> bool, &'static str);
+
 /// Result of validating an `OpenAPI` specification
 #[derive(Debug, Default)]
 pub struct ValidationResult {
@@ -100,37 +102,53 @@ impl SpecValidator {
 
     /// Returns a human-readable reason for why a content type is not supported
     fn get_unsupported_content_type_reason(content_type: &str) -> &'static str {
-        if Self::is_multipart_content_type(content_type) {
-            return "file uploads are not supported";
-        }
-        if Self::is_octet_stream_content_type(content_type) {
-            return "binary data uploads are not supported";
-        }
-        if Self::is_image_upload_content_type(content_type) {
-            return "image uploads are not supported";
-        }
-        if Self::is_pdf_content_type(content_type) {
-            return "PDF uploads are not supported";
-        }
-        if Self::is_xml_content_type(content_type) {
-            return "XML content is not supported";
-        }
-        if Self::is_form_content_type(content_type) {
-            return "form-encoded data is not supported";
-        }
-        if Self::is_text_content_type(content_type) {
-            return "plain text content is not supported";
-        }
-        if Self::is_csv_content_type(content_type) {
-            return "CSV content is not supported";
-        }
-        if Self::is_ndjson_content_type(content_type) {
-            return "newline-delimited JSON is not supported";
-        }
-        if Self::is_graphql_content_type(content_type) {
-            return "GraphQL content is not supported";
-        }
-        "is not supported"
+        let reason_rules: [ContentTypeReasonRule; 10] = [
+            (
+                Self::is_multipart_content_type as fn(&str) -> bool,
+                "file uploads are not supported",
+            ),
+            (
+                Self::is_octet_stream_content_type as fn(&str) -> bool,
+                "binary data uploads are not supported",
+            ),
+            (
+                Self::is_image_upload_content_type as fn(&str) -> bool,
+                "image uploads are not supported",
+            ),
+            (
+                Self::is_pdf_content_type as fn(&str) -> bool,
+                "PDF uploads are not supported",
+            ),
+            (
+                Self::is_xml_content_type as fn(&str) -> bool,
+                "XML content is not supported",
+            ),
+            (
+                Self::is_form_content_type as fn(&str) -> bool,
+                "form-encoded data is not supported",
+            ),
+            (
+                Self::is_text_content_type as fn(&str) -> bool,
+                "plain text content is not supported",
+            ),
+            (
+                Self::is_csv_content_type as fn(&str) -> bool,
+                "CSV content is not supported",
+            ),
+            (
+                Self::is_ndjson_content_type as fn(&str) -> bool,
+                "newline-delimited JSON is not supported",
+            ),
+            (
+                Self::is_graphql_content_type as fn(&str) -> bool,
+                "GraphQL content is not supported",
+            ),
+        ];
+
+        reason_rules
+            .iter()
+            .find_map(|(matches, reason)| matches(content_type).then_some(*reason))
+            .unwrap_or("is not supported")
     }
 
     fn is_multipart_content_type(content_type: &str) -> bool {
@@ -480,21 +498,23 @@ impl SpecValidator {
         reqs.iter()
             .flat_map(|req| req.keys())
             .filter_map(|scheme_name| {
-                unsupported_schemes.get(scheme_name).map(|msg| {
-                    // Extract the specific reason from the validation message
-                    match () {
-                        () if msg.contains("OAuth2") => format!("{scheme_name} (OAuth2)"),
-                        () if msg.contains("OpenID Connect") => {
-                            format!("{scheme_name} (OpenID Connect)")
-                        }
-                        () if msg.contains("complex authentication flows") => {
-                            format!("{scheme_name} (requires complex flow)")
-                        }
-                        () => scheme_name.clone(),
-                    }
-                })
+                unsupported_schemes
+                    .get(scheme_name)
+                    .map(|msg| Self::format_unsupported_scheme_detail(scheme_name, msg))
             })
             .collect()
+    }
+
+    fn format_unsupported_scheme_detail(scheme_name: &str, msg: &str) -> String {
+        if msg.contains("OAuth2") {
+            format!("{scheme_name} (OAuth2)")
+        } else if msg.contains("OpenID Connect") {
+            format!("{scheme_name} (OpenID Connect)")
+        } else if msg.contains("complex authentication flows") {
+            format!("{scheme_name} (requires complex flow)")
+        } else {
+            scheme_name.to_string()
+        }
     }
 
     /// Formats the reason message for authentication-related skips
