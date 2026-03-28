@@ -285,33 +285,32 @@ impl CommandSearcher {
         for command in &spec.commands {
             let full_command = effective_command_path(command);
 
-            // Check fuzzy match score on the effective command path
-            match self.matcher.fuzzy_match(&full_command, input) {
-                Some(score) if score > 0 => suggestions.push((full_command.clone(), score)),
-                _ => {}
-            }
+            Self::push_fuzzy_match(
+                &mut suggestions,
+                &full_command,
+                self.matcher.fuzzy_match(&full_command, input),
+                0,
+            );
 
-            // Also check the effective subcommand name directly
             let effective_name = command
                 .display_name
                 .as_deref()
                 .map_or_else(|| to_kebab_case(&command.operation_id), to_kebab_case);
-            match self.matcher.fuzzy_match(&effective_name, input) {
-                Some(score) if score > 0 => {
-                    suggestions.push((full_command.clone(), score + 10));
-                }
-                _ => {}
-            }
+            Self::push_fuzzy_match(
+                &mut suggestions,
+                &full_command,
+                self.matcher.fuzzy_match(&effective_name, input),
+                10,
+            );
 
-            // Also check aliases
             for alias in &command.aliases {
                 let alias_kebab = to_kebab_case(alias);
-                match self.matcher.fuzzy_match(&alias_kebab, input) {
-                    Some(score) if score > 0 => {
-                        suggestions.push((full_command.clone(), score + 5));
-                    }
-                    _ => {}
-                }
+                Self::push_fuzzy_match(
+                    &mut suggestions,
+                    &full_command,
+                    self.matcher.fuzzy_match(&alias_kebab, input),
+                    5,
+                );
             }
         }
 
@@ -320,6 +319,18 @@ impl CommandSearcher {
         suggestions.truncate(max_results);
 
         suggestions
+    }
+
+    fn push_fuzzy_match(
+        suggestions: &mut Vec<(String, i64)>,
+        command: &str,
+        score: Option<i64>,
+        bonus: i64,
+    ) {
+        let Some(score) = score.filter(|score| *score > 0) else {
+            return;
+        };
+        suggestions.push((command.to_string(), score + bonus));
     }
 }
 

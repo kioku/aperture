@@ -225,36 +225,42 @@ fn extract_body(has_request_body: bool, matches: &ArgMatches) -> Result<Option<S
         return Ok(None);
     }
 
-    // --body-file takes precedence when present (clap enforces mutual exclusion
-    // with --body via conflicts_with, so only one can appear at a time).
-    if let Ok(Some(path)) = matches.try_get_one::<String>("body-file") {
-        let raw = if path == "-" {
-            let mut buf = String::new();
-            std::io::stdin()
-                .read_to_string(&mut buf)
-                .map_err(|e| Error::io_error(format!("Failed to read body from stdin: {e}")))?;
-            buf
-        } else {
-            std::fs::read_to_string(path)
-                .map_err(|e| Error::io_error(format!("Failed to read body file '{path}': {e}")))?
-        };
-        // Trim trailing whitespace so files with a trailing newline are treated
-        // identically to the equivalent --body inline string.
-        let content = raw.trim_end();
-        let _: serde_json::Value =
-            serde_json::from_str(content).map_err(|e| Error::invalid_json_body(e.to_string()))?;
-        return Ok(Some(content.to_owned()));
+    if let Some(path) = matches.try_get_one::<String>("body-file").ok().flatten() {
+        return read_body_file(path).map(Some);
     }
 
     matches
         .get_one::<String>("body")
-        .map(|body_value| {
-            // Validate JSON
-            let _: serde_json::Value = serde_json::from_str(body_value)
-                .map_err(|e| Error::invalid_json_body(e.to_string()))?;
-            Ok(body_value.clone())
-        })
+        .map(|body_value| validate_inline_body(body_value))
         .transpose()
+}
+
+fn read_body_file(path: &str) -> Result<String, Error> {
+    let raw = if path == "-" {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| Error::io_error(format!("Failed to read body from stdin: {e}")))?;
+        buf
+    } else {
+        std::fs::read_to_string(path)
+            .map_err(|e| Error::io_error(format!("Failed to read body file '{path}': {e}")))?
+    };
+
+    let content = raw.trim_end();
+    validate_json_body(content)?;
+    Ok(content.to_owned())
+}
+
+fn validate_inline_body(body_value: &str) -> Result<String, Error> {
+    validate_json_body(body_value)?;
+    Ok(body_value.to_owned())
+}
+
+fn validate_json_body(body: &str) -> Result<(), Error> {
+    let _: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| Error::invalid_json_body(e.to_string()))?;
+    Ok(())
 }
 
 /// Extracts server variable arguments from CLI matches.

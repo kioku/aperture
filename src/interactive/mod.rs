@@ -135,7 +135,15 @@ pub fn confirm_with_timeout(prompt: &str, timeout: Duration) -> Result<bool, Err
 /// # Errors
 /// Returns an error if the environment variable name is invalid
 pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
-    // Check if empty
+    validate_env_var_not_empty(name)?;
+    validate_env_var_length(name)?;
+    validate_env_var_not_reserved(name)?;
+    validate_env_var_start(name)?;
+    validate_env_var_characters(name)?;
+    Ok(())
+}
+
+fn validate_env_var_not_empty(name: &str) -> Result<(), Error> {
     if name.is_empty() {
         return Err(Error::invalid_environment_variable_name(
             name,
@@ -143,8 +151,10 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
             "Provide a non-empty environment variable name like 'API_TOKEN'",
         ));
     }
+    Ok(())
+}
 
-    // Check length
+fn validate_env_var_length(name: &str) -> Result<(), Error> {
     if name.len() > MAX_INPUT_LENGTH {
         return Err(Error::invalid_environment_variable_name(
             name,
@@ -156,8 +166,10 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
             format!("Shorten the name to {MAX_INPUT_LENGTH} characters or less"),
         ));
     }
+    Ok(())
+}
 
-    // Check for reserved names (case insensitive)
+fn validate_env_var_not_reserved(name: &str) -> Result<(), Error> {
     let name_upper = name.to_uppercase();
     if RESERVED_ENV_VARS
         .iter()
@@ -169,46 +181,51 @@ pub fn validate_env_var_name(name: &str) -> Result<(), Error> {
             "Use a different name like 'MY_API_TOKEN' or 'APP_SECRET'",
         ));
     }
+    Ok(())
+}
 
-    // Check format - must start with letter or underscore, followed by alphanumeric or underscore
-    if !name.chars().next().unwrap_or('_').is_ascii_alphabetic() && !name.starts_with('_') {
-        let first_char = name.chars().next().unwrap_or('?');
-        let suggested_name = if first_char.is_ascii_digit() {
-            format!("VAR_{name}")
-        } else {
-            format!("_{name}")
-        };
-        return Err(Error::invalid_environment_variable_name(
-            name,
-            "must start with a letter or underscore",
-            format!("Try '{suggested_name}' instead"),
-        ));
+fn validate_env_var_start(name: &str) -> Result<(), Error> {
+    if name.chars().next().unwrap_or('_').is_ascii_alphabetic() || name.starts_with('_') {
+        return Ok(());
     }
 
-    // Check all characters are valid - alphanumeric or underscore only
+    let first_char = name.chars().next().unwrap_or('?');
+    let suggested_name = if first_char.is_ascii_digit() {
+        format!("VAR_{name}")
+    } else {
+        format!("_{name}")
+    };
+    Err(Error::invalid_environment_variable_name(
+        name,
+        "must start with a letter or underscore",
+        format!("Try '{suggested_name}' instead"),
+    ))
+}
+
+fn validate_env_var_characters(name: &str) -> Result<(), Error> {
     let invalid_chars: Vec<char> = name
         .chars()
         .filter(|c| !c.is_ascii_alphanumeric() && *c != '_')
         .collect();
-    if !invalid_chars.is_empty() {
-        let invalid_chars_str: String = invalid_chars.iter().collect();
-        let suggested_name = name
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>();
-        return Err(Error::interactive_invalid_characters(
-            &invalid_chars_str,
-            format!("Try '{suggested_name}' instead"),
-        ));
+    if invalid_chars.is_empty() {
+        return Ok(());
     }
 
-    Ok(())
+    let invalid_chars_str: String = invalid_chars.iter().collect();
+    let suggested_name = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    Err(Error::interactive_invalid_characters(
+        &invalid_chars_str,
+        format!("Try '{suggested_name}' instead"),
+    ))
 }
 
 /// Testable version of `prompt_for_input` that accepts an `InputOutput` trait
@@ -325,34 +342,19 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
     }
 
     io.println(prompt)?;
-    for (i, (key, description)) in options.iter().enumerate() {
-        io.println(&format!("  {}: {} - {}", i + 1, key, description))?;
-    }
+    print_selection_options(options, io)?;
 
     for attempt in 1..=MAX_RETRIES {
-        let selection = prompt_for_input_with_io_and_timeout(
-            "Enter your choice (number or name): ",
-            io,
-            timeout,
-        )?;
-
-        match handle_empty_selection(&selection, io, timeout)? {
-            EmptySelectionResult::Continue => continue,
-            EmptySelectionResult::Cancel => {
-                return Err(Error::invalid_config("Selection cancelled by user"))
+        match resolve_selection_attempt(options, io, timeout)? {
+            SelectionOutcome::Selected(choice) => return Ok(choice),
+            SelectionOutcome::Retry => {
+                if attempt < MAX_RETRIES {
+                    io.println(&format!(
+                        "Invalid selection. Please enter a number (1-{}) or a valid name. (Attempt {attempt} of {MAX_RETRIES})",
+                        options.len()
+                    ))?;
+                }
             }
-            EmptySelectionResult::ProcessSelection => {}
-        }
-
-        if let Some(choice) = resolve_selection_choice(options, &selection) {
-            return Ok(choice);
-        }
-
-        if attempt < MAX_RETRIES {
-            io.println(&format!(
-                "Invalid selection. Please enter a number (1-{}) or a valid name. (Attempt {attempt} of {MAX_RETRIES})",
-                options.len()
-            ))?;
         }
     }
 
@@ -361,6 +363,44 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
         "Invalid selection",
         &build_selection_suggestions(options),
     ))
+}
+
+fn print_selection_options<T: InputOutput>(
+    options: &[(String, String)],
+    io: &T,
+) -> Result<(), Error> {
+    for (i, (key, description)) in options.iter().enumerate() {
+        io.println(&format!("  {}: {} - {}", i + 1, key, description))?;
+    }
+    Ok(())
+}
+
+enum SelectionOutcome {
+    Selected(String),
+    Retry,
+}
+
+fn resolve_selection_attempt<T: InputOutput>(
+    options: &[(String, String)],
+    io: &T,
+    timeout: Duration,
+) -> Result<SelectionOutcome, Error> {
+    let selection =
+        prompt_for_input_with_io_and_timeout("Enter your choice (number or name): ", io, timeout)?;
+
+    match handle_empty_selection(&selection, io, timeout)? {
+        EmptySelectionResult::Continue => return Ok(SelectionOutcome::Retry),
+        EmptySelectionResult::Cancel => {
+            return Err(Error::invalid_config("Selection cancelled by user"));
+        }
+        EmptySelectionResult::ProcessSelection => {}
+    }
+
+    if let Some(choice) = resolve_selection_choice(options, &selection) {
+        return Ok(SelectionOutcome::Selected(choice));
+    }
+
+    Ok(SelectionOutcome::Retry)
 }
 
 /// Testable version of `confirm` that accepts an `InputOutput` trait

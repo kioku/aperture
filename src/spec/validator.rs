@@ -100,30 +100,80 @@ impl SpecValidator {
 
     /// Returns a human-readable reason for why a content type is not supported
     fn get_unsupported_content_type_reason(content_type: &str) -> &'static str {
-        match content_type {
-            // Binary file types
-            constants::CONTENT_TYPE_MULTIPART => "file uploads are not supported",
-            constants::CONTENT_TYPE_OCTET_STREAM => "binary data uploads are not supported",
-            ct if ct.starts_with(constants::CONTENT_TYPE_PREFIX_IMAGE) => {
-                "image uploads are not supported"
-            }
-            constants::CONTENT_TYPE_PDF => "PDF uploads are not supported",
-
-            // Alternative text formats
-            constants::CONTENT_TYPE_XML | constants::CONTENT_TYPE_TEXT_XML => {
-                "XML content is not supported"
-            }
-            constants::CONTENT_TYPE_FORM => "form-encoded data is not supported",
-            constants::CONTENT_TYPE_TEXT => "plain text content is not supported",
-            constants::CONTENT_TYPE_CSV => "CSV content is not supported",
-
-            // JSON-compatible formats
-            constants::CONTENT_TYPE_NDJSON => "newline-delimited JSON is not supported",
-            constants::CONTENT_TYPE_GRAPHQL => "GraphQL content is not supported",
-
-            // Generic fallback
-            _ => "is not supported",
+        if Self::is_multipart_content_type(content_type) {
+            return "file uploads are not supported";
         }
+        if Self::is_octet_stream_content_type(content_type) {
+            return "binary data uploads are not supported";
+        }
+        if Self::is_image_upload_content_type(content_type) {
+            return "image uploads are not supported";
+        }
+        if Self::is_pdf_content_type(content_type) {
+            return "PDF uploads are not supported";
+        }
+        if Self::is_xml_content_type(content_type) {
+            return "XML content is not supported";
+        }
+        if Self::is_form_content_type(content_type) {
+            return "form-encoded data is not supported";
+        }
+        if Self::is_text_content_type(content_type) {
+            return "plain text content is not supported";
+        }
+        if Self::is_csv_content_type(content_type) {
+            return "CSV content is not supported";
+        }
+        if Self::is_ndjson_content_type(content_type) {
+            return "newline-delimited JSON is not supported";
+        }
+        if Self::is_graphql_content_type(content_type) {
+            return "GraphQL content is not supported";
+        }
+        "is not supported"
+    }
+
+    fn is_multipart_content_type(content_type: &str) -> bool {
+        content_type == constants::CONTENT_TYPE_MULTIPART
+    }
+
+    fn is_octet_stream_content_type(content_type: &str) -> bool {
+        content_type == constants::CONTENT_TYPE_OCTET_STREAM
+    }
+
+    fn is_image_upload_content_type(content_type: &str) -> bool {
+        content_type.starts_with(constants::CONTENT_TYPE_PREFIX_IMAGE)
+    }
+
+    fn is_pdf_content_type(content_type: &str) -> bool {
+        content_type == constants::CONTENT_TYPE_PDF
+    }
+
+    fn is_xml_content_type(content_type: &str) -> bool {
+        matches!(
+            content_type,
+            constants::CONTENT_TYPE_XML | constants::CONTENT_TYPE_TEXT_XML
+        )
+    }
+
+    fn is_form_content_type(content_type: &str) -> bool {
+        content_type == constants::CONTENT_TYPE_FORM
+    }
+
+    fn is_text_content_type(content_type: &str) -> bool {
+        content_type == constants::CONTENT_TYPE_TEXT
+    }
+
+    fn is_csv_content_type(content_type: &str) -> bool {
+        content_type == constants::CONTENT_TYPE_CSV
+    }
+
+    fn is_ndjson_content_type(content_type: &str) -> bool {
+        content_type == constants::CONTENT_TYPE_NDJSON
+    }
+
+    fn is_graphql_content_type(content_type: &str) -> bool {
+        content_type == constants::CONTENT_TYPE_GRAPHQL
     }
 
     /// Validates an `OpenAPI` specification for Aperture compatibility
@@ -260,14 +310,46 @@ impl SpecValidator {
         name: &str,
         scheme: &SecurityScheme,
     ) -> Result<(), Error> {
-        let (SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. }) =
-            scheme
-        else {
+        let Some(extensions) = Self::aperture_secret_extensions(scheme) else {
             return Ok(());
         };
 
-        let Some(aperture_secret) = extensions.get(crate::constants::EXT_APERTURE_SECRET) else {
+        let Some(secret_obj) = Self::aperture_secret_object(name, extensions)? else {
             return Ok(());
+        };
+
+        let source =
+            Self::required_secret_string_field(name, secret_obj, crate::constants::EXT_KEY_SOURCE)?;
+        if source != crate::constants::SOURCE_ENV {
+            return Err(Error::validation_error(format!(
+                "Unsupported source '{source}' in x-aperture-secret for security scheme '{name}'. Only 'env' is supported."
+            )));
+        }
+
+        let env_name =
+            Self::required_secret_string_field(name, secret_obj, crate::constants::EXT_KEY_NAME)?;
+
+        Self::validate_env_var_name(name, env_name)
+    }
+
+    #[allow(clippy::missing_const_for_fn)]
+    fn aperture_secret_extensions(
+        scheme: &SecurityScheme,
+    ) -> Option<&indexmap::IndexMap<String, serde_json::Value>> {
+        match scheme {
+            SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. } => {
+                Some(extensions)
+            }
+            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+        }
+    }
+
+    fn aperture_secret_object<'a>(
+        name: &str,
+        extensions: &'a indexmap::IndexMap<String, serde_json::Value>,
+    ) -> Result<Option<&'a serde_json::Map<String, serde_json::Value>>, Error> {
+        let Some(aperture_secret) = extensions.get(crate::constants::EXT_APERTURE_SECRET) else {
+            return Ok(None);
         };
 
         let secret_obj = aperture_secret.as_object().ok_or_else(|| {
@@ -276,41 +358,27 @@ impl SpecValidator {
             ))
         })?;
 
-        let source = secret_obj
-            .get(crate::constants::EXT_KEY_SOURCE)
+        Ok(Some(secret_obj))
+    }
+
+    fn required_secret_string_field<'a>(
+        scheme_name: &str,
+        secret_obj: &'a serde_json::Map<String, serde_json::Value>,
+        field_name: &str,
+    ) -> Result<&'a str, Error> {
+        secret_obj
+            .get(field_name)
             .ok_or_else(|| {
                 Error::validation_error(format!(
-                    "Missing 'source' field in x-aperture-secret for security scheme '{name}'"
+                    "Missing '{field_name}' field in x-aperture-secret for security scheme '{scheme_name}'"
                 ))
             })?
             .as_str()
             .ok_or_else(|| {
                 Error::validation_error(format!(
-                    "Invalid 'source' field in x-aperture-secret for security scheme '{name}': must be a string"
+                    "Invalid '{field_name}' field in x-aperture-secret for security scheme '{scheme_name}': must be a string"
                 ))
-            })?;
-
-        if source != crate::constants::SOURCE_ENV {
-            return Err(Error::validation_error(format!(
-                "Unsupported source '{source}' in x-aperture-secret for security scheme '{name}'. Only 'env' is supported."
-            )));
-        }
-
-        let env_name = secret_obj
-            .get(crate::constants::EXT_KEY_NAME)
-            .ok_or_else(|| {
-                Error::validation_error(format!(
-                    "Missing 'name' field in x-aperture-secret for security scheme '{name}'"
-                ))
-            })?
-            .as_str()
-            .ok_or_else(|| {
-                Error::validation_error(format!(
-                    "Invalid 'name' field in x-aperture-secret for security scheme '{name}': must be a string"
-                ))
-            })?;
-
-        Self::validate_env_var_name(name, env_name)
+            })
     }
 
     fn validate_security_scheme(

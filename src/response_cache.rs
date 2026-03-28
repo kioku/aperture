@@ -372,74 +372,18 @@ impl ResponseCache {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
-            if !filename_str.ends_with(constants::CACHE_FILE_SUFFIX) {
-                continue;
-            }
-
-            // Check if this entry matches the requested API
-            let Some(target_api) = api_name else {
-                // No filter, include all entries
-                stats.total_entries += 1;
-
-                // Check if entry is expired
-                let Ok(metadata) = entry.metadata().await else {
-                    continue;
-                };
-
-                stats.total_size_bytes += metadata.len();
-
-                // Try to read the cache file to check expiration
-                let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
-                    continue;
-                };
-
-                let Ok(cached_response) = serde_json::from_str::<CachedResponse>(&json_content)
-                else {
-                    continue;
-                };
-
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
-                    .as_secs();
-
-                if now > cached_response.cached_at + cached_response.ttl_seconds {
-                    stats.expired_entries += 1;
-                } else {
-                    stats.valid_entries += 1;
-                }
-
-                continue;
-            };
-
-            if !filename_str.starts_with(&format!("{target_api}_")) {
+            if !Self::is_stats_entry(&filename_str, api_name) {
                 continue;
             }
 
             stats.total_entries += 1;
 
-            // Check if entry is expired
-            let Ok(metadata) = entry.metadata().await else {
+            let Some((size_bytes, is_expired)) = Self::inspect_stats_entry(&entry).await? else {
                 continue;
             };
 
-            stats.total_size_bytes += metadata.len();
-
-            // Try to read the cache file to check expiration
-            let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
-                continue;
-            };
-
-            let Ok(cached_response) = serde_json::from_str::<CachedResponse>(&json_content) else {
-                continue;
-            };
-
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
-                .as_secs();
-
-            if now > cached_response.cached_at + cached_response.ttl_seconds {
+            stats.total_size_bytes += size_bytes;
+            if is_expired {
                 stats.expired_entries += 1;
             } else {
                 stats.valid_entries += 1;
@@ -447,6 +391,37 @@ impl ResponseCache {
         }
 
         Ok(stats)
+    }
+
+    fn is_stats_entry(filename: &str, api_name: Option<&str>) -> bool {
+        filename.ends_with(constants::CACHE_FILE_SUFFIX)
+            && api_name.is_none_or(|target| filename.starts_with(&format!("{target}_")))
+    }
+
+    async fn inspect_stats_entry(
+        entry: &tokio::fs::DirEntry,
+    ) -> Result<Option<(u64, bool)>, Error> {
+        let Ok(metadata) = entry.metadata().await else {
+            return Ok(None);
+        };
+
+        let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
+            return Ok(None);
+        };
+
+        let Ok(cached_response) = serde_json::from_str::<CachedResponse>(&json_content) else {
+            return Ok(None);
+        };
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
+            .as_secs();
+
+        Ok(Some((
+            metadata.len(),
+            now > cached_response.cached_at + cached_response.ttl_seconds,
+        )))
     }
 
     /// Check whether a directory entry is a stale temp file (older than 1 hour)

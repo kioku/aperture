@@ -192,40 +192,39 @@ impl ShortcutResolver {
         candidates
     }
 
-    fn resolve_from_candidates(mut candidates: Vec<ResolvedShortcut>) -> ResolutionResult {
+    fn resolve_from_candidates(candidates: Vec<ResolvedShortcut>) -> ResolutionResult {
         match candidates.len() {
             0 => ResolutionResult::NotFound,
-            1 => candidates.into_iter().next().map_or_else(
-                || {
-                    // This should never happen given len() == 1, but handle defensively
-                    // ast-grep-ignore: no-println
-                    eprintln!("Warning: Expected exactly one candidate but found none");
-                    ResolutionResult::NotFound
-                },
-                |candidate| ResolutionResult::Resolved(Box::new(candidate)),
-            ),
-            _ => {
-                candidates.sort_by(|a, b| b.confidence.cmp(&a.confidence));
-
-                let has_high_confidence = candidates[0].confidence >= 85
-                    && (candidates.len() == 1
-                        || candidates[0].confidence > candidates[1].confidence + 10);
-
-                if !has_high_confidence {
-                    return ResolutionResult::Ambiguous(candidates);
-                }
-
-                candidates.into_iter().next().map_or_else(
-                    || {
-                        // This should never happen given we just accessed candidates[0], but handle defensively
-                        // ast-grep-ignore: no-println
-                        eprintln!("Warning: Expected candidates after sorting but found none");
-                        ResolutionResult::NotFound
-                    },
-                    |candidate| ResolutionResult::Resolved(Box::new(candidate)),
-                )
-            }
+            1 => Self::resolve_single_candidate(candidates),
+            _ => Self::resolve_best_candidate(candidates),
         }
+    }
+
+    fn resolve_single_candidate(candidates: Vec<ResolvedShortcut>) -> ResolutionResult {
+        candidates.into_iter().next().map_or_else(
+            || {
+                // This should never happen given len() == 1, but handle defensively
+                // ast-grep-ignore: no-println
+                eprintln!("Warning: Expected exactly one candidate but found none");
+                ResolutionResult::NotFound
+            },
+            |candidate| ResolutionResult::Resolved(Box::new(candidate)),
+        )
+    }
+
+    fn resolve_best_candidate(mut candidates: Vec<ResolvedShortcut>) -> ResolutionResult {
+        candidates.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+
+        if !Self::has_high_confidence_candidate(&candidates) {
+            return ResolutionResult::Ambiguous(candidates);
+        }
+
+        Self::resolve_single_candidate(candidates)
+    }
+
+    fn has_high_confidence_candidate(candidates: &[ResolvedShortcut]) -> bool {
+        candidates[0].confidence >= 85
+            && (candidates.len() == 1 || candidates[0].confidence > candidates[1].confidence + 10)
     }
 
     #[must_use]

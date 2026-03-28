@@ -6,7 +6,7 @@ use crate::error::Error;
 use crate::invocation::ExecutionResult;
 use crate::logging;
 use crate::resilience::{
-    calculate_retry_delay_with_header, is_retryable_status, parse_retry_after_value,
+    calculate_retry_delay_with_header, is_retryable_status, parse_retry_after_value, RetryConfig,
 };
 use crate::response_cache::{
     is_auth_header, scrub_auth_headers, CacheConfig, CacheKey, CachedRequestInfo, CachedResponse,
@@ -180,7 +180,6 @@ async fn send_request_with_retry(
 ) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
     use crate::resilience::RetryConfig;
 
-    // Log the request with secret redaction
     logging::log_request(
         method.as_str(),
         url,
@@ -189,18 +188,10 @@ async fn send_request_with_retry(
         secret_ctx,
     );
 
-    // If no retry context or retries disabled, just send once
-    let Some(ctx) = retry_context else {
-        let request = build_request(client, method, url, headers, body);
-        return send_request(request, secret_ctx).await;
+    let Some(ctx) = retry_context.filter(|ctx| ctx.is_enabled()) else {
+        return send_request_once(client, method, url, headers, body, secret_ctx).await;
     };
 
-    if !ctx.is_enabled() {
-        let request = build_request(client, method, url, headers, body);
-        return send_request(request, secret_ctx).await;
-    }
-
-    // Check if safe to retry non-GET requests
     if !ctx.is_safe_to_retry() {
         tracing::warn!(
             method = %method,
@@ -208,11 +199,9 @@ async fn send_request_with_retry(
             "Retries disabled - method is not idempotent and no idempotency key provided. \
              Use --force-retry or provide --idempotency-key"
         );
-        let request = build_request(client, method.clone(), url, headers, body);
-        return send_request(request, secret_ctx).await;
+        return send_request_once(client, method.clone(), url, headers, body, secret_ctx).await;
     }
 
-    // Create a RetryConfig from the RetryContext
     let retry_config = RetryConfig {
         max_attempts: ctx.max_attempts as usize,
         initial_delay_ms: ctx.initial_delay_ms,
@@ -221,6 +210,32 @@ async fn send_request_with_retry(
         jitter: true,
     };
 
+    retry_request_with_backoff(
+        client,
+        method,
+        url,
+        headers,
+        body,
+        ctx,
+        &retry_config,
+        operation,
+        secret_ctx,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn retry_request_with_backoff(
+    client: &reqwest::Client,
+    method: Method,
+    url: &str,
+    headers: HeaderMap,
+    body: Option<String>,
+    ctx: &RetryContext,
+    retry_config: &crate::resilience::RetryConfig,
+    operation: &CachedCommand,
+    secret_ctx: Option<&logging::SecretContext>,
+) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
     let max_attempts = ctx.max_attempts;
     let mut attempt: u32 = 0;
     let mut last_error: Option<Error> = None;
@@ -232,82 +247,75 @@ async fn send_request_with_retry(
         attempt += 1;
 
         let request = build_request(client, method.clone(), url, headers.clone(), body.clone());
-        let result = send_request(request, secret_ctx).await;
-
-        match result {
+        match send_request(request, secret_ctx).await {
             Ok((status, response_headers, response_text)) => {
-                // Success - return immediately
-                if status.is_success() {
-                    return Ok((status, response_headers, response_text));
+                match handle_retryable_http_response(
+                    retry_config,
+                    attempt,
+                    max_attempts,
+                    &method,
+                    operation,
+                    status,
+                    response_headers,
+                    response_text,
+                )
+                .await
+                {
+                    RetryableHttpResponse::Return(result) => return Ok(result),
+                    RetryableHttpResponse::Retry {
+                        status,
+                        response_headers,
+                        response_text,
+                    } => {
+                        last_status = Some(status);
+                        last_response_headers = Some(response_headers);
+                        last_response_text = Some(response_text);
+                    }
                 }
-
-                // Check if we should retry this status code
-                if !is_retryable_status(status.as_u16()) {
-                    return Ok((status, response_headers, response_text));
-                }
-
-                // Parse Retry-After header if present
-                let retry_after = response_headers
-                    .get("retry-after")
-                    .and_then(|v| parse_retry_after_value(v));
-
-                // Calculate delay using the retry config
-                let delay = calculate_retry_delay_with_header(
-                    &retry_config,
-                    (attempt - 1) as usize, // 0-indexed for delay calculation
-                    retry_after,
-                );
-
-                // Check if we have more attempts
-                if attempt < max_attempts {
-                    tracing::warn!(
-                        attempt,
-                        max_attempts,
-                        method = %method,
-                        operation_id = %operation.operation_id,
-                        status = status.as_u16(),
-                        delay_ms = delay.as_millis(),
-                        "Retrying after HTTP error"
-                    );
-                    sleep(delay).await;
-                }
-
-                // Save for potential final error
-                last_status = Some(status);
-                last_response_headers = Some(response_headers);
-                last_response_text = Some(response_text);
             }
-            Err(e) => {
-                // Network error - check if we should retry
-                let should_retry = matches!(&e, Error::Network(_));
-
-                if !should_retry {
-                    return Err(e);
+            Err(error) => match handle_retryable_network_error(
+                retry_config,
+                attempt,
+                max_attempts,
+                &method,
+                operation,
+                error,
+            )
+            .await
+            {
+                RetryableNetworkError::Return(error) => return Err(error),
+                RetryableNetworkError::Retry(error) => {
+                    last_error = Some(error);
                 }
-
-                // Calculate delay
-                let delay =
-                    calculate_retry_delay_with_header(&retry_config, (attempt - 1) as usize, None);
-
-                if attempt < max_attempts {
-                    tracing::warn!(
-                        attempt,
-                        max_attempts,
-                        method = %method,
-                        operation_id = %operation.operation_id,
-                        delay_ms = delay.as_millis(),
-                        error = %e,
-                        "Retrying after network error"
-                    );
-                    sleep(delay).await;
-                }
-
-                last_error = Some(e);
-            }
+            },
         }
     }
 
-    // All retries exhausted - return last result
+    finish_retry_result(
+        max_attempts,
+        attempt,
+        last_status,
+        last_response_headers,
+        last_response_text,
+        last_error,
+        ctx,
+        &method,
+        operation,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_retry_result(
+    max_attempts: u32,
+    attempt: u32,
+    last_status: Option<reqwest::StatusCode>,
+    last_response_headers: Option<HashMap<String, String>>,
+    last_response_text: Option<String>,
+    last_error: Option<Error>,
+    ctx: &RetryContext,
+    method: &Method,
+    operation: &CachedCommand,
+) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
     if let (Some(status), Some(headers), Some(text)) =
         (last_status, last_response_headers, last_response_text)
     {
@@ -320,19 +328,17 @@ async fn send_request_with_retry(
         return Ok((status, headers, text));
     }
 
-    // Return detailed retry error if we have a last error
-    if let Some(e) = last_error {
+    if let Some(error) = last_error {
         tracing::warn!(
             method = %method,
             operation_id = %operation.operation_id,
             max_attempts,
             "Retry exhausted"
         );
-        // Return detailed retry error with full context
         return Err(Error::retry_limit_exceeded_detailed(
             max_attempts,
             attempt,
-            e.to_string(),
+            error.to_string(),
             ctx.initial_delay_ms,
             ctx.max_delay_ms,
             None,
@@ -340,7 +346,6 @@ async fn send_request_with_retry(
         ));
     }
 
-    // Should not happen, but handle gracefully
     Err(Error::retry_limit_exceeded_detailed(
         max_attempts,
         attempt,
@@ -350,6 +355,95 @@ async fn send_request_with_retry(
         None,
         &operation.operation_id,
     ))
+}
+
+enum RetryableHttpResponse {
+    Return((reqwest::StatusCode, HashMap<String, String>, String)),
+    Retry {
+        status: reqwest::StatusCode,
+        response_headers: HashMap<String, String>,
+        response_text: String,
+    },
+}
+
+enum RetryableNetworkError {
+    Return(Error),
+    Retry(Error),
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_retryable_http_response(
+    retry_config: &RetryConfig,
+    attempt: u32,
+    max_attempts: u32,
+    method: &Method,
+    operation: &CachedCommand,
+    status: reqwest::StatusCode,
+    response_headers: HashMap<String, String>,
+    response_text: String,
+) -> RetryableHttpResponse {
+    if status.is_success() {
+        return RetryableHttpResponse::Return((status, response_headers, response_text));
+    }
+
+    if !is_retryable_status(status.as_u16()) {
+        return RetryableHttpResponse::Return((status, response_headers, response_text));
+    }
+
+    let retry_after = response_headers
+        .get("retry-after")
+        .and_then(|value| parse_retry_after_value(value));
+    let delay =
+        calculate_retry_delay_with_header(retry_config, (attempt - 1) as usize, retry_after);
+
+    if attempt < max_attempts {
+        tracing::warn!(
+            attempt,
+            max_attempts,
+            method = %method,
+            operation_id = %operation.operation_id,
+            status = status.as_u16(),
+            delay_ms = delay.as_millis(),
+            "Retrying after HTTP error"
+        );
+        sleep(delay).await;
+    }
+
+    RetryableHttpResponse::Retry {
+        status,
+        response_headers,
+        response_text,
+    }
+}
+
+async fn handle_retryable_network_error(
+    retry_config: &RetryConfig,
+    attempt: u32,
+    max_attempts: u32,
+    method: &Method,
+    operation: &CachedCommand,
+    error: Error,
+) -> RetryableNetworkError {
+    if !matches!(&error, Error::Network(_)) {
+        return RetryableNetworkError::Return(error);
+    }
+
+    let delay = calculate_retry_delay_with_header(retry_config, (attempt - 1) as usize, None);
+
+    if attempt < max_attempts {
+        tracing::warn!(
+            attempt,
+            max_attempts,
+            method = %method,
+            operation_id = %operation.operation_id,
+            delay_ms = delay.as_millis(),
+            error = %error,
+            "Retrying after network error"
+        );
+        sleep(delay).await;
+    }
+
+    RetryableNetworkError::Retry(error)
 }
 
 /// Build a request from components
@@ -365,6 +459,18 @@ fn build_request(
         request = request.json(&json_body);
     }
     request
+}
+
+async fn send_request_once(
+    client: &reqwest::Client,
+    method: Method,
+    url: &str,
+    headers: HeaderMap,
+    body: Option<String>,
+    secret_ctx: Option<&logging::SecretContext>,
+) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+    let request = build_request(client, method, url, headers, body);
+    send_request(request, secret_ctx).await
 }
 
 /// Handle HTTP error responses
@@ -857,6 +963,69 @@ pub async fn execute(
     call: crate::invocation::OperationCall,
     ctx: crate::invocation::ExecutionContext,
 ) -> Result<crate::invocation::ExecutionResult, Error> {
+    let prepared = prepare_execution(spec, call, &ctx)?;
+
+    if let Some(result) = resolve_pre_execution_result(
+        prepared.cache_context.as_ref(),
+        ctx.dry_run,
+        &prepared.method,
+        &prepared.url,
+        &prepared.headers_clone,
+        prepared.body.as_deref(),
+        &prepared.operation.operation_id,
+    )
+    .await?
+    {
+        return Ok(result);
+    }
+
+    let (status, response_headers, response_text) = send_request_with_retry(
+        &prepared.client,
+        prepared.method.clone(),
+        &prepared.url,
+        prepared.headers,
+        prepared.body.clone(),
+        prepared.retry_ctx.as_ref(),
+        prepared.operation,
+        Some(&prepared.secret_ctx),
+    )
+    .await?;
+
+    finalize_execution_result(
+        status,
+        response_headers,
+        response_text,
+        spec,
+        prepared.operation,
+        prepared.method,
+        prepared.url,
+        &prepared.headers_clone,
+        prepared.body.as_deref(),
+        prepared.cache_context,
+        prepared.cache_config,
+    )
+    .await
+}
+
+struct PreparedExecution<'a> {
+    operation: &'a CachedCommand,
+    method: Method,
+    url: String,
+    client: reqwest::Client,
+    headers: HeaderMap,
+    headers_clone: HeaderMap,
+    cache_context: Option<(CacheKey, ResponseCache)>,
+    retry_ctx: Option<RetryContext>,
+    secret_ctx: logging::SecretContext,
+    body: Option<String>,
+    cache_config: Option<&'a CacheConfig>,
+}
+
+fn prepare_execution<'a>(
+    spec: &'a CachedSpec,
+    call: crate::invocation::OperationCall,
+    ctx: &'a crate::invocation::ExecutionContext,
+) -> Result<PreparedExecution<'a>, Error> {
     let operation = find_operation_by_id(spec, &call.operation_id)?;
     let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
     let base_url =
@@ -889,53 +1058,26 @@ pub async fn execute(
         &headers_clone,
         call.body.as_deref(),
     )?;
-
-    if let Some(result) = resolve_pre_execution_result(
-        cache_context.as_ref(),
-        ctx.dry_run,
-        &method,
-        &url,
-        &headers_clone,
-        call.body.as_deref(),
-        &operation.operation_id,
-    )
-    .await?
-    {
-        return Ok(result);
-    }
-
-    let retry_ctx = ctx.retry_context.map(|mut rc| {
+    let retry_ctx = ctx.retry_context.clone().map(|mut rc| {
         rc.method = Some(method.to_string());
         rc
     });
     let secret_ctx =
         logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref());
-    let (status, response_headers, response_text) = send_request_with_retry(
-        &client,
-        method.clone(),
-        &url,
-        headers,
-        call.body.clone(),
-        retry_ctx.as_ref(),
-        operation,
-        Some(&secret_ctx),
-    )
-    .await?;
 
-    finalize_execution_result(
-        status,
-        response_headers,
-        response_text,
-        spec,
+    Ok(PreparedExecution {
         operation,
         method,
         url,
-        &headers_clone,
-        call.body.as_deref(),
+        client,
+        headers,
+        headers_clone,
         cache_context,
-        ctx.cache_config.as_ref(),
-    )
-    .await
+        retry_ctx,
+        secret_ctx,
+        body: call.body,
+        cache_config: ctx.cache_config.as_ref(),
+    })
 }
 
 /// Finds an operation by its `operation_id` in the spec.
@@ -1007,16 +1149,27 @@ fn build_headers_from_params(
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<HeaderMap, Error> {
-    let mut headers = HeaderMap::new();
+    let mut headers = default_request_headers();
+    apply_header_parameters(&mut headers, header_params)?;
+    apply_security_headers(&mut headers, spec, operation, api_name, global_config)?;
+    apply_custom_headers(&mut headers, custom_headers)?;
+    Ok(headers)
+}
 
-    // Default headers
+fn default_request_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
     headers.insert("User-Agent", HeaderValue::from_static("aperture/0.1.0"));
     headers.insert(
         constants::HEADER_ACCEPT,
         HeaderValue::from_static(constants::CONTENT_TYPE_JSON),
     );
+    headers
+}
 
-    // Add header parameters from the pre-extracted map
+fn apply_header_parameters(
+    headers: &mut HeaderMap,
+    header_params: &HashMap<String, String>,
+) -> Result<(), Error> {
     for (name, value) in header_params {
         let header_name = HeaderName::from_str(name)
             .map_err(|e| Error::invalid_header_name(name, e.to_string()))?;
@@ -1024,16 +1177,26 @@ fn build_headers_from_params(
             .map_err(|e| Error::invalid_header_value(name, e.to_string()))?;
         headers.insert(header_name, header_value);
     }
+    Ok(())
+}
 
-    // Add authentication headers
+fn apply_security_headers(
+    headers: &mut HeaderMap,
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+    api_name: &str,
+    global_config: Option<&GlobalConfig>,
+) -> Result<(), Error> {
     for security_scheme_name in &operation.security_requirements {
         let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) else {
             continue;
         };
-        add_authentication_header(&mut headers, security_scheme, api_name, global_config)?;
+        add_authentication_header(headers, security_scheme, api_name, global_config)?;
     }
+    Ok(())
+}
 
-    // Add custom headers
+fn apply_custom_headers(headers: &mut HeaderMap, custom_headers: &[String]) -> Result<(), Error> {
     for header_str in custom_headers {
         let (name, value) = parse_custom_header(header_str)?;
         let header_name = HeaderName::from_str(&name)
@@ -1042,8 +1205,7 @@ fn build_headers_from_params(
             .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
         headers.insert(header_name, header_value);
     }
-
-    Ok(headers)
+    Ok(())
 }
 
 /// Applies a JQ filter to the response text
@@ -1055,99 +1217,85 @@ fn build_headers_from_params(
 /// - The JQ filter expression is invalid
 /// - The filter execution fails
 pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
-    // Parse the response as JSON
     let json_value: Value = serde_json::from_str(response_text)
         .map_err(|e| Error::jq_filter_error(filter, format!("Response is not valid JSON: {e}")))?;
 
-    #[cfg(feature = "jq")]
-    {
-        // Use jaq v2.x (pure Rust implementation)
-        use jaq_core::load::{Arena, File, Loader};
-        use jaq_core::Compiler;
+    apply_jq_filter_value(json_value, filter)
+}
 
-        // Create the program from the filter string
-        let program = File {
-            code: filter,
-            path: (),
-        };
+#[cfg(feature = "jq")]
+fn apply_jq_filter_value(json_value: Value, filter: &str) -> Result<String, Error> {
+    // Use jaq v2.x (pure Rust implementation)
+    use jaq_core::load::{Arena, File, Loader};
+    use jaq_core::Compiler;
 
-        // Collect both standard library and JSON definitions into vectors
-        // This avoids hanging issues with lazy iterator chains
-        let defs: Vec<_> = jaq_std::defs().chain(jaq_json::defs()).collect();
-        let funs: Vec<_> = jaq_std::funs().chain(jaq_json::funs()).collect();
+    let program = File {
+        code: filter,
+        path: (),
+    };
 
-        // Create loader with both standard library and JSON definitions
-        let loader = Loader::new(defs);
-        let arena = Arena::default();
+    let defs: Vec<_> = jaq_std::defs().chain(jaq_json::defs()).collect();
+    let funs: Vec<_> = jaq_std::funs().chain(jaq_json::funs()).collect();
 
-        // Parse the filter
-        let modules = match loader.load(&arena, program) {
-            Ok(modules) => modules,
-            Err(errs) => {
-                return Err(Error::jq_filter_error(
-                    filter,
-                    format!("Parse error: {:?}", errs),
-                ));
-            }
-        };
+    let loader = Loader::new(defs);
+    let arena = Arena::default();
 
-        // Compile the filter with both standard library and JSON functions
-        let filter_fn = match Compiler::default().with_funs(funs).compile(modules) {
-            Ok(filter) => filter,
-            Err(errs) => {
-                return Err(Error::jq_filter_error(
-                    filter,
-                    format!("Compilation error: {:?}", errs),
-                ));
-            }
-        };
-
-        // Convert serde_json::Value to jaq Val
-        let jaq_value = Val::from(json_value);
-
-        // Execute the filter
-        let inputs = RcIter::new(core::iter::empty());
-        let ctx = Ctx::new([], &inputs);
-
-        // Run the filter on the input value
-        let output = filter_fn.run((ctx, jaq_value));
-
-        // Collect all results
-        let results: Result<Vec<Val>, _> = output.collect();
-
-        match results {
-            Ok(vals) => {
-                if vals.is_empty() {
-                    return Ok(constants::NULL_VALUE.to_string());
-                }
-
-                if vals.len() == 1 {
-                    // Single result - convert back to JSON
-                    let json_val = serde_json::Value::from(vals[0].clone());
-                    return serde_json::to_string_pretty(&json_val).map_err(|e| {
-                        Error::serialization_error(format!("Failed to serialize result: {e}"))
-                    });
-                }
-
-                // Multiple results - return as JSON array
-                let json_vals: Vec<Value> = vals.into_iter().map(serde_json::Value::from).collect();
-                let array = Value::Array(json_vals);
-                serde_json::to_string_pretty(&array).map_err(|e| {
-                    Error::serialization_error(format!("Failed to serialize results: {e}"))
-                })
-            }
-            Err(e) => Err(Error::jq_filter_error(
-                format!("{:?}", filter),
-                format!("Filter execution error: {e}"),
-            )),
+    let modules = match loader.load(&arena, program) {
+        Ok(modules) => modules,
+        Err(errs) => {
+            return Err(Error::jq_filter_error(
+                filter,
+                format!("Parse error: {errs:?}"),
+            ));
         }
-    }
+    };
 
-    #[cfg(not(feature = "jq"))]
-    {
-        // Basic JQ-like functionality without full jq library
-        apply_basic_jq_filter(&json_value, filter)
+    let filter_fn = match Compiler::default().with_funs(funs).compile(modules) {
+        Ok(filter) => filter,
+        Err(errs) => {
+            return Err(Error::jq_filter_error(
+                filter,
+                format!("Compilation error: {errs:?}"),
+            ));
+        }
+    };
+
+    let jaq_value = Val::from(json_value);
+    let inputs = RcIter::new(core::iter::empty());
+    let ctx = Ctx::new([], &inputs);
+    let output = filter_fn.run((ctx, jaq_value));
+    let results: Result<Vec<Val>, _> = output.collect();
+
+    match results {
+        Ok(vals) => {
+            if vals.is_empty() {
+                return Ok(constants::NULL_VALUE.to_string());
+            }
+
+            if vals.len() == 1 {
+                let json_val = serde_json::Value::from(vals[0].clone());
+                return serde_json::to_string_pretty(&json_val).map_err(|e| {
+                    Error::serialization_error(format!("Failed to serialize result: {e}"))
+                });
+            }
+
+            let json_vals: Vec<Value> = vals.into_iter().map(serde_json::Value::from).collect();
+            let array = Value::Array(json_vals);
+            serde_json::to_string_pretty(&array).map_err(|e| {
+                Error::serialization_error(format!("Failed to serialize results: {e}"))
+            })
+        }
+        Err(e) => Err(Error::jq_filter_error(
+            format!("{filter:?}"),
+            format!("Filter execution error: {e}"),
+        )),
     }
+}
+
+#[cfg(not(feature = "jq"))]
+#[allow(clippy::needless_pass_by_value)]
+fn apply_jq_filter_value(json_value: Value, filter: &str) -> Result<String, Error> {
+    apply_basic_jq_filter(&json_value, filter)
 }
 
 #[cfg(not(feature = "jq"))]

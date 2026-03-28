@@ -166,38 +166,57 @@ async fn execute_api_runtime(
         .map(String::as_str)
         .or(cli.jq.as_deref());
     let output_format = resolve_output_format(matches, &cli.format);
-
-    // Translate ArgMatches → domain types
     let call = crate::cli::translate::matches_to_operation_call(spec, matches)?;
     let mut ctx = crate::cli::translate::cli_to_execution_context(cli, global_config)?;
     ctx.server_var_args = crate::cli::translate::extract_server_var_args(matches);
 
-    if ctx.auto_paginate && jq_filter.is_some() {
+    if ctx.auto_paginate {
+        return execute_paginated_api_runtime(spec, call, ctx, cli, jq_filter, output_format).await;
+    }
+
+    execute_standard_api_runtime(spec, call, ctx, output_format, jq_filter).await
+}
+
+async fn execute_paginated_api_runtime(
+    spec: &CachedSpec,
+    call: crate::invocation::OperationCall,
+    ctx: crate::invocation::ExecutionContext,
+    cli: &Cli,
+    jq_filter: Option<&str>,
+    output_format: crate::cli::OutputFormat,
+) -> Result<(), Error> {
+    if jq_filter.is_some() {
         tracing::warn!(
             "--jq is ignored with --auto-paginate; \
              pipe NDJSON output through an external jq process instead"
         );
     }
-    if ctx.auto_paginate && !matches!(output_format, crate::cli::OutputFormat::Json) {
+    if !matches!(output_format, crate::cli::OutputFormat::Json) {
         tracing::warn!("--format is ignored with --auto-paginate; output is always NDJSON");
     }
 
-    if ctx.auto_paginate {
-        let mut stdout = std::io::stdout();
-        let result = crate::pagination::execute_paginated(spec, call, ctx, &mut stdout).await;
-        return match result {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                let e = enrich_network_error(e);
-                // When --json-errors is active, emit the error as the final NDJSON
-                // line on stdout so pipeline consumers can detect mid-stream failure
-                // without inspecting stderr.
-                emit_pagination_error_ndjson(cli, &mut stdout, &e);
-                Err(e)
-            }
-        };
+    let mut stdout = std::io::stdout();
+    let result = crate::pagination::execute_paginated(spec, call, ctx, &mut stdout).await;
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let e = enrich_network_error(e);
+            // When --json-errors is active, emit the error as the final NDJSON
+            // line on stdout so pipeline consumers can detect mid-stream failure
+            // without inspecting stderr.
+            emit_pagination_error_ndjson(cli, &mut stdout, &e);
+            Err(e)
+        }
     }
+}
 
+async fn execute_standard_api_runtime(
+    spec: &CachedSpec,
+    call: crate::invocation::OperationCall,
+    ctx: crate::invocation::ExecutionContext,
+    output_format: crate::cli::OutputFormat,
+    jq_filter: Option<&str>,
+) -> Result<(), Error> {
     let result = executor::execute(spec, call, ctx)
         .await
         .map_err(enrich_network_error)?;
@@ -272,41 +291,49 @@ pub async fn execute_batch_operations(
         .await?;
 
     let output = Output::new(cli.quiet, cli.json_errors);
-
     if cli.json_errors {
-        let summary = serde_json::json!({
-            "batch_execution_summary": {
-                "total_operations": result.results.len(),
-                "successful_operations": result.success_count,
-                "failed_operations": result.failure_count,
-                "total_duration_seconds": result.total_duration.as_secs_f64(),
-                "operations": result.results.iter().map(|r| serde_json::json!({
-                    "operation_id": r.operation.id,
-                    "args": r.operation.args,
-                    "success": r.success,
-                    "duration_seconds": r.duration.as_secs_f64(),
-                    "error": r.error
-                })).collect::<Vec<_>>()
-            }
-        });
-        let json_output = match &cli.jq {
-            Some(jq_filter) => {
-                let summary_json = serde_json::to_string(&summary)
-                    .expect("JSON serialization of valid structure cannot fail");
-                executor::apply_jq_filter(&summary_json, jq_filter)?
-            }
-            None => serde_json::to_string_pretty(&summary)
-                .expect("JSON serialization of valid structure cannot fail"),
-        };
-        // ast-grep-ignore: no-println
-        println!("{json_output}");
-        // ast-grep-ignore: no-nested-if
-        if result.failure_count > 0 {
-            std::process::exit(1);
-        }
+        render_batch_json_summary(&result, cli)?;
         return Ok(());
     }
 
+    render_batch_text_summary(&result, &output);
+    Ok(())
+}
+
+fn render_batch_json_summary(result: &crate::batch::BatchResult, cli: &Cli) -> Result<(), Error> {
+    let summary = serde_json::json!({
+        "batch_execution_summary": {
+            "total_operations": result.results.len(),
+            "successful_operations": result.success_count,
+            "failed_operations": result.failure_count,
+            "total_duration_seconds": result.total_duration.as_secs_f64(),
+            "operations": result.results.iter().map(|r| serde_json::json!({
+                "operation_id": r.operation.id,
+                "args": r.operation.args,
+                "success": r.success,
+                "duration_seconds": r.duration.as_secs_f64(),
+                "error": r.error
+            })).collect::<Vec<_>>()
+        }
+    });
+    let json_output = match &cli.jq {
+        Some(jq_filter) => {
+            let summary_json = serde_json::to_string(&summary)
+                .expect("JSON serialization of valid structure cannot fail");
+            executor::apply_jq_filter(&summary_json, jq_filter)?
+        }
+        None => serde_json::to_string_pretty(&summary)
+            .expect("JSON serialization of valid structure cannot fail"),
+    };
+    // ast-grep-ignore: no-println
+    println!("{json_output}");
+    if result.failure_count > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn render_batch_text_summary(result: &crate::batch::BatchResult, output: &Output) {
     output.info("\n=== Batch Execution Summary ===");
     // ast-grep-ignore: no-println
     println!("Total operations: {}", result.results.len());
@@ -318,7 +345,7 @@ pub async fn execute_batch_operations(
     println!("Total time: {:.2}s", result.total_duration.as_secs_f64());
 
     if result.failure_count == 0 {
-        return Ok(());
+        return;
     }
 
     output.info("\nFailed operations:");
@@ -335,10 +362,7 @@ pub async fn execute_batch_operations(
         );
     }
 
-    if result.failure_count > 0 {
-        std::process::exit(1);
-    }
-    Ok(())
+    std::process::exit(1);
 }
 
 /// Execute a command using shortcut resolution
@@ -350,20 +374,7 @@ pub async fn execute_shortcut_command(
     let output = Output::new(cli.quiet, cli.json_errors);
 
     if args.is_empty() {
-        // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-        // ast-grep-ignore: no-println
-        eprintln!("Error: No command specified");
-        // ast-grep-ignore: no-println
-        eprintln!("Usage: aperture exec <shortcut> [args...]");
-        // ast-grep-ignore: no-println
-        eprintln!("Examples:");
-        // ast-grep-ignore: no-println
-        eprintln!("  aperture exec getUserById --id 123");
-        // ast-grep-ignore: no-println
-        eprintln!("  aperture exec GET /users/123");
-        // ast-grep-ignore: no-println
-        eprintln!("  aperture exec users list");
-        std::process::exit(1);
+        print_shortcut_usage();
     }
 
     let specs = manager.list_specs()?;
@@ -372,16 +383,7 @@ pub async fn execute_shortcut_command(
         return Ok(());
     }
 
-    let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
-    let mut all_specs = std::collections::BTreeMap::new();
-    for spec_name in &specs {
-        match loader::load_cached_spec(&cache_dir, spec_name) {
-            Ok(spec) => {
-                all_specs.insert(spec_name.clone(), spec);
-            }
-            Err(e) => tracing::warn!(spec = spec_name, error = %e, "could not load spec"),
-        }
-    }
+    let all_specs = load_shortcut_specs(manager, &specs);
     if all_specs.is_empty() {
         output.info("No valid API specifications found.");
         return Ok(());
@@ -389,7 +391,32 @@ pub async fn execute_shortcut_command(
 
     let mut resolver = ShortcutResolver::new();
     resolver.index_specs(&all_specs);
+    handle_shortcut_resolution(&resolver, args, cli, &output).await
+}
 
+fn load_shortcut_specs(
+    manager: &ConfigManager<OsFileSystem>,
+    specs: &[String],
+) -> std::collections::BTreeMap<String, crate::cache::models::CachedSpec> {
+    let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
+    let mut all_specs = std::collections::BTreeMap::new();
+    for spec_name in specs {
+        match loader::load_cached_spec(&cache_dir, spec_name) {
+            Ok(spec) => {
+                all_specs.insert(spec_name.clone(), spec);
+            }
+            Err(e) => tracing::warn!(spec = spec_name, error = %e, "could not load spec"),
+        }
+    }
+    all_specs
+}
+
+async fn handle_shortcut_resolution(
+    resolver: &ShortcutResolver,
+    args: Vec<String>,
+    cli: &Cli,
+    output: &Output,
+) -> Result<(), Error> {
     match resolver.resolve_shortcut(&args) {
         ResolutionResult::Resolved(shortcut) => {
             output.info(format!(
@@ -434,6 +461,23 @@ pub async fn execute_shortcut_command(
             std::process::exit(1);
         }
     }
+}
+
+fn print_shortcut_usage() -> ! {
+    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+    // ast-grep-ignore: no-println
+    eprintln!("Error: No command specified");
+    // ast-grep-ignore: no-println
+    eprintln!("Usage: aperture exec <shortcut> [args...]");
+    // ast-grep-ignore: no-println
+    eprintln!("Examples:");
+    // ast-grep-ignore: no-println
+    eprintln!("  aperture exec getUserById --id 123");
+    // ast-grep-ignore: no-println
+    eprintln!("  aperture exec GET /users/123");
+    // ast-grep-ignore: no-println
+    eprintln!("  aperture exec users list");
+    std::process::exit(1);
 }
 
 fn count_shortcut_args(args: &[String]) -> usize {

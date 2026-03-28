@@ -111,44 +111,32 @@ async fn run_non_config_command(
     output: &Output,
 ) -> Result<(), Error> {
     match &cli.command {
-        Commands::ListCommands { context } => {
-            run_list_commands(context, output)?;
-        }
-        Commands::Api { context, args } => {
-            run_api_command(cli, context, args).await?;
-        }
+        Commands::ListCommands { context } => run_list_commands(context, output),
+        Commands::Api { context, args } => run_api_command(cli, context, args).await,
         Commands::Search {
             query,
             api,
             verbose,
-        } => {
-            run_search_command(manager, query, api.as_deref(), *verbose, output)?;
-        }
-        Commands::Exec { args } => {
-            run_shortcut_command(manager, args, cli).await?;
-        }
+        } => run_search_command(manager, query, api.as_deref(), *verbose, output),
+        Commands::Exec { args } => run_shortcut_command(manager, args, cli).await,
         Commands::Docs {
             api,
             tag,
             operation,
             enhanced,
-        } => {
-            run_docs_command(
-                manager,
-                api.as_deref(),
-                tag.as_deref(),
-                operation.as_deref(),
-                *enhanced,
-                output,
-            )?;
-        }
+        } => run_docs_command(
+            manager,
+            api.as_deref(),
+            tag.as_deref(),
+            operation.as_deref(),
+            *enhanced,
+            output,
+        ),
         Commands::Overview { api, all } => {
-            run_overview_command(manager, api.as_deref(), *all, output)?;
+            run_overview_command(manager, api.as_deref(), *all, output)
         }
         Commands::Config { .. } => unreachable!("config commands are handled separately"),
     }
-
-    Ok(())
 }
 
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]

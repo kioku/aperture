@@ -44,6 +44,8 @@ pub const fn http_methods_iter(item: &PathItem) -> HttpMethodsIter<'_> {
 /// Maximum depth for resolving parameter references to prevent stack overflow
 pub const MAX_REFERENCE_DEPTH: usize = 10;
 
+const REFERENCE_PLACEHOLDER: &str = "{reference}";
+
 /// Resolves a parameter reference to its actual parameter definition
 ///
 /// # Arguments
@@ -121,46 +123,29 @@ fn resolve_schema_reference_with_visited(
     visited: &mut HashSet<String>,
     depth: usize,
 ) -> Result<openapiv3::Schema, Error> {
-    // Check depth limit
-    if depth >= MAX_REFERENCE_DEPTH {
-        return Err(Error::validation_error(format!(
-            "Maximum reference depth ({MAX_REFERENCE_DEPTH}) exceeded while resolving '{reference}'"
-        )));
-    }
-
-    // Check for circular references
-    if !visited.insert(reference.to_string()) {
-        return Err(Error::validation_error(format!(
-            "Circular reference detected: '{reference}' is part of a reference cycle"
-        )));
-    }
-
-    // Parse the reference path
-    // Expected format: #/components/schemas/{schema_name}
-    if !reference.starts_with("#/components/schemas/") {
-        return Err(Error::validation_error(format!(
+    let resolution = prepare_component_reference_resolution(
+        spec,
+        reference,
+        visited,
+        depth,
+        "#/components/schemas/",
+        format!(
             "Invalid schema reference format: '{reference}'. Expected format: #/components/schemas/{{name}}"
-        )));
-    }
+        ),
+        "Cannot resolve schema reference: OpenAPI spec has no components section",
+    )?;
 
-    let schema_name = reference
-        .strip_prefix("#/components/schemas/")
+    let schema_ref = resolution
+        .components
+        .schemas
+        .get(&resolution.name)
         .ok_or_else(|| {
-            Error::validation_error(format!("Invalid schema reference: '{reference}'"))
+            Error::validation_error(format!(
+                "Schema '{}' not found in components",
+                resolution.name
+            ))
         })?;
 
-    // Look up the schema in components
-    let components = spec.components.as_ref().ok_or_else(|| {
-        Error::validation_error(
-            "Cannot resolve schema reference: OpenAPI spec has no components section".to_string(),
-        )
-    })?;
-
-    let schema_ref = components.schemas.get(schema_name).ok_or_else(|| {
-        Error::validation_error(format!("Schema '{schema_name}' not found in components"))
-    })?;
-
-    // Handle nested references (reference pointing to another reference)
     match schema_ref {
         ReferenceOr::Item(schema) => Ok(schema.clone()),
         ReferenceOr::Reference {
@@ -176,51 +161,81 @@ fn resolve_parameter_reference_with_visited(
     visited: &mut HashSet<String>,
     depth: usize,
 ) -> Result<Parameter, Error> {
-    // Check depth limit
-    if depth >= MAX_REFERENCE_DEPTH {
-        return Err(Error::validation_error(format!(
-            "Maximum reference depth ({MAX_REFERENCE_DEPTH}) exceeded while resolving '{reference}'"
-        )));
-    }
-
-    // Check for circular references
-    if !visited.insert(reference.to_string()) {
-        return Err(Error::validation_error(format!(
-            "Circular reference detected: '{reference}' is part of a reference cycle"
-        )));
-    }
-
-    // Parse the reference path
-    // Expected format: #/components/parameters/{parameter_name}
-    if !reference.starts_with("#/components/parameters/") {
-        return Err(Error::validation_error(format!(
+    let resolution = prepare_component_reference_resolution(
+        spec,
+        reference,
+        visited,
+        depth,
+        "#/components/parameters/",
+        format!(
             "Invalid parameter reference format: '{reference}'. Expected format: #/components/parameters/{{name}}"
-        )));
-    }
+        ),
+        "Cannot resolve parameter reference: OpenAPI spec has no components section",
+    )?;
 
-    let param_name = reference
-        .strip_prefix("#/components/parameters/")
+    let param_ref = resolution
+        .components
+        .parameters
+        .get(&resolution.name)
         .ok_or_else(|| {
-            Error::validation_error(format!("Invalid parameter reference: '{reference}'"))
+            Error::validation_error(format!(
+                "Parameter '{}' not found in components",
+                resolution.name
+            ))
         })?;
 
-    // Look up the parameter in components
-    let components = spec.components.as_ref().ok_or_else(|| {
-        Error::validation_error(
-            "Cannot resolve parameter reference: OpenAPI spec has no components section"
-                .to_string(),
-        )
-    })?;
-
-    let param_ref = components.parameters.get(param_name).ok_or_else(|| {
-        Error::validation_error(format!("Parameter '{param_name}' not found in components"))
-    })?;
-
-    // Handle nested references (reference pointing to another reference)
     match param_ref {
         ReferenceOr::Item(param) => Ok(param.clone()),
         ReferenceOr::Reference {
             reference: nested_ref,
         } => resolve_parameter_reference_with_visited(spec, nested_ref, visited, depth + 1),
     }
+}
+
+struct ComponentReferenceResolution<'a> {
+    name: String,
+    components: &'a openapiv3::Components,
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn prepare_component_reference_resolution<'a>(
+    spec: &'a OpenAPI,
+    reference: &str,
+    visited: &mut HashSet<String>,
+    depth: usize,
+    prefix: &str,
+    invalid_format_message: String,
+    missing_components_message: &str,
+) -> Result<ComponentReferenceResolution<'a>, Error> {
+    if depth >= MAX_REFERENCE_DEPTH {
+        return Err(Error::validation_error(format!(
+            "Maximum reference depth ({MAX_REFERENCE_DEPTH}) exceeded while resolving '{reference}'"
+        )));
+    }
+
+    if !visited.insert(reference.to_string()) {
+        return Err(Error::validation_error(format!(
+            "Circular reference detected: '{reference}' is part of a reference cycle"
+        )));
+    }
+
+    if !reference.starts_with(prefix) {
+        return Err(Error::validation_error(
+            invalid_format_message.replace(REFERENCE_PLACEHOLDER, reference),
+        ));
+    }
+
+    let name = reference
+        .strip_prefix(prefix)
+        .ok_or_else(|| Error::validation_error(format!("Invalid reference: '{reference}'")))?;
+
+    let components = spec
+        .components
+        .as_ref()
+        .ok_or_else(|| Error::validation_error(missing_components_message.to_string()))?;
+
+    Ok(ComponentReferenceResolution {
+        name: name.to_string(),
+        components,
+    })
 }
