@@ -260,86 +260,106 @@ fn output_or_capture(message: &str, capture_output: bool) -> Option<String> {
 #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<String>, Error> {
     match json_value {
-        Value::Array(items) => {
-            if items.is_empty() {
-                return Ok(output_or_capture(constants::EMPTY_ARRAY, capture_output));
-            }
-
-            if items.len() > MAX_TABLE_ROWS {
-                let msg = format!(
-                    "Array too large: {} items (max {} for table display)\nUse --format json or --jq to process the full data",
-                    items.len(),
-                    MAX_TABLE_ROWS
-                );
-                return Ok(output_or_capture(&msg, capture_output));
-            }
-
-            let Some(Value::Object(_)) = items.first() else {
-                return Ok(print_numbered_list(items, capture_output));
-            };
-
-            let mut table_data: Vec<BTreeMap<String, String>> = Vec::new();
-
-            for item in items {
-                let Value::Object(obj) = item else {
-                    continue;
-                };
-                let mut row = BTreeMap::new();
-                for (key, value) in obj {
-                    row.insert(key.clone(), format_value_for_table(value));
-                }
-                table_data.push(row);
-            }
-
-            if table_data.is_empty() {
-                return Ok(print_numbered_list(items, capture_output));
-            }
-
-            let mut rows = Vec::new();
-            for (i, row) in table_data.iter().enumerate() {
-                if i > 0 {
-                    rows.push(TableRow {
-                        key: "---".to_string(),
-                        value: "---".to_string(),
-                    });
-                }
-                for (key, value) in row {
-                    rows.push(TableRow {
-                        key: key.clone(),
-                        value: value.clone(),
-                    });
-                }
-            }
-
-            let table = Table::new(&rows);
-            Ok(output_or_capture(&table.to_string(), capture_output))
-        }
-        Value::Object(obj) => {
-            if obj.len() > MAX_TABLE_ROWS {
-                let msg = format!(
-                    "Object too large: {} fields (max {} for table display)\nUse --format json or --jq to process the full data",
-                    obj.len(),
-                    MAX_TABLE_ROWS
-                );
-                return Ok(output_or_capture(&msg, capture_output));
-            }
-
-            let rows: Vec<KeyValue> = obj
-                .iter()
-                .map(|(key, value)| KeyValue {
-                    key: key.clone(),
-                    value: format_value_for_table(value),
-                })
-                .collect();
-
-            let table = Table::new(&rows);
-            Ok(output_or_capture(&table.to_string(), capture_output))
-        }
+        Value::Array(items) => Ok(render_array_as_table(items, capture_output)),
+        Value::Object(obj) => Ok(render_object_as_table(obj, capture_output)),
         _ => {
             let formatted = format_value_for_table(json_value);
             Ok(output_or_capture(&formatted, capture_output))
         }
     }
+}
+
+fn render_array_as_table(items: &[Value], capture_output: bool) -> Option<String> {
+    if items.is_empty() {
+        return output_or_capture(constants::EMPTY_ARRAY, capture_output);
+    }
+
+    if items.len() > MAX_TABLE_ROWS {
+        return output_or_capture(
+            &format_large_collection_message("Array", items.len()),
+            capture_output,
+        );
+    }
+
+    let Some(Value::Object(_)) = items.first() else {
+        return print_numbered_list(items, capture_output);
+    };
+
+    let table_data = collect_table_data(items);
+    if table_data.is_empty() {
+        return print_numbered_list(items, capture_output);
+    }
+
+    let rows = build_table_rows(&table_data);
+    let table = Table::new(&rows);
+    output_or_capture(&table.to_string(), capture_output)
+}
+
+fn render_object_as_table(
+    obj: &serde_json::Map<String, Value>,
+    capture_output: bool,
+) -> Option<String> {
+    if obj.len() > MAX_TABLE_ROWS {
+        return output_or_capture(
+            &format_large_collection_message("Object", obj.len()),
+            capture_output,
+        );
+    }
+
+    let rows: Vec<KeyValue> = obj
+        .iter()
+        .map(|(key, value)| KeyValue {
+            key: key.clone(),
+            value: format_value_for_table(value),
+        })
+        .collect();
+
+    let table = Table::new(&rows);
+    output_or_capture(&table.to_string(), capture_output)
+}
+
+fn collect_table_data(items: &[Value]) -> Vec<BTreeMap<String, String>> {
+    let mut table_data: Vec<BTreeMap<String, String>> = Vec::new();
+
+    for item in items {
+        let Value::Object(obj) = item else {
+            continue;
+        };
+        let mut row = BTreeMap::new();
+        for (key, value) in obj {
+            row.insert(key.clone(), format_value_for_table(value));
+        }
+        table_data.push(row);
+    }
+
+    table_data
+}
+
+fn build_table_rows(table_data: &[BTreeMap<String, String>]) -> Vec<TableRow> {
+    let mut rows = Vec::new();
+    for (i, row) in table_data.iter().enumerate() {
+        if i > 0 {
+            rows.push(TableRow {
+                key: "---".to_string(),
+                value: "---".to_string(),
+            });
+        }
+        for (key, value) in row {
+            rows.push(TableRow {
+                key: key.clone(),
+                value: value.clone(),
+            });
+        }
+    }
+    rows
+}
+
+fn format_large_collection_message(kind: &str, size: usize) -> String {
+    format!(
+        "{kind} too large: {size} {} (max {} for table display)\nUse --format json or --jq to process the full data",
+        if kind == "Array" { "items" } else { "fields" },
+        MAX_TABLE_ROWS
+    )
 }
 
 /// Formats a JSON value for display in a table cell.

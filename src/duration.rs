@@ -38,39 +38,46 @@ pub fn parse_duration(s: &str) -> Result<Duration, Error> {
         ));
     }
 
-    // Try parsing with suffixes
-    if let Some(ms_str) = s.strip_suffix("ms") {
-        let ms: u64 = ms_str
-            .trim()
-            .parse()
-            .map_err(|_| Error::invalid_config(format!("Invalid milliseconds value: {ms_str}")))?;
-        return Ok(Duration::from_millis(ms));
+    if let Some(duration) = parse_duration_suffix(s, "ms", "milliseconds", Duration::from_millis)? {
+        return Ok(duration);
     }
 
-    if let Some(m_str) = s.strip_suffix('m') {
-        // Make sure it's not "ms" (already handled above)
-        let minutes: u64 = m_str
-            .trim()
-            .parse()
-            .map_err(|_| Error::invalid_config(format!("Invalid minutes value: {m_str}")))?;
-        return Ok(Duration::from_secs(minutes * 60));
+    if let Some(duration) = parse_duration_suffix(s, "m", "minutes", |minutes| {
+        Duration::from_secs(minutes * 60)
+    })? {
+        return Ok(duration);
     }
 
-    if let Some(s_str) = s.strip_suffix('s') {
-        let secs: u64 = s_str
-            .trim()
-            .parse()
-            .map_err(|_| Error::invalid_config(format!("Invalid seconds value: {s_str}")))?;
-        return Ok(Duration::from_secs(secs));
+    if let Some(duration) = parse_duration_suffix(s, "s", "seconds", Duration::from_secs)? {
+        return Ok(duration);
     }
 
-    // Plain number - treat as milliseconds
-    let ms: u64 = s.parse().map_err(|_| {
+    Ok(Duration::from_millis(parse_plain_millis(s)?))
+}
+
+fn parse_duration_suffix(
+    value: &str,
+    suffix: &str,
+    label: &str,
+    build: impl Fn(u64) -> Duration,
+) -> Result<Option<Duration>, Error> {
+    let Some(raw) = value.strip_suffix(suffix) else {
+        return Ok(None);
+    };
+
+    let amount: u64 = raw
+        .trim()
+        .parse()
+        .map_err(|_| Error::invalid_config(format!("Invalid {label} value: {raw}")))?;
+    Ok(Some(build(amount)))
+}
+
+fn parse_plain_millis(value: &str) -> Result<u64, Error> {
+    value.parse().map_err(|_| {
         Error::invalid_config(format!(
-            "Invalid duration format: {s}. Use format like '500ms', '1s', '30s', or '1m'"
+            "Invalid duration format: {value}. Use format like '500ms', '1s', '30s', or '1m'"
         ))
-    })?;
-    Ok(Duration::from_millis(ms))
+    })
 }
 
 #[cfg(test)]

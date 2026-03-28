@@ -372,74 +372,22 @@ impl ResponseCache {
             let filename = entry.file_name();
             let filename_str = filename.to_string_lossy();
 
-            if !filename_str.ends_with(constants::CACHE_FILE_SUFFIX) {
-                continue;
-            }
-
-            // Check if this entry matches the requested API
-            let Some(target_api) = api_name else {
-                // No filter, include all entries
-                stats.total_entries += 1;
-
-                // Check if entry is expired
-                let Ok(metadata) = entry.metadata().await else {
-                    continue;
-                };
-
-                stats.total_size_bytes += metadata.len();
-
-                // Try to read the cache file to check expiration
-                let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
-                    continue;
-                };
-
-                let Ok(cached_response) = serde_json::from_str::<CachedResponse>(&json_content)
-                else {
-                    continue;
-                };
-
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
-                    .as_secs();
-
-                if now > cached_response.cached_at + cached_response.ttl_seconds {
-                    stats.expired_entries += 1;
-                } else {
-                    stats.valid_entries += 1;
-                }
-
-                continue;
-            };
-
-            if !filename_str.starts_with(&format!("{target_api}_")) {
+            if !Self::is_stats_entry(&filename_str, api_name) {
                 continue;
             }
 
             stats.total_entries += 1;
 
-            // Check if entry is expired
             let Ok(metadata) = entry.metadata().await else {
                 continue;
             };
-
             stats.total_size_bytes += metadata.len();
 
-            // Try to read the cache file to check expiration
-            let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
+            let Some(is_expired) = Self::inspect_stats_entry(&entry).await? else {
                 continue;
             };
 
-            let Ok(cached_response) = serde_json::from_str::<CachedResponse>(&json_content) else {
-                continue;
-            };
-
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
-                .as_secs();
-
-            if now > cached_response.cached_at + cached_response.ttl_seconds {
+            if is_expired {
                 stats.expired_entries += 1;
             } else {
                 stats.valid_entries += 1;
@@ -447,6 +395,30 @@ impl ResponseCache {
         }
 
         Ok(stats)
+    }
+
+    fn is_stats_entry(filename: &str, api_name: Option<&str>) -> bool {
+        filename.ends_with(constants::CACHE_FILE_SUFFIX)
+            && api_name.is_none_or(|target| filename.starts_with(&format!("{target}_")))
+    }
+
+    async fn inspect_stats_entry(entry: &tokio::fs::DirEntry) -> Result<Option<bool>, Error> {
+        let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
+            return Ok(None);
+        };
+
+        let Ok(cached_response) = serde_json::from_str::<CachedResponse>(&json_content) else {
+            return Ok(None);
+        };
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
+            .as_secs();
+
+        Ok(Some(
+            now > cached_response.cached_at + cached_response.ttl_seconds,
+        ))
     }
 
     /// Check whether a directory entry is a stale temp file (older than 1 hour)
@@ -909,6 +881,29 @@ mod tests {
         assert_eq!(stats.valid_entries, 2);
         assert_eq!(stats.expired_entries, 0);
         assert!(stats.total_size_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_counts_corrupted_entry_size() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+
+        let key = CacheKey {
+            api_name: "api_corrupt".to_string(),
+            operation_id: "broken".to_string(),
+            request_hash: "hash".to_string(),
+        };
+        let cache_file = cache.config.cache_dir.join(key.to_filename());
+        tokio::fs::write(&cache_file, b"not valid json")
+            .await
+            .unwrap();
+
+        let expected_size = tokio::fs::metadata(&cache_file).await.unwrap().len();
+        let stats = cache.get_stats(Some("api_corrupt")).await.unwrap();
+        assert_eq!(stats.total_entries, 1);
+        assert_eq!(stats.valid_entries, 0);
+        assert_eq!(stats.expired_entries, 0);
+        assert_eq!(stats.total_size_bytes, expected_size);
     }
 
     #[tokio::test]

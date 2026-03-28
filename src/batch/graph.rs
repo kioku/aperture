@@ -205,20 +205,43 @@ fn topological_sort(
     adj: &[Vec<usize>],
 ) -> Result<ExecutionOrder, Error> {
     let n = operations.len();
-    let mut in_degree = vec![0usize; n];
+    let mut in_degree = compute_in_degree(adj, n);
+    let mut queue = seed_zero_in_degree_queue(&in_degree);
+    let order = kahn_topological_order(adj, &mut in_degree, &mut queue, n);
+
+    if order.len() == n {
+        return Ok(order);
+    }
+
+    let cycle_ids = unresolved_cycle_ids(operations, adj, &in_degree);
+    Err(Error::batch_cycle_detected(&cycle_ids))
+}
+
+fn compute_in_degree(adj: &[Vec<usize>], node_count: usize) -> Vec<usize> {
+    let mut in_degree = vec![0usize; node_count];
     for successors in adj {
         for &succ in successors {
             in_degree[succ] += 1;
         }
     }
+    in_degree
+}
 
-    // Seed queue with zero-in-degree nodes in original order
-    let mut queue: VecDeque<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
+fn seed_zero_in_degree_queue(in_degree: &[usize]) -> VecDeque<usize> {
+    (0..in_degree.len())
+        .filter(|&i| in_degree[i] == 0)
+        .collect()
+}
 
-    let mut order = Vec::with_capacity(n);
+fn kahn_topological_order(
+    adj: &[Vec<usize>],
+    in_degree: &mut [usize],
+    queue: &mut VecDeque<usize>,
+    node_count: usize,
+) -> ExecutionOrder {
+    let mut order = Vec::with_capacity(node_count);
     while let Some(node) = queue.pop_front() {
         order.push(node);
-        // Sort successors to preserve original order among siblings
         let mut successors = adj[node].clone();
         successors.sort_unstable();
         for succ in successors {
@@ -228,30 +251,28 @@ fn topological_sort(
             }
         }
     }
+    order
+}
 
-    if order.len() != n {
-        // Build the unresolved subgraph (nodes with in-degree > 0 after Kahn).
-        // This includes cycle members and possibly downstream nodes blocked by
-        // those cycles; we then extract one concrete cycle path from that subgraph.
-        let unresolved: Vec<bool> = in_degree.iter().map(|&d| d > 0).collect();
+fn unresolved_cycle_ids(
+    operations: &[BatchOperation],
+    adj: &[Vec<usize>],
+    in_degree: &[usize],
+) -> Vec<String> {
+    let unresolved: Vec<bool> = in_degree.iter().map(|&d| d > 0).collect();
 
-        let cycle_indices = find_cycle_path(adj, &unresolved)
-            .unwrap_or_else(|| (0..n).filter(|&i| unresolved[i]).collect());
+    let cycle_indices = find_cycle_path(adj, &unresolved)
+        .unwrap_or_else(|| (0..operations.len()).filter(|&i| unresolved[i]).collect());
 
-        let cycle_ids: Vec<String> = cycle_indices
-            .into_iter()
-            .map(|i| {
-                operations[i]
-                    .id
-                    .clone()
-                    .unwrap_or_else(|| format!("index {i}"))
-            })
-            .collect();
-
-        return Err(Error::batch_cycle_detected(&cycle_ids));
-    }
-
-    Ok(order)
+    cycle_indices
+        .into_iter()
+        .map(|i| {
+            operations[i]
+                .id
+                .clone()
+                .unwrap_or_else(|| format!("index {i}"))
+        })
+        .collect()
 }
 
 /// Finds one concrete directed cycle in the unresolved subgraph.

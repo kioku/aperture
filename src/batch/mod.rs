@@ -502,17 +502,75 @@ impl BatchProcessor {
     ) -> Result<BatchResult, Error> {
         let start_time = std::time::Instant::now();
         let total_operations = batch_file.operations.len();
+        Self::log_batch_start(self.config.show_progress, total_operations);
 
-        if self.config.show_progress {
+        let handles = self.spawn_batch_operation_handles(
+            spec,
+            batch_file.operations,
+            global_config,
+            base_url,
+            dry_run,
+            output_format,
+            jq_filter,
+        );
+        let results = Self::collect_batch_operation_results(handles).await?;
+
+        let total_duration = start_time.elapsed();
+        let success_count = results.iter().filter(|r| r.success).count();
+        let failure_count = results.len() - success_count;
+
+        Self::log_batch_completion(
+            self.config.show_progress,
+            success_count,
+            total_operations,
+            total_duration,
+        );
+
+        Ok(BatchResult {
+            results,
+            total_duration,
+            success_count,
+            failure_count,
+        })
+    }
+
+    fn log_batch_start(show_progress: bool, total_operations: usize) {
+        if show_progress {
             // ast-grep-ignore: no-println
             println!("Starting batch execution: {total_operations} operations");
         }
+    }
 
-        let mut results = Vec::with_capacity(total_operations);
+    fn log_batch_completion(
+        show_progress: bool,
+        success_count: usize,
+        total_operations: usize,
+        total_duration: std::time::Duration,
+    ) {
+        if show_progress {
+            // ast-grep-ignore: no-println
+            println!(
+                "Batch execution completed: {}/{} operations successful in {:.2}s",
+                success_count,
+                total_operations,
+                total_duration.as_secs_f64()
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_batch_operation_handles(
+        &self,
+        spec: &CachedSpec,
+        operations: Vec<BatchOperation>,
+        global_config: Option<&GlobalConfig>,
+        base_url: Option<&str>,
+        dry_run: bool,
+        output_format: &crate::cli::OutputFormat,
+        jq_filter: Option<&str>,
+    ) -> Vec<tokio::task::JoinHandle<BatchOperationResult>> {
         let mut handles = Vec::new();
-
-        // Create tasks for each operation
-        for (index, operation) in batch_file.operations.into_iter().enumerate() {
+        for (index, operation) in operations.into_iter().enumerate() {
             let spec = spec.clone();
             let global_config = global_config.cloned();
             let base_url = base_url.map(String::from);
@@ -523,92 +581,102 @@ impl BatchProcessor {
             let show_progress = self.config.show_progress;
             let suppress_output = self.config.suppress_output;
 
-            let handle = tokio::spawn(async move {
-                // Acquire semaphore permit for concurrency control
-                let _permit = semaphore
-                    .acquire()
-                    .await
-                    .expect("semaphore should not be closed");
-
-                // Apply rate limiting if configured
-                if let Some(limiter) = rate_limiter {
-                    limiter.until_ready().await;
-                }
-
-                let operation_start = std::time::Instant::now();
-
-                // Execute the operation
-                let result = Self::execute_single_operation(
-                    &spec,
-                    &operation,
-                    global_config.as_ref(),
-                    base_url.as_deref(),
-                    dry_run,
-                    &output_format,
-                    jq_filter.as_deref(),
-                    suppress_output,
-                )
-                .await;
-
-                let duration = operation_start.elapsed();
-
-                let (success, error, response) = match result {
-                    Ok(resp) => {
-                        if show_progress {
-                            // ast-grep-ignore: no-println
-                            println!("Operation {} completed", index + 1);
-                        }
-                        (true, None, Some(resp))
-                    }
-                    Err(e) => {
-                        if show_progress {
-                            // ast-grep-ignore: no-println
-                            println!("Operation {} failed: {}", index + 1, e);
-                        }
-                        (false, Some(e.to_string()), None)
-                    }
-                };
-
-                BatchOperationResult {
+            handles.push(tokio::spawn(async move {
+                Self::execute_batch_operation_task(
+                    spec,
                     operation,
-                    success,
-                    error,
-                    response,
-                    duration,
-                }
-            });
+                    global_config,
+                    base_url,
+                    dry_run,
+                    output_format,
+                    jq_filter,
+                    semaphore,
+                    rate_limiter,
+                    show_progress,
+                    suppress_output,
+                    index,
+                )
+                .await
+            }));
+        }
+        handles
+    }
 
-            handles.push(handle);
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_batch_operation_task(
+        spec: CachedSpec,
+        operation: BatchOperation,
+        global_config: Option<GlobalConfig>,
+        base_url: Option<String>,
+        dry_run: bool,
+        output_format: crate::cli::OutputFormat,
+        jq_filter: Option<String>,
+        semaphore: Arc<Semaphore>,
+        rate_limiter: Option<Arc<DefaultDirectRateLimiter>>,
+        show_progress: bool,
+        suppress_output: bool,
+        index: usize,
+    ) -> BatchOperationResult {
+        let _permit = semaphore
+            .acquire()
+            .await
+            .expect("semaphore should not be closed");
+
+        if let Some(limiter) = rate_limiter {
+            limiter.until_ready().await;
         }
 
-        // Collect all results
+        let operation_start = std::time::Instant::now();
+        let result = Self::execute_single_operation(
+            &spec,
+            &operation,
+            global_config.as_ref(),
+            base_url.as_deref(),
+            dry_run,
+            &output_format,
+            jq_filter.as_deref(),
+            suppress_output,
+        )
+        .await;
+        let duration = operation_start.elapsed();
+
+        let (success, error, response) = match result {
+            Ok(resp) => {
+                if show_progress {
+                    // ast-grep-ignore: no-println
+                    println!("Operation {} completed", index + 1);
+                }
+                (true, None, Some(resp))
+            }
+            Err(e) => {
+                if show_progress {
+                    // ast-grep-ignore: no-println
+                    println!("Operation {} failed: {}", index + 1, e);
+                }
+                (false, Some(e.to_string()), None)
+            }
+        };
+
+        BatchOperationResult {
+            operation,
+            success,
+            error,
+            response,
+            duration,
+        }
+    }
+
+    async fn collect_batch_operation_results(
+        handles: Vec<tokio::task::JoinHandle<BatchOperationResult>>,
+    ) -> Result<Vec<BatchOperationResult>, Error> {
+        let mut results = Vec::with_capacity(handles.len());
         for handle in handles {
             let result = handle
                 .await
                 .map_err(|e| Error::invalid_config(format!("Task failed: {e}")))?;
             results.push(result);
         }
-
-        let total_duration = start_time.elapsed();
-        let success_count = results.iter().filter(|r| r.success).count();
-        let failure_count = results.len() - success_count;
-
-        if self.config.show_progress {
-            // ast-grep-ignore: no-println
-            println!(
-                "Batch execution completed: {}/{} operations successful in {:.2}s",
-                success_count,
-                total_operations,
-                total_duration.as_secs_f64()
-            );
-        }
-
-        Ok(BatchResult {
-            results,
-            total_duration,
-            success_count,
-            failure_count,
-        })
+        Ok(results)
     }
 
     fn validate_batch_body_file_args(operation: &BatchOperation) -> Result<(), Error> {

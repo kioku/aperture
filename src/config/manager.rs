@@ -109,37 +109,28 @@ impl<F: FileSystem> ConfigManager<F> {
                 ReferenceOr::Item(item) => Some(item),
                 ReferenceOr::Reference { .. } => None,
             })
-            .map(|item| {
-                let mut count = 0;
-                if item.get.is_some() {
-                    count += 1;
-                }
-                if item.post.is_some() {
-                    count += 1;
-                }
-                if item.put.is_some() {
-                    count += 1;
-                }
-                if item.delete.is_some() {
-                    count += 1;
-                }
-                if item.patch.is_some() {
-                    count += 1;
-                }
-                if item.head.is_some() {
-                    count += 1;
-                }
-                if item.options.is_some() {
-                    count += 1;
-                }
-                if item.trace.is_some() {
-                    count += 1;
-                }
-                count
-            })
+            .map(count_path_item_operations)
             .sum()
     }
+}
 
+fn count_path_item_operations(item: &openapiv3::PathItem) -> usize {
+    [
+        item.get.as_ref(),
+        item.post.as_ref(),
+        item.put.as_ref(),
+        item.delete.as_ref(),
+        item.patch.as_ref(),
+        item.head.as_ref(),
+        item.options.as_ref(),
+        item.trace.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .count()
+}
+
+impl<F: FileSystem> ConfigManager<F> {
     /// Display validation warnings with custom prefix
     #[must_use]
     pub fn format_validation_warnings(

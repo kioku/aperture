@@ -44,54 +44,77 @@ pub fn execute_help_command(
     output: &Output,
 ) -> Result<(), Error> {
     match (api_name, tag, operation) {
-        (None, None, None) => {
-            let specs = load_all_specs(manager)?;
-            let doc_gen = DocumentationGenerator::new(specs);
-            // ast-grep-ignore: no-println
-            println!("{}", doc_gen.generate_interactive_menu());
+        (None, None, None) => render_interactive_menu(manager),
+        (Some(api), None, None) => render_api_overview(manager, api),
+        (Some(api), Some(tag), Some(op)) => {
+            render_command_help(manager, api, tag, op, enhanced, output)
         }
-        (Some(api), tag_opt, operation_opt) => {
-            let specs = load_all_specs(manager)?;
-            let doc_gen = DocumentationGenerator::new(specs);
-            match (tag_opt, operation_opt) {
-                (None, None) => {
-                    let overview = doc_gen.generate_api_overview(api)?;
-                    // ast-grep-ignore: no-println
-                    println!("{overview}");
-                }
-                (Some(tag), Some(op)) => {
-                    let help = doc_gen.generate_command_help(api, tag, op)?;
-                    if enhanced {
-                        // ast-grep-ignore: no-println
-                        println!("{help}");
-                    } else {
-                        // ast-grep-ignore: no-println
-                        println!("{}", help.lines().take(20).collect::<Vec<_>>().join("\n"));
-                        output.tip("Use --enhanced for full documentation with examples");
-                    }
-                }
-                _ => {
-                    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-                    // ast-grep-ignore: no-println
-                    eprintln!("Invalid docs command. Usage:");
-                    // ast-grep-ignore: no-println
-                    eprintln!("  aperture docs                        # Interactive menu");
-                    // ast-grep-ignore: no-println
-                    eprintln!("  aperture docs <api>                  # API overview");
-                    // ast-grep-ignore: no-println
-                    eprintln!("  aperture docs <api> <tag> <operation> # Command help");
-                    std::process::exit(1);
-                }
-            }
+        (Some(_), _, _) => {
+            print_invalid_docs_usage();
         }
         _ => {
-            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-            // ast-grep-ignore: no-println
-            eprintln!("Invalid help command arguments");
-            std::process::exit(1);
+            print_invalid_help_arguments();
         }
     }
+}
+
+fn render_interactive_menu(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
+    let specs = load_all_specs(manager)?;
+    let doc_gen = DocumentationGenerator::new(specs);
+    // ast-grep-ignore: no-println
+    println!("{}", doc_gen.generate_interactive_menu());
     Ok(())
+}
+
+fn render_api_overview(manager: &ConfigManager<OsFileSystem>, api: &str) -> Result<(), Error> {
+    let specs = load_all_specs(manager)?;
+    let doc_gen = DocumentationGenerator::new(specs);
+    let overview = doc_gen.generate_api_overview(api)?;
+    // ast-grep-ignore: no-println
+    println!("{overview}");
+    Ok(())
+}
+
+fn render_command_help(
+    manager: &ConfigManager<OsFileSystem>,
+    api: &str,
+    tag: &str,
+    operation: &str,
+    enhanced: bool,
+    output: &Output,
+) -> Result<(), Error> {
+    let specs = load_all_specs(manager)?;
+    let doc_gen = DocumentationGenerator::new(specs);
+    let help = doc_gen.generate_command_help(api, tag, operation)?;
+    if enhanced {
+        // ast-grep-ignore: no-println
+        println!("{help}");
+    } else {
+        // ast-grep-ignore: no-println
+        println!("{}", help.lines().take(20).collect::<Vec<_>>().join("\n"));
+        output.tip("Use --enhanced for full documentation with examples");
+    }
+    Ok(())
+}
+
+fn print_invalid_docs_usage() -> ! {
+    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+    // ast-grep-ignore: no-println
+    eprintln!("Invalid docs command. Usage:");
+    // ast-grep-ignore: no-println
+    eprintln!("  aperture docs                        # Interactive menu");
+    // ast-grep-ignore: no-println
+    eprintln!("  aperture docs <api>                  # API overview");
+    // ast-grep-ignore: no-println
+    eprintln!("  aperture docs <api> <tag> <operation> # Command help");
+    std::process::exit(1);
+}
+
+fn print_invalid_help_arguments() -> ! {
+    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+    // ast-grep-ignore: no-println
+    eprintln!("Invalid help command arguments");
+    std::process::exit(1);
 }
 
 /// Execute overview command
@@ -104,25 +127,30 @@ pub fn execute_overview_command(
 ) -> Result<(), Error> {
     if !all {
         let Some(api) = api_name else {
-            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-            // ast-grep-ignore: no-println
-            eprintln!("Error: Must specify API name or use --all flag");
-            // ast-grep-ignore: no-println
-            eprintln!("Usage:");
-            // ast-grep-ignore: no-println
-            eprintln!("  aperture overview <api>");
-            // ast-grep-ignore: no-println
-            eprintln!("  aperture overview --all");
-            std::process::exit(1);
+            print_overview_usage();
         };
-        let specs = load_all_specs(manager)?;
-        let doc_gen = DocumentationGenerator::new(specs);
-        let overview = doc_gen.generate_api_overview(api)?;
-        // ast-grep-ignore: no-println
-        println!("{overview}");
-        return Ok(());
+        return render_single_api_overview(manager, api);
     }
 
+    render_all_api_overviews(manager, output)
+}
+
+fn render_single_api_overview(
+    manager: &ConfigManager<OsFileSystem>,
+    api: &str,
+) -> Result<(), Error> {
+    let specs = load_all_specs(manager)?;
+    let doc_gen = DocumentationGenerator::new(specs);
+    let overview = doc_gen.generate_api_overview(api)?;
+    // ast-grep-ignore: no-println
+    println!("{overview}");
+    Ok(())
+}
+
+fn render_all_api_overviews(
+    manager: &ConfigManager<OsFileSystem>,
+    output: &Output,
+) -> Result<(), Error> {
     let specs = load_all_specs(manager)?;
     if specs.is_empty() {
         output.info("No API specifications configured.");
@@ -144,14 +172,7 @@ pub fn execute_overview_command(
         let operation_count = spec.commands.len();
         // ast-grep-ignore: no-println
         println!("   Operations: {operation_count}");
-        let mut method_counts = std::collections::BTreeMap::new();
-        for command in &spec.commands {
-            *method_counts.entry(command.method.clone()).or_insert(0) += 1;
-        }
-        let method_summary: Vec<String> = method_counts
-            .iter()
-            .map(|(method, count)| format!("{method}: {count}"))
-            .collect();
+        let method_summary = summarize_methods(&spec.commands);
         // ast-grep-ignore: no-println
         println!("   Methods: {}", method_summary.join(", "));
         // ast-grep-ignore: no-println
@@ -161,6 +182,30 @@ pub fn execute_overview_command(
     println!("\n{}", "=".repeat(60));
     output.tip("Use 'aperture overview <api>' for detailed information about a specific API");
     Ok(())
+}
+
+fn summarize_methods(spec_commands: &[crate::cache::models::CachedCommand]) -> Vec<String> {
+    let mut method_counts = std::collections::BTreeMap::new();
+    for command in spec_commands {
+        *method_counts.entry(command.method.clone()).or_insert(0) += 1;
+    }
+    method_counts
+        .iter()
+        .map(|(method, count)| format!("{method}: {count}"))
+        .collect()
+}
+
+fn print_overview_usage() -> ! {
+    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
+    // ast-grep-ignore: no-println
+    eprintln!("Error: Must specify API name or use --all flag");
+    // ast-grep-ignore: no-println
+    eprintln!("Usage:");
+    // ast-grep-ignore: no-println
+    eprintln!("  aperture overview <api>");
+    // ast-grep-ignore: no-println
+    eprintln!("  aperture overview --all");
+    std::process::exit(1);
 }
 
 /// Load all cached specs from the manager

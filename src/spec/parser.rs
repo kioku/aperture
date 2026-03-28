@@ -260,7 +260,7 @@ fn parse_with_oas3_direct_with_original(
     Ok(spec)
 }
 
-/// Restore security schemes to the OpenAPI spec if they were lost during conversion
+/// Restore security schemes to the `OpenAPI` spec if they were lost during conversion
 #[cfg(feature = "openapi31")]
 fn restore_security_schemes(
     spec: &mut OpenAPI,
@@ -269,23 +269,22 @@ fn restore_security_schemes(
     >,
 ) {
     if let Some(schemes) = security_schemes {
-        // Ensure components exists and add the security schemes
-        match spec.components {
-            Some(ref mut components) => {
+        spec.components = Some(match spec.components.take() {
+            Some(mut components) => {
                 components.security_schemes = schemes;
+                components
             }
-            None => {
-                let mut components = openapiv3::Components::default();
-                components.security_schemes = schemes;
-                spec.components = Some(components);
-            }
-        }
+            None => openapiv3::Components {
+                security_schemes: schemes,
+                ..Default::default()
+            },
+        });
     }
 }
 
 /// Extract security schemes from YAML/JSON content before any processing
 ///
-/// This function is needed because the oas3 library's conversion from OpenAPI 3.1 to 3.0
+/// This function is needed because the `oas3` library's conversion from `OpenAPI` 3.1 to 3.0
 /// sometimes loses security scheme definitions. We extract them from the original content
 /// to restore them after conversion.
 #[cfg(feature = "openapi31")]

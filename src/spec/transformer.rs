@@ -277,61 +277,25 @@ impl SpecTransformer {
         operation: &Operation,
         global_security_requirements: &[String],
     ) -> Result<CachedCommand, Error> {
-        // Extract operation metadata
         let operation_id = operation
             .operation_id
             .clone()
             .unwrap_or_else(|| format!("{method}_{path}"));
 
-        // Use first tag as command namespace, or "default" if no tags
         let name = operation
             .tags
             .first()
             .cloned()
             .unwrap_or_else(|| constants::DEFAULT_GROUP.to_string());
 
-        // Transform parameters
-        let mut parameters = Vec::new();
-        for param_ref in &operation.parameters {
-            match param_ref {
-                ReferenceOr::Item(param) => {
-                    parameters.push(Self::transform_parameter(param));
-                }
-                ReferenceOr::Reference { reference } => {
-                    let param = Self::resolve_parameter_reference(spec, reference)?;
-                    parameters.push(Self::transform_parameter(&param));
-                }
-            }
-        }
-
-        // Transform request body
+        let parameters = Self::collect_operation_parameters(spec, &operation.parameters)?;
         let request_body = operation
             .request_body
             .as_ref()
             .and_then(Self::transform_request_body);
-
-        // Transform responses
-        let responses = operation
-            .responses
-            .responses
-            .iter()
-            .map(|(code, response_ref)| {
-                Self::transform_response(spec, code.to_string(), response_ref)
-            })
-            .collect();
-
-        // Extract security requirements - use operation-level if defined, else global
-        let security_requirements = operation.security.as_ref().map_or_else(
-            || global_security_requirements.to_vec(),
-            |security_reqs| {
-                security_reqs
-                    .iter()
-                    .flat_map(|security_req| security_req.keys().cloned())
-                    .collect()
-            },
-        );
-
-        // Generate examples for this command
+        let responses = Self::collect_operation_responses(spec, &operation.responses.responses);
+        let security_requirements =
+            Self::resolve_security_requirements(operation, global_security_requirements);
         let examples = Self::generate_command_examples(
             &name,
             &operation_id,
@@ -340,8 +304,6 @@ impl SpecTransformer {
             &parameters,
             request_body.as_ref(),
         );
-
-        // Detect pagination strategy from the spec.
         let pagination = Self::detect_pagination(operation, spec);
 
         Ok(CachedCommand {
@@ -368,6 +330,49 @@ impl SpecTransformer {
             hidden: false,
             pagination,
         })
+    }
+
+    fn collect_operation_parameters(
+        spec: &OpenAPI,
+        parameters: &[ReferenceOr<Parameter>],
+    ) -> Result<Vec<CachedParameter>, Error> {
+        parameters
+            .iter()
+            .map(|param_ref| match param_ref {
+                ReferenceOr::Item(param) => Ok(Self::transform_parameter(param)),
+                ReferenceOr::Reference { reference } => {
+                    let param = Self::resolve_parameter_reference(spec, reference)?;
+                    Ok(Self::transform_parameter(&param))
+                }
+            })
+            .collect()
+    }
+
+    fn collect_operation_responses(
+        spec: &OpenAPI,
+        responses: &indexmap::IndexMap<openapiv3::StatusCode, ReferenceOr<openapiv3::Response>>,
+    ) -> Vec<CachedResponse> {
+        responses
+            .iter()
+            .map(|(code, response_ref)| {
+                Self::transform_response(spec, code.to_string(), response_ref)
+            })
+            .collect()
+    }
+
+    fn resolve_security_requirements(
+        operation: &Operation,
+        global_security_requirements: &[String],
+    ) -> Vec<String> {
+        operation.security.as_ref().map_or_else(
+            || global_security_requirements.to_vec(),
+            |security_reqs| {
+                security_reqs
+                    .iter()
+                    .flat_map(|security_req| security_req.keys().cloned())
+                    .collect()
+            },
+        )
     }
 
     /// Transforms a parameter into cached format
@@ -628,28 +633,10 @@ impl SpecTransformer {
     ) -> Option<CachedRequestBody> {
         match request_body {
             ReferenceOr::Item(body) => {
-                // Prefer JSON content if available
-                let content_type = if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
-                    constants::CONTENT_TYPE_JSON
-                } else {
-                    body.content.keys().next()?
-                };
-
-                // Extract schema and example from the content
+                let content_type = Self::preferred_request_body_content_type(body)?;
                 let media_type = body.content.get(content_type)?;
-                let schema = media_type
-                    .schema
-                    .as_ref()
-                    .and_then(|schema_ref| match schema_ref {
-                        ReferenceOr::Item(schema) => serde_json::to_string(schema).ok(),
-                        ReferenceOr::Reference { .. } => None,
-                    })
-                    .unwrap_or_else(|| "{}".to_string());
-
-                let example = media_type
-                    .example
-                    .as_ref()
-                    .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
+                let schema = Self::request_body_schema(media_type);
+                let example = Self::request_body_example(media_type);
 
                 Some(CachedRequestBody {
                     content_type: content_type.to_string(),
@@ -661,6 +648,32 @@ impl SpecTransformer {
             }
             ReferenceOr::Reference { .. } => None, // Skip references for now
         }
+    }
+
+    fn preferred_request_body_content_type(body: &RequestBody) -> Option<&str> {
+        if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
+            Some(constants::CONTENT_TYPE_JSON)
+        } else {
+            body.content.keys().next().map(String::as_str)
+        }
+    }
+
+    fn request_body_schema(media_type: &openapiv3::MediaType) -> String {
+        media_type
+            .schema
+            .as_ref()
+            .and_then(|schema_ref| match schema_ref {
+                ReferenceOr::Item(schema) => serde_json::to_string(schema).ok(),
+                ReferenceOr::Reference { .. } => None,
+            })
+            .unwrap_or_else(|| "{}".to_string())
+    }
+
+    fn request_body_example(media_type: &openapiv3::MediaType) -> Option<String> {
+        media_type
+            .example
+            .as_ref()
+            .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()))
     }
 
     /// Extracts and transforms security schemes from the `OpenAPI` spec
@@ -985,45 +998,54 @@ fn parse_aperture_pagination_extension(value: &serde_json::Value) -> Option<Pagi
     let strategy_str = obj.get("strategy")?.as_str()?;
 
     match strategy_str {
-        constants::PAGINATION_STRATEGY_CURSOR => {
-            let cursor_field = obj
-                .get("cursor_field")
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            let cursor_param = obj
-                .get("cursor_param")
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            // Default cursor_param to the cursor_field name when not specified
-            let cursor_param = cursor_param.or_else(|| cursor_field.clone());
-            Some(PaginationInfo {
-                strategy: PaginationStrategy::Cursor,
-                cursor_field,
-                cursor_param,
-                ..Default::default()
-            })
-        }
-        constants::PAGINATION_STRATEGY_OFFSET => {
-            let page_param = obj
-                .get("page_param")
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            let limit_param = obj
-                .get("limit_param")
-                .and_then(|v| v.as_str())
-                .map(String::from);
-            Some(PaginationInfo {
-                strategy: PaginationStrategy::Offset,
-                page_param,
-                limit_param,
-                ..Default::default()
-            })
-        }
+        constants::PAGINATION_STRATEGY_CURSOR => Some(parse_cursor_pagination_extension(obj)),
+        constants::PAGINATION_STRATEGY_OFFSET => Some(parse_offset_pagination_extension(obj)),
         constants::PAGINATION_STRATEGY_LINK_HEADER => Some(PaginationInfo {
             strategy: PaginationStrategy::LinkHeader,
             ..Default::default()
         }),
         _ => None,
+    }
+}
+
+fn parse_cursor_pagination_extension(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> PaginationInfo {
+    let cursor_field = obj
+        .get("cursor_field")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let cursor_param = obj
+        .get("cursor_param")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| cursor_field.clone());
+
+    PaginationInfo {
+        strategy: PaginationStrategy::Cursor,
+        cursor_field,
+        cursor_param,
+        ..Default::default()
+    }
+}
+
+fn parse_offset_pagination_extension(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> PaginationInfo {
+    let page_param = obj
+        .get("page_param")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let limit_param = obj
+        .get("limit_param")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    PaginationInfo {
+        strategy: PaginationStrategy::Offset,
+        page_param,
+        limit_param,
+        ..Default::default()
     }
 }
 

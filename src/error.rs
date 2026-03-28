@@ -266,22 +266,8 @@ impl Error {
             Option<Cow<'static, str>>,
             Option<serde_json::Value>,
         ) = match self {
-            Self::Io(io_err) => {
-                let context = match io_err.kind() {
-                    std::io::ErrorKind::NotFound => {
-                        Some(Cow::Borrowed(constants::ERR_FILE_NOT_FOUND))
-                    }
-                    std::io::ErrorKind::PermissionDenied => {
-                        Some(Cow::Borrowed(constants::ERR_PERMISSION))
-                    }
-                    _ => None,
-                };
-                ("FileSystem", io_err.to_string(), context, None)
-            }
-            Self::Network(req_err) => {
-                let context = network_error_context(req_err);
-                ("Network", req_err.to_string(), context, None)
-            }
+            Self::Io(io_err) => io_error_json_parts(io_err),
+            Self::Network(req_err) => network_error_json_parts(req_err),
             Self::Yaml(yaml_err) => (
                 "YAMLParsing",
                 yaml_err.to_string(),
@@ -304,11 +290,7 @@ impl Error {
                 kind,
                 message,
                 context: ctx,
-            } => {
-                let context = ctx.as_ref().and_then(|c| c.suggestion.clone());
-                let details = ctx.as_ref().and_then(|c| c.details.clone());
-                (kind.as_str(), message.to_string(), context, details)
-            }
+            } => internal_error_json_parts(kind, message.as_ref(), ctx.as_ref()),
             Self::Anyhow(anyhow_err) => ("Unknown", anyhow_err.to_string(), None, None),
         };
 
@@ -319,6 +301,53 @@ impl Error {
             details,
         }
     }
+}
+
+fn io_error_json_parts(
+    io_err: &std::io::Error,
+) -> (
+    &'static str,
+    String,
+    Option<Cow<'static, str>>,
+    Option<serde_json::Value>,
+) {
+    let context = match io_err.kind() {
+        std::io::ErrorKind::NotFound => Some(Cow::Borrowed(constants::ERR_FILE_NOT_FOUND)),
+        std::io::ErrorKind::PermissionDenied => Some(Cow::Borrowed(constants::ERR_PERMISSION)),
+        _ => None,
+    };
+    ("FileSystem", io_err.to_string(), context, None)
+}
+
+fn network_error_json_parts(
+    req_err: &reqwest::Error,
+) -> (
+    &'static str,
+    String,
+    Option<Cow<'static, str>>,
+    Option<serde_json::Value>,
+) {
+    (
+        "Network",
+        req_err.to_string(),
+        network_error_context(req_err),
+        None,
+    )
+}
+
+fn internal_error_json_parts(
+    kind: &ErrorKind,
+    message: &str,
+    context: Option<&ErrorContext>,
+) -> (
+    &'static str,
+    String,
+    Option<Cow<'static, str>>,
+    Option<serde_json::Value>,
+) {
+    let suggestion = context.and_then(|c| c.suggestion.clone());
+    let details = context.and_then(|c| c.details.clone());
+    (kind.as_str(), message.to_string(), suggestion, details)
 }
 
 impl Error {

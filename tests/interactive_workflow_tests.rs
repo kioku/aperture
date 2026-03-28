@@ -218,6 +218,18 @@ fn test_select_from_options_with_empty_input_and_cancellation() {
 }
 
 #[test]
+fn test_select_from_options_with_empty_input_continue() {
+    let mut mock = MockInputOutputImpl::new();
+    let options = vec![("option1".to_string(), "First option".to_string())];
+
+    expect_empty_selection_continue(&mut mock);
+
+    let result = select_from_options_with_io("Choose:", &options, &mock);
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), "option1");
+}
+
+#[test]
 fn test_select_from_options_with_invalid_input_retry() {
     let mut mock = MockInputOutputImpl::new();
     let options = vec![("option1".to_string(), "First option".to_string())];
@@ -450,12 +462,99 @@ fn test_end_to_end_interactive_workflow() {
     assert!(confirmed.unwrap());
 }
 
+fn expect_invalid_selection_attempt(
+    mock: &mut MockInputOutputImpl,
+    attempt: usize,
+    input: &str,
+    should_print_retry_message: bool,
+) {
+    let input = input.to_string();
+
+    mock.expect_print()
+        .with(eq("Enter your choice (number or name): "))
+        .times(1)
+        .returning(|_| Ok(()));
+    mock.expect_flush().times(1).returning(|| Ok(()));
+    mock.expect_read_line_with_timeout()
+        .times(1)
+        .returning(move |_| Ok(format!("{input}\n")));
+
+    if should_print_retry_message {
+        let expected = format!(
+            "Invalid selection. Please enter a number (1-1) or a valid name. (Attempt {attempt} of 3)"
+        );
+        mock.expect_println()
+            .with(eq(expected))
+            .times(1)
+            .returning(|_| Ok(()));
+    }
+}
+
+fn expect_empty_selection_continue(mock: &mut MockInputOutputImpl) {
+    expect_selection_prompt(mock);
+    expect_empty_selection_attempt(mock);
+    expect_continue_confirmation(mock);
+    expect_valid_selection_attempt(mock);
+}
+
+fn expect_selection_prompt(mock: &mut MockInputOutputImpl) {
+    mock.expect_println()
+        .with(eq("Choose:"))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_println()
+        .with(eq("  1: option1 - First option"))
+        .times(1)
+        .returning(|_| Ok(()));
+}
+
+fn expect_empty_selection_attempt(mock: &mut MockInputOutputImpl) {
+    mock.expect_print()
+        .with(eq("Enter your choice (number or name): "))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_flush().times(1).returning(|| Ok(()));
+
+    mock.expect_read_line_with_timeout()
+        .times(1)
+        .returning(|_| Ok("\n".to_string()));
+}
+
+fn expect_continue_confirmation(mock: &mut MockInputOutputImpl) {
+    mock.expect_print()
+        .with(eq(
+            "Do you want to continue with the current operation? (y/n): ",
+        ))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_flush().times(1).returning(|| Ok(()));
+
+    mock.expect_read_line_with_timeout()
+        .times(1)
+        .returning(|_| Ok("y\n".to_string()));
+}
+
+fn expect_valid_selection_attempt(mock: &mut MockInputOutputImpl) {
+    mock.expect_print()
+        .with(eq("Enter your choice (number or name): "))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_flush().times(1).returning(|| Ok(()));
+
+    mock.expect_read_line_with_timeout()
+        .times(1)
+        .returning(|_| Ok("1\n".to_string()));
+}
+
 #[test]
 fn test_multiple_retry_attempts_until_max() {
     let mut mock = MockInputOutputImpl::new();
     let options = vec![("valid".to_string(), "Valid option".to_string())];
 
-    // Display options
     mock.expect_println()
         .with(eq("Choose:"))
         .times(1)
@@ -466,47 +565,9 @@ fn test_multiple_retry_attempts_until_max() {
         .times(1)
         .returning(|_| Ok(()));
 
-    // Attempt 1 - invalid
-    mock.expect_print()
-        .with(eq("Enter your choice (number or name): "))
-        .times(1)
-        .returning(|_| Ok(()));
-    mock.expect_flush().times(1).returning(|| Ok(()));
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("invalid1\n".to_string()));
-    mock.expect_println()
-        .with(eq(
-            "Invalid selection. Please enter a number (1-1) or a valid name. (Attempt 1 of 3)",
-        ))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    // Attempt 2 - invalid
-    mock.expect_print()
-        .with(eq("Enter your choice (number or name): "))
-        .times(1)
-        .returning(|_| Ok(()));
-    mock.expect_flush().times(1).returning(|| Ok(()));
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("invalid2\n".to_string()));
-    mock.expect_println()
-        .with(eq(
-            "Invalid selection. Please enter a number (1-1) or a valid name. (Attempt 2 of 3)",
-        ))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    // Attempt 3 - invalid (final attempt, no retry message)
-    mock.expect_print()
-        .with(eq("Enter your choice (number or name): "))
-        .times(1)
-        .returning(|_| Ok(()));
-    mock.expect_flush().times(1).returning(|| Ok(()));
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("invalid3\n".to_string()));
+    expect_invalid_selection_attempt(&mut mock, 1, "invalid1", true);
+    expect_invalid_selection_attempt(&mut mock, 2, "invalid2", true);
+    expect_invalid_selection_attempt(&mut mock, 3, "invalid3", false);
 
     let result = select_from_options_with_io("Choose:", &options, &mock);
     assert!(result.is_err());
