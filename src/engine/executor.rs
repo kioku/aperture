@@ -822,6 +822,35 @@ async fn finalize_execution_result(
 ///
 /// Returns errors for authentication failures, network issues, or response
 /// validation problems.
+async fn resolve_pre_execution_result(
+    cache_context: Option<&(CacheKey, ResponseCache)>,
+    dry_run: bool,
+    method: &Method,
+    url: &str,
+    headers: &HeaderMap,
+    body: Option<&str>,
+    operation_id: &str,
+) -> Result<Option<ExecutionResult>, Error> {
+    if let Some(result) = cached_execution_result(cache_context).await? {
+        return Ok(Some(result));
+    }
+
+    Ok(build_dry_run_result(
+        dry_run,
+        method,
+        url,
+        headers,
+        body,
+        operation_id,
+    ))
+}
+
+/// Executes an API operation using CLI-agnostic domain types.
+///
+/// # Errors
+///
+/// Returns errors for authentication failures, network issues, invalid
+/// parameters, and response validation problems.
 #[allow(clippy::too_many_lines)]
 pub async fn execute(
     spec: &CachedSpec,
@@ -861,18 +890,17 @@ pub async fn execute(
         call.body.as_deref(),
     )?;
 
-    if let Some(result) = cached_execution_result(cache_context.as_ref()).await? {
-        return Ok(result);
-    }
-
-    if let Some(result) = build_dry_run_result(
+    if let Some(result) = resolve_pre_execution_result(
+        cache_context.as_ref(),
         ctx.dry_run,
         &method,
         &url,
         &headers_clone,
         call.body.as_deref(),
         &operation.operation_id,
-    ) {
+    )
+    .await?
+    {
         return Ok(result);
     }
 

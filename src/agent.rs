@@ -477,6 +477,95 @@ pub enum SecuritySchemeDetails {
     },
 }
 
+fn build_openapi_temp_cached_spec(api_name: &str, spec: &OpenAPI) -> CachedSpec {
+    let base_url = spec.servers.first().map(|s| s.url.clone());
+    let servers: Vec<String> = spec.servers.iter().map(|s| s.url.clone()).collect();
+
+    CachedSpec {
+        cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
+        name: api_name.to_string(),
+        version: spec.info.version.clone(),
+        commands: vec![],
+        base_url,
+        servers,
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    }
+}
+
+fn collect_openapi_command_groups(
+    spec: &OpenAPI,
+    cached_spec: &CachedSpec,
+) -> HashMap<String, Vec<CommandInfo>> {
+    let skipped_set: std::collections::HashSet<(&str, &str)> = cached_spec
+        .skipped_endpoints
+        .iter()
+        .map(|ep| (ep.path.as_str(), ep.method.as_str()))
+        .collect();
+
+    let mut command_groups: HashMap<String, Vec<CommandInfo>> = HashMap::new();
+
+    for (path, path_item) in &spec.paths.paths {
+        let ReferenceOr::Item(item) = path_item else {
+            continue;
+        };
+
+        for (method, operation) in crate::spec::http_methods_iter(item) {
+            let Some(op) = operation else {
+                continue;
+            };
+
+            if skipped_set.contains(&(path.as_str(), method.to_uppercase().as_str())) {
+                continue;
+            }
+
+            let command_info =
+                convert_openapi_operation_to_info(method, path, op, spec, spec.security.as_ref());
+            let group_name = op.tags.first().map_or_else(
+                || constants::DEFAULT_GROUP.to_string(),
+                |tag| to_kebab_case(tag),
+            );
+
+            command_groups
+                .entry(group_name)
+                .or_default()
+                .push(command_info);
+        }
+    }
+
+    command_groups
+}
+
+fn overlay_cached_command_metadata(
+    command_groups: HashMap<String, Vec<CommandInfo>>,
+    cached_spec: &CachedSpec,
+) -> HashMap<String, Vec<CommandInfo>> {
+    let mapping_index: HashMap<&str, &CachedCommand> = cached_spec
+        .commands
+        .iter()
+        .map(|c| (c.operation_id.as_str(), c))
+        .collect();
+
+    let mut regrouped: HashMap<String, Vec<CommandInfo>> = HashMap::new();
+    for (_group, commands) in command_groups {
+        for mut cmd_info in commands {
+            if let Some(cached_cmd) = mapping_index.get(cmd_info.operation_id.as_str()) {
+                cmd_info.display_group.clone_from(&cached_cmd.display_group);
+                cmd_info.display_name.clone_from(&cached_cmd.display_name);
+                cmd_info.aliases.clone_from(&cached_cmd.aliases);
+                cmd_info.hidden = cached_cmd.hidden;
+                cmd_info.pagination = PaginationManifestInfo::from_cached(&cached_cmd.pagination);
+            }
+
+            let effective_group = effective_group_key(&cmd_info);
+            regrouped.entry(effective_group).or_default().push(cmd_info);
+        }
+    }
+
+    regrouped
+}
+
 /// Generates a capability manifest from an `OpenAPI` specification.
 ///
 /// This function creates a comprehensive JSON description of all available commands,
@@ -500,23 +589,7 @@ pub fn generate_capability_manifest_from_openapi(
     cached_spec: &CachedSpec,
     global_config: Option<&GlobalConfig>,
 ) -> Result<String, Error> {
-    // First, convert the OpenAPI spec to a temporary CachedSpec for URL resolution
-    let base_url = spec.servers.first().map(|s| s.url.clone());
-    let servers: Vec<String> = spec.servers.iter().map(|s| s.url.clone()).collect();
-
-    let temp_cached_spec = CachedSpec {
-        cache_format_version: crate::cache::models::CACHE_FORMAT_VERSION,
-        name: api_name.to_string(),
-        version: spec.info.version.clone(),
-        commands: vec![], // We'll generate commands directly from OpenAPI
-        base_url,
-        servers,
-        security_schemes: HashMap::new(), // We'll extract these directly too
-        skipped_endpoints: vec![],        // No endpoints are skipped for agent manifest
-        server_variables: HashMap::new(), // We'll extract these later if needed
-    };
-
-    // Resolve base URL using the same priority hierarchy as executor
+    let temp_cached_spec = build_openapi_temp_cached_spec(api_name, spec);
     let resolver = BaseUrlResolver::new(&temp_cached_spec);
     let resolver = if let Some(config) = global_config {
         resolver.with_global_config(config)
@@ -525,88 +598,14 @@ pub fn generate_capability_manifest_from_openapi(
     };
     let resolved_base_url = resolver.resolve(None);
 
-    // Extract commands directly from OpenAPI spec, excluding skipped endpoints
-    let mut command_groups: HashMap<String, Vec<CommandInfo>> = HashMap::new();
-
-    // Build a set of skipped (path, method) pairs for efficient lookup
-    let skipped_set: std::collections::HashSet<(&str, &str)> = cached_spec
-        .skipped_endpoints
-        .iter()
-        .map(|ep| (ep.path.as_str(), ep.method.as_str()))
-        .collect();
-
-    for (path, path_item) in &spec.paths.paths {
-        let ReferenceOr::Item(item) = path_item else {
-            continue;
-        };
-
-        // Process each HTTP method
-        for (method, operation) in crate::spec::http_methods_iter(item) {
-            let Some(op) = operation else {
-                continue;
-            };
-
-            // Skip endpoints that were filtered out during caching
-            if skipped_set.contains(&(path.as_str(), method.to_uppercase().as_str())) {
-                continue;
-            }
-
-            let command_info =
-                convert_openapi_operation_to_info(method, path, op, spec, spec.security.as_ref());
-
-            // Group by first tag or "default", converted to kebab-case
-            let group_name = op.tags.first().map_or_else(
-                || constants::DEFAULT_GROUP.to_string(),
-                |tag| to_kebab_case(tag),
-            );
-
-            command_groups
-                .entry(group_name)
-                .or_default()
-                .push(command_info);
-        }
-    }
-
-    // Overlay command mapping fields from the cached spec.
-    //
-    // The manifest is generated from the raw OpenAPI spec for richer metadata,
-    // but command mappings (display_group, display_name, aliases, hidden) are
-    // applied at the cache layer during `config add`/`config reinit`. We merge
-    // these fields back into the manifest so agents see the effective CLI names.
-    let mapping_index: HashMap<&str, &CachedCommand> = cached_spec
-        .commands
-        .iter()
-        .map(|c| (c.operation_id.as_str(), c))
-        .collect();
-
-    // We also need to re-group commands when display_group overrides are present,
-    // since the original grouping uses the raw tag name.
-    let mut regrouped: HashMap<String, Vec<CommandInfo>> = HashMap::new();
-    for (_group, commands) in command_groups {
-        for mut cmd_info in commands {
-            if let Some(cached_cmd) = mapping_index.get(cmd_info.operation_id.as_str()) {
-                cmd_info.display_group.clone_from(&cached_cmd.display_group);
-                cmd_info.display_name.clone_from(&cached_cmd.display_name);
-                cmd_info.aliases.clone_from(&cached_cmd.aliases);
-                cmd_info.hidden = cached_cmd.hidden;
-                cmd_info.pagination = PaginationManifestInfo::from_cached(&cached_cmd.pagination);
-            }
-
-            let effective_group = effective_group_key(&cmd_info);
-
-            regrouped.entry(effective_group).or_default().push(cmd_info);
-        }
-    }
-
-    // Extract security schemes directly from OpenAPI
+    let command_groups = collect_openapi_command_groups(spec, cached_spec);
+    let regrouped = overlay_cached_command_metadata(command_groups, cached_spec);
     let security_schemes = extract_security_schemes_from_openapi(spec);
 
-    // Compute endpoint statistics from the cached spec
     let skipped = cached_spec.skipped_endpoints.len();
     let available = cached_spec.commands.len();
     let total = available + skipped;
 
-    // Create the manifest
     let manifest = ApiCapabilityManifest {
         api: ApiInfo {
             name: spec.info.title.clone(),
@@ -624,7 +623,6 @@ pub fn generate_capability_manifest_from_openapi(
         batch: build_batch_capability_info(),
     };
 
-    // Serialize to JSON
     serde_json::to_string_pretty(&manifest)
         .map_err(|e| Error::serialization_error(format!("Failed to serialize agent manifest: {e}")))
 }

@@ -775,6 +775,97 @@ impl SpecTransformer {
         crate::spec::resolve_parameter_reference(spec, reference)
     }
 
+    fn build_command_example_command_line(
+        base_cmd: &str,
+        params: &[&CachedParameter],
+        fallback_example: &str,
+    ) -> String {
+        let mut cmd = base_cmd.to_string();
+        for param in params {
+            write!(
+                &mut cmd,
+                " --{} {}",
+                param.name,
+                param.example.as_deref().unwrap_or(fallback_example)
+            )
+            .expect("writing to String cannot fail");
+        }
+        cmd
+    }
+
+    fn build_required_parameters_example(
+        base_cmd: &str,
+        method: &str,
+        path: &str,
+        required_params: &[&CachedParameter],
+    ) -> Option<CommandExample> {
+        if required_params.is_empty() {
+            return None;
+        }
+
+        Some(CommandExample {
+            description: "Basic usage with required parameters".to_string(),
+            command_line: Self::build_command_example_command_line(
+                base_cmd,
+                required_params,
+                "<value>",
+            ),
+            explanation: Some(format!("{method} {path}")),
+        })
+    }
+
+    fn build_request_body_example(
+        base_cmd: &str,
+        required_params: &[&CachedParameter],
+        request_body: Option<&CachedRequestBody>,
+    ) -> Option<CommandExample> {
+        request_body?;
+
+        let path_query_params: Vec<&CachedParameter> = required_params
+            .iter()
+            .copied()
+            .filter(|p| p.location == "path" || p.location == "query")
+            .collect();
+
+        let mut cmd = Self::build_command_example_command_line(base_cmd, &path_query_params, "123");
+        cmd.push_str(r#" --body '{"name": "example", "value": 42}'"#);
+
+        Some(CommandExample {
+            description: "With request body".to_string(),
+            command_line: cmd,
+            explanation: Some("Sends JSON data in the request body".to_string()),
+        })
+    }
+
+    fn build_optional_parameters_example(
+        base_cmd: &str,
+        required_params: &[&CachedParameter],
+        optional_params: &[&CachedParameter],
+    ) -> Option<CommandExample> {
+        if required_params.is_empty() || optional_params.is_empty() {
+            return None;
+        }
+
+        let mut cmd = Self::build_command_example_command_line(base_cmd, required_params, "value");
+        for param in optional_params {
+            write!(
+                &mut cmd,
+                " --{} {}",
+                param.name,
+                param.example.as_deref().unwrap_or("optional")
+            )
+            .expect("writing to String cannot fail");
+        }
+
+        Some(CommandExample {
+            description: "With optional parameters".to_string(),
+            command_line: cmd,
+            explanation: Some(
+                "Includes optional query parameters for filtering or customization".to_string(),
+            ),
+        })
+    }
+
     /// Generate examples for a command
     #[allow(clippy::too_many_lines)]
     fn generate_command_examples(
@@ -785,107 +876,38 @@ impl SpecTransformer {
         parameters: &[CachedParameter],
         request_body: Option<&CachedRequestBody>,
     ) -> Vec<CommandExample> {
-        let mut examples = Vec::new();
         let operation_kebab = to_kebab_case(operation_id);
         let tag_kebab = to_kebab_case(tag);
-
-        // Build base command
         let base_cmd = format!("aperture api myapi {tag_kebab} {operation_kebab}");
 
-        // Example 1: Simple required parameters only
         let required_params: Vec<&CachedParameter> =
             parameters.iter().filter(|p| p.required).collect();
-
-        if !required_params.is_empty() {
-            let mut cmd = base_cmd.clone();
-            for param in &required_params {
-                write!(
-                    &mut cmd,
-                    " --{} {}",
-                    param.name,
-                    param.example.as_deref().unwrap_or("<value>")
-                )
-                .expect("writing to String cannot fail");
-            }
-
-            examples.push(CommandExample {
-                description: "Basic usage with required parameters".to_string(),
-                command_line: cmd,
-                explanation: Some(format!("{method} {path}")),
-            });
-        }
-
-        // Example 2: With request body if present
-        if let Some(_body) = request_body {
-            let mut cmd = base_cmd.clone();
-
-            // Add required path/query parameters (only path and query params)
-            let path_query_params = required_params
-                .iter()
-                .filter(|p| p.location == "path" || p.location == "query");
-
-            for param in path_query_params {
-                write!(
-                    &mut cmd,
-                    " --{} {}",
-                    param.name,
-                    param.example.as_deref().unwrap_or("123")
-                )
-                .expect("writing to String cannot fail");
-            }
-
-            // Add body example
-            cmd.push_str(r#" --body '{"name": "example", "value": 42}'"#);
-
-            examples.push(CommandExample {
-                description: "With request body".to_string(),
-                command_line: cmd,
-                explanation: Some("Sends JSON data in the request body".to_string()),
-            });
-        }
-
-        // Example 3: With optional parameters
         let optional_params: Vec<&CachedParameter> = parameters
             .iter()
             .filter(|p| !p.required && p.location == "query")
-            .take(2) // Limit to 2 optional params for brevity
+            .take(2)
             .collect();
 
-        if !optional_params.is_empty() && !required_params.is_empty() {
-            let mut cmd = base_cmd.clone();
+        let mut examples = Vec::new();
 
-            // Add required parameters
-            for param in &required_params {
-                write!(
-                    &mut cmd,
-                    " --{} {}",
-                    param.name,
-                    param.example.as_deref().unwrap_or("value")
-                )
-                .expect("writing to String cannot fail");
-            }
-
-            // Add optional parameters
-            for param in &optional_params {
-                write!(
-                    &mut cmd,
-                    " --{} {}",
-                    param.name,
-                    param.example.as_deref().unwrap_or("optional")
-                )
-                .expect("writing to String cannot fail");
-            }
-
-            examples.push(CommandExample {
-                description: "With optional parameters".to_string(),
-                command_line: cmd,
-                explanation: Some(
-                    "Includes optional query parameters for filtering or customization".to_string(),
-                ),
-            });
+        if let Some(example) =
+            Self::build_required_parameters_example(&base_cmd, method, path, &required_params)
+        {
+            examples.push(example);
         }
 
-        // If no examples were generated, create a simple one
+        if let Some(example) =
+            Self::build_request_body_example(&base_cmd, &required_params, request_body)
+        {
+            examples.push(example);
+        }
+
+        if let Some(example) =
+            Self::build_optional_parameters_example(&base_cmd, &required_params, &optional_params)
+        {
+            examples.push(example);
+        }
+
         if examples.is_empty() {
             examples.push(CommandExample {
                 description: "Basic usage".to_string(),

@@ -14,6 +14,51 @@
 /// - Consecutive non-alphanumeric characters are collapsed: "a---b" -> "a-b"
 /// - Leading/trailing hyphens are trimmed
 /// - Unicode characters are properly lowercased
+fn needs_boundary_hyphen(
+    last_was_sep: bool,
+    last_was_lower: bool,
+    current: char,
+    next: Option<char>,
+    has_following_char: bool,
+    result: &str,
+) -> bool {
+    let is_upper = current.is_uppercase();
+    let next_is_lower = next.is_some_and(char::is_lowercase);
+    let last_char_is_numeric = result.chars().last().is_some_and(char::is_numeric);
+
+    let simple_boundary = !last_was_sep && is_upper && last_was_lower;
+    let acronym_boundary = !simple_boundary
+        && !last_was_sep
+        && is_upper
+        && next_is_lower
+        && has_following_char
+        && !last_char_is_numeric;
+
+    simple_boundary || acronym_boundary
+}
+
+fn push_lowercase(result: &mut String, ch: char) {
+    for lower_ch in ch.to_lowercase() {
+        result.push(lower_ch);
+    }
+}
+
+/// Converts a string to kebab-case
+///
+/// Handles multiple input formats:
+/// - `camelCase`: `"getUserById"` -> "get-user-by-id"
+/// - `PascalCase`: `"GetUser"` -> "get-user"
+/// - `snake_case`: `"get_user_by_id"` -> "get-user-by-id"
+/// - Spaces: "List an Organization's Issues" -> "list-an-organizations-issues"
+/// - Mixed: `"XMLHttpRequest"` -> "xml-http-request"
+/// - Unicode: `"CAFÉ"` -> `"café"`
+///
+/// Special handling:
+/// - Apostrophes are removed entirely: "Organization's" -> "organizations"
+/// - Special characters become hyphens: "hello!world" -> "hello-world"
+/// - Consecutive non-alphanumeric characters are collapsed: "a---b" -> "a-b"
+/// - Leading/trailing hyphens are trimmed
+/// - Unicode characters are properly lowercased
 #[must_use]
 pub fn to_kebab_case(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
@@ -21,31 +66,27 @@ pub fn to_kebab_case(s: &str) -> String {
     let mut last_was_sep = true;
     let mut last_was_lower = false;
 
-    for (idx, &ch) in chars.iter().enumerate() {
+    for (idx, ch) in chars.iter().copied().enumerate() {
         if ch == '\'' {
             continue;
         }
 
-        if ch.is_alphanumeric() {
-            let is_upper = ch.is_uppercase();
-            let next_is_lower = chars.get(idx + 1).is_some_and(|next| next.is_lowercase());
-            let has_following_char = chars.get(idx + 2).is_some();
-            let needs_simple_boundary_hyphen = !last_was_sep && is_upper && last_was_lower;
-            let needs_acronym_boundary_hyphen = !needs_simple_boundary_hyphen
-                && !last_was_sep
-                && is_upper
-                && next_is_lower
-                && has_following_char
-                && !result.chars().last().is_some_and(char::is_numeric);
+        let is_alphanumeric = ch.is_alphanumeric();
+        if is_alphanumeric
+            && needs_boundary_hyphen(
+                last_was_sep,
+                last_was_lower,
+                ch,
+                chars.get(idx + 1).copied(),
+                chars.get(idx + 2).is_some(),
+                &result,
+            )
+        {
+            result.push('-');
+        }
 
-            result.extend(
-                (needs_simple_boundary_hyphen || needs_acronym_boundary_hyphen).then_some('-'),
-            );
-
-            for lower_ch in ch.to_lowercase() {
-                result.push(lower_ch);
-            }
-
+        if is_alphanumeric {
+            push_lowercase(&mut result, ch);
             last_was_sep = false;
             last_was_lower = ch.is_lowercase() || ch.is_numeric();
             continue;

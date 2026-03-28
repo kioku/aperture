@@ -470,6 +470,50 @@ impl ResponseCache {
         }
     }
 
+    fn is_orphaned_temp_file(filename: &str) -> bool {
+        filename.starts_with('.')
+            && std::path::Path::new(filename)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp"))
+    }
+
+    fn is_cache_entry_for_api(filename: &str, api_name: &str) -> bool {
+        filename.starts_with(&format!("{api_name}_"))
+            && filename.ends_with(constants::CACHE_FILE_SUFFIX)
+    }
+
+    async fn collect_entry_for_cleanup(
+        &self,
+        entry: &tokio::fs::DirEntry,
+        api_name: &str,
+        now_system: SystemTime,
+        entries: &mut Vec<(std::path::PathBuf, SystemTime)>,
+        stale_tmp_files: &mut Vec<std::path::PathBuf>,
+    ) {
+        let filename = entry.file_name();
+        let filename_str = filename.to_string_lossy();
+
+        if Self::is_orphaned_temp_file(&filename_str) {
+            self.collect_stale_temp_file(entry, now_system, stale_tmp_files)
+                .await;
+            return;
+        }
+
+        if !Self::is_cache_entry_for_api(&filename_str, api_name) {
+            return;
+        }
+
+        let Ok(metadata) = entry.metadata().await else {
+            return;
+        };
+
+        let Ok(modified) = metadata.modified() else {
+            return;
+        };
+
+        entries.push((entry.path(), modified));
+    }
+
     /// Clean up old cache entries for an API, keeping only the most recent
     /// `max_entries`.  Also sweeps orphaned `.*.tmp` files older than 1 hour
     /// that may have been left behind by a crashed process.
@@ -487,44 +531,20 @@ impl ResponseCache {
             .await
             .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?
         {
-            let filename = entry.file_name();
-            let filename_str = filename.to_string_lossy();
-
-            // Detect orphaned temp files from crashed atomic writes.
-            // Pattern: .filename.random.tmp
-            let is_temp_file = filename_str.starts_with('.')
-                && filename_str.ends_with(".tmp")
-                && filename_str.len() > 4;
-
-            if is_temp_file {
-                self.collect_stale_temp_file(&entry, now_system, &mut stale_tmp_files)
-                    .await;
-                continue;
-            }
-
-            if !filename_str.starts_with(&format!("{api_name}_"))
-                || !filename_str.ends_with(constants::CACHE_FILE_SUFFIX)
-            {
-                continue;
-            }
-
-            let Ok(metadata) = entry.metadata().await else {
-                continue;
-            };
-
-            let Ok(modified) = metadata.modified() else {
-                continue;
-            };
-
-            entries.push((entry.path(), modified));
+            self.collect_entry_for_cleanup(
+                &entry,
+                api_name,
+                now_system,
+                &mut entries,
+                &mut stale_tmp_files,
+            )
+            .await;
         }
 
-        // Remove orphaned temp files
         for path in &stale_tmp_files {
             let _ = tokio::fs::remove_file(path).await;
         }
 
-        // If we have more entries than max_entries, remove the oldest ones
         if entries.len() > self.config.max_entries {
             entries.sort_by_key(|(_, modified)| *modified);
             let to_remove = entries.len() - self.config.max_entries;

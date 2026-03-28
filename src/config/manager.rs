@@ -488,6 +488,65 @@ impl<F: FileSystem> ConfigManager<F> {
 
     // ---- Settings Management ----
 
+    fn ensure_toml_table(doc: &mut toml_edit::DocumentMut, table_name: &str) {
+        if doc.get(table_name).is_none() {
+            doc[table_name] = toml_edit::Item::Table(toml_edit::Table::new());
+        }
+    }
+
+    fn set_root_u64(doc: &mut toml_edit::DocumentMut, key: &str, value: u64) {
+        doc[key] = toml_edit::value(i64::try_from(value).unwrap_or(i64::MAX));
+    }
+
+    fn set_nested_bool(doc: &mut toml_edit::DocumentMut, table_name: &str, key: &str, value: bool) {
+        Self::ensure_toml_table(doc, table_name);
+        doc[table_name][key] = toml_edit::value(value);
+    }
+
+    fn set_nested_u64(doc: &mut toml_edit::DocumentMut, table_name: &str, key: &str, value: u64) {
+        Self::ensure_toml_table(doc, table_name);
+        doc[table_name][key] = toml_edit::value(i64::try_from(value).unwrap_or(i64::MAX));
+    }
+
+    fn apply_setting_to_document(
+        doc: &mut toml_edit::DocumentMut,
+        key: crate::config::settings::SettingKey,
+        value: &crate::config::settings::SettingValue,
+    ) {
+        use crate::config::settings::{SettingKey, SettingValue};
+
+        // Type mismatches are programming errors - parse_for_key guarantees correct types.
+        match (key, value) {
+            (SettingKey::DefaultTimeoutSecs, SettingValue::U64(v)) => {
+                Self::set_root_u64(doc, "default_timeout_secs", *v);
+            }
+            (SettingKey::AgentDefaultsJsonErrors, SettingValue::Bool(v)) => {
+                Self::set_nested_bool(doc, "agent_defaults", "json_errors", *v);
+            }
+            (SettingKey::RetryDefaultsMaxAttempts, SettingValue::U64(v)) => {
+                Self::set_nested_u64(doc, "retry_defaults", "max_attempts", *v);
+            }
+            (SettingKey::RetryDefaultsInitialDelayMs, SettingValue::U64(v)) => {
+                Self::set_nested_u64(doc, "retry_defaults", "initial_delay_ms", *v);
+            }
+            (SettingKey::RetryDefaultsMaxDelayMs, SettingValue::U64(v)) => {
+                Self::set_nested_u64(doc, "retry_defaults", "max_delay_ms", *v);
+            }
+            (
+                SettingKey::DefaultTimeoutSecs
+                | SettingKey::RetryDefaultsMaxAttempts
+                | SettingKey::RetryDefaultsInitialDelayMs
+                | SettingKey::RetryDefaultsMaxDelayMs,
+                _,
+            ) => {
+                debug_assert!(false, "Integer settings require U64 value");
+            }
+            (SettingKey::AgentDefaultsJsonErrors, _) => {
+                debug_assert!(false, "AgentDefaultsJsonErrors requires Bool value");
+            }
+        }
+    }
+
     /// Sets a global configuration setting value.
     ///
     /// Uses `toml_edit` to preserve comments and formatting in the config file.
@@ -504,12 +563,10 @@ impl<F: FileSystem> ConfigManager<F> {
         key: &crate::config::settings::SettingKey,
         value: &crate::config::settings::SettingValue,
     ) -> Result<(), Error> {
-        use crate::config::settings::{SettingKey, SettingValue};
         use toml_edit::DocumentMut;
 
         let config_path = self.config_dir.join(crate::constants::CONFIG_FILENAME);
 
-        // Load existing document or create new one
         let content = if self.fs.exists(&config_path) {
             self.fs.read_to_string(&config_path)?
         } else {
@@ -520,64 +577,9 @@ impl<F: FileSystem> ConfigManager<F> {
             .parse()
             .map_err(|e| Error::invalid_config(format!("Failed to parse config: {e}")))?;
 
-        // Apply the setting based on key
-        // Note: Type mismatches indicate a programming error since parse_for_key
-        // should always produce the correct type for each key.
-        match (key, value) {
-            (SettingKey::DefaultTimeoutSecs, SettingValue::U64(v)) => {
-                doc["default_timeout_secs"] =
-                    toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
-            }
-            (SettingKey::AgentDefaultsJsonErrors, SettingValue::Bool(v)) => {
-                // Ensure agent_defaults table exists
-                if doc.get("agent_defaults").is_none() {
-                    doc["agent_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
-                }
-                doc["agent_defaults"]["json_errors"] = toml_edit::value(*v);
-            }
-            (SettingKey::RetryDefaultsMaxAttempts, SettingValue::U64(v)) => {
-                // Ensure retry_defaults table exists
-                if doc.get("retry_defaults").is_none() {
-                    doc["retry_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
-                }
-                doc["retry_defaults"]["max_attempts"] =
-                    toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
-            }
-            (SettingKey::RetryDefaultsInitialDelayMs, SettingValue::U64(v)) => {
-                // Ensure retry_defaults table exists
-                if doc.get("retry_defaults").is_none() {
-                    doc["retry_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
-                }
-                doc["retry_defaults"]["initial_delay_ms"] =
-                    toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
-            }
-            (SettingKey::RetryDefaultsMaxDelayMs, SettingValue::U64(v)) => {
-                // Ensure retry_defaults table exists
-                if doc.get("retry_defaults").is_none() {
-                    doc["retry_defaults"] = toml_edit::Item::Table(toml_edit::Table::new());
-                }
-                doc["retry_defaults"]["max_delay_ms"] =
-                    toml_edit::value(i64::try_from(*v).unwrap_or(i64::MAX));
-            }
-            // Type mismatches are programming errors - parse_for_key guarantees correct types
-            (
-                SettingKey::DefaultTimeoutSecs
-                | SettingKey::RetryDefaultsMaxAttempts
-                | SettingKey::RetryDefaultsInitialDelayMs
-                | SettingKey::RetryDefaultsMaxDelayMs,
-                _,
-            ) => {
-                debug_assert!(false, "Integer settings require U64 value");
-            }
-            (SettingKey::AgentDefaultsJsonErrors, _) => {
-                debug_assert!(false, "AgentDefaultsJsonErrors requires Bool value");
-            }
-        }
+        Self::apply_setting_to_document(&mut doc, *key, value);
 
-        // Ensure config directory exists
         self.fs.create_dir_all(&self.config_dir)?;
-
-        // Write back preserving formatting (atomic to prevent corruption)
         self.fs
             .atomic_write(&config_path, doc.to_string().as_bytes())?;
         Ok(())
@@ -1119,6 +1121,57 @@ impl<F: FileSystem> ConfigManager<F> {
         self.save_global_config(&config)
     }
 
+    fn validate_operation_mapping_inputs(
+        name: Option<&str>,
+        group: Option<&str>,
+        alias: Option<&str>,
+    ) -> Result<(), Error> {
+        if name.is_some_and(|n| n.trim().is_empty()) {
+            return Err(Error::invalid_config("Operation name cannot be empty"));
+        }
+        if group.is_some_and(|g| g.trim().is_empty()) {
+            return Err(Error::invalid_config("Operation group cannot be empty"));
+        }
+        if alias.is_some_and(|a| a.trim().is_empty()) {
+            return Err(Error::invalid_config("Alias cannot be empty"));
+        }
+
+        Ok(())
+    }
+
+    const fn has_operation_mapping_changes(
+        name: Option<&str>,
+        group: Option<&str>,
+        alias: Option<&str>,
+        hidden: Option<bool>,
+    ) -> bool {
+        name.is_some() || group.is_some() || alias.is_some() || hidden.is_some()
+    }
+
+    fn apply_operation_mapping_updates(
+        op: &mut crate::config::models::OperationMapping,
+        name: Option<&str>,
+        group: Option<&str>,
+        alias: Option<&str>,
+        hidden: Option<bool>,
+    ) {
+        if let Some(n) = name {
+            op.name = Some(n.to_string());
+        }
+        if let Some(g) = group {
+            op.group = Some(g.to_string());
+        }
+        if let Some(alias) = alias
+            .map(str::to_string)
+            .filter(|alias| !op.aliases.contains(alias))
+        {
+            op.aliases.push(alias);
+        }
+        if let Some(h) = hidden {
+            op.hidden = h;
+        }
+    }
+
     /// Sets an operation mapping field for an API.
     ///
     /// # Errors
@@ -1137,18 +1190,9 @@ impl<F: FileSystem> ConfigManager<F> {
         alias: Option<&str>,
         hidden: Option<bool>,
     ) -> Result<(), Error> {
-        if name.is_some_and(|n| n.trim().is_empty()) {
-            return Err(Error::invalid_config("Operation name cannot be empty"));
-        }
-        if group.is_some_and(|g| g.trim().is_empty()) {
-            return Err(Error::invalid_config("Operation group cannot be empty"));
-        }
-        if alias.is_some_and(|a| a.trim().is_empty()) {
-            return Err(Error::invalid_config("Alias cannot be empty"));
-        }
+        Self::validate_operation_mapping_inputs(name, group, alias)?;
 
-        // No-op updates should not create empty mapping entries.
-        if name.is_none() && group.is_none() && alias.is_none() && hidden.is_none() {
+        if !Self::has_operation_mapping_changes(name, group, alias, hidden) {
             self.ensure_spec_exists(api_name.as_str())?;
             return Ok(());
         }
@@ -1167,21 +1211,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .entry(operation_id.to_string())
             .or_default();
 
-        if let Some(n) = name {
-            op.name = Some(n.to_string());
-        }
-        if let Some(g) = group {
-            op.group = Some(g.to_string());
-        }
-        // Add alias if specified and not already present
-        let alias_str = alias.map(str::to_string);
-        if alias_str.as_ref().is_some_and(|a| !op.aliases.contains(a)) {
-            op.aliases
-                .push(alias_str.expect("checked is_some_and above"));
-        }
-        if let Some(h) = hidden {
-            op.hidden = h;
-        }
+        Self::apply_operation_mapping_updates(op, name, group, alias, hidden);
 
         self.save_global_config(&config)
     }
