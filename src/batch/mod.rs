@@ -363,43 +363,18 @@ impl BatchProcessor {
             .as_deref()
             .unwrap_or(crate::constants::DEFAULT_OPERATION_NAME);
 
-        // Interpolate variables in args and body_file — if this fails the
-        // operation cannot proceed.
-        let interpolated_args = match interpolation::interpolate_args(&operation.args, store, op_id)
-        {
-            Ok(args) => args,
+        let exec_op = match Self::interpolate_batch_operation(operation, store, op_id) {
+            Ok(operation) => operation,
             Err(e) => {
-                return BatchOperationResult {
-                    operation: operation.clone(),
-                    success: false,
-                    error: Some(e.to_string()),
-                    response: None,
-                    duration: std::time::Duration::ZERO,
-                };
+                return Self::failed_batch_operation_result(
+                    operation.clone(),
+                    e.to_string(),
+                    None,
+                    std::time::Duration::ZERO,
+                );
             }
         };
 
-        let interpolated_body_file = match operation
-            .body_file
-            .as_deref()
-            .map(|p| interpolation::interpolate_string(p, store, op_id))
-            .transpose()
-        {
-            Ok(path) => path,
-            Err(e) => {
-                return BatchOperationResult {
-                    operation: operation.clone(),
-                    success: false,
-                    error: Some(e.to_string()),
-                    response: None,
-                    duration: std::time::Duration::ZERO,
-                };
-            }
-        };
-
-        let mut exec_op = operation.clone();
-        exec_op.args = interpolated_args;
-        exec_op.body_file = interpolated_body_file;
         let operation_start = std::time::Instant::now();
 
         // Suppress output and skip jq_filter: capture needs JSON text that
@@ -424,37 +399,70 @@ impl BatchProcessor {
             Ok(resp) => resp,
             Err(e) => {
                 Self::log_progress(show_progress, || format!("Operation '{op_id}' failed: {e}"));
-                return BatchOperationResult {
-                    operation: exec_op,
-                    success: false,
-                    error: Some(e.to_string()),
-                    response: None,
-                    duration,
-                };
+                return Self::failed_batch_operation_result(exec_op, e.to_string(), None, duration);
             }
         };
 
-        // Extract captures — failure is treated as an operation failure.
-        // Note: capture queries are on the original operation, not exec_op.
-        let capture_result = capture::extract_captures(operation, &response, store);
-        let Err(capture_err) = capture_result else {
-            Self::log_progress(show_progress, || format!("Operation '{op_id}' completed"));
-            return BatchOperationResult {
-                operation: exec_op,
-                success: true,
-                error: None,
-                response: Some(response),
-                duration,
-            };
-        };
+        match capture::extract_captures(operation, &response, store) {
+            Ok(()) => {
+                Self::log_progress(show_progress, || format!("Operation '{op_id}' completed"));
+                Self::successful_batch_operation_result(exec_op, response, duration)
+            }
+            Err(capture_err) => {
+                Self::log_progress(show_progress, || {
+                    format!("Operation '{op_id}' capture failed: {capture_err}")
+                });
+                Self::failed_batch_operation_result(
+                    exec_op,
+                    capture_err.to_string(),
+                    Some(response),
+                    duration,
+                )
+            }
+        }
+    }
 
-        Self::log_progress(show_progress, || {
-            format!("Operation '{op_id}' capture failed: {capture_err}")
-        });
+    fn interpolate_batch_operation(
+        operation: &BatchOperation,
+        store: &interpolation::VariableStore,
+        op_id: &str,
+    ) -> Result<BatchOperation, Error> {
+        let mut exec_op = operation.clone();
+        exec_op.args = interpolation::interpolate_args(&operation.args, store, op_id)?;
+        exec_op.body_file = operation
+            .body_file
+            .as_deref()
+            .map(|path| interpolation::interpolate_string(path, store, op_id))
+            .transpose()?;
+        Ok(exec_op)
+    }
+
+    #[allow(clippy::missing_const_for_fn)]
+    fn failed_batch_operation_result(
+        operation: BatchOperation,
+        error: String,
+        response: Option<String>,
+        duration: std::time::Duration,
+    ) -> BatchOperationResult {
         BatchOperationResult {
-            operation: exec_op,
+            operation,
             success: false,
-            error: Some(capture_err.to_string()),
+            error: Some(error),
+            response,
+            duration,
+        }
+    }
+
+    #[allow(clippy::missing_const_for_fn)]
+    fn successful_batch_operation_result(
+        operation: BatchOperation,
+        response: String,
+        duration: std::time::Duration,
+    ) -> BatchOperationResult {
+        BatchOperationResult {
+            operation,
+            success: true,
+            error: None,
             response: Some(response),
             duration,
         }
@@ -811,35 +819,24 @@ fn build_batch_retry_context(
     operation: &BatchOperation,
     global_config: Option<&GlobalConfig>,
 ) -> Result<Option<RetryContext>, Error> {
-    // Get retry defaults from global config
     let defaults = global_config.map(|c| &c.retry_defaults);
-
-    // Determine max_attempts: operation > global config > 0 (disabled)
     let max_attempts = operation
         .retry
         .or_else(|| defaults.map(|d| d.max_attempts))
         .unwrap_or(0);
 
-    // If retries are disabled, return None
     if max_attempts == 0 {
         return Ok(None);
     }
 
-    // Determine initial_delay_ms: operation > global config > 500ms default
-    // Truncation is safe: delay values in practice are well under u64::MAX milliseconds
-    let initial_delay_ms = if let Some(ref delay_str) = operation.retry_delay {
-        parse_duration(delay_str)?.as_millis() as u64
-    } else {
-        defaults.map_or(500, |d| d.initial_delay_ms)
-    };
-
-    // Determine max_delay_ms: operation > global config > 30000ms default
-    // Truncation is safe: delay values in practice are well under u64::MAX milliseconds
-    let max_delay_ms = if let Some(ref delay_str) = operation.retry_max_delay {
-        parse_duration(delay_str)?.as_millis() as u64
-    } else {
-        defaults.map_or(30_000, |d| d.max_delay_ms)
-    };
+    let initial_delay_ms = resolve_retry_delay_ms(
+        operation.retry_delay.as_deref(),
+        defaults.map_or(500, |d| d.initial_delay_ms),
+    )?;
+    let max_delay_ms = resolve_retry_delay_ms(
+        operation.retry_max_delay.as_deref(),
+        defaults.map_or(30_000, |d| d.max_delay_ms),
+    )?;
 
     Ok(Some(RetryContext {
         max_attempts,
@@ -849,6 +846,14 @@ fn build_batch_retry_context(
         method: None,               // Will be determined in executor
         has_idempotency_key: false, // Batch operations don't support idempotency keys yet
     }))
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn resolve_retry_delay_ms(delay: Option<&str>, default_ms: u64) -> Result<u64, Error> {
+    match delay {
+        Some(delay_str) => Ok(parse_duration(delay_str)?.as_millis() as u64),
+        None => Ok(default_ms),
+    }
 }
 
 #[cfg(test)]
@@ -945,5 +950,67 @@ operations:
         let processor = BatchProcessor::new(config);
         assert_eq!(processor.semaphore.available_permits(), 10);
         assert!(processor.rate_limiter.is_some());
+    }
+
+    #[test]
+    fn test_build_batch_retry_context_prefers_operation_values() {
+        let operation = BatchOperation {
+            retry: Some(3),
+            retry_delay: Some("2s".to_string()),
+            retry_max_delay: Some("5s".to_string()),
+            force_retry: true,
+            ..Default::default()
+        };
+
+        let mut global_config = GlobalConfig::default();
+        global_config.retry_defaults.max_attempts = 7;
+        global_config.retry_defaults.initial_delay_ms = 1_000;
+        global_config.retry_defaults.max_delay_ms = 10_000;
+
+        let retry_context = build_batch_retry_context(&operation, Some(&global_config))
+            .expect("retry context should build")
+            .expect("retry should be enabled");
+
+        assert_eq!(retry_context.max_attempts, 3);
+        assert_eq!(retry_context.initial_delay_ms, 2_000);
+        assert_eq!(retry_context.max_delay_ms, 5_000);
+        assert!(retry_context.force_retry);
+        assert!(!retry_context.has_idempotency_key);
+    }
+
+    #[test]
+    fn test_build_batch_retry_context_uses_global_defaults() {
+        let operation = BatchOperation {
+            retry: None,
+            retry_delay: None,
+            retry_max_delay: None,
+            force_retry: false,
+            ..Default::default()
+        };
+
+        let mut global_config = GlobalConfig::default();
+        global_config.retry_defaults.max_attempts = 4;
+        global_config.retry_defaults.initial_delay_ms = 750;
+        global_config.retry_defaults.max_delay_ms = 5_500;
+
+        let retry_context = build_batch_retry_context(&operation, Some(&global_config))
+            .expect("retry context should build")
+            .expect("retry should be enabled");
+
+        assert_eq!(retry_context.max_attempts, 4);
+        assert_eq!(retry_context.initial_delay_ms, 750);
+        assert_eq!(retry_context.max_delay_ms, 5_500);
+        assert!(!retry_context.force_retry);
+        assert!(!retry_context.has_idempotency_key);
+    }
+
+    #[test]
+    fn test_build_batch_retry_context_disables_when_attempts_are_zero() {
+        let operation = BatchOperation::default();
+        let global_config = GlobalConfig::default();
+
+        assert!(build_batch_retry_context(&operation, Some(&global_config))
+            .expect("retry context should build")
+            .is_none());
     }
 }

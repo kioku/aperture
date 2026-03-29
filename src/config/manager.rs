@@ -1,5 +1,6 @@
 use crate::cache::fingerprint::{compute_content_hash, get_file_mtime_secs};
 use crate::cache::metadata::CacheMetadataManager;
+use crate::cache::models::CachedSecurityScheme;
 use crate::config::context_name::ApiContextName;
 use crate::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
 use crate::config::url_resolver::BaseUrlResolver;
@@ -1558,43 +1559,71 @@ impl<F: FileSystem> ConfigManager<F> {
             .security_schemes
             .values()
             .map(|scheme| {
-                let mut description = format!("{} ({})", scheme.scheme_type, scheme.name);
-
-                // Add type-specific details
-                match scheme.scheme_type.as_str() {
-                    constants::AUTH_SCHEME_APIKEY => {
-                        if let (Some(location), Some(param)) =
-                            (&scheme.location, &scheme.parameter_name)
-                        {
-                            description = format!("{description} - {location} parameter: {param}");
-                        }
-                    }
-                    "http" => {
-                        if let Some(http_scheme) = &scheme.scheme {
-                            description = format!("{description} - {http_scheme} authentication");
-                        }
-                    }
-                    _ => {}
-                }
-
-                // Show current configuration status - use match to avoid nested if
-                description = match (
-                    current_secrets.contains_key(&scheme.name),
-                    &scheme.aperture_secret,
-                ) {
-                    (true, _) => format!("{description} [CONFIGURED]"),
-                    (false, Some(_)) => format!("{description} [x-aperture-secret]"),
-                    (false, None) => format!("{description} [NOT CONFIGURED]"),
-                };
-
-                // Add OpenAPI description if available
-                if let Some(openapi_desc) = &scheme.description {
-                    description = format!("{description} - {openapi_desc}");
-                }
-
-                (scheme.name.clone(), description)
+                (
+                    scheme.name.clone(),
+                    Self::describe_security_scheme_option(scheme, current_secrets),
+                )
             })
             .collect()
+    }
+
+    fn describe_security_scheme_option(
+        scheme: &CachedSecurityScheme,
+        current_secrets: &std::collections::HashMap<String, ApertureSecret>,
+    ) -> String {
+        let description = Self::format_security_scheme_base_description(scheme);
+        let description = Self::apply_security_scheme_type_details(&description, scheme);
+        let description = Self::apply_security_scheme_status(&description, scheme, current_secrets);
+        Self::append_security_scheme_description(&description, scheme)
+    }
+
+    fn format_security_scheme_base_description(scheme: &CachedSecurityScheme) -> String {
+        format!("{} ({})", scheme.scheme_type, scheme.name)
+    }
+
+    fn apply_security_scheme_type_details(
+        description: &str,
+        scheme: &CachedSecurityScheme,
+    ) -> String {
+        match scheme.scheme_type.as_str() {
+            constants::AUTH_SCHEME_APIKEY => {
+                if let (Some(location), Some(param)) = (&scheme.location, &scheme.parameter_name) {
+                    format!("{description} - {location} parameter: {param}")
+                } else {
+                    description.to_owned()
+                }
+            }
+            "http" => scheme.scheme.as_ref().map_or_else(
+                || description.to_owned(),
+                |http_scheme| format!("{description} - {http_scheme} authentication"),
+            ),
+            _ => description.to_owned(),
+        }
+    }
+
+    fn apply_security_scheme_status(
+        description: &str,
+        scheme: &CachedSecurityScheme,
+        current_secrets: &std::collections::HashMap<String, ApertureSecret>,
+    ) -> String {
+        match (
+            current_secrets.contains_key(&scheme.name),
+            &scheme.aperture_secret,
+        ) {
+            (true, _) => format!("{description} [CONFIGURED]"),
+            (false, Some(_)) => format!("{description} [x-aperture-secret]"),
+            (false, None) => format!("{description} [NOT CONFIGURED]"),
+        }
+    }
+
+    fn append_security_scheme_description(
+        description: &str,
+        scheme: &CachedSecurityScheme,
+    ) -> String {
+        scheme.description.as_ref().map_or_else(
+            || description.to_owned(),
+            |openapi_desc| format!("{description} - {openapi_desc}"),
+        )
     }
 
     /// Runs the interactive configuration loop
