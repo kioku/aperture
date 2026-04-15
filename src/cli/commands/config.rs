@@ -1110,7 +1110,7 @@ pub fn handle_set_mapping(
         output.success(format!(
             "Set group mapping for '{api_name}': '{original}' → '{new_name}'"
         ));
-        output.info("Run 'aperture config reinit' to apply changes.");
+        output.info("Run 'aperture config api reinit' to apply changes.");
         return Ok(());
     }
 
@@ -1131,7 +1131,7 @@ pub fn handle_set_mapping(
         "Set operation mapping for '{api_name}': '{op_id}' → {}",
         describe_mapping_changes(name, op_group, alias, remove_alias, hidden, visible)
     ));
-    output.info("Run 'aperture config reinit' to apply changes.");
+    output.info("Run 'aperture config api reinit' to apply changes.");
     Ok(())
 }
 
@@ -1210,7 +1210,7 @@ pub fn handle_remove_mapping(
             ));
         }
     }
-    output.info("Run 'aperture config reinit' to apply changes.");
+    output.info("Run 'aperture config api reinit' to apply changes.");
     Ok(())
 }
 
