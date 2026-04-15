@@ -105,6 +105,12 @@ if command -v ast-grep &> /dev/null && [ -f "sgconfig.yml" ]; then
     fi
 fi
 
+# ── compl scan (optional) ─────────────────────────────────────────────────────
+
+if command -v compl &> /dev/null; then
+    run_step "compl scan" compl scan --threshold 10
+fi
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 run_step "cargo test" cargo test --features integration
