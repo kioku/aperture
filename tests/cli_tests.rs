@@ -43,11 +43,50 @@ fn test_config_add_new_spec() {
         .env("APERTURE_CONFIG_DIR", &config_dir)
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "Spec 'my-api' added successfully.",
-        ));
+        .stdout(
+            predicate::str::contains("Spec 'my-api' added successfully.")
+                .and(predicate::str::contains("Next steps:"))
+                .and(predicate::str::contains("aperture overview my-api"))
+                .and(predicate::str::contains(
+                    "aperture search <term> --api my-api",
+                ))
+                .and(predicate::str::contains("aperture list-commands my-api"))
+                .and(predicate::str::contains(
+                    "aperture docs my-api <tag> <operation>",
+                ))
+                .and(predicate::str::contains(
+                    "aperture api my-api --describe-json",
+                )),
+        );
 
     assert!(config_dir.join("specs").join("my-api.yaml").exists());
+}
+
+#[test]
+fn test_config_add_partial_spec_reports_skipped_endpoint_summary() {
+    let config_dir =
+        setup_temp_config_dir("test_config_add_partial_spec_reports_skipped_endpoint_summary");
+    let spec_file = PathBuf::from("tests/fixtures/openapi/spec-with-multipart.yaml")
+        .canonicalize()
+        .unwrap();
+
+    get_bin()
+        .arg("config")
+        .arg("add")
+        .arg("partial-api")
+        .arg(&spec_file)
+        .env("APERTURE_CONFIG_DIR", &config_dir)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Spec 'partial-api' added successfully.")
+                .and(predicate::str::contains(
+                    "Partial spec acceptance: 3 of 5 endpoints available (2 skipped).",
+                ))
+                .and(predicate::str::contains(
+                    "Review skipped endpoints with 'aperture config list --verbose'.",
+                )),
+        );
 }
 
 #[test]
