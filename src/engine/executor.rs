@@ -674,31 +674,39 @@ fn resolve_authentication_secret(
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<Option<ResolvedAuthenticationSecret>, Error> {
-    let secret_config = global_config
+    let configured_secret = global_config
         .and_then(|config| config.api_configs.get(api_name))
         .and_then(|api_config| api_config.secrets.get(&security_scheme.name));
 
-    match (secret_config, &security_scheme.aperture_secret) {
-        (Some(config_secret), _) => {
-            let value = std::env::var(&config_secret.name)
-                .map_err(|_| Error::secret_not_set(&security_scheme.name, &config_secret.name))?;
-            Ok(Some(ResolvedAuthenticationSecret {
-                value,
-                env_var_name: config_secret.name.clone(),
-                source: "config",
-            }))
-        }
-        (None, Some(aperture_secret)) => {
-            let value = std::env::var(&aperture_secret.name)
-                .map_err(|_| Error::secret_not_set(&security_scheme.name, &aperture_secret.name))?;
-            Ok(Some(ResolvedAuthenticationSecret {
-                value,
-                env_var_name: aperture_secret.name.clone(),
-                source: "x-aperture-secret",
-            }))
-        }
-        (None, None) => Ok(None),
+    if let Some(secret) = configured_secret {
+        return resolve_secret_from_env(&security_scheme.name, &secret.name, "config").map(Some);
     }
+
+    let Some(aperture_secret) = &security_scheme.aperture_secret else {
+        return Ok(None);
+    };
+
+    resolve_secret_from_env(
+        &security_scheme.name,
+        &aperture_secret.name,
+        "x-aperture-secret",
+    )
+    .map(Some)
+}
+
+fn resolve_secret_from_env(
+    scheme_name: &str,
+    env_var_name: &str,
+    source: &'static str,
+) -> Result<ResolvedAuthenticationSecret, Error> {
+    let value = std::env::var(env_var_name)
+        .map_err(|_| Error::secret_not_set(scheme_name, env_var_name))?;
+
+    Ok(ResolvedAuthenticationSecret {
+        value,
+        env_var_name: env_var_name.to_string(),
+        source,
+    })
 }
 
 fn insert_api_key_header(

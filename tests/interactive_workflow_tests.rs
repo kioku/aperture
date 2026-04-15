@@ -234,47 +234,9 @@ fn test_select_from_options_with_invalid_input_retry() {
     let mut mock = MockInputOutputImpl::new();
     let options = vec![("option1".to_string(), "First option".to_string())];
 
-    mock.expect_println()
-        .with(eq("Choose:"))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_println()
-        .with(eq("  1: option1 - First option"))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    // First attempt - invalid input
-    mock.expect_print()
-        .with(eq("Enter your choice (number or name): "))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_flush().times(1).returning(|| Ok(()));
-
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("invalid\n".to_string()));
-
-    // Error message
-    mock.expect_println()
-        .with(eq(
-            "Invalid selection. Please enter a number (1-1) or a valid name. (Attempt 1 of 3)",
-        ))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    // Second attempt - valid input
-    mock.expect_print()
-        .with(eq("Enter your choice (number or name): "))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_flush().times(1).returning(|| Ok(()));
-
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("1\n".to_string()));
+    expect_selection_prompt(&mut mock);
+    expect_invalid_selection_attempt(&mut mock, 1, "invalid", true);
+    expect_valid_selection_attempt(&mut mock);
 
     let result = select_from_options_with_io("Choose:", &options, &mock);
     assert!(result.is_ok());
@@ -411,45 +373,8 @@ fn test_end_to_end_interactive_workflow() {
         ("apiKey".to_string(), "API key".to_string()),
     ];
 
-    // Display options
-    mock.expect_println()
-        .with(eq("Select authentication method:"))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_println()
-        .with(eq("  1: bearerAuth - Bearer token"))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_println()
-        .with(eq("  2: apiKey - API key"))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    // User selects bearerAuth
-    mock.expect_print()
-        .with(eq("Enter your choice (number or name): "))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_flush().times(1).returning(|| Ok(()));
-
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("bearerAuth\n".to_string()));
-
-    // Confirm selection
-    mock.expect_print()
-        .with(eq("Use bearerAuth authentication? (y/n): "))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    mock.expect_flush().times(1).returning(|| Ok(()));
-
-    mock.expect_read_line_with_timeout()
-        .times(1)
-        .returning(|_| Ok("y\n".to_string()));
+    expect_auth_method_selection_flow(&mut mock);
+    expect_yes_confirmation(&mut mock, "Use bearerAuth authentication? (y/n): ");
 
     // Execute the workflow
     let selected = select_from_options_with_io("Select authentication method:", &options, &mock);
@@ -548,6 +473,64 @@ fn expect_valid_selection_attempt(mock: &mut MockInputOutputImpl) {
     mock.expect_read_line_with_timeout()
         .times(1)
         .returning(|_| Ok("1\n".to_string()));
+}
+
+fn expect_auth_method_selection_flow(mock: &mut MockInputOutputImpl) {
+    expect_selection_prompt_with_options(
+        mock,
+        "Select authentication method:",
+        &["  1: bearerAuth - Bearer token", "  2: apiKey - API key"],
+    );
+    expect_named_selection_attempt(mock, "bearerAuth");
+}
+
+fn expect_selection_prompt_with_options(
+    mock: &mut MockInputOutputImpl,
+    prompt: &str,
+    option_lines: &[&str],
+) {
+    let prompt = prompt.to_string();
+    mock.expect_println()
+        .with(eq(prompt))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    for option_line in option_lines {
+        let option_line = (*option_line).to_string();
+        mock.expect_println()
+            .with(eq(option_line))
+            .times(1)
+            .returning(|_| Ok(()));
+    }
+}
+
+fn expect_named_selection_attempt(mock: &mut MockInputOutputImpl, selection: &str) {
+    let selection = selection.to_string();
+
+    mock.expect_print()
+        .with(eq("Enter your choice (number or name): "))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_flush().times(1).returning(|| Ok(()));
+
+    mock.expect_read_line_with_timeout()
+        .times(1)
+        .returning(move |_| Ok(format!("{selection}\n")));
+}
+
+fn expect_yes_confirmation(mock: &mut MockInputOutputImpl, prompt: &str) {
+    let prompt = prompt.to_string();
+    mock.expect_print()
+        .with(eq(prompt))
+        .times(1)
+        .returning(|_| Ok(()));
+
+    mock.expect_flush().times(1).returning(|| Ok(()));
+
+    mock.expect_read_line_with_timeout()
+        .times(1)
+        .returning(|_| Ok("y\n".to_string()));
 }
 
 #[test]

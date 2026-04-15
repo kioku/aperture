@@ -166,27 +166,8 @@ fn build_adjacency(
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
 
     for (i, op) in operations.iter().enumerate() {
-        let mut deps: HashSet<usize> = HashSet::new();
-
-        // Explicit depends_on
-        for dep_id in op.depends_on.iter().flatten() {
-            let &dep_idx = id_to_index.get(dep_id.as_str()).ok_or_else(|| {
-                Error::batch_missing_dependency(op.id.as_deref().unwrap_or("<unnamed>"), dep_id)
-            })?;
-            deps.insert(dep_idx);
-        }
-
-        // Implicit dependencies from variable references in args.
-        // For capture_append variables with multiple providers, this
-        // correctly adds edges from ALL providers to the consumer.
-        let implicit_deps = op
-            .args
-            .iter()
-            .flat_map(|arg| extract_variable_references(arg))
-            .filter_map(|var| capture_var_to_op.get(var))
-            .flat_map(|indices| indices.iter().copied())
-            .filter(|&idx| idx != i);
-        deps.extend(implicit_deps);
+        let mut deps = explicit_dependencies(op, id_to_index)?;
+        deps.extend(implicit_dependencies(op, i, capture_var_to_op));
 
         for dep_idx in deps {
             adj[dep_idx].push(i);
@@ -194,6 +175,36 @@ fn build_adjacency(
     }
 
     Ok(adj)
+}
+
+fn explicit_dependencies(
+    operation: &BatchOperation,
+    id_to_index: &HashMap<&str, usize>,
+) -> Result<HashSet<usize>, Error> {
+    let mut deps = HashSet::new();
+
+    for dep_id in operation.depends_on.iter().flatten() {
+        let &dep_idx = id_to_index.get(dep_id.as_str()).ok_or_else(|| {
+            Error::batch_missing_dependency(operation.id.as_deref().unwrap_or("<unnamed>"), dep_id)
+        })?;
+        deps.insert(dep_idx);
+    }
+
+    Ok(deps)
+}
+
+fn implicit_dependencies<'a>(
+    operation: &'a BatchOperation,
+    operation_index: usize,
+    capture_var_to_op: &'a HashMap<&str, Vec<usize>>,
+) -> impl Iterator<Item = usize> + 'a {
+    operation
+        .args
+        .iter()
+        .flat_map(|arg| extract_variable_references(arg))
+        .filter_map(|var| capture_var_to_op.get(var))
+        .flat_map(|indices| indices.iter().copied())
+        .filter(move |&idx| idx != operation_index)
 }
 
 /// Kahn's algorithm for topological sorting with cycle detection.

@@ -305,13 +305,25 @@ fn handle_clear_secrets(
         output.info(format!("No secrets configured for API '{api_name}'"));
         return Ok(());
     }
+
     if force {
-        manager.clear_secrets(&api_name)?;
-        output.success(format!(
-            "Cleared all secret configurations for API '{api_name}'"
-        ));
+        return clear_all_api_secrets(manager, &api_name, output);
+    }
+
+    announce_secret_clear(&api_name, &secrets, output);
+    if !crate::interactive::confirm("Are you sure you want to continue?")? {
+        output.info("Operation cancelled");
         return Ok(());
     }
+
+    clear_all_api_secrets(manager, &api_name, output)
+}
+
+fn announce_secret_clear(
+    api_name: &ApiContextName,
+    secrets: &std::collections::HashMap<String, crate::config::models::ApertureSecret>,
+    output: &Output,
+) {
     output.info(format!(
         "This will remove all {} secret configuration(s) for API '{api_name}':",
         secrets.len()
@@ -319,11 +331,14 @@ fn handle_clear_secrets(
     for scheme_name in secrets.keys() {
         output.info(format!("  - {scheme_name}"));
     }
-    if !crate::interactive::confirm("Are you sure you want to continue?")? {
-        output.info("Operation cancelled");
-        return Ok(());
-    }
-    manager.clear_secrets(&api_name)?;
+}
+
+fn clear_all_api_secrets(
+    manager: &ConfigManager<OsFileSystem>,
+    api_name: &ApiContextName,
+    output: &Output,
+) -> Result<(), Error> {
+    manager.clear_secrets(api_name)?;
     output.success(format!(
         "Cleared all secret configurations for API '{api_name}'"
     ));
@@ -402,6 +417,30 @@ async fn execute_specs_config_command(
     output: &Output,
 ) -> Result<(), Error> {
     match command {
+        crate::cli::ConfigCommands::Add { .. }
+        | crate::cli::ConfigCommands::List { .. }
+        | crate::cli::ConfigCommands::Remove { .. }
+        | crate::cli::ConfigCommands::Edit { .. } => {
+            execute_specs_catalog_command(manager, command, output).await
+        }
+        crate::cli::ConfigCommands::SetUrl { .. }
+        | crate::cli::ConfigCommands::GetUrl { .. }
+        | crate::cli::ConfigCommands::ListUrls {} => {
+            execute_specs_url_command(manager, command, output)
+        }
+        crate::cli::ConfigCommands::Reinit { context, all } => {
+            handle_reinit(manager, context, all, output)
+        }
+        _ => unreachable!("command family routing must be exhaustive"),
+    }
+}
+
+async fn execute_specs_catalog_command(
+    manager: &ConfigManager<OsFileSystem>,
+    command: crate::cli::ConfigCommands,
+    output: &Output,
+) -> Result<(), Error> {
+    match command {
         crate::cli::ConfigCommands::Add {
             name,
             file_or_url,
@@ -415,6 +454,16 @@ async fn execute_specs_config_command(
         crate::cli::ConfigCommands::Edit { name } => {
             handle_edit_spec_command(manager, name, output)
         }
+        _ => unreachable!("catalog command routing must be exhaustive"),
+    }
+}
+
+fn execute_specs_url_command(
+    manager: &ConfigManager<OsFileSystem>,
+    command: crate::cli::ConfigCommands,
+    output: &Output,
+) -> Result<(), Error> {
+    match command {
         crate::cli::ConfigCommands::SetUrl { name, url, env } => {
             handle_set_url(manager, name, url, env, output)
         }
@@ -422,10 +471,7 @@ async fn execute_specs_config_command(
             handle_get_url_command(manager, name, output)
         }
         crate::cli::ConfigCommands::ListUrls {} => handle_list_urls(manager, output),
-        crate::cli::ConfigCommands::Reinit { context, all } => {
-            handle_reinit(manager, context, all, output)
-        }
-        _ => unreachable!("command family routing must be exhaustive"),
+        _ => unreachable!("url command routing must be exhaustive"),
     }
 }
 

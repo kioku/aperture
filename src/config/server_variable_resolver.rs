@@ -33,55 +33,66 @@ impl<'a> ServerVariableResolver<'a> {
         &self,
         server_var_args: &[String],
     ) -> Result<HashMap<String, String>, Error> {
-        let mut resolved_vars = HashMap::new();
+        let resolved_vars = Self::parse_resolved_vars(server_var_args)?;
+        self.validate_no_unknown_variables(&resolved_vars)?;
 
-        // Parse CLI arguments
+        let mut final_vars = HashMap::new();
+        for (var_name, var_def) in &self.spec.server_variables {
+            let value = Self::resolve_variable_value(var_name, var_def, &resolved_vars)?;
+            final_vars.insert(var_name.clone(), value);
+        }
+
+        Ok(final_vars)
+    }
+
+    fn parse_resolved_vars(server_var_args: &[String]) -> Result<HashMap<String, String>, Error> {
+        let mut resolved_vars = HashMap::new();
         for arg in server_var_args {
             let (key, value) = Self::parse_key_value(arg)?;
             resolved_vars.insert(key, value);
         }
+        Ok(resolved_vars)
+    }
 
-        // Validate and apply defaults
-        let mut final_vars = HashMap::new();
+    fn resolve_variable_value(
+        var_name: &str,
+        var_def: &ServerVariable,
+        resolved_vars: &HashMap<String, String>,
+    ) -> Result<String, Error> {
+        if let Some(provided_value) = resolved_vars.get(var_name) {
+            Self::validate_enum_constraint(var_name, provided_value, var_def)?;
+            return Ok(provided_value.clone());
+        }
 
-        for (var_name, var_def) in &self.spec.server_variables {
-            // Check if user provided a value
-            if let Some(provided_value) = resolved_vars.get(var_name) {
-                // Validate provided value against enum constraints
-                Self::validate_enum_constraint(var_name, provided_value, var_def)?;
-                final_vars.insert(var_name.clone(), provided_value.clone());
-                continue;
-            }
-
-            // Check if there's a default value
-            if let Some(default_value) = &var_def.default {
-                // Validate default value against enum constraints
-                Self::validate_enum_constraint(var_name, default_value, var_def)?;
-                // Use default value
-                final_vars.insert(var_name.clone(), default_value.clone());
-                continue;
-            }
-
-            // Required variable with no default - this is an error
+        let Some(default_value) = &var_def.default else {
             return Err(Error::missing_server_variable(var_name));
-        }
+        };
 
-        // Check for unknown variables provided by user
+        Self::validate_enum_constraint(var_name, default_value, var_def)?;
+        Ok(default_value.clone())
+    }
+
+    fn validate_no_unknown_variables(
+        &self,
+        resolved_vars: &HashMap<String, String>,
+    ) -> Result<(), Error> {
         for provided_var in resolved_vars.keys() {
-            if !self.spec.server_variables.contains_key(provided_var) {
-                return Err(Error::unknown_server_variable(
-                    provided_var,
-                    &self
-                        .spec
-                        .server_variables
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                ));
+            if self.spec.server_variables.contains_key(provided_var) {
+                continue;
             }
+
+            return Err(Error::unknown_server_variable(
+                provided_var,
+                &self
+                    .spec
+                    .server_variables
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            ));
         }
 
-        Ok(final_vars)
+        Ok(())
     }
 
     /// Substitutes server variables in a URL template
@@ -296,6 +307,55 @@ mod tests {
 
         assert_eq!(result.get("region"), Some(&"eu".to_string()));
         assert_eq!(result.get("env"), Some(&"staging".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_variables_duplicate_key_uses_last_value() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let args = vec![
+            "region=us".to_string(),
+            "region=eu".to_string(),
+            "env=prod".to_string(),
+        ];
+        let result = resolver.resolve_variables(&args).unwrap();
+
+        assert_eq!(result.get("region"), Some(&"eu".to_string()));
+        assert_eq!(result.get("env"), Some(&"prod".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_variables_trims_surrounding_whitespace() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let args = vec![" region = eu ".to_string(), " env = staging ".to_string()];
+        let result = resolver.resolve_variables(&args).unwrap();
+
+        assert_eq!(result.get("region"), Some(&"eu".to_string()));
+        assert_eq!(result.get("env"), Some(&"staging".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_variables_rejects_whitespace_only_value() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let args = vec!["region=   ".to_string(), "env=prod".to_string()];
+        let result = resolver.resolve_variables(&args);
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("Empty variable value"));
+            }
+            _ => panic!("Expected Internal ServerVariable error"),
+        }
     }
 
     #[test]

@@ -41,7 +41,7 @@ pub fn print_error(error: &Error) {
 /// redirecting the process-global stderr.
 fn write_internal_error<W: std::io::Write>(
     writer: &mut W,
-    kind: &crate::error::ErrorKind,
+    kind: crate::error::ErrorKind,
     message: &str,
     context: Option<&crate::error::ErrorContext>,
 ) {
@@ -99,15 +99,20 @@ fn write_network_error<W: std::io::Write>(writer: &mut W, req_err: &reqwest::Err
         write_error_with_hint(writer, "Timeout Error", req_err, constants::ERR_TIMEOUT);
         return;
     }
-    if !req_err.is_status() {
-        let _ = writeln!(writer, "Network Error\n{req_err}");
-        return;
-    }
-    let Some(status) = req_err.status() else {
+
+    let Some(status) = req_err.status().filter(|_| req_err.is_status()) else {
         let _ = writeln!(writer, "Network Error\n{req_err}");
         return;
     };
 
+    write_network_status_error(writer, req_err, status);
+}
+
+fn write_network_status_error<W: std::io::Write>(
+    writer: &mut W,
+    req_err: &reqwest::Error,
+    status: reqwest::StatusCode,
+) {
     match status.as_u16() {
         401 => write_error_with_hint(
             writer,
@@ -144,7 +149,7 @@ fn write_error<W: std::io::Write>(error: &Error, writer: &mut W) {
             kind,
             message,
             context,
-        } => write_internal_error(writer, kind, message, context.as_ref()),
+        } => write_internal_error(writer, *kind, message, context.as_ref()),
         Error::Io(io_err) => write_io_error(writer, io_err),
         Error::Network(req_err) => write_network_error(writer, req_err),
         Error::Yaml(yaml_err) => write_error_with_hint(

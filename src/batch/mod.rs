@@ -376,12 +376,47 @@ impl BatchProcessor {
         };
 
         let operation_start = std::time::Instant::now();
-
-        // Suppress output and skip jq_filter: capture needs JSON text that
-        // preserves the raw response structure regardless of caller formatting.
-        let result = Self::execute_single_operation(
+        let response = match Self::execute_dependent_operation(
             spec,
             &exec_op,
+            global_config,
+            base_url,
+            dry_run,
+        )
+        .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                let duration = operation_start.elapsed();
+                Self::log_progress(show_progress, || format!("Operation '{op_id}' failed: {e}"));
+                return Self::failed_batch_operation_result(exec_op, e.to_string(), None, duration);
+            }
+        };
+
+        let duration = operation_start.elapsed();
+        Self::finalize_dependent_operation_result(
+            operation,
+            store,
+            exec_op,
+            response,
+            duration,
+            op_id,
+            show_progress,
+        )
+    }
+
+    async fn execute_dependent_operation(
+        spec: &CachedSpec,
+        exec_op: &BatchOperation,
+        global_config: Option<&GlobalConfig>,
+        base_url: Option<&str>,
+        dry_run: bool,
+    ) -> Result<String, Error> {
+        // Suppress output and skip jq_filter: capture needs JSON text that
+        // preserves the raw response structure regardless of caller formatting.
+        Self::execute_single_operation(
+            spec,
+            exec_op,
             global_config,
             base_url,
             dry_run,
@@ -389,20 +424,18 @@ impl BatchProcessor {
             None,
             true,
         )
-        .await;
+        .await
+    }
 
-        let duration = operation_start.elapsed();
-
-        // From here on, store exec_op (with interpolated args) in results
-        // so callers see the actual values used, not {{templates}}.
-        let response = match result {
-            Ok(resp) => resp,
-            Err(e) => {
-                Self::log_progress(show_progress, || format!("Operation '{op_id}' failed: {e}"));
-                return Self::failed_batch_operation_result(exec_op, e.to_string(), None, duration);
-            }
-        };
-
+    fn finalize_dependent_operation_result(
+        operation: &BatchOperation,
+        store: &mut interpolation::VariableStore,
+        exec_op: BatchOperation,
+        response: String,
+        duration: std::time::Duration,
+        op_id: &str,
+        show_progress: bool,
+    ) -> BatchOperationResult {
         match capture::extract_captures(operation, &response, store) {
             Ok(()) => {
                 Self::log_progress(show_progress, || format!("Operation '{op_id}' completed"));

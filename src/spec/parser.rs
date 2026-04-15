@@ -138,38 +138,50 @@ fn fix_component_indentation(content: &str) -> String {
 /// - Webhooks are not supported
 /// - JSON Schema 2020-12 features may not be preserved
 pub fn parse_openapi(content: &str) -> Result<OpenAPI, Error> {
-    // Always preprocess for compatibility issues
+    // Always preprocess for compatibility issues.
     let mut preprocessed = preprocess_for_compatibility(content);
 
-    // Check if this looks like OpenAPI 3.1.x (both YAML and JSON formats)
-    if content.contains("openapi: 3.1")
-        || content.contains("openapi: \"3.1")
-        || content.contains("openapi: '3.1")
-        || content.contains(r#""openapi":"3.1"#)
-        || content.contains(r#""openapi": "3.1"#)
-    {
+    let is_openapi_31 = looks_like_openapi_31(content);
+    if is_openapi_31 {
         // For OpenAPI 3.1 specs, also fix potential indentation issues
-        // (some 3.1 specs like OpenProject have malformed indentation)
+        // (some 3.1 specs like OpenProject have malformed indentation).
         preprocessed = fix_component_indentation(&preprocessed);
+    }
 
-        // Try oas3 first for 3.1 specs - pass original content for security scheme extraction
-        match parse_with_oas3_direct_with_original(&preprocessed, content) {
-            Ok(spec) => return Ok(spec),
-            #[cfg(not(feature = "openapi31"))]
-            Err(e) => return Err(e), // Return the "not enabled" error immediately
-            #[cfg(feature = "openapi31")]
-            Err(_) => {} // Fall through to try regular parsing
+    #[cfg(feature = "openapi31")]
+    {
+        let parsed_openapi_31 = if is_openapi_31 {
+            parse_with_oas3_direct_with_original(&preprocessed, content).ok()
+        } else {
+            None
+        };
+
+        if let Some(spec) = parsed_openapi_31 {
+            return Ok(spec);
         }
     }
 
-    // Try parsing as OpenAPI 3.0.x (most common case)
-    // Detect format based on content structure
+    #[cfg(not(feature = "openapi31"))]
+    if is_openapi_31 {
+        return parse_with_oas3_direct_with_original(&preprocessed, content);
+    }
+
+    // Try parsing as OpenAPI 3.0.x (most common case).
+    // Detect format based on content structure.
     let trimmed = content.trim();
     if trimmed.starts_with('{') {
         parse_json_with_fallback(&preprocessed)
     } else {
         parse_yaml_with_fallback(&preprocessed)
     }
+}
+
+fn looks_like_openapi_31(content: &str) -> bool {
+    content.contains("openapi: 3.1")
+        || content.contains("openapi: \"3.1")
+        || content.contains("openapi: '3.1")
+        || content.contains(r#""openapi":"3.1"#)
+        || content.contains(r#""openapi": "3.1"#)
 }
 
 /// Parse JSON content with YAML fallback
@@ -370,6 +382,36 @@ paths: {}
         #[cfg(not(feature = "openapi31"))]
         {
             // Without the feature, it should return an error about missing support
+            assert!(result.is_err());
+            if let Err(Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message,
+                ..
+            }) = result
+            {
+                assert!(message.contains("OpenAPI 3.1 support is not enabled"));
+            } else {
+                panic!("Expected validation error about missing 3.1 support");
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_openapi_31_json_format() {
+        let spec_31_json = r#"{"openapi": "3.1.0", "info": {"title": "Test API", "version": "1.0.0"}, "paths": {}}"#;
+
+        let result = parse_openapi(spec_31_json);
+
+        #[cfg(feature = "openapi31")]
+        {
+            assert!(result.is_ok());
+            if let Ok(spec) = result {
+                assert!(spec.openapi.starts_with("3."));
+            }
+        }
+
+        #[cfg(not(feature = "openapi31"))]
+        {
             assert!(result.is_err());
             if let Err(Error::Internal {
                 kind: crate::error::ErrorKind::Validation,

@@ -36,19 +36,7 @@ pub async fn execute_request(
     use crate::cli::translate;
     use crate::invocation::ExecutionContext;
 
-    // Check --show-examples flag (CLI-only concern).
-    // NOTE: The primary path through `execute_api_command` also checks this
-    // flag before reaching here.  This duplicate check is intentional so that
-    // callers of the legacy `execute_request` API (tests, batch) still get
-    // correct behavior without depending on an outer guard.
-    if translate::has_show_examples_flag(matches) {
-        let operation_id = translate::matches_to_operation_id(spec, matches)?;
-        let operation = spec
-            .commands
-            .iter()
-            .find(|cmd| cmd.operation_id == operation_id)
-            .ok_or_else(|| Error::spec_not_found(&spec.name))?;
-        crate::cli::render::render_examples(operation);
+    if maybe_render_examples(spec, matches)? {
         return Ok(None);
     }
 
@@ -77,4 +65,26 @@ pub async fn execute_request(
         crate::cli::render::render_result(&result, output_format, jq_filter)?;
         Ok(None)
     }
+}
+
+fn maybe_render_examples(spec: &CachedSpec, matches: &ArgMatches) -> Result<bool, Error> {
+    use crate::cli::translate;
+
+    // Check --show-examples flag (CLI-only concern).
+    // NOTE: The primary path through `execute_api_command` also checks this
+    // flag before reaching here. This duplicate check is intentional so that
+    // callers of the legacy `execute_request` API (tests, batch) still get
+    // correct behavior without depending on an outer guard.
+    if !translate::has_show_examples_flag(matches) {
+        return Ok(false);
+    }
+
+    let operation_id = translate::matches_to_operation_id(spec, matches)?;
+    let operation = spec
+        .commands
+        .iter()
+        .find(|cmd| cmd.operation_id == operation_id)
+        .ok_or_else(|| Error::spec_not_found(&spec.name))?;
+    crate::cli::render::render_examples(operation);
+    Ok(true)
 }

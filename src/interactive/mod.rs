@@ -344,6 +344,14 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
     io.println(prompt)?;
     print_selection_options(options, io)?;
 
+    run_selection_attempts(options, io, timeout)
+}
+
+fn run_selection_attempts<T: InputOutput>(
+    options: &[(String, String)],
+    io: &T,
+    timeout: Duration,
+) -> Result<String, Error> {
     for attempt in 1..=MAX_RETRIES {
         match resolve_selection_attempt(options, io, timeout)? {
             SelectionOutcome::Selected(choice) => return Ok(choice),
@@ -352,11 +360,15 @@ pub fn select_from_options_with_io_and_timeout<T: InputOutput>(
         }
     }
 
-    Err(Error::interactive_retries_exhausted(
+    Err(selection_retries_exhausted(options))
+}
+
+fn selection_retries_exhausted(options: &[(String, String)]) -> Error {
+    Error::interactive_retries_exhausted(
         MAX_RETRIES,
         "Invalid selection",
         &build_selection_suggestions(options),
-    ))
+    )
 }
 
 fn report_invalid_selection<T: InputOutput>(

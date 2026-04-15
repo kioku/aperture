@@ -38,21 +38,27 @@ pub fn parse_duration(s: &str) -> Result<Duration, Error> {
         ));
     }
 
-    if let Some(duration) = parse_duration_suffix(s, "ms", "milliseconds", Duration::from_millis)? {
-        return Ok(duration);
-    }
-
-    if let Some(duration) = parse_duration_suffix(s, "m", "minutes", |minutes| {
-        Duration::from_secs(minutes * 60)
-    })? {
-        return Ok(duration);
-    }
-
-    if let Some(duration) = parse_duration_suffix(s, "s", "seconds", Duration::from_secs)? {
+    if let Some(duration) = parse_duration_with_suffixes(s)? {
         return Ok(duration);
     }
 
     Ok(Duration::from_millis(parse_plain_millis(s)?))
+}
+
+fn parse_duration_with_suffixes(value: &str) -> Result<Option<Duration>, Error> {
+    if let Some(duration) =
+        parse_duration_suffix(value, "ms", "milliseconds", Duration::from_millis)?
+    {
+        return Ok(Some(duration));
+    }
+
+    if let Some(duration) = parse_duration_suffix(value, "m", "minutes", |minutes| {
+        Duration::from_secs(minutes * 60)
+    })? {
+        return Ok(Some(duration));
+    }
+
+    parse_duration_suffix(value, "s", "seconds", Duration::from_secs)
 }
 
 fn parse_duration_suffix(

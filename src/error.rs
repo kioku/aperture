@@ -45,7 +45,8 @@ pub enum Error {
 /// This enum represents the 8 primary error categories used throughout
 /// the application. All internal errors are mapped to one of these categories
 /// to provide consistent error handling and reporting.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(usize)]
 pub enum ErrorKind {
     /// Specification-related errors (not found, already exists, cache issues)
     Specification,
@@ -134,20 +135,22 @@ impl ErrorContext {
 }
 
 impl ErrorKind {
+    const NAMES: [&'static str; 9] = [
+        "Specification",
+        "Authentication",
+        "Validation",
+        "Network",
+        "HttpError",
+        "Headers",
+        "Interactive",
+        "ServerVariable",
+        "Runtime",
+    ];
+
     /// Get the string identifier for this error kind
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Specification => "Specification",
-            Self::Authentication => "Authentication",
-            Self::Validation => "Validation",
-            Self::Network => "Network",
-            Self::HttpRequest => "HttpError",
-            Self::Headers => "Headers",
-            Self::Interactive => "Interactive",
-            Self::ServerVariable => "ServerVariable",
-            Self::Runtime => "Runtime",
-        }
+        Self::NAMES[*self as usize]
     }
 }
 
@@ -290,7 +293,7 @@ impl Error {
                 kind,
                 message,
                 context: ctx,
-            } => internal_error_json_parts(kind, message.as_ref(), ctx.as_ref()),
+            } => internal_error_json_parts(*kind, message.as_ref(), ctx.as_ref()),
             Self::Anyhow(anyhow_err) => ("Unknown", anyhow_err.to_string(), None, None),
         };
 
@@ -336,7 +339,7 @@ fn network_error_json_parts(
 }
 
 fn internal_error_json_parts(
-    kind: &ErrorKind,
+    kind: ErrorKind,
     message: &str,
     context: Option<&ErrorContext>,
 ) -> (
