@@ -29,7 +29,18 @@ async fn handle_add_spec_command(
         .add_spec_auto(&name, &file_or_url, force, strict)
         .await?;
     output.success(format!("Spec '{name}' added successfully."));
+    print_config_add_next_steps(&name, output);
     Ok(())
+}
+
+fn print_config_add_next_steps(name: &ApiContextName, output: &Output) {
+    let context = name.as_str();
+    output.info("Next steps:");
+    output.tip(format!("  1. aperture overview {context}"));
+    output.tip(format!("  2. aperture search <term> --api {context}"));
+    output.tip(format!("  3. aperture list-commands {context}"));
+    output.tip(format!("  4. aperture docs {context} <tag> <operation>"));
+    output.tip(format!("  5. aperture api {context} --describe-json"));
 }
 
 #[allow(clippy::needless_pass_by_value)]
