@@ -337,12 +337,14 @@ fn test_help_output() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Manage your collection of OpenAPI specifications",
+            "Manage Aperture configuration using domain-oriented subcommands",
         ))
-        .stdout(predicate::str::contains("add"))
-        .stdout(predicate::str::contains("list"))
-        .stdout(predicate::str::contains("remove"))
-        .stdout(predicate::str::contains("edit"));
+        .stdout(predicate::str::contains("api"))
+        .stdout(predicate::str::contains("url"))
+        .stdout(predicate::str::contains("secret"))
+        .stdout(predicate::str::contains("cache"))
+        .stdout(predicate::str::contains("setting"))
+        .stdout(predicate::str::contains("mapping"));
 }
 
 #[tokio::test]
