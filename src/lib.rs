@@ -3,6 +3,7 @@ pub mod atomic;
 pub mod batch;
 pub mod cache;
 pub mod cli;
+pub mod command_guidance;
 pub mod config;
 pub mod constants;
 pub mod docs;

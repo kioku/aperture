@@ -149,9 +149,14 @@ fn test_suggest_valid_values() {
 fn test_suggest_auth_fix() {
     let suggestion = suggest_auth_fix("api-key", Some("API_KEY"));
     assert!(suggestion.contains("API_KEY"));
-    assert!(suggestion.contains("aperture config secrets"));
+    assert!(suggestion.contains("aperture config set-secret"));
+    assert!(!suggestion.contains("aperture config secrets"));
 
     let suggestion = suggest_auth_fix("oauth", None);
     assert!(suggestion.contains("oauth"));
-    assert!(suggestion.contains("aperture config secrets"));
+    assert!(suggestion.contains("aperture config set-secret"));
+    assert!(suggestion.contains("aperture config list-secrets"));
+    assert!(suggestion.contains("aperture config remove-secret"));
+    assert!(suggestion.contains("aperture config clear-secrets"));
+    assert!(!suggestion.contains("aperture config secrets"));
 }

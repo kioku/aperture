@@ -8,6 +8,7 @@
 //! 3. **Builder Pattern**: `ErrorContext` provides fluent builder methods for error construction
 //! 4. **JSON Support**: All errors can be serialized to JSON for programmatic consumption
 
+use crate::command_guidance;
 use crate::constants;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -389,9 +390,7 @@ impl Error {
             )),
             context: Some(ErrorContext::new(
                 Some(json!({ "spec_name": name })),
-                Some(Cow::Owned(format!(
-                    "Run 'aperture config reinit {name}' to regenerate the cache."
-                ))),
+                Some(Cow::Owned(command_guidance::cache_reinit_hint(Some(&name)))),
             )),
         }
     }
@@ -402,7 +401,8 @@ impl Error {
         Self::Internal {
             kind: ErrorKind::Specification,
             message: Cow::Owned(format!(
-                "No cached spec found for '{name}'. Run 'aperture config add {name}' first"
+                "No cached spec found for '{name}'. {}",
+                command_guidance::cached_spec_not_found_hint(&name)
             )),
             context: Some(ErrorContext::with_detail("spec_name", &name)),
         }
@@ -438,9 +438,7 @@ impl Error {
                 Some(
                     json!({ "spec_name": name, "found_version": found, "expected_version": expected }),
                 ),
-                Some(Cow::Borrowed(
-                    "Run 'aperture config reinit' to regenerate the cache.",
-                )),
+                Some(Cow::Owned(command_guidance::cache_reinit_hint(None))),
             )),
         }
     }
@@ -840,9 +838,7 @@ impl Error {
             message: Cow::Owned(format!("Operation '{operation}' not found")),
             context: Some(ErrorContext::new(
                 Some(json!({ "operation": operation })),
-                Some(Cow::Borrowed(
-                    "Check available operations with --help or --describe-json",
-                )),
+                Some(Cow::Borrowed(command_guidance::CMD_HELP_WITH_DESCRIBE_JSON)),
             )),
         }
     }
@@ -854,7 +850,7 @@ impl Error {
     ) -> Self {
         let operation = operation.into();
         let suggestion_text = if suggestions.is_empty() {
-            "Check available operations with --help or --describe-json".to_string()
+            command_guidance::CMD_HELP_WITH_DESCRIBE_JSON.to_string()
         } else {
             format!("Did you mean one of these?\n{}", suggestions.join("\n"))
         };
@@ -920,7 +916,7 @@ impl Error {
             message: Cow::Owned(format!("Invalid command for '{context}': {reason}")),
             context: Some(
                 ErrorContext::with_name_reason("context", &context, &reason)
-                    .and_suggestion("Check available commands with --help or --describe-json"),
+                    .and_suggestion(command_guidance::CMD_HELP_WITH_DESCRIBE_JSON_COMMANDS),
             ),
         }
     }
@@ -1166,9 +1162,10 @@ impl Error {
             message: Cow::Owned(format!("Unknown setting key: '{key}'")),
             context: Some(ErrorContext::new(
                 Some(json!({ "key": key })),
-                Some(Cow::Borrowed(
-                    "Run 'aperture config settings' to see available settings.",
-                )),
+                Some(Cow::Owned(format!(
+                    "Run '{}' to see available settings.",
+                    command_guidance::CMD_CONFIG_SETTINGS
+                ))),
             )),
         }
     }
@@ -1353,7 +1350,10 @@ mod tests {
         let j = err.to_json();
         assert_eq!(j.error_type, "Specification");
         assert!(j.message.contains("stale-api"));
-        assert!(j.context.is_some());
+        let context = j
+            .context
+            .expect("cache_stale should include remediation hint");
+        assert!(context.contains("aperture config reinit stale-api"));
     }
 
     #[test]
@@ -1362,7 +1362,11 @@ mod tests {
         let j = err.to_json();
         assert_eq!(j.error_type, "Authentication");
         assert!(j.message.contains("MY_API_KEY"));
-        assert!(j.context.is_some(), "secret_not_set carries a suggestion");
+        let context = j
+            .context
+            .expect("secret_not_set should include remediation hint");
+        assert!(context.contains("aperture config set-secret"));
+        assert!(!context.contains("aperture config secrets"));
         assert!(j.details.is_some());
     }
 
@@ -1484,7 +1488,10 @@ mod tests {
         let j = err.to_json();
         assert_eq!(j.error_type, "Runtime");
         assert!(j.message.contains("unknown-op"));
-        assert!(j.context.is_some());
+        assert_eq!(
+            j.context.as_deref(),
+            Some(crate::command_guidance::CMD_HELP_WITH_DESCRIBE_JSON)
+        );
     }
 
     // ---- External error variants via to_json() ----

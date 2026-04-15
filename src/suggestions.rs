@@ -1,6 +1,7 @@
 //! Smart suggestions for error messages and command discovery
 
 use crate::cache::models::CachedSpec;
+use crate::command_guidance;
 use crate::search::CommandSearcher;
 use std::collections::BTreeMap;
 
@@ -69,8 +70,8 @@ pub fn suggest_valid_values(param_name: &str, valid_values: &[String]) -> String
 #[must_use]
 pub fn suggest_auth_fix(scheme_name: &str, env_var: Option<&str>) -> String {
     env_var.map_or_else(
-        || format!("Configure authentication for '{scheme_name}' using 'aperture config secrets'"),
-        |var| format!("Set the {var} environment variable or run 'aperture config secrets' to configure authentication")
+        || command_guidance::auth_secret_management_hint(scheme_name),
+        command_guidance::auth_secret_missing_env_hint,
     )
 }
 
