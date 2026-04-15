@@ -235,6 +235,39 @@ impl ShortcutResolver {
         }
     }
 
+    fn deduplicate_candidates(candidates: Vec<ResolvedShortcut>) -> Vec<ResolvedShortcut> {
+        let mut deduped: Vec<ResolvedShortcut> = Vec::new();
+        let mut seen_indexes: HashMap<Vec<String>, usize> = HashMap::new();
+
+        for candidate in candidates {
+            match seen_indexes.get(&candidate.full_command).copied() {
+                Some(existing_index)
+                    if candidate.confidence > deduped[existing_index].confidence =>
+                {
+                    deduped[existing_index] = candidate;
+                }
+                Some(_) => {}
+                None => {
+                    seen_indexes.insert(candidate.full_command.clone(), deduped.len());
+                    deduped.push(candidate);
+                }
+            }
+        }
+
+        deduped
+    }
+
+    fn sort_candidates_by_confidence(candidates: &mut [ResolvedShortcut]) {
+        candidates.sort_by(|a, b| {
+            b.confidence
+                .cmp(&a.confidence)
+                .then_with(|| a.full_command.cmp(&b.full_command))
+                .then_with(|| a.command.operation_id.cmp(&b.command.operation_id))
+                .then_with(|| a.command.method.cmp(&b.command.method))
+                .then_with(|| a.command.path.cmp(&b.command.path))
+        });
+    }
+
     fn resolve_single_candidate(candidates: Vec<ResolvedShortcut>) -> ResolutionResult {
         candidates.into_iter().next().map_or_else(
             || {
@@ -248,7 +281,7 @@ impl ShortcutResolver {
     }
 
     fn resolve_best_candidate(mut candidates: Vec<ResolvedShortcut>) -> ResolutionResult {
-        candidates.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+        Self::sort_candidates_by_confidence(&mut candidates);
 
         if !Self::has_high_confidence_candidate(&candidates) {
             return ResolutionResult::Ambiguous(candidates);
@@ -268,7 +301,8 @@ impl ShortcutResolver {
             return ResolutionResult::NotFound;
         }
 
-        Self::resolve_from_candidates(self.collect_resolution_candidates(args))
+        let candidates = Self::deduplicate_candidates(self.collect_resolution_candidates(args));
+        Self::resolve_from_candidates(candidates)
     }
 
     /// Try to resolve using direct operation ID matching

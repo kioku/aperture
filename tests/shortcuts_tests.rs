@@ -299,6 +299,58 @@ fn test_empty_args() {
 }
 
 #[test]
+fn test_duplicate_candidates_are_deduplicated_by_effective_command_path() {
+    let spec = CachedSpec {
+        cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
+        name: "test-api".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![CachedCommand {
+            name: "users".to_string(),
+            description: Some("List users".to_string()),
+            summary: None,
+            operation_id: "listUsers".to_string(),
+            method: "GET".to_string(),
+            path: "/users".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec!["users".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: Some("users".to_string()),
+            display_name: Some("list-users".to_string()),
+            aliases: vec![],
+            hidden: false,
+            pagination: PaginationInfo::default(),
+        }],
+        base_url: Some("https://api.example.com".to_string()),
+        servers: vec![],
+        security_schemes: HashMap::new(),
+        skipped_endpoints: vec![],
+        server_variables: HashMap::new(),
+    };
+
+    let mut specs = BTreeMap::new();
+    specs.insert("test-api".to_string(), spec);
+
+    let mut resolver = ShortcutResolver::new();
+    resolver.index_specs(&specs);
+
+    match resolver.resolve_shortcut(&["users".to_string()]) {
+        ResolutionResult::Resolved(shortcut) => {
+            assert_eq!(shortcut.command.operation_id, "listUsers");
+            assert_eq!(
+                shortcut.full_command,
+                vec!["api", "test-api", "users", "list-users"]
+            );
+        }
+        other => panic!("Expected a single deduplicated match, got: {other:?}"),
+    }
+}
+
+#[test]
 fn test_shortcut_uses_display_names_in_full_command() {
     let spec = CachedSpec {
         cache_format_version: aperture_cli::cache::models::CACHE_FORMAT_VERSION,
