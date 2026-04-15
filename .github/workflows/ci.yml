@@ -139,7 +139,7 @@ jobs:
         run: cargo llvm-cov --features integration --workspace --lcov --output-path target/coverage.lcov
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: target/coverage.lcov
           token: ${{ secrets.CODECOV_TOKEN }}
