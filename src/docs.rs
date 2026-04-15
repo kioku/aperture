@@ -398,7 +398,7 @@ impl DocumentationGenerator {
         overview.push_str("## Quick Start\n\n");
         write!(
             overview,
-            "List all available commands:\n```bash\naperture list-commands {api_name}\n```\n\n"
+            "List all available commands:\n```bash\naperture commands {api_name}\n```\n\n"
         )
         .ok();
 
@@ -465,8 +465,8 @@ impl DocumentationGenerator {
         menu.push_str("## Common Commands\n\n");
         menu.push_str("- `aperture config list` - List all configured APIs\n");
         menu.push_str("- `aperture search <term>` - Search across all APIs\n");
-        menu.push_str("- `aperture list-commands <api>` - Show available commands for an API\n");
-        menu.push_str("- `aperture exec <shortcut>` - Execute using shortcuts\n");
+        menu.push_str("- `aperture commands <api>` - Show available commands for an API\n");
+        menu.push_str("- `aperture run <shortcut>` - Execute using shortcuts\n");
         menu.push_str("- `aperture api <api> --help` - Get help for an API\n\n");
 
         // Tips

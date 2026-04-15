@@ -186,7 +186,7 @@ fn test_generate_api_overview() {
     assert!(overview.contains("POST: 1"));
     assert!(overview.contains("users: 2"));
     assert!(overview.contains("## Quick Start"));
-    assert!(overview.contains("aperture list-commands testapi"));
+    assert!(overview.contains("aperture commands testapi"));
     assert!(overview.contains("## Sample Operations"));
 }
 
@@ -204,7 +204,7 @@ fn test_generate_interactive_menu() {
     assert!(menu.contains("## Common Commands"));
     assert!(menu.contains("aperture config list"));
     assert!(menu.contains("aperture search"));
-    assert!(menu.contains("aperture exec"));
+    assert!(menu.contains("aperture run"));
     assert!(menu.contains("## Tips"));
     assert!(menu.contains("--describe-json"));
     assert!(menu.contains("--dry-run"));
