@@ -226,8 +226,8 @@ pub enum Commands {
                       - cache: response cache operations\n\
                       - setting: global CLI settings\n\
                       - mapping: command tree customization\n\n\
-                      Legacy flat commands (for example `config set-url`) are still\n\
-                      accepted for compatibility during migration."
+                      Legacy flat commands are still accepted for compatibility\n\
+                      during migration."
     )]
     Config {
         #[command(subcommand)]
@@ -974,8 +974,8 @@ pub enum ConfigCommands {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands};
-    use clap::Parser;
+    use super::{Cli, Commands, ConfigCommands, ConfigUrlCommands};
+    use clap::{CommandFactory, Parser};
 
     #[test]
     fn commands_canonical_name_parses() {
@@ -1019,5 +1019,78 @@ mod tests {
             }
             other => panic!("expected Commands::Exec, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn config_nested_url_set_parses() {
+        let cli = Cli::try_parse_from([
+            "aperture",
+            "config",
+            "url",
+            "set",
+            "my-api",
+            "https://api.example.com",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Config {
+                command:
+                    ConfigCommands::Url {
+                        command: ConfigUrlCommands::Set { name, url, env },
+                    },
+            } => {
+                assert_eq!(name, "my-api");
+                assert_eq!(url, "https://api.example.com");
+                assert!(env.is_none());
+            }
+            other => panic!("expected nested url set command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn config_legacy_set_url_parses_for_compatibility() {
+        let cli = Cli::try_parse_from([
+            "aperture",
+            "config",
+            "set-url",
+            "my-api",
+            "https://api.example.com",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Config {
+                command: ConfigCommands::SetUrl { name, url, env },
+            } => {
+                assert_eq!(name, "my-api");
+                assert_eq!(url, "https://api.example.com");
+                assert!(env.is_none());
+            }
+            other => panic!("expected legacy set-url command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn config_help_lists_domain_commands() {
+        let mut command = Cli::command();
+        let config_command = command
+            .find_subcommand_mut("config")
+            .expect("config command should exist");
+        let mut help = Vec::new();
+        config_command
+            .write_long_help(&mut help)
+            .expect("config help should render");
+        let help = String::from_utf8(help).expect("help should be valid UTF-8");
+
+        for domain in ["api", "url", "secret", "cache", "setting", "mapping"] {
+            assert!(
+                help.contains(domain),
+                "config help should include domain '{domain}', got:\n{help}"
+            );
+        }
+
+        assert!(!help.contains("set-url"));
+        assert!(!help.contains("list-urls"));
     }
 }

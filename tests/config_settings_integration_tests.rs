@@ -24,6 +24,40 @@ fn test_config_settings_lists_all() {
         .stdout(predicate::str::contains("Type: boolean"));
 }
 
+/// Test `aperture config setting list` nested command lists settings
+#[test]
+fn test_config_setting_list_nested_command() {
+    let temp_dir = TempDir::new().unwrap();
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "setting", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("default_timeout_secs"))
+        .stdout(predicate::str::contains("agent_defaults.json_errors"));
+}
+
+/// Test `aperture config setting set/get` nested commands roundtrip
+#[test]
+fn test_config_setting_nested_set_get_roundtrip() {
+    let temp_dir = TempDir::new().unwrap();
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "setting", "set", "default_timeout_secs", "90"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Set default_timeout_secs = 90"));
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "setting", "get", "default_timeout_secs"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("90"));
+}
+
 /// Test `aperture config settings --json` outputs valid JSON
 #[test]
 fn test_config_settings_json_output() {
