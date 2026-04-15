@@ -94,3 +94,90 @@ fn api_context_describe_json_remains_machine_oriented() {
     assert_eq!(manifest["api"]["name"].as_str(), Some("Landing Test API"));
     assert!(manifest["commands"]["users"].is_array());
 }
+
+#[test]
+fn api_context_with_json_errors_and_no_operation_preserves_error_semantics() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let spec_file = create_spec(&temp_dir);
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "api",
+            "add",
+            "test-api",
+            spec_file.to_str().expect("spec path should be valid UTF-8"),
+        ])
+        .assert()
+        .success();
+
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["--json-errors", "api", "test-api"])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    let error_json: serde_json::Value =
+        serde_json::from_str(&stderr).expect("json-errors output should be valid JSON");
+    assert_eq!(error_json["error_type"].as_str(), Some("Validation"));
+    assert_eq!(error_json["details"]["operation"].as_str(), Some("unknown"));
+}
+
+#[test]
+fn api_context_with_dry_run_and_no_operation_preserves_error_semantics() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let spec_file = create_spec(&temp_dir);
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "api",
+            "add",
+            "test-api",
+            spec_file.to_str().expect("spec path should be valid UTF-8"),
+        ])
+        .assert()
+        .success();
+
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["api", "test-api", "--dry-run"])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    assert!(stderr.contains("Operation 'unknown' not found"));
+}
+
+#[test]
+fn api_context_with_explicit_format_and_no_operation_preserves_error_semantics() {
+    let temp_dir = TempDir::new().expect("temp dir should be created");
+    let spec_file = create_spec(&temp_dir);
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--quiet",
+            "config",
+            "api",
+            "add",
+            "test-api",
+            spec_file.to_str().expect("spec path should be valid UTF-8"),
+        ])
+        .assert()
+        .success();
+
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["api", "test-api", "--format", "yaml"])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    assert!(stderr.contains("Operation 'unknown' not found"));
+}
