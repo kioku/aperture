@@ -191,6 +191,26 @@ fn test_generate_api_overview() {
 }
 
 #[test]
+fn test_generate_api_reference_index() {
+    let mut specs = BTreeMap::new();
+    specs.insert("testapi".to_string(), create_test_spec());
+
+    let doc_gen = DocumentationGenerator::new(specs);
+    let reference = doc_gen.generate_api_reference_index("testapi").unwrap();
+
+    assert!(reference.contains("# TestAPI API Reference"));
+    assert!(reference.contains("## Reference Workflow"));
+    assert!(reference.contains("aperture search \"keyword\" --api testapi"));
+    assert!(reference.contains("aperture docs testapi <tag> <operation>"));
+    assert!(reference.contains("## Categories"));
+    assert!(reference.contains("`users` (2 operations)"));
+    assert!(reference.contains("## Example Docs Paths"));
+    assert!(reference.contains("aperture docs testapi users get-user-by-id"));
+    assert!(!reference.contains("## Statistics"));
+    assert!(!reference.contains("## Sample Operations"));
+}
+
+#[test]
 fn test_generate_interactive_menu() {
     let mut specs = BTreeMap::new();
     specs.insert("testapi".to_string(), create_test_spec());

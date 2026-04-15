@@ -380,6 +380,10 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
 
     if results.is_empty() {
         lines.push("No matching operations found.".to_string());
+        lines.push(
+            "Try broader terms or run `aperture commands <api>` to browse by structure."
+                .to_string(),
+        );
         return lines;
     }
 
@@ -406,6 +410,15 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
         if let Some(ref summary) = result.command.summary {
             lines.push(format!("   {summary}"));
         }
+
+        lines.push(format!(
+            "   Inspect: aperture docs {} {}",
+            result.api_context, result.command_path
+        ));
+        lines.push(format!(
+            "   Execute: aperture api {} {} ...",
+            result.api_context, result.command_path
+        ));
 
         if !verbose {
             lines.push(String::new());

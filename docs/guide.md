@@ -251,7 +251,9 @@ aperture config reinit my-api
 
 ## Search Commands
 
-Find operations across all registered APIs. Search matches against operation names, descriptions, display names, and aliases from command mappings.
+**Canonical role:** primary intent-first discovery. Use search when you know what you want to do but not where the command is.
+
+Search matches operation names, descriptions, display names, and aliases from command mappings.
 
 ```bash
 # Search by keyword
@@ -284,9 +286,16 @@ aperture run users list
 
 ## API Exploration
 
+Use this human workflow for discovery:
+
+1. **Orient** with `overview`
+2. **Find** with `search`
+3. **Inspect** with `docs`
+4. **Execute** with `api`
+
 ### Overview
 
-Get a quick summary of an API with statistics and example commands:
+**Canonical role:** orientation. Get a high-level API summary with statistics and starter paths.
 
 ```bash
 # Overview of a specific API
@@ -296,15 +305,27 @@ aperture overview my-api
 aperture overview --all
 ```
 
+### Commands Tree
+
+**Canonical role:** structural lookup. Get a terse tree of available command paths.
+
+```bash
+# Canonical command name
+aperture commands my-api
+
+# Legacy alias
+aperture list-commands my-api
+```
+
 ### Interactive Documentation
 
-Browse detailed documentation for APIs and operations:
+**Canonical role:** deep reference. Inspect exact operation usage, parameters, request bodies, and responses.
 
 ```bash
 # Interactive help menu
 aperture docs
 
-# API overview
+# API reference index
 aperture docs my-api
 
 # Detailed command help with parameters and examples

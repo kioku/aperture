@@ -355,6 +355,38 @@ impl DocumentationGenerator {
         Ok(overview)
     }
 
+    /// Generate an API reference index for docs navigation.
+    ///
+    /// # Errors
+    /// Returns an error if the API is not found
+    pub fn generate_api_reference_index(&self, api_name: &str) -> Result<String, Error> {
+        let spec = self
+            .specs
+            .get(api_name)
+            .ok_or_else(|| Error::spec_not_found(api_name))?;
+
+        let visible_commands: Vec<&CachedCommand> = spec
+            .commands
+            .iter()
+            .filter(|command| !command.hidden)
+            .collect();
+
+        let mut category_counts = BTreeMap::new();
+        for command in &visible_commands {
+            *category_counts
+                .entry(Self::effective_group(command))
+                .or_insert(0usize) += 1;
+        }
+
+        let mut reference = String::new();
+        Self::write_api_reference_header(&mut reference, spec);
+        Self::write_api_reference_navigation(&mut reference, api_name);
+        Self::write_api_reference_categories(&mut reference, &category_counts);
+        Self::write_api_reference_examples(&mut reference, api_name, &visible_commands);
+
+        Ok(reference)
+    }
+
     fn write_api_overview_header(overview: &mut String, spec: &CachedSpec) {
         write!(overview, "# {} API\n\n", spec.name).ok();
         writeln!(overview, "**Version**: {}", spec.version).ok();
@@ -432,6 +464,81 @@ impl DocumentationGenerator {
             )
             .ok();
         }
+    }
+
+    fn write_api_reference_header(reference: &mut String, spec: &CachedSpec) {
+        write!(reference, "# {} API Reference\n\n", spec.name).ok();
+        writeln!(reference, "**Version**: {}", spec.version).ok();
+        if let Some(base_url) = spec.base_url.as_deref() {
+            writeln!(reference, "**Base URL**: {base_url}").ok();
+        }
+        reference.push('\n');
+        reference.push_str(
+            "Use this view to inspect operation-level documentation before executing commands.\n\n",
+        );
+    }
+
+    fn write_api_reference_navigation(reference: &mut String, api_name: &str) {
+        reference.push_str("## Reference Workflow\n\n");
+        write!(
+            reference,
+            "1. Find operations by intent:\n```bash\naperture search \"keyword\" --api {api_name}\n```\n\n"
+        )
+        .ok();
+        write!(
+            reference,
+            "2. Inspect command structure:\n```bash\naperture commands {api_name}\n```\n\n"
+        )
+        .ok();
+        write!(
+            reference,
+            "3. Open deep operation docs:\n```bash\naperture docs {api_name} <tag> <operation>\n```\n\n"
+        )
+        .ok();
+    }
+
+    fn write_api_reference_categories(
+        reference: &mut String,
+        category_counts: &BTreeMap<String, usize>,
+    ) {
+        reference.push_str("## Categories\n\n");
+
+        if category_counts.is_empty() {
+            reference.push_str("No visible operations found.\n\n");
+            return;
+        }
+
+        for (category, count) in category_counts {
+            writeln!(reference, "- `{category}` ({count} operations)").ok();
+        }
+        reference.push('\n');
+    }
+
+    fn write_api_reference_examples(
+        reference: &mut String,
+        api_name: &str,
+        visible_commands: &[&CachedCommand],
+    ) {
+        if visible_commands.is_empty() {
+            return;
+        }
+
+        reference.push_str("## Example Docs Paths\n\n");
+        for command in visible_commands.iter().take(3) {
+            let tag = Self::effective_group(command);
+            let operation = Self::effective_operation(command);
+            let summary = command
+                .summary
+                .as_deref()
+                .or(command.description.as_deref())
+                .unwrap_or("No description");
+            writeln!(
+                reference,
+                "- `aperture docs {api_name} {tag} {operation}` — {summary}"
+            )
+            .ok();
+        }
+        reference.push('\n');
     }
 
     /// Generate interactive help menu

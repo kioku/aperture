@@ -264,6 +264,12 @@ fn test_format_search_results() {
         .iter()
         .any(|line| line.contains("aperture api test-api")));
     assert!(output.iter().any(|line| line.contains("GET /users/{id}")));
+    assert!(output
+        .iter()
+        .any(|line| line.contains("Inspect: aperture docs test-api users get-user")));
+    assert!(output
+        .iter()
+        .any(|line| line.contains("Execute: aperture api test-api users get-user ...")));
 
     // Test verbose output
     let output = format_search_results(&results, true);
@@ -275,8 +281,8 @@ fn test_empty_search_results() {
     let results = vec![];
     let output = format_search_results(&results, false);
 
-    assert_eq!(output.len(), 1);
     assert_eq!(output[0], "No matching operations found.");
+    assert!(output[1].contains("aperture commands <api>"));
 }
 
 #[test]

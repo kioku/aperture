@@ -237,10 +237,13 @@ pub enum Commands {
     #[command(
         name = "commands",
         visible_alias = "list-commands",
-        long_about = "Display a tree-like summary of all available commands for an API.\n\n\
-                      Shows operations organized by tags, making it easy to discover\n\
-                      what functionality is available in a registered API specification.\n\
-                      This provides an overview without having to use --help on each operation.\n\n\
+        long_about = "Show a terse structural tree of commands for one API.\n\n\
+                      Canonical role: quick structure lookup (what exists, grouped by category).\n\
+                      This stays intentionally compact and is not full documentation.\n\n\
+                      Next steps:\n\
+                      - Use `aperture overview <api>` to orient to the API at a high level.\n\
+                      - Use `aperture search <term> --api <api>` when you know intent, not path.\n\
+                      - Use `aperture docs <api> <tag> <operation>` for deep operation reference.\n\n\
                       Legacy alias: list-commands\n\n\
                       Example:\n  \
                       aperture commands myapi"
@@ -270,15 +273,20 @@ pub enum Commands {
         args: Vec<String>,
     },
     /// Search for API operations across all specifications
-    #[command(long_about = "Search for API operations by keyword or pattern.\n\n\
-                      Search through all registered API specifications to find\n\
-                      relevant operations. The search includes operation IDs,\n\
-                      descriptions, paths, and HTTP methods.\n\n\
+    #[command(
+        long_about = "Search for operations by intent (keyword, phrase, or regex).\n\n\
+                      Canonical role: primary human discovery entry point when you know\n\
+                      what you want to do but not where the command lives. Supports\n\
+                      both cross-API discovery and per-API filtering.\n\n\
+                      Next steps:\n\
+                      - Use `aperture docs <api> <tag> <operation>` to inspect details.\n\
+                      - Use `aperture api <api> <tag> <operation> ...` to execute.\n\n\
                       Examples:\n  \
-                      aperture search 'list users'     # Find user listing operations\n  \
-                      aperture search 'POST create'     # Find POST operations with 'create'\n  \
-                      aperture search issues --api sm   # Search only in 'sm' API\n  \
-                      aperture search 'get.*by.*id'     # Regex pattern search")]
+                      aperture search 'list users'      # Cross-API intent search\n  \
+                      aperture search 'POST create'     # Method + intent\n  \
+                      aperture search issues --api sm   # Limit to one API\n  \
+                      aperture search 'get.*by.*id'     # Regex pattern search"
+    )]
     Search {
         /// Search query (keywords, patterns, or regex)
         query: String,
@@ -322,14 +330,17 @@ pub enum Commands {
     },
     /// Get detailed documentation for APIs and commands
     #[command(
-        long_about = "Get comprehensive documentation for APIs and operations.\n\n\
-                      This provides detailed information including parameters, examples,\n\
-                      response schemas, and authentication requirements. Use it to learn\n\
-                      about available functionality without trial and error.\n\n\
+        long_about = "Show deep reference documentation for APIs and operations.\n\n\
+                      Canonical role: inspect exact operation details (parameters, request\n\
+                      body, responses, auth, and examples) before execution.\n\n\
+                      Next steps:\n\
+                      - Start with `aperture overview <api>` for orientation.\n\
+                      - Use `aperture search <term>` to find operation paths quickly.\n\
+                      - Execute with `aperture api <api> <tag> <operation> ...`.\n\n\
                       Examples:\n  \
-                      aperture docs                        # Interactive help menu\n  \
-                      aperture docs myapi                  # API overview\n  \
-                      aperture docs myapi users get-user  # Detailed command help"
+                      aperture docs                        # Interactive discovery menu\n  \
+                      aperture docs myapi                  # API reference index\n  \
+                      aperture docs myapi users get-user  # Detailed operation reference"
     )]
     Docs {
         /// API name (optional, shows interactive menu if omitted).
@@ -345,9 +356,13 @@ pub enum Commands {
     },
     /// Show API overview with statistics and quick start guide
     #[command(
-        long_about = "Display comprehensive API overview with statistics and examples.\n\n\
-                      Shows operation counts, method distribution, available categories,\n\
-                      and sample commands to help you get started quickly with any API.\n\n\
+        long_about = "Orient yourself to an API before diving into details.\n\n\
+                      Canonical role: high-level orientation (shape, scale, categories,\n\
+                      and starter paths) for one API or all configured APIs.\n\n\
+                      Next steps:\n\
+                      - Use `aperture search <term> --api <api>` to find intent-matching operations.\n\
+                      - Use `aperture commands <api>` for a terse structural tree.\n\
+                      - Use `aperture docs <api> <tag> <operation>` for deep inspection.\n\n\
                       Examples:\n  \
                       aperture overview myapi\n  \
                       aperture overview --all  # Overview of all registered APIs"
