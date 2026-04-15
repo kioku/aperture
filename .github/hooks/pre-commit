@@ -108,7 +108,7 @@ fi
 # ── compl scan (optional) ─────────────────────────────────────────────────────
 
 if command -v compl &> /dev/null; then
-    run_step "compl scan" compl scan --threshold 10
+    run_step "compl scan (jsonl)" compl scan --threshold 10 --fail-above 10 --jsonl
 fi
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
