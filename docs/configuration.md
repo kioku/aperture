@@ -282,7 +282,7 @@ hidden = true
 During cache generation, Aperture validates that:
 - No two operations resolve to the same `(group, name)` pair
 - No alias collides with another operation's name or alias in the same group
-- Customized group names don't conflict with built-in commands (`config`, `search`, `exec`, `docs`, `overview`)
+- Customized group names don't conflict with built-in commands (`api`, `commands`, `run`, `config`, `search`, `docs`, `overview`; legacy aliases `list-commands` and `exec` are also reserved)
 
 Collisions produce hard errors that prevent cache generation.
 
