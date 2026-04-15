@@ -707,3 +707,53 @@ pub enum ConfigCommands {
         operation: Option<String>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Commands};
+    use clap::Parser;
+
+    #[test]
+    fn commands_canonical_name_parses() {
+        let cli = Cli::try_parse_from(["aperture", "commands", "my-api"]).unwrap();
+        match cli.command {
+            Commands::ListCommands { context } => assert_eq!(context, "my-api"),
+            other => panic!("expected Commands::ListCommands, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_commands_alias_parses() {
+        let cli = Cli::try_parse_from(["aperture", "list-commands", "my-api"]).unwrap();
+        match cli.command {
+            Commands::ListCommands { context } => assert_eq!(context, "my-api"),
+            other => panic!("expected Commands::ListCommands, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_canonical_name_parses() {
+        let cli =
+            Cli::try_parse_from(["aperture", "run", "get-user-by-id", "--id", "123"]).unwrap();
+        match cli.command {
+            Commands::Exec { api, args } => {
+                assert!(api.is_none());
+                assert_eq!(args, vec!["get-user-by-id", "--id", "123"]);
+            }
+            other => panic!("expected Commands::Exec, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn exec_alias_parses() {
+        let cli =
+            Cli::try_parse_from(["aperture", "exec", "get-user-by-id", "--id", "123"]).unwrap();
+        match cli.command {
+            Commands::Exec { api, args } => {
+                assert!(api.is_none());
+                assert_eq!(args, vec!["get-user-by-id", "--id", "123"]);
+            }
+            other => panic!("expected Commands::Exec, got {other:?}"),
+        }
+    }
+}
