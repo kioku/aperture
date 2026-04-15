@@ -11,6 +11,7 @@ use crate::error::Error;
 use crate::fs::OsFileSystem;
 use crate::output::Output;
 use crate::shortcuts::{ResolutionResult, ShortcutResolver};
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 /// Adds connection/timeout context to network errors.
@@ -152,6 +153,45 @@ fn handle_show_examples_command(
         .find(|cmd| cmd.operation_id == operation_id)
         .ok_or_else(|| Error::spec_not_found(context))?;
     crate::cli::render::render_examples(operation);
+    Ok(())
+}
+
+fn render_api_context_landing(context: &str, spec: &CachedSpec) -> Result<(), Error> {
+    let mut specs = std::collections::BTreeMap::new();
+    specs.insert(context.to_string(), spec.clone());
+
+    let doc_gen = crate::docs::DocumentationGenerator::new(specs);
+    let mut overview = doc_gen.generate_api_overview(context)?;
+
+    overview.push_str("## Next Steps\n\n");
+    writeln!(
+        overview,
+        "- Discover by intent: `aperture search \"<keyword>\" --api {context}`"
+    )
+    .ok();
+    writeln!(
+        overview,
+        "- Inspect command paths: `aperture commands {context}`"
+    )
+    .ok();
+    writeln!(
+        overview,
+        "- Read operation docs: `aperture docs {context} <tag> <operation>`"
+    )
+    .ok();
+    writeln!(
+        overview,
+        "- Execute an operation: `aperture api {context} <tag> <operation> ...`"
+    )
+    .ok();
+    writeln!(
+        overview,
+        "- Machine manifest: `aperture api {context} --describe-json`"
+    )
+    .ok();
+
+    // ast-grep-ignore: no-println
+    println!("{overview}");
     Ok(())
 }
 
@@ -318,6 +358,10 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
 
     if let Some(batch_file_path) = &cli.batch_file {
         return handle_batch_file_command(context, batch_file_path, &command_context, cli).await;
+    }
+
+    if args.is_empty() {
+        return render_api_context_landing(context, &command_context.spec);
     }
 
     let Some(matches) = parse_matches_with_examples_fallback(
