@@ -225,6 +225,46 @@ async fn execute_standard_api_runtime(
     Ok(())
 }
 
+fn parse_dynamic_matches(
+    spec: &CachedSpec,
+    args: &[String],
+    use_positional_args: bool,
+) -> Result<clap::ArgMatches, clap::Error> {
+    generator::generate_command_tree_with_flags(spec, use_positional_args).try_get_matches_from(
+        std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args.iter().cloned()),
+    )
+}
+
+fn parse_dynamic_matches_relaxed(
+    spec: &CachedSpec,
+    args: &[String],
+    use_positional_args: bool,
+) -> Result<clap::ArgMatches, clap::Error> {
+    generator::generate_command_tree_with_flags(spec, use_positional_args)
+        .ignore_errors(true)
+        .try_get_matches_from(
+            std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args.iter().cloned()),
+        )
+}
+
+fn is_help_control_flow(error: &clap::Error) -> bool {
+    matches!(
+        error.kind(),
+        clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+    )
+}
+
+fn should_attempt_examples_fallback(args: &[String], parse_error: &clap::Error) -> bool {
+    args.iter().any(|arg| arg == "--show-examples")
+        && parse_error.kind() == clap::error::ErrorKind::MissingRequiredArgument
+}
+
+fn render_clap_control_flow_output(parse_error: &clap::Error) -> Result<(), Error> {
+    parse_error
+        .print()
+        .map_err(|e| Error::io_error(format!("Failed to print command help: {e}")))
+}
+
 #[allow(clippy::too_many_lines)]
 pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
     let command_context = load_api_command_context(context)?;
@@ -237,12 +277,26 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
         return handle_batch_file_command(context, batch_file_path, &command_context, cli).await;
     }
 
-    // Generate the dynamic command tree and parse arguments
-    let command =
-        generator::generate_command_tree_with_flags(&command_context.spec, cli.positional_args);
-    let matches = command
-        .try_get_matches_from(std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args))
-        .map_err(|e| Error::invalid_command(context, e.to_string()))?;
+    let matches = match parse_dynamic_matches(&command_context.spec, &args, cli.positional_args) {
+        Ok(matches) => matches,
+        Err(parse_error) if is_help_control_flow(&parse_error) => {
+            render_clap_control_flow_output(&parse_error)?;
+            return Ok(());
+        }
+        Err(parse_error) if should_attempt_examples_fallback(&args, &parse_error) => {
+            let relaxed_matches =
+                parse_dynamic_matches_relaxed(&command_context.spec, &args, cli.positional_args)
+                    .map_err(|e| Error::invalid_command(context, e.to_string()))?;
+
+            if crate::cli::translate::has_show_examples_flag(&relaxed_matches) {
+                handle_show_examples_command(context, &relaxed_matches, &command_context)?;
+                return Ok(());
+            }
+
+            return Err(Error::invalid_command(context, parse_error.to_string()));
+        }
+        Err(parse_error) => return Err(Error::invalid_command(context, parse_error.to_string())),
+    };
 
     // Check --show-examples flag
     if crate::cli::translate::has_show_examples_flag(&matches) {

@@ -41,7 +41,7 @@ clap = { version = "4.6.0", features = ["derive"] }
 jaq-core = { version = "2.2.1", optional = true }
 jaq-json = { version = "1.1.3", features = ["serde_json"], optional = true }
 jaq-std = { version = "2.1.2", optional = true }
-oas3 = { version = "0.20", features = ["yaml-spec"], optional = true }
+oas3 = { version = "0.21", features = ["yaml-spec"], optional = true }
 openapiv3 = "2.2.0"
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
@@ -51,15 +51,15 @@ serde_yaml = "0.9.34"
 shellexpand = "3.1.1"
 tabled = "0.20.0"
 thiserror = "2.0.18"
-tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+tokio = { version = "1.51.1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 dirs = "6.0.0"
 base64 = "0.22.1"
-fastrand = "2.3.0"
+fastrand = "2.4.1"
 fs2 = "0.4.3"
 fuzzy-matcher = "0.3.7"
 governor = "0.10.4"
 httpdate = "1.0"
-indexmap = "2.2.1"
+indexmap = "2.14.0"
 sha2 = "0.10.8"
 toml = "0.9"
 toml_edit = "0.24"
@@ -93,7 +93,7 @@ aperture-cli = { path = "." }
 predicates = "3.1.4"
 tempfile = "3.27.0"
 serde_json = "1.0.149"
-tokio = { version = "1.50.0", features = ["rt", "macros", "test-util"] }
+tokio = { version = "1.51.1", features = ["rt", "macros", "test-util"] }
 mockall = "0.14"
 once_cell = "1.21.4"
 
