@@ -299,6 +299,83 @@ fn exec_show_examples_succeeds_without_required_runtime_arguments() {
 }
 
 #[test]
+fn exec_api_filter_rejects_invalid_api_name() {
+    let temp_dir = TempDir::new().unwrap();
+    let output = run_with_config_dir(
+        &temp_dir,
+        &["exec", "--api", "   ", "get-user-by-id", "--help"],
+    );
+
+    assert!(
+        !output.status.success(),
+        "expected validation failure; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let combined = combined_output(&output);
+    assert!(
+        combined.contains("Invalid API context name '   '"),
+        "expected invalid API name error; got {combined}"
+    );
+}
+
+#[test]
+fn exec_api_filter_rejects_unknown_context() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec_named(&temp_dir, "users-a", &spec_file);
+
+    let output = run_with_config_dir(
+        &temp_dir,
+        &["exec", "--api", "none", "get-user-by-id", "--help"],
+    );
+
+    assert!(
+        !output.status.success(),
+        "expected unknown API failure; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let combined = combined_output(&output);
+    assert!(
+        combined.contains("Specification: API specification 'none' not found"),
+        "expected missing API context error; got {combined}"
+    );
+}
+
+#[test]
+fn exec_api_filter_rejects_duplicate_flags() {
+    let temp_dir = TempDir::new().unwrap();
+    let output = run_with_config_dir(
+        &temp_dir,
+        &[
+            "exec",
+            "--api",
+            "users-a",
+            "--api",
+            "users-b",
+            "get-user-by-id",
+            "--help",
+        ],
+    );
+
+    assert!(
+        !output.status.success(),
+        "expected parse failure; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let combined = combined_output(&output);
+    assert!(
+        combined.contains("cannot be used multiple times"),
+        "expected duplicate --api rejection; got {combined}"
+    );
+}
+
+#[test]
 fn exec_api_filter_disambiguates_multi_api_shortcuts() {
     let temp_dir = TempDir::new().unwrap();
     let spec_file = create_required_param_spec(&temp_dir);
