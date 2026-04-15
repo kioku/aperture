@@ -176,7 +176,7 @@ fn test_config_get_invalid_key_error() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Unknown setting key"))
-        .stderr(predicate::str::contains("aperture config settings"));
+        .stderr(predicate::str::contains("aperture config setting list"));
 }
 
 /// Test `aperture config set` with invalid value type shows helpful error

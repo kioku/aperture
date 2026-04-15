@@ -28,9 +28,9 @@ pub enum OutputFormat {
                   OpenAPI specs and creating a rich command-line interface with built-in\n\
                   security, caching, and agent-friendly features.\n\n\
                   Examples:\n  \
-                  aperture config add myapi api-spec.yaml\n  \
+                  aperture config api add myapi api-spec.yaml\n  \
                   aperture api myapi users get-user --id 123\n  \
-                  aperture config list\n\n\
+                  aperture config api list\n\n\
                   Agent-friendly features:\n  \
                   aperture api myapi --describe-json    # Get capability manifest\n  \
                   aperture --json-errors api myapi ...  # Structured error output\n  \

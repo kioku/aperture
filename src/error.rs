@@ -1353,7 +1353,7 @@ mod tests {
         let context = j
             .context
             .expect("cache_stale should include remediation hint");
-        assert!(context.contains("aperture config reinit stale-api"));
+        assert!(context.contains("aperture config api reinit stale-api"));
     }
 
     #[test]
@@ -1365,8 +1365,8 @@ mod tests {
         let context = j
             .context
             .expect("secret_not_set should include remediation hint");
-        assert!(context.contains("aperture config set-secret"));
-        assert!(!context.contains("aperture config secrets"));
+        assert!(context.contains("aperture config secret set"));
+        assert!(!context.contains("aperture config set-secret"));
         assert!(j.details.is_some());
     }
 
