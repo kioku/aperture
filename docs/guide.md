@@ -21,7 +21,7 @@ aperture config add my-api https://api.example.com/openapi.yaml
 aperture config list
 
 # List commands for an API
-aperture list-commands my-api
+aperture commands my-api
 
 # Get detailed command information
 aperture api my-api --describe-json
@@ -35,6 +35,23 @@ aperture api my-api users list
 aperture api my-api users get-user-by-id --id 123
 aperture api my-api users create --name "John Doe" --email "john@example.com"
 ```
+
+## CLI Naming Conventions
+
+Aperture follows these naming rules across commands, subcommands, and examples:
+
+- **Top-level commands:** prefer clear, full words (`commands`, `run`, `search`, `docs`, `overview`).
+- **Config subcommands:** use `verb-resource` (`set-url`, `get-url`, `list-secrets`).
+- **Examples and docs:** always use canonical command names.
+
+### Compatibility aliases
+
+To avoid breaking existing scripts, Aperture supports these legacy aliases:
+
+- `aperture list-commands` → `aperture commands`
+- `aperture exec` → `aperture run`
+
+These aliases remain available for compatibility, but new usage should prefer canonical names.
 
 ## Command Syntax
 
@@ -256,13 +273,13 @@ Execute operations using shorthand:
 
 ```bash
 # By operation ID
-aperture exec getUserById --id 123
+aperture run getUserById --id 123
 
 # By HTTP method and path
-aperture exec GET /users/123
+aperture run GET /users/123
 
 # By tag and operation
-aperture exec users list
+aperture run users list
 ```
 
 ## API Exploration

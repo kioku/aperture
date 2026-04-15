@@ -127,6 +127,7 @@ cargo install aperture-cli --features "jq openapi31"
 | Document | Description |
 |----------|-------------|
 | [User Guide](docs/guide.md) | Day-to-day usage, commands, output formats |
+| [CLI Naming](docs/cli-naming.md) | Canonical command naming, aliases, migration guidance |
 | [Agent Integration](docs/agent-integration.md) | Capability manifests, batch ops, integration patterns |
 | [Security Model](docs/security.md) | Authentication, secrets, cache security |
 | [Configuration](docs/configuration.md) | URLs, environments, cache, command mapping |

@@ -1,4 +1,4 @@
-//! Handlers for `aperture api`, `aperture exec`, and batch operations.
+//! Handlers for `aperture api`, `aperture run`, and batch operations.
 
 use crate::batch::{BatchConfig, BatchProcessor};
 use crate::cache::models::CachedSpec;
@@ -550,7 +550,7 @@ async fn handle_shortcut_resolution(
                 args[0]
             );
             // ast-grep-ignore: no-println
-            eprintln!("  aperture list-commands <api>  # List available commands for an API");
+            eprintln!("  aperture commands <api>       # List available commands for an API");
             // ast-grep-ignore: no-println
             eprintln!("  aperture api <api> --help     # Show help for an API");
             std::process::exit(1);
@@ -563,17 +563,17 @@ fn print_shortcut_usage() -> ! {
     // ast-grep-ignore: no-println
     eprintln!("Error: No command specified");
     // ast-grep-ignore: no-println
-    eprintln!("Usage: aperture exec <shortcut> [args...]");
+    eprintln!("Usage: aperture run <shortcut> [args...]");
     // ast-grep-ignore: no-println
     eprintln!("Examples:");
     // ast-grep-ignore: no-println
-    eprintln!("  aperture exec getUserById --id 123");
+    eprintln!("  aperture run getUserById --id 123");
     // ast-grep-ignore: no-println
-    eprintln!("  aperture exec --api billing getUserById --id 123");
+    eprintln!("  aperture run --api billing getUserById --id 123");
     // ast-grep-ignore: no-println
-    eprintln!("  aperture exec GET /users/123");
+    eprintln!("  aperture run GET /users/123");
     // ast-grep-ignore: no-println
-    eprintln!("  aperture exec users list");
+    eprintln!("  aperture run users list");
     std::process::exit(1);
 }
 

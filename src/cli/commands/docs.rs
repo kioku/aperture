@@ -1,4 +1,4 @@
-//! Handlers for `aperture docs`, `aperture overview`, and `aperture list-commands`.
+//! Handlers for `aperture docs`, `aperture overview`, and `aperture commands`.
 
 use crate::cache::models::CachedSpec;
 use crate::config::manager::{get_config_dir, ConfigManager};
@@ -30,7 +30,7 @@ pub fn list_commands(context: &str, output: &Output) -> Result<(), Error> {
     output.tip(format!(
         "Use 'aperture search <term> --api {context}' to find specific operations"
     ));
-    output.tip("Use shortcuts: 'aperture exec <operation-id> --help'");
+    output.tip("Use shortcuts: 'aperture run <operation-id> --help'");
     Ok(())
 }
 
@@ -176,7 +176,7 @@ fn render_all_api_overviews(
         // ast-grep-ignore: no-println
         println!("   Methods: {}", method_summary.join(", "));
         // ast-grep-ignore: no-println
-        println!("   Quick start: aperture list-commands {api_name}");
+        println!("   Quick start: aperture commands {api_name}");
     }
     // ast-grep-ignore: no-println
     println!("\n{}", "=".repeat(60));

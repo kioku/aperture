@@ -10,7 +10,17 @@ use crate::utils::to_kebab_case;
 use std::collections::{HashMap, HashSet};
 
 /// Names reserved for built-in Aperture commands that cannot be used as group names.
-const RESERVED_GROUP_NAMES: &[&str] = &["config", "search", "exec", "docs", "overview"];
+const RESERVED_GROUP_NAMES: &[&str] = &[
+    "api",
+    "commands",
+    "list-commands",
+    "config",
+    "search",
+    "run",
+    "exec",
+    "docs",
+    "overview",
+];
 
 /// Result of applying command mappings, including any warnings.
 #[derive(Debug)]
