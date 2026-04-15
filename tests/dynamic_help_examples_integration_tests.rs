@@ -78,6 +78,21 @@ fn combined_output(output: &Output) -> String {
     )
 }
 
+fn assert_failure_with_validation_framing(output: &Output) {
+    assert!(
+        !output.status.success(),
+        "expected failure; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let combined = combined_output(output);
+    assert!(
+        combined.contains("Validation: Invalid command"),
+        "expected invalid command framing for malformed input; got {combined}"
+    );
+}
+
 #[test]
 fn api_group_help_is_successful_control_flow() {
     let temp_dir = TempDir::new().unwrap();
@@ -136,6 +151,113 @@ fn api_show_examples_succeeds_without_required_runtime_arguments() {
         combined.contains("Command: get-user-by-id")
             && (combined.contains("No examples available") || combined.contains("Examples:")),
         "expected example output; got {combined}"
+    );
+}
+
+#[test]
+fn api_show_examples_rejects_unknown_extra_flags() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec(&temp_dir, &spec_file);
+
+    let output = run_with_config_dir(
+        &temp_dir,
+        &[
+            "api",
+            "test-api",
+            "users",
+            "get-user-by-id",
+            "--show-examples",
+            "--bogus",
+        ],
+    );
+
+    assert_failure_with_validation_framing(&output);
+    assert!(
+        combined_output(&output).contains("--bogus"),
+        "expected malformed flag details in output"
+    );
+}
+
+#[test]
+fn api_show_examples_rejects_duplicate_flags() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec(&temp_dir, &spec_file);
+
+    let output = run_with_config_dir(
+        &temp_dir,
+        &[
+            "api",
+            "test-api",
+            "users",
+            "get-user-by-id",
+            "--show-examples",
+            "--show-examples",
+        ],
+    );
+
+    assert_failure_with_validation_framing(&output);
+    assert!(
+        combined_output(&output).contains("cannot be used multiple times"),
+        "expected duplicate flag error details in output"
+    );
+}
+
+#[test]
+fn api_show_examples_rejects_invalid_flag_value() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec(&temp_dir, &spec_file);
+
+    let output = run_with_config_dir(
+        &temp_dir,
+        &[
+            "api",
+            "test-api",
+            "users",
+            "get-user-by-id",
+            "--show-examples=foo",
+        ],
+    );
+
+    assert_failure_with_validation_framing(&output);
+    assert!(
+        combined_output(&output).contains("unexpected value 'foo'"),
+        "expected invalid value details in output"
+    );
+}
+
+#[test]
+fn api_show_examples_rejects_missing_operation_target() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec(&temp_dir, &spec_file);
+
+    let output = run_with_config_dir(&temp_dir, &["api", "test-api", "users", "--show-examples"]);
+
+    assert_failure_with_validation_framing(&output);
+    assert!(
+        combined_output(&output).contains("unexpected argument '--show-examples'"),
+        "expected missing operation parse failure details in output"
+    );
+}
+
+#[test]
+fn api_show_examples_rejects_whitespace_operation_name() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec(&temp_dir, &spec_file);
+
+    let output = run_with_config_dir(
+        &temp_dir,
+        &["api", "test-api", "users", " ", "--show-examples"],
+    );
+
+    assert_failure_with_validation_framing(&output);
+    assert!(
+        combined_output(&output).contains("unrecognized subcommand ' '"),
+        "expected whitespace operation parse failure details in output"
     );
 }
 
