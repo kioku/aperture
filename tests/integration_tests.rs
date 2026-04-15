@@ -337,12 +337,76 @@ fn test_help_output() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Manage your collection of OpenAPI specifications",
+            "Manage Aperture configuration using domain-oriented subcommands",
         ))
-        .stdout(predicate::str::contains("add"))
-        .stdout(predicate::str::contains("list"))
-        .stdout(predicate::str::contains("remove"))
-        .stdout(predicate::str::contains("edit"));
+        .stdout(predicate::str::contains("api"))
+        .stdout(predicate::str::contains("url"))
+        .stdout(predicate::str::contains("secret"))
+        .stdout(predicate::str::contains("cache"))
+        .stdout(predicate::str::contains("setting"))
+        .stdout(predicate::str::contains("mapping"));
+}
+
+#[test]
+fn test_mapping_commands_recommend_nested_reinit_path() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_dir = temp_dir.path().to_path_buf();
+    let spec_file = temp_dir.path().join("spec.yaml");
+
+    fs::write(
+        &spec_file,
+        "openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - users
+      operationId: getUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Success
+",
+    )
+    .unwrap();
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args([
+            "config",
+            "api",
+            "add",
+            "test-api",
+            spec_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", config_dir.to_str().unwrap())
+        .args([
+            "config",
+            "mapping",
+            "set",
+            "test-api",
+            "--operation",
+            "getUserById",
+            "--alias",
+            "get",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Run 'aperture config api reinit' to apply changes.",
+        ));
 }
 
 #[tokio::test]

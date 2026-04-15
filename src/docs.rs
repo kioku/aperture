@@ -446,7 +446,7 @@ impl DocumentationGenerator {
         if self.specs.is_empty() {
             menu.push_str("## No APIs Configured\n\n");
             menu.push_str("Get started by adding an API specification:\n");
-            menu.push_str("```bash\naperture config add myapi ./openapi.yaml\n```\n\n");
+            menu.push_str("```bash\naperture config api add myapi ./openapi.yaml\n```\n\n");
         } else {
             menu.push_str("## Your APIs\n\n");
             for (api_name, spec) in &self.specs {
@@ -463,7 +463,7 @@ impl DocumentationGenerator {
 
         // Common commands
         menu.push_str("## Common Commands\n\n");
-        menu.push_str("- `aperture config list` - List all configured APIs\n");
+        menu.push_str("- `aperture config api list` - List all configured APIs\n");
         menu.push_str("- `aperture search <term>` - Search across all APIs\n");
         menu.push_str("- `aperture commands <api>` - Show available commands for an API\n");
         menu.push_str("- `aperture run <shortcut>` - Execute using shortcuts\n");

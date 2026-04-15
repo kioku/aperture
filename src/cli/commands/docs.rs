@@ -154,7 +154,7 @@ fn render_all_api_overviews(
     let specs = load_all_specs(manager)?;
     if specs.is_empty() {
         output.info("No API specifications configured.");
-        output.info("Use 'aperture config add <name> <spec-file>' to get started.");
+        output.info("Use 'aperture config api add <name> <spec-file>' to get started.");
         return Ok(());
     }
 

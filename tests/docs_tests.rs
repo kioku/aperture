@@ -202,7 +202,7 @@ fn test_generate_interactive_menu() {
     assert!(menu.contains("## Your APIs"));
     assert!(menu.contains("**testapi** (2 operations)"));
     assert!(menu.contains("## Common Commands"));
-    assert!(menu.contains("aperture config list"));
+    assert!(menu.contains("aperture config api list"));
     assert!(menu.contains("aperture search"));
     assert!(menu.contains("aperture run"));
     assert!(menu.contains("## Tips"));
@@ -217,7 +217,7 @@ fn test_generate_interactive_menu_no_apis() {
     let menu = doc_gen.generate_interactive_menu();
 
     assert!(menu.contains("## No APIs Configured"));
-    assert!(menu.contains("aperture config add myapi ./openapi.yaml"));
+    assert!(menu.contains("aperture config api add myapi ./openapi.yaml"));
 }
 
 #[test]

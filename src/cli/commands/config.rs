@@ -386,9 +386,167 @@ enum ConfigCommandFamily {
     Mappings,
 }
 
+fn normalize_api_config_command(
+    command: crate::cli::ConfigApiCommands,
+) -> crate::cli::ConfigCommands {
+    match command {
+        crate::cli::ConfigApiCommands::Add {
+            name,
+            file_or_url,
+            force,
+            strict,
+        } => crate::cli::ConfigCommands::Add {
+            name,
+            file_or_url,
+            force,
+            strict,
+        },
+        crate::cli::ConfigApiCommands::List { verbose } => {
+            crate::cli::ConfigCommands::List { verbose }
+        }
+        crate::cli::ConfigApiCommands::Remove { name } => {
+            crate::cli::ConfigCommands::Remove { name }
+        }
+        crate::cli::ConfigApiCommands::Edit { name } => crate::cli::ConfigCommands::Edit { name },
+        crate::cli::ConfigApiCommands::Reinit { context, all } => {
+            crate::cli::ConfigCommands::Reinit { context, all }
+        }
+    }
+}
+
+fn normalize_url_config_command(
+    command: crate::cli::ConfigUrlCommands,
+) -> crate::cli::ConfigCommands {
+    match command {
+        crate::cli::ConfigUrlCommands::Set { name, url, env } => {
+            crate::cli::ConfigCommands::SetUrl { name, url, env }
+        }
+        crate::cli::ConfigUrlCommands::Get { name } => crate::cli::ConfigCommands::GetUrl { name },
+        crate::cli::ConfigUrlCommands::List => crate::cli::ConfigCommands::ListUrls {},
+    }
+}
+
+fn normalize_secret_config_command(
+    command: crate::cli::ConfigSecretCommands,
+) -> crate::cli::ConfigCommands {
+    match command {
+        crate::cli::ConfigSecretCommands::Set {
+            api_name,
+            scheme_name,
+            env,
+            interactive,
+        } => crate::cli::ConfigCommands::SetSecret {
+            api_name,
+            scheme_name,
+            env,
+            interactive,
+        },
+        crate::cli::ConfigSecretCommands::List { api_name } => {
+            crate::cli::ConfigCommands::ListSecrets { api_name }
+        }
+        crate::cli::ConfigSecretCommands::Remove {
+            api_name,
+            scheme_name,
+        } => crate::cli::ConfigCommands::RemoveSecret {
+            api_name,
+            scheme_name,
+        },
+        crate::cli::ConfigSecretCommands::Clear { api_name, force } => {
+            crate::cli::ConfigCommands::ClearSecrets { api_name, force }
+        }
+    }
+}
+
+fn normalize_cache_config_command(
+    command: crate::cli::ConfigCacheCommands,
+) -> crate::cli::ConfigCommands {
+    match command {
+        crate::cli::ConfigCacheCommands::Clear { api_name, all } => {
+            crate::cli::ConfigCommands::ClearCache { api_name, all }
+        }
+        crate::cli::ConfigCacheCommands::Stats { api_name } => {
+            crate::cli::ConfigCommands::CacheStats { api_name }
+        }
+    }
+}
+
+fn normalize_setting_config_command(
+    command: crate::cli::ConfigSettingCommands,
+) -> crate::cli::ConfigCommands {
+    match command {
+        crate::cli::ConfigSettingCommands::Set { key, value } => {
+            crate::cli::ConfigCommands::Set { key, value }
+        }
+        crate::cli::ConfigSettingCommands::Get { key, json } => {
+            crate::cli::ConfigCommands::Get { key, json }
+        }
+        crate::cli::ConfigSettingCommands::List { json } => {
+            crate::cli::ConfigCommands::Settings { json }
+        }
+    }
+}
+
+fn normalize_mapping_config_command(
+    command: crate::cli::ConfigMappingCommands,
+) -> crate::cli::ConfigCommands {
+    match command {
+        crate::cli::ConfigMappingCommands::Set {
+            api_name,
+            group,
+            operation,
+            name,
+            op_group,
+            alias,
+            remove_alias,
+            hidden,
+            visible,
+        } => crate::cli::ConfigCommands::SetMapping {
+            api_name,
+            group,
+            operation,
+            name,
+            op_group,
+            alias,
+            remove_alias,
+            hidden,
+            visible,
+        },
+        crate::cli::ConfigMappingCommands::List { api_name } => {
+            crate::cli::ConfigCommands::ListMappings { api_name }
+        }
+        crate::cli::ConfigMappingCommands::Remove {
+            api_name,
+            group,
+            operation,
+        } => crate::cli::ConfigCommands::RemoveMapping {
+            api_name,
+            group,
+            operation,
+        },
+    }
+}
+
+fn normalize_config_command(command: crate::cli::ConfigCommands) -> crate::cli::ConfigCommands {
+    match command {
+        crate::cli::ConfigCommands::Api { command } => normalize_api_config_command(command),
+        crate::cli::ConfigCommands::Url { command } => normalize_url_config_command(command),
+        crate::cli::ConfigCommands::Secret { command } => normalize_secret_config_command(command),
+        crate::cli::ConfigCommands::Cache { command } => normalize_cache_config_command(command),
+        crate::cli::ConfigCommands::Setting { command } => {
+            normalize_setting_config_command(command)
+        }
+        crate::cli::ConfigCommands::Mapping { command } => {
+            normalize_mapping_config_command(command)
+        }
+        legacy => legacy,
+    }
+}
+
 const fn config_command_family(command: &crate::cli::ConfigCommands) -> ConfigCommandFamily {
     match command {
-        crate::cli::ConfigCommands::Add { .. }
+        crate::cli::ConfigCommands::Api { .. }
+        | crate::cli::ConfigCommands::Url { .. }
+        | crate::cli::ConfigCommands::Add { .. }
         | crate::cli::ConfigCommands::List { .. }
         | crate::cli::ConfigCommands::Remove { .. }
         | crate::cli::ConfigCommands::Edit { .. }
@@ -396,16 +554,20 @@ const fn config_command_family(command: &crate::cli::ConfigCommands) -> ConfigCo
         | crate::cli::ConfigCommands::GetUrl { .. }
         | crate::cli::ConfigCommands::ListUrls {}
         | crate::cli::ConfigCommands::Reinit { .. } => ConfigCommandFamily::Specs,
-        crate::cli::ConfigCommands::ClearCache { .. }
+        crate::cli::ConfigCommands::Cache { .. }
+        | crate::cli::ConfigCommands::ClearCache { .. }
         | crate::cli::ConfigCommands::CacheStats { .. } => ConfigCommandFamily::Cache,
-        crate::cli::ConfigCommands::SetSecret { .. }
+        crate::cli::ConfigCommands::Secret { .. }
+        | crate::cli::ConfigCommands::SetSecret { .. }
         | crate::cli::ConfigCommands::ListSecrets { .. }
         | crate::cli::ConfigCommands::RemoveSecret { .. }
         | crate::cli::ConfigCommands::ClearSecrets { .. } => ConfigCommandFamily::Secrets,
-        crate::cli::ConfigCommands::Set { .. }
+        crate::cli::ConfigCommands::Setting { .. }
+        | crate::cli::ConfigCommands::Set { .. }
         | crate::cli::ConfigCommands::Get { .. }
         | crate::cli::ConfigCommands::Settings { .. } => ConfigCommandFamily::Settings,
-        crate::cli::ConfigCommands::SetMapping { .. }
+        crate::cli::ConfigCommands::Mapping { .. }
+        | crate::cli::ConfigCommands::SetMapping { .. }
         | crate::cli::ConfigCommands::ListMappings { .. }
         | crate::cli::ConfigCommands::RemoveMapping { .. } => ConfigCommandFamily::Mappings,
     }
@@ -580,6 +742,7 @@ pub async fn execute_config_command(
     command: crate::cli::ConfigCommands,
     output: &Output,
 ) -> Result<(), Error> {
+    let command = normalize_config_command(command);
     match config_command_family(&command) {
         ConfigCommandFamily::Specs => execute_specs_config_command(manager, command, output).await,
         ConfigCommandFamily::Cache => execute_cache_config_command(manager, command, output).await,
@@ -947,7 +1110,7 @@ pub fn handle_set_mapping(
         output.success(format!(
             "Set group mapping for '{api_name}': '{original}' → '{new_name}'"
         ));
-        output.info("Run 'aperture config reinit' to apply changes.");
+        output.info("Run 'aperture config api reinit' to apply changes.");
         return Ok(());
     }
 
@@ -968,7 +1131,7 @@ pub fn handle_set_mapping(
         "Set operation mapping for '{api_name}': '{op_id}' → {}",
         describe_mapping_changes(name, op_group, alias, remove_alias, hidden, visible)
     ));
-    output.info("Run 'aperture config reinit' to apply changes.");
+    output.info("Run 'aperture config api reinit' to apply changes.");
     Ok(())
 }
 
@@ -1047,7 +1210,7 @@ pub fn handle_remove_mapping(
             ));
         }
     }
-    output.info("Run 'aperture config reinit' to apply changes.");
+    output.info("Run 'aperture config api reinit' to apply changes.");
     Ok(())
 }
 

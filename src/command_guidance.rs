@@ -1,12 +1,12 @@
 //! Canonical command guidance used in user-facing hints and remediation text.
 
-pub const CMD_CONFIG_SET_SECRET: &str = "aperture config set-secret";
-pub const CMD_CONFIG_LIST_SECRETS: &str = "aperture config list-secrets";
-pub const CMD_CONFIG_REMOVE_SECRET: &str = "aperture config remove-secret";
-pub const CMD_CONFIG_CLEAR_SECRETS: &str = "aperture config clear-secrets";
-pub const CMD_CONFIG_REINIT: &str = "aperture config reinit";
-pub const CMD_CONFIG_ADD: &str = "aperture config add";
-pub const CMD_CONFIG_SETTINGS: &str = "aperture config settings";
+pub const CMD_CONFIG_SET_SECRET: &str = "aperture config secret set";
+pub const CMD_CONFIG_LIST_SECRETS: &str = "aperture config secret list";
+pub const CMD_CONFIG_REMOVE_SECRET: &str = "aperture config secret remove";
+pub const CMD_CONFIG_CLEAR_SECRETS: &str = "aperture config secret clear";
+pub const CMD_CONFIG_REINIT: &str = "aperture config api reinit";
+pub const CMD_CONFIG_ADD: &str = "aperture config api add";
+pub const CMD_CONFIG_SETTINGS: &str = "aperture config setting list";
 pub const CMD_HELP_WITH_DESCRIBE_JSON: &str =
     "Check available operations with --help or --describe-json";
 pub const CMD_HELP_WITH_DESCRIBE_JSON_COMMANDS: &str =

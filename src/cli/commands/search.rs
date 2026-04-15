@@ -17,7 +17,7 @@ pub fn execute_search_command(
 ) -> Result<(), Error> {
     let specs = manager.list_specs()?;
     if specs.is_empty() {
-        output.info("No API specifications found. Use 'aperture config add' to register APIs.");
+        output.info("No API specifications found. Use 'aperture config api add' to register APIs.");
         return Ok(());
     }
 

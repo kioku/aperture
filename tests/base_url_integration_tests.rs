@@ -639,36 +639,42 @@ fn test_multiple_apis_url_management() {
 
 #[test]
 fn test_help_includes_new_commands() {
-    // Test that help shows the new URL management commands
+    // Top-level config help should expose nested domains.
     aperture_cmd()
         .args(["config", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("set-url"))
-        .stdout(predicate::str::contains("get-url"))
-        .stdout(predicate::str::contains("list-urls"));
+        .stdout(predicate::str::contains("url"))
+        .stdout(predicate::str::contains("secret"))
+        .stdout(predicate::str::contains("cache"))
+        .stdout(predicate::str::contains("setting"))
+        .stdout(predicate::str::contains("mapping"));
 
-    // Test individual command help
+    // Domain help should expose grouped URL verbs.
+    aperture_cmd()
+        .args(["config", "url", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("set"))
+        .stdout(predicate::str::contains("get"))
+        .stdout(predicate::str::contains("list"));
+
+    // Nested command help should work for the new taxonomy.
+    aperture_cmd()
+        .args(["config", "url", "set", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Set base URL for an API specification",
+        ))
+        .stdout(predicate::str::contains("--env"));
+
+    // Legacy flat command path remains available for compatibility.
     aperture_cmd()
         .args(["config", "set-url", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
             "Set the base URL for an API specification",
-        ))
-        .stdout(predicate::str::contains("--env"));
-
-    aperture_cmd()
-        .args(["config", "get-url", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "Display the base URL configuration",
         ));
-
-    aperture_cmd()
-        .args(["config", "list-urls", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Display all configured base URLs"));
 }

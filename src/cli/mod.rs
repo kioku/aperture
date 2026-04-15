@@ -28,9 +28,9 @@ pub enum OutputFormat {
                   OpenAPI specs and creating a rich command-line interface with built-in\n\
                   security, caching, and agent-friendly features.\n\n\
                   Examples:\n  \
-                  aperture config add myapi api-spec.yaml\n  \
+                  aperture config api add myapi api-spec.yaml\n  \
                   aperture api myapi users get-user --id 123\n  \
-                  aperture config list\n\n\
+                  aperture config api list\n\n\
                   Agent-friendly features:\n  \
                   aperture api myapi --describe-json    # Get capability manifest\n  \
                   aperture --json-errors api myapi ...  # Structured error output\n  \
@@ -216,11 +216,19 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Manage API specifications (add, list, remove, edit)
-    #[command(long_about = "Manage your collection of OpenAPI specifications.\n\n\
-                      Add specifications to make their operations available as commands,\n\
-                      list currently registered specs, remove unused ones, or edit\n\
-                      existing specifications in your default editor.")]
+    /// Manage configuration in domain-specific groups
+    #[command(
+        long_about = "Manage Aperture configuration using domain-oriented subcommands.\n\n\
+                      Domains are organized by administrative area:\n\
+                      - api: specification lifecycle (add/list/remove/edit/reinit)\n\
+                      - url: base URL overrides and environment URL sets\n\
+                      - secret: authentication secret mappings\n\
+                      - cache: response cache operations\n\
+                      - setting: global CLI settings\n\
+                      - mapping: command tree customization\n\n\
+                      Legacy flat commands are still accepted for compatibility\n\
+                      during migration."
+    )]
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
@@ -355,7 +363,244 @@ pub enum Commands {
 }
 
 #[derive(Subcommand, Debug, Clone)]
+pub enum ConfigApiCommands {
+    /// Add a new API specification from a file or URL
+    Add {
+        /// Name to identify this API specification (used as context in 'aperture api').
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        name: String,
+        /// Path to the `OpenAPI` 3.x specification file (YAML format) or URL
+        file_or_url: String,
+        /// Overwrite existing specification if it already exists
+        #[arg(long, help = "Replace the specification if it already exists")]
+        force: bool,
+        /// Reject specs with unsupported features instead of skipping endpoints
+        #[arg(
+            long,
+            help = "Reject entire spec if any endpoints have unsupported content types (e.g., multipart/form-data, XML). Default behavior skips unsupported endpoints with warnings."
+        )]
+        strict: bool,
+    },
+    /// List all registered API specifications
+    List {
+        /// Show detailed information including skipped endpoints
+        #[arg(long, help = "Show detailed information about each API")]
+        verbose: bool,
+    },
+    /// Remove an API specification from configuration
+    Remove {
+        /// Name of the API specification to remove.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        name: String,
+    },
+    /// Edit an API specification in your default editor
+    Edit {
+        /// Name of the API specification to edit.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        name: String,
+    },
+    /// Re-initialize cached specifications
+    Reinit {
+        /// Name of the API specification to reinitialize (omit for --all).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        context: Option<String>,
+        /// Reinitialize all cached specifications
+        #[arg(long, conflicts_with = "context", help = "Reinitialize all specs")]
+        all: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigUrlCommands {
+    /// Set base URL for an API specification
+    Set {
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        name: String,
+        /// The base URL to set
+        url: String,
+        /// Set URL for a specific environment (e.g., dev, staging, prod)
+        #[arg(long, value_name = "ENV", help = "Set URL for specific environment")]
+        env: Option<String>,
+    },
+    /// Get base URL configuration for an API specification
+    Get {
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        name: String,
+    },
+    /// List all configured base URLs
+    List,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigSecretCommands {
+    /// Set secret configuration for an API specification security scheme
+    Set {
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        api_name: String,
+        /// Name of the security scheme (omit for interactive mode)
+        scheme_name: Option<String>,
+        /// Environment variable name containing the secret
+        #[arg(long, value_name = "VAR", help = "Environment variable name")]
+        env: Option<String>,
+        /// Interactive mode to configure all undefined secrets
+        #[arg(long, conflicts_with_all = ["scheme_name", "env"], help = "Configure secrets interactively")]
+        interactive: bool,
+    },
+    /// List configured secrets for an API specification
+    List {
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        api_name: String,
+    },
+    /// Remove a specific configured secret for an API specification
+    Remove {
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        api_name: String,
+        /// Name of the security scheme to remove
+        scheme_name: String,
+    },
+    /// Clear all configured secrets for an API specification
+    Clear {
+        /// Name of the API specification.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        api_name: String,
+        /// Skip confirmation prompt
+        #[arg(long, help = "Skip confirmation prompt")]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigCacheCommands {
+    /// Clear response cache
+    Clear {
+        /// Name of the API specification to clear cache for (omit for --all).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        api_name: Option<String>,
+        /// Clear all cached responses
+        #[arg(long, conflicts_with = "api_name", help = "Clear all response cache")]
+        all: bool,
+    },
+    /// Show response cache statistics
+    Stats {
+        /// Name of the API specification to show stats for (omit for all APIs).
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        api_name: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigSettingCommands {
+    /// Set a global configuration setting
+    Set {
+        /// Setting key (use `config setting list` to see all available keys)
+        key: String,
+        /// Value to set (validated against expected type)
+        value: String,
+    },
+    /// Get a global configuration setting value
+    Get {
+        /// Setting key to retrieve (use `config setting list` to see all available keys)
+        key: String,
+        /// Output as JSON
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+    },
+    /// List all available configuration settings
+    List {
+        /// Output as JSON
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum ConfigMappingCommands {
+    /// Set a command mapping for an API specification
+    Set {
+        /// Name of the API specification.
+        api_name: String,
+        /// Rename a tag group: `--group <original> <new_name>`
+        #[arg(long, num_args = 2, value_names = ["ORIGINAL", "NEW_NAME"], conflicts_with = "operation")]
+        group: Option<Vec<String>>,
+        /// Target an operation by its operationId
+        #[arg(long, value_name = "OPERATION_ID")]
+        operation: Option<String>,
+        /// Set the subcommand name for an operation
+        #[arg(long, requires = "operation", value_name = "NAME")]
+        name: Option<String>,
+        /// Set the group for an operation (overrides tag)
+        #[arg(long = "op-group", requires = "operation", value_name = "GROUP")]
+        op_group: Option<String>,
+        /// Add an alias for an operation
+        #[arg(long, requires = "operation", value_name = "ALIAS")]
+        alias: Option<String>,
+        /// Remove an alias from an operation
+        #[arg(long, requires = "operation", value_name = "ALIAS")]
+        remove_alias: Option<String>,
+        /// Mark an operation as hidden from help output
+        #[arg(long, requires = "operation")]
+        hidden: bool,
+        /// Mark an operation as visible (unhide)
+        #[arg(long, requires = "operation", conflicts_with = "hidden")]
+        visible: bool,
+    },
+    /// List command mappings for an API specification
+    List {
+        /// Name of the API specification.
+        api_name: String,
+    },
+    /// Remove a command mapping for an API specification
+    Remove {
+        /// Name of the API specification.
+        api_name: String,
+        /// Remove a group mapping by original tag name
+        #[arg(long, value_name = "ORIGINAL", conflicts_with = "operation")]
+        group: Option<String>,
+        /// Remove an operation mapping by operationId
+        #[arg(long, value_name = "OPERATION_ID")]
+        operation: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
 pub enum ConfigCommands {
+    /// API specification administration
+    Api {
+        #[command(subcommand)]
+        command: ConfigApiCommands,
+    },
+    /// Base URL override administration
+    Url {
+        #[command(subcommand)]
+        command: ConfigUrlCommands,
+    },
+    /// Secret mapping administration
+    Secret {
+        #[command(subcommand)]
+        command: ConfigSecretCommands,
+    },
+    /// Response cache administration
+    Cache {
+        #[command(subcommand)]
+        command: ConfigCacheCommands,
+    },
+    /// Global setting administration
+    Setting {
+        #[command(subcommand)]
+        command: ConfigSettingCommands,
+    },
+    /// Command mapping administration
+    Mapping {
+        #[command(subcommand)]
+        command: ConfigMappingCommands,
+    },
+
+    #[command(hide = true)]
     /// Add a new API specification from a file
     #[command(
         long_about = "Add an OpenAPI 3.x specification to your configuration.\n\n\
@@ -384,6 +629,7 @@ pub enum ConfigCommands {
         )]
         strict: bool,
     },
+    #[command(hide = true)]
     /// List all registered API specifications
     #[command(
         long_about = "Display all currently registered API specifications.\n\n\
@@ -395,6 +641,7 @@ pub enum ConfigCommands {
         #[arg(long, help = "Show detailed information about each API")]
         verbose: bool,
     },
+    #[command(hide = true)]
     /// Remove an API specification from configuration
     #[command(
         long_about = "Remove a registered API specification and its cached data.\n\n\
@@ -407,6 +654,7 @@ pub enum ConfigCommands {
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
+    #[command(hide = true)]
     /// Edit an API specification in your default editor
     #[command(
         long_about = "Open an API specification in your default text editor.\n\n\
@@ -422,6 +670,7 @@ pub enum ConfigCommands {
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
+    #[command(hide = true)]
     /// Set base URL for an API specification
     #[command(long_about = "Set the base URL for an API specification.\n\n\
                       This overrides the base URL from the OpenAPI spec and the\n\
@@ -441,6 +690,7 @@ pub enum ConfigCommands {
         #[arg(long, value_name = "ENV", help = "Set URL for specific environment")]
         env: Option<String>,
     },
+    #[command(hide = true)]
     /// Get base URL configuration for an API specification
     #[command(
         long_about = "Display the base URL configuration for an API specification.\n\n\
@@ -455,6 +705,7 @@ pub enum ConfigCommands {
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
+    #[command(hide = true)]
     /// List all configured base URLs
     #[command(
         long_about = "Display all configured base URLs across all API specifications.\n\n\
@@ -463,6 +714,7 @@ pub enum ConfigCommands {
                       at a glance."
     )]
     ListUrls {},
+    #[command(hide = true)]
     /// Set secret configuration for an API specification security scheme
     #[command(
         long_about = "Configure authentication secrets for API specifications.\n\n\
@@ -487,6 +739,7 @@ pub enum ConfigCommands {
         #[arg(long, conflicts_with_all = ["scheme_name", "env"], help = "Configure secrets interactively")]
         interactive: bool,
     },
+    #[command(hide = true)]
     /// List configured secrets for an API specification
     #[command(
         long_about = "Display configured secret mappings for an API specification.\n\n\
@@ -501,6 +754,7 @@ pub enum ConfigCommands {
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: String,
     },
+    #[command(hide = true)]
     /// Remove a specific configured secret for an API specification
     #[command(
         long_about = "Remove a configured secret mapping for a specific security scheme.\n\n\
@@ -518,6 +772,7 @@ pub enum ConfigCommands {
         /// Name of the security scheme to remove
         scheme_name: String,
     },
+    #[command(hide = true)]
     /// Clear all configured secrets for an API specification
     #[command(
         long_about = "Remove all configured secret mappings for an API specification.\n\n\
@@ -536,6 +791,7 @@ pub enum ConfigCommands {
         #[arg(long, help = "Skip confirmation prompt")]
         force: bool,
     },
+    #[command(hide = true)]
     /// Re-initialize cached specifications
     #[command(
         long_about = "Regenerate binary cache files for API specifications.\n\n\
@@ -554,6 +810,7 @@ pub enum ConfigCommands {
         #[arg(long, conflicts_with = "context", help = "Reinitialize all specs")]
         all: bool,
     },
+    #[command(hide = true)]
     /// Clear response cache
     #[command(long_about = "Clear cached API responses to free up disk space.\n\n\
                       You can clear cache for a specific API or all cached responses.\n\
@@ -570,6 +827,7 @@ pub enum ConfigCommands {
         #[arg(long, conflicts_with = "api_name", help = "Clear all response cache")]
         all: bool,
     },
+    #[command(hide = true)]
     /// Show response cache statistics
     #[command(long_about = "Display statistics about cached API responses.\n\n\
                       Shows cache size, number of entries, and hit/miss rates.\n\
@@ -582,6 +840,7 @@ pub enum ConfigCommands {
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         api_name: Option<String>,
     },
+    #[command(hide = true)]
     /// Set a global configuration setting
     #[command(long_about = "Set a global configuration setting value.\n\n\
                       Supports dot-notation for nested settings and type-safe validation.\n\
@@ -602,6 +861,7 @@ pub enum ConfigCommands {
         /// Value to set (validated against expected type)
         value: String,
     },
+    #[command(hide = true)]
     /// Get a global configuration setting value
     #[command(
         long_about = "Get the current value of a global configuration setting.\n\n\
@@ -619,6 +879,7 @@ pub enum ConfigCommands {
         #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(hide = true)]
     /// List all available configuration settings
     #[command(
         long_about = "Display all available configuration settings and their current values.\n\n\
@@ -633,6 +894,7 @@ pub enum ConfigCommands {
         #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(hide = true)]
     /// Set a command mapping for an API specification
     #[command(
         name = "set-mapping",
@@ -674,6 +936,7 @@ pub enum ConfigCommands {
         #[arg(long, requires = "operation", conflicts_with = "hidden")]
         visible: bool,
     },
+    #[command(hide = true)]
     /// List command mappings for an API specification
     #[command(
         name = "list-mappings",
@@ -686,6 +949,7 @@ pub enum ConfigCommands {
         /// Name of the API specification.
         api_name: String,
     },
+    #[command(hide = true)]
     /// Remove a command mapping for an API specification
     #[command(
         name = "remove-mapping",
@@ -710,8 +974,8 @@ pub enum ConfigCommands {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands};
-    use clap::Parser;
+    use super::{Cli, Commands, ConfigCommands, ConfigUrlCommands};
+    use clap::{CommandFactory, Parser};
 
     #[test]
     fn commands_canonical_name_parses() {
@@ -755,5 +1019,123 @@ mod tests {
             }
             other => panic!("expected Commands::Exec, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn config_nested_url_set_parses() {
+        let cli = Cli::try_parse_from([
+            "aperture",
+            "config",
+            "url",
+            "set",
+            "my-api",
+            "https://api.example.com",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Config {
+                command:
+                    ConfigCommands::Url {
+                        command: ConfigUrlCommands::Set { name, url, env },
+                    },
+            } => {
+                assert_eq!(name, "my-api");
+                assert_eq!(url, "https://api.example.com");
+                assert!(env.is_none());
+            }
+            other => panic!("expected nested url set command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn config_legacy_set_url_parses_for_compatibility() {
+        let cli = Cli::try_parse_from([
+            "aperture",
+            "config",
+            "set-url",
+            "my-api",
+            "https://api.example.com",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Config {
+                command: ConfigCommands::SetUrl { name, url, env },
+            } => {
+                assert_eq!(name, "my-api");
+                assert_eq!(url, "https://api.example.com");
+                assert!(env.is_none());
+            }
+            other => panic!("expected legacy set-url command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn config_help_lists_domain_commands() {
+        let mut command = Cli::command();
+        let config_command = command
+            .find_subcommand_mut("config")
+            .expect("config command should exist");
+        let mut help = Vec::new();
+        config_command
+            .write_long_help(&mut help)
+            .expect("config help should render");
+        let help = String::from_utf8(help).expect("help should be valid UTF-8");
+
+        for domain in ["api", "url", "secret", "cache", "setting", "mapping"] {
+            assert!(
+                help.contains(domain),
+                "config help should include domain '{domain}', got:\n{help}"
+            );
+        }
+
+        assert!(!help.contains("set-url"));
+        assert!(!help.contains("list-urls"));
+    }
+
+    #[test]
+    fn config_rejects_unknown_domain() {
+        let err = Cli::try_parse_from(["aperture", "config", "unknown-domain"]).unwrap_err();
+        let err = err.to_string();
+
+        assert!(err.contains("unrecognized subcommand 'unknown-domain'"));
+    }
+
+    #[test]
+    fn config_nested_url_set_rejects_extra_argument() {
+        let err = Cli::try_parse_from([
+            "aperture",
+            "config",
+            "url",
+            "set",
+            "my-api",
+            "https://api.example.com",
+            "extra",
+        ])
+        .unwrap_err();
+        let err = err.to_string();
+
+        assert!(err.contains("unexpected argument 'extra'"));
+    }
+
+    #[test]
+    fn config_nested_url_set_rejects_duplicate_env_flags() {
+        let err = Cli::try_parse_from([
+            "aperture",
+            "config",
+            "url",
+            "set",
+            "my-api",
+            "--env",
+            "dev",
+            "--env",
+            "prod",
+            "https://api.example.com",
+        ])
+        .unwrap_err();
+        let err = err.to_string();
+
+        assert!(err.contains("cannot be used multiple times"));
     }
 }

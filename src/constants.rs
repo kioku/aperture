@@ -120,7 +120,8 @@ pub const ERR_OPENAPI_FORMAT: &str =
 
 // CLI Messages
 pub const MSG_USE_HELP: &str = "Use --help to see available commands.";
-pub const MSG_USE_CONFIG_LIST: &str = "Use 'aperture config list' to see available specifications.";
+pub const MSG_USE_CONFIG_LIST: &str =
+    "Use 'aperture config api list' to see available specifications.";
 pub const MSG_WARNING_PREFIX: &str = "Warning:";
 
 // Default Values
