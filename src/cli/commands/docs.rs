@@ -45,7 +45,7 @@ pub fn execute_help_command(
 ) -> Result<(), Error> {
     match (api_name, tag, operation) {
         (None, None, None) => render_interactive_menu(manager),
-        (Some(api), None, None) => render_api_overview(manager, api),
+        (Some(api), None, None) => render_api_reference_index(manager, api),
         (Some(api), Some(tag), Some(op)) => {
             render_command_help(manager, api, tag, op, enhanced, output)
         }
@@ -66,12 +66,15 @@ fn render_interactive_menu(manager: &ConfigManager<OsFileSystem>) -> Result<(), 
     Ok(())
 }
 
-fn render_api_overview(manager: &ConfigManager<OsFileSystem>, api: &str) -> Result<(), Error> {
+fn render_api_reference_index(
+    manager: &ConfigManager<OsFileSystem>,
+    api: &str,
+) -> Result<(), Error> {
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
-    let overview = doc_gen.generate_api_overview(api)?;
+    let reference = doc_gen.generate_api_reference_index(api)?;
     // ast-grep-ignore: no-println
-    println!("{overview}");
+    println!("{reference}");
     Ok(())
 }
 
@@ -104,7 +107,7 @@ fn print_invalid_docs_usage() -> ! {
     // ast-grep-ignore: no-println
     eprintln!("  aperture docs                        # Interactive menu");
     // ast-grep-ignore: no-println
-    eprintln!("  aperture docs <api>                  # API overview");
+    eprintln!("  aperture docs <api>                  # API reference index");
     // ast-grep-ignore: no-println
     eprintln!("  aperture docs <api> <tag> <operation> # Command help");
     std::process::exit(1);
