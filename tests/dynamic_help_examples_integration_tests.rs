@@ -36,12 +36,16 @@ paths:
     spec_file
 }
 
-fn add_spec(temp_dir: &TempDir, spec_file: &std::path::Path) {
+fn add_spec_named(temp_dir: &TempDir, name: &str, spec_file: &std::path::Path) {
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", temp_dir.path())
-        .args(["config", "add", "test-api", spec_file.to_str().unwrap()])
+        .args(["config", "add", name, spec_file.to_str().unwrap()])
         .assert()
         .success();
+}
+
+fn add_spec(temp_dir: &TempDir, spec_file: &std::path::Path) {
+    add_spec_named(temp_dir, "test-api", spec_file);
 }
 
 fn run_with_config_dir(temp_dir: &TempDir, args: &[&str]) -> Output {
@@ -291,5 +295,56 @@ fn exec_show_examples_succeeds_without_required_runtime_arguments() {
     assert!(
         combined.contains("Resolved shortcut to:") && combined.contains("Command: get-user-by-id"),
         "expected resolved examples output; got {combined}"
+    );
+}
+
+#[test]
+fn exec_api_filter_disambiguates_multi_api_shortcuts() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec_named(&temp_dir, "users-a", &spec_file);
+    add_spec_named(&temp_dir, "users-b", &spec_file);
+
+    let output = run_with_config_dir(
+        &temp_dir,
+        &["exec", "--api", "users-a", "get-user-by-id", "--help"],
+    );
+
+    assert_success_without_validation_framing(&output);
+    let combined = combined_output(&output);
+    assert!(
+        combined.contains("Resolved shortcut to: aperture api users-a users get-user-by-id"),
+        "expected API-scoped resolution output; got {combined}"
+    );
+}
+
+#[test]
+fn exec_ambiguity_output_explains_api_disambiguation() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec_named(&temp_dir, "users-a", &spec_file);
+    add_spec_named(&temp_dir, "users-b", &spec_file);
+
+    let output = run_with_config_dir(&temp_dir, &["exec", "get-user-by-id", "--help"]);
+
+    assert!(
+        !output.status.success(),
+        "expected ambiguity failure; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let combined = combined_output(&output);
+    assert!(
+        combined.contains("Multiple commands match this shortcut"),
+        "expected explicit ambiguity header; got {combined}"
+    );
+    assert!(
+        combined.contains("--api <name>"),
+        "expected API narrowing guidance; got {combined}"
+    );
+    assert!(
+        combined.contains("[api: users-a]") && combined.contains("[api: users-b]"),
+        "expected per-API suggestions; got {combined}"
     );
 }

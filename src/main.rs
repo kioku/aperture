@@ -66,9 +66,17 @@ fn run_search_command(
 async fn run_shortcut_command(
     manager: &ConfigManager<OsFileSystem>,
     args: &[String],
+    api: Option<&str>,
     cli: &Cli,
 ) -> Result<(), Error> {
-    aperture_cli::cli::commands::api::execute_shortcut_command(manager, args.to_vec(), cli).await
+    let validated_api = api.map(validate_api_name).transpose()?;
+    aperture_cli::cli::commands::api::execute_shortcut_command(
+        manager,
+        args.to_vec(),
+        validated_api.as_deref(),
+        cli,
+    )
+    .await
 }
 
 fn run_docs_command(
@@ -118,7 +126,9 @@ async fn run_non_config_command(
             api,
             verbose,
         } => run_search_command(manager, query, api.as_deref(), *verbose, output),
-        Commands::Exec { args } => run_shortcut_command(manager, args, cli).await,
+        Commands::Exec { api, args } => {
+            run_shortcut_command(manager, args, api.as_deref(), cli).await
+        }
         Commands::Docs {
             api,
             tag,

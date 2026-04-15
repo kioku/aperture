@@ -290,10 +290,19 @@ pub enum Commands {
                       When multiple matches are found, you'll get suggestions to choose from.\n\n\
                       Examples:\n  \
                       aperture exec getUserById --id 123\n  \
+                      aperture exec --api billing getUserById --id 123\n  \
                       aperture exec GET /users/123\n  \
                       aperture exec users list"
     )]
     Exec {
+        /// Limit shortcut resolution to a specific API context.
+        /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
+        #[arg(
+            long,
+            value_name = "API",
+            help = "Resolve shortcuts only within specified API"
+        )]
+        api: Option<String>,
         /// Shortcut command arguments
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,

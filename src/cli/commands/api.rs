@@ -454,6 +454,7 @@ fn render_batch_text_summary(result: &crate::batch::BatchResult, output: &Output
 pub async fn execute_shortcut_command(
     manager: &ConfigManager<OsFileSystem>,
     args: Vec<String>,
+    api_filter: Option<&str>,
     cli: &Cli,
 ) -> Result<(), Error> {
     let output = Output::new(cli.quiet, cli.json_errors);
@@ -468,7 +469,7 @@ pub async fn execute_shortcut_command(
         return Ok(());
     }
 
-    let all_specs = load_shortcut_specs(manager, &specs);
+    let all_specs = load_shortcut_specs(manager, &specs, api_filter)?;
     if all_specs.is_empty() {
         output.info("No valid API specifications found.");
         return Ok(());
@@ -482,10 +483,21 @@ pub async fn execute_shortcut_command(
 fn load_shortcut_specs(
     manager: &ConfigManager<OsFileSystem>,
     specs: &[String],
-) -> std::collections::BTreeMap<String, crate::cache::models::CachedSpec> {
+    api_filter: Option<&str>,
+) -> Result<std::collections::BTreeMap<String, crate::cache::models::CachedSpec>, Error> {
+    let selected_specs: Vec<&String> = match api_filter {
+        Some(api_name) => {
+            let Some(spec_name) = specs.iter().find(|spec| spec.as_str() == api_name) else {
+                return Err(Error::spec_not_found(api_name));
+            };
+            vec![spec_name]
+        }
+        None => specs.iter().collect(),
+    };
+
     let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
     let mut all_specs = std::collections::BTreeMap::new();
-    for spec_name in specs {
+    for spec_name in selected_specs {
         match loader::load_cached_spec(&cache_dir, spec_name) {
             Ok(spec) => {
                 all_specs.insert(spec_name.clone(), spec);
@@ -493,7 +505,7 @@ fn load_shortcut_specs(
             Err(e) => tracing::warn!(spec = spec_name, error = %e, "could not load spec"),
         }
     }
-    all_specs
+    Ok(all_specs)
 }
 
 async fn handle_shortcut_resolution(
@@ -556,6 +568,8 @@ fn print_shortcut_usage() -> ! {
     eprintln!("Examples:");
     // ast-grep-ignore: no-println
     eprintln!("  aperture exec getUserById --id 123");
+    // ast-grep-ignore: no-println
+    eprintln!("  aperture exec --api billing getUserById --id 123");
     // ast-grep-ignore: no-println
     eprintln!("  aperture exec GET /users/123");
     // ast-grep-ignore: no-println
