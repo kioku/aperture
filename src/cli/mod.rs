@@ -259,10 +259,13 @@ pub enum Commands {
                       The context refers to the name you gave when adding the spec.\n\
                       Commands are dynamically generated based on the OpenAPI specification,\n\
                       organized by tags (e.g., 'users', 'posts', 'orders').\n\n\
+                      Running only `aperture api <context>` shows a human-oriented landing\n\
+                      overview with discovery and execution next steps.\n\n\
                       Examples:\n  \
+                      aperture api myapi                    # Landing overview\n  \
                       aperture api myapi users get-user --id 123\n  \
                       aperture api myapi posts create-post --body '{\"title\":\"Hello\"}'\n  \
-                      aperture api myapi --help  # See available operations"
+                      aperture api myapi --help             # See available operations"
     )]
     Api {
         /// Name of the API specification context.

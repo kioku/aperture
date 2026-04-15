@@ -20,10 +20,13 @@ aperture config add my-api https://api.example.com/openapi.yaml
 # List registered APIs
 aperture config list
 
+# Land in an API context (overview + next actions)
+aperture api my-api
+
 # List commands for an API
 aperture commands my-api
 
-# Get detailed command information
+# Get detailed command information (machine-oriented)
 aperture api my-api --describe-json
 ```
 
@@ -288,10 +291,10 @@ aperture run users list
 
 Use this human workflow for discovery:
 
-1. **Orient** with `overview`
+1. **Land** with `api <context>`
 2. **Find** with `search`
 3. **Inspect** with `docs`
-4. **Execute** with `api`
+4. **Execute** with `api <context> <tag> <operation>`
 
 ### Overview
 
