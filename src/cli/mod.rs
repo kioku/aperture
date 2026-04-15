@@ -1093,4 +1093,49 @@ mod tests {
         assert!(!help.contains("set-url"));
         assert!(!help.contains("list-urls"));
     }
+
+    #[test]
+    fn config_rejects_unknown_domain() {
+        let err = Cli::try_parse_from(["aperture", "config", "unknown-domain"]).unwrap_err();
+        let err = err.to_string();
+
+        assert!(err.contains("unrecognized subcommand 'unknown-domain'"));
+    }
+
+    #[test]
+    fn config_nested_url_set_rejects_extra_argument() {
+        let err = Cli::try_parse_from([
+            "aperture",
+            "config",
+            "url",
+            "set",
+            "my-api",
+            "https://api.example.com",
+            "extra",
+        ])
+        .unwrap_err();
+        let err = err.to_string();
+
+        assert!(err.contains("unexpected argument 'extra'"));
+    }
+
+    #[test]
+    fn config_nested_url_set_rejects_duplicate_env_flags() {
+        let err = Cli::try_parse_from([
+            "aperture",
+            "config",
+            "url",
+            "set",
+            "my-api",
+            "--env",
+            "dev",
+            "--env",
+            "prod",
+            "https://api.example.com",
+        ])
+        .unwrap_err();
+        let err = err.to_string();
+
+        assert!(err.contains("cannot be used multiple times"));
+    }
 }
