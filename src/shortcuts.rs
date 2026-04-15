@@ -235,6 +235,39 @@ impl ShortcutResolver {
         }
     }
 
+    fn deduplicate_candidates(candidates: Vec<ResolvedShortcut>) -> Vec<ResolvedShortcut> {
+        let mut deduped: Vec<ResolvedShortcut> = Vec::new();
+        let mut seen_indexes: HashMap<Vec<String>, usize> = HashMap::new();
+
+        for candidate in candidates {
+            match seen_indexes.get(&candidate.full_command).copied() {
+                Some(existing_index)
+                    if candidate.confidence > deduped[existing_index].confidence =>
+                {
+                    deduped[existing_index] = candidate;
+                }
+                Some(_) => {}
+                None => {
+                    seen_indexes.insert(candidate.full_command.clone(), deduped.len());
+                    deduped.push(candidate);
+                }
+            }
+        }
+
+        deduped
+    }
+
+    fn sort_candidates_by_confidence(candidates: &mut [ResolvedShortcut]) {
+        candidates.sort_by(|a, b| {
+            b.confidence
+                .cmp(&a.confidence)
+                .then_with(|| a.full_command.cmp(&b.full_command))
+                .then_with(|| a.command.operation_id.cmp(&b.command.operation_id))
+                .then_with(|| a.command.method.cmp(&b.command.method))
+                .then_with(|| a.command.path.cmp(&b.command.path))
+        });
+    }
+
     fn resolve_single_candidate(candidates: Vec<ResolvedShortcut>) -> ResolutionResult {
         candidates.into_iter().next().map_or_else(
             || {
@@ -248,7 +281,7 @@ impl ShortcutResolver {
     }
 
     fn resolve_best_candidate(mut candidates: Vec<ResolvedShortcut>) -> ResolutionResult {
-        candidates.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+        Self::sort_candidates_by_confidence(&mut candidates);
 
         if !Self::has_high_confidence_candidate(&candidates) {
             return ResolutionResult::Ambiguous(candidates);
@@ -268,7 +301,8 @@ impl ShortcutResolver {
             return ResolutionResult::NotFound;
         }
 
-        Self::resolve_from_candidates(self.collect_resolution_candidates(args))
+        let candidates = Self::deduplicate_candidates(self.collect_resolution_candidates(args));
+        Self::resolve_from_candidates(candidates)
     }
 
     /// Try to resolve using direct operation ID matching
@@ -393,21 +427,27 @@ impl ShortcutResolver {
     /// Generate suggestions for ambiguous matches
     #[must_use]
     pub fn format_ambiguous_suggestions(&self, matches: &[ResolvedShortcut]) -> String {
-        let mut suggestions = Vec::new();
+        let mut candidates = Self::deduplicate_candidates(matches.to_vec());
+        Self::sort_candidates_by_confidence(&mut candidates);
 
-        for (i, shortcut) in matches.iter().take(5).enumerate() {
+        let mut suggestions = Vec::new();
+        for (i, shortcut) in candidates.iter().take(5).enumerate() {
             let cmd = shortcut.full_command.join(" ");
+            let api_name = shortcut
+                .full_command
+                .get(1)
+                .map_or("unknown", String::as_str);
             let desc = shortcut
                 .command
                 .description
                 .as_deref()
                 .unwrap_or("No description");
             let num = i + 1;
-            suggestions.push(format!("{num}. aperture {cmd} - {desc}"));
+            suggestions.push(format!("{num}. [api: {api_name}] aperture {cmd} - {desc}"));
         }
 
         format!(
-            "Multiple commands match. Did you mean:\n{}",
+            "Multiple commands match this shortcut. Narrow by API with `--api <name>` or run one of these full paths:\n{}",
             suggestions.join("\n")
         )
     }

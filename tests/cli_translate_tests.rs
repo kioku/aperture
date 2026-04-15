@@ -151,7 +151,10 @@ fn base_cli() -> Cli {
         retry_delay: None,
         retry_max_delay: None,
         force_retry: false,
-        command: Commands::Exec { args: vec![] },
+        command: Commands::Exec {
+            api: None,
+            args: vec![],
+        },
     }
 }
 
