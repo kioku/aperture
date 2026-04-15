@@ -2,6 +2,19 @@
 
 Aperture stores configuration in `~/.config/aperture/`. This document covers all configuration options and commands.
 
+## Config Command Taxonomy
+
+`aperture config` is organized into nested administrative domains:
+
+- `aperture config api ...` — specification lifecycle
+- `aperture config url ...` — base URL overrides
+- `aperture config secret ...` — auth secret mappings
+- `aperture config cache ...` — response cache operations
+- `aperture config setting ...` — global settings
+- `aperture config mapping ...` — command tree customization
+
+Legacy flat commands (for example `config set-url` and `config settings`) remain supported for compatibility, but new documentation uses nested domain commands.
+
 ## Directory Structure
 
 ```
@@ -25,25 +38,25 @@ Aperture stores configuration in `~/.config/aperture/`. This document covers all
 
 ```bash
 # From local file
-aperture config add my-api ./openapi.yaml
+aperture config api add my-api ./openapi.yaml
 
 # From URL
-aperture config add my-api https://api.example.com/openapi.yaml
+aperture config api add my-api https://api.example.com/openapi.yaml
 
 # With strict validation (reject unsupported features)
-aperture config add --strict my-api ./openapi.yaml
+aperture config api add --strict my-api ./openapi.yaml
 ```
 
 ### List Specifications
 
 ```bash
-aperture config list
+aperture config api list
 ```
 
 ### Remove a Specification
 
 ```bash
-aperture config remove my-api
+aperture config api remove my-api
 ```
 
 ### Reinitialize Cache
@@ -51,7 +64,7 @@ aperture config remove my-api
 Rebuild all cached specifications:
 
 ```bash
-aperture config reinit --all
+aperture config api reinit --all
 ```
 
 ## Base URL Management
@@ -62,28 +75,28 @@ Override the base URL defined in OpenAPI specs.
 
 ```bash
 # Permanent override
-aperture config set-url my-api https://api.example.com
+aperture config url set my-api https://api.example.com
 
 # Environment-specific
-aperture config set-url my-api --env staging https://staging.api.example.com
-aperture config set-url my-api --env prod https://api.example.com
+aperture config url set my-api --env staging https://staging.api.example.com
+aperture config url set my-api --env prod https://api.example.com
 ```
 
 ### View URL Configuration
 
 ```bash
 # Single API
-aperture config get-url my-api
+aperture config url get my-api
 
 # All APIs
-aperture config list-urls
+aperture config url list
 ```
 
 ### URL Resolution Priority
 
 1. **CLI argument** (for testing)
 2. **Environment-specific config** (when `APERTURE_ENV` is set)
-3. **Per-API override** (set via `config set-url`)
+3. **Per-API override** (set via `config url set`)
 4. **`APERTURE_BASE_URL`** environment variable
 5. **OpenAPI spec** server URL
 6. **Fallback** `https://api.example.com`
@@ -92,9 +105,9 @@ aperture config list-urls
 
 ```bash
 # Configure environments
-aperture config set-url my-api --env dev https://dev.api.example.com
-aperture config set-url my-api --env staging https://staging.api.example.com
-aperture config set-url my-api --env prod https://api.example.com
+aperture config url set my-api --env dev https://dev.api.example.com
+aperture config url set my-api --env staging https://staging.api.example.com
+aperture config url set my-api --env prod https://api.example.com
 
 # Select environment at runtime
 APERTURE_ENV=staging aperture api my-api users list
@@ -137,13 +150,13 @@ See [Security Model](security.md) for complete documentation.
 
 ```bash
 # Configure secret mapping
-aperture config set-secret my-api bearerAuth --env API_TOKEN
+aperture config secret set my-api bearerAuth --env API_TOKEN
 
 # Interactive setup
-aperture config set-secret my-api --interactive
+aperture config secret set my-api --interactive
 
 # List configured secrets
-aperture config list-secrets my-api
+aperture config secret list my-api
 ```
 
 ## Cache Management
@@ -152,24 +165,24 @@ aperture config list-secrets my-api
 
 ```bash
 # View cache statistics
-aperture config cache-stats my-api
+aperture config cache stats my-api
 
 # Clear response cache
-aperture config clear-cache my-api
+aperture config cache clear my-api
 ```
 
 ### Specification Cache
 
 ```bash
 # Rebuild all spec caches
-aperture config reinit --all
+aperture config api reinit --all
 
 # Rebuild specific spec cache
-aperture config reinit my-api
+aperture config api reinit my-api
 
 # Remove and re-add specific spec
-aperture config remove my-api
-aperture config add my-api ./openapi.yaml
+aperture config api remove my-api
+aperture config api add my-api ./openapi.yaml
 ```
 
 ## Command Mapping
@@ -178,7 +191,7 @@ Customize the CLI command tree for any API specification without modifying the o
 
 ### How It Works
 
-Command mappings are stored in `config.toml` under `api_configs.<name>.command_mapping` and applied during cache generation (`config add` or `config reinit`). Agents see the effective names in `--describe-json`.
+Command mappings are stored in `config.toml` under `api_configs.<name>.command_mapping` and applied during cache generation (`config api add` or `config api reinit`). Agents see the effective names in `--describe-json`.
 
 ### Group Renames
 
@@ -186,10 +199,10 @@ Rename the tag-derived command groups:
 
 ```bash
 # "User Management" tag becomes "users" group
-aperture config set-mapping my-api --group "User Management" users
+aperture config mapping set my-api --group "User Management" users
 
 # "Organization Settings" becomes "orgs"
-aperture config set-mapping my-api --group "Organization Settings" orgs
+aperture config mapping set my-api --group "Organization Settings" orgs
 ```
 
 ### Operation Mappings
@@ -198,28 +211,28 @@ Customize individual operations by their `operationId`:
 
 ```bash
 # Rename the subcommand
-aperture config set-mapping my-api --operation getUserById --name fetch
+aperture config mapping set my-api --operation getUserById --name fetch
 
 # Move to a different group
-aperture config set-mapping my-api --operation getUserById --op-group accounts
+aperture config mapping set my-api --operation getUserById --op-group accounts
 
 # Add an alias
-aperture config set-mapping my-api --operation getUserById --alias get
+aperture config mapping set my-api --operation getUserById --alias get
 
 # Remove an alias
-aperture config set-mapping my-api --operation getUserById --remove-alias get
+aperture config mapping set my-api --operation getUserById --remove-alias get
 
 # Hide from help output
-aperture config set-mapping my-api --operation deleteUser --hidden
+aperture config mapping set my-api --operation deleteUser --hidden
 
 # Unhide
-aperture config set-mapping my-api --operation deleteUser --visible
+aperture config mapping set my-api --operation deleteUser --visible
 ```
 
 ### Viewing Mappings
 
 ```bash
-aperture config list-mappings my-api
+aperture config mapping list my-api
 ```
 
 **Output:**
@@ -243,10 +256,10 @@ Command mappings for API 'my-api':
 
 ```bash
 # Remove a group mapping
-aperture config remove-mapping my-api --group "User Management"
+aperture config mapping remove my-api --group "User Management"
 
 # Remove an operation mapping
-aperture config remove-mapping my-api --operation getUserById
+aperture config mapping remove my-api --operation getUserById
 ```
 
 ### Applying Changes
@@ -254,7 +267,7 @@ aperture config remove-mapping my-api --operation getUserById
 Mappings take effect after rebuilding the cache:
 
 ```bash
-aperture config reinit my-api
+aperture config api reinit my-api
 ```
 
 ### Config File Format
@@ -291,7 +304,7 @@ Collisions produce hard errors that prevent cache generation.
 When a spec is updated and operations change:
 - Mappings referencing non-existent tags or operation IDs produce **warnings**, not errors
 - The spec is still processed with stale mappings ignored
-- Clean up stale mappings with `config remove-mapping`
+- Clean up stale mappings with `config mapping remove`
 
 ## Global Settings Management
 
@@ -300,7 +313,7 @@ Aperture provides commands to view and modify global settings without manually e
 ### List All Settings
 
 ```bash
-aperture config settings
+aperture config setting list
 ```
 
 **Output:**
@@ -331,10 +344,10 @@ Available configuration settings:
 ### Get a Setting
 
 ```bash
-aperture config get default_timeout_secs
+aperture config setting get default_timeout_secs
 # Output: 30
 
-aperture config get retry_defaults.max_attempts
+aperture config setting get retry_defaults.max_attempts
 # Output: 0
 ```
 
@@ -342,16 +355,16 @@ aperture config get retry_defaults.max_attempts
 
 ```bash
 # Set request timeout to 60 seconds
-aperture config set default_timeout_secs 60
+aperture config setting set default_timeout_secs 60
 
 # Enable JSON errors by default
-aperture config set agent_defaults.json_errors true
+aperture config setting set agent_defaults.json_errors true
 
 # Enable automatic retries (3 attempts)
-aperture config set retry_defaults.max_attempts 3
+aperture config setting set retry_defaults.max_attempts 3
 
 # Set initial retry delay to 1 second
-aperture config set retry_defaults.initial_delay_ms 1000
+aperture config setting set retry_defaults.initial_delay_ms 1000
 ```
 
 Settings are validated against their expected types. Comments and formatting in `config.toml` are preserved.
@@ -444,61 +457,76 @@ Without the feature, 3.1 specs produce an error with instructions to enable it.
 
 ## Command Reference
 
-### Spec Management
+### Spec Management (`config api`)
 
 | Command | Description |
 |---------|-------------|
-| `config add <name> <path>` | Add specification |
-| `config add --strict <name> <path>` | Add with strict validation |
-| `config list` | List registered specs |
-| `config remove <name>` | Remove specification |
-| `config reinit --all` | Rebuild all caches |
-| `config reinit <name>` | Rebuild specific cache |
+| `config api add <name> <path>` | Add specification |
+| `config api add --strict <name> <path>` | Add with strict validation |
+| `config api list` | List registered specs |
+| `config api remove <name>` | Remove specification |
+| `config api reinit --all` | Rebuild all caches |
+| `config api reinit <name>` | Rebuild specific cache |
 
-### URL Management
-
-| Command | Description |
-|---------|-------------|
-| `config set-url <name> <url>` | Set base URL |
-| `config set-url <name> --env <env> <url>` | Set environment URL |
-| `config get-url <name>` | Show URL config |
-| `config list-urls` | Show all URL configs |
-
-### Secret Management
+### URL Management (`config url`)
 
 | Command | Description |
 |---------|-------------|
-| `config set-secret <name> <scheme> --env <var>` | Map secret |
-| `config set-secret <name> --interactive` | Interactive setup |
-| `config list-secrets <name>` | List secret mappings |
+| `config url set <name> <url>` | Set base URL |
+| `config url set <name> --env <env> <url>` | Set environment URL |
+| `config url get <name>` | Show URL config |
+| `config url list` | Show all URL configs |
 
-### Cache Management
-
-| Command | Description |
-|---------|-------------|
-| `config cache-stats <name>` | Show cache stats |
-| `config clear-cache <name>` | Clear response cache |
-
-### Command Mapping
+### Secret Management (`config secret`)
 
 | Command | Description |
 |---------|-------------|
-| `config set-mapping <name> --group <original> <new>` | Rename a tag group |
-| `config set-mapping <name> --operation <id> --name <n>` | Rename an operation |
-| `config set-mapping <name> --operation <id> --op-group <g>` | Move operation to group |
-| `config set-mapping <name> --operation <id> --alias <a>` | Add an alias |
-| `config set-mapping <name> --operation <id> --remove-alias <a>` | Remove an alias |
-| `config set-mapping <name> --operation <id> --hidden` | Hide from help |
-| `config set-mapping <name> --operation <id> --visible` | Unhide |
-| `config list-mappings <name>` | List all mappings |
-| `config remove-mapping <name> --group <original>` | Remove group mapping |
-| `config remove-mapping <name> --operation <id>` | Remove operation mapping |
+| `config secret set <name> <scheme> --env <var>` | Map secret |
+| `config secret set <name> --interactive` | Interactive setup |
+| `config secret list <name>` | List secret mappings |
+| `config secret remove <name> <scheme>` | Remove one secret mapping |
+| `config secret clear <name> [--force]` | Clear all secret mappings |
 
-### Settings Management
+### Cache Management (`config cache`)
 
 | Command | Description |
 |---------|-------------|
-| `config settings` | List all settings with values |
-| `config settings --json` | List settings as JSON |
-| `config get <key>` | Get a setting value |
-| `config set <key> <value>` | Set a setting value |
+| `config cache stats <name>` | Show cache stats |
+| `config cache clear <name>` | Clear response cache |
+
+### Command Mapping (`config mapping`)
+
+| Command | Description |
+|---------|-------------|
+| `config mapping set <name> --group <original> <new>` | Rename a tag group |
+| `config mapping set <name> --operation <id> --name <n>` | Rename an operation |
+| `config mapping set <name> --operation <id> --op-group <g>` | Move operation to group |
+| `config mapping set <name> --operation <id> --alias <a>` | Add an alias |
+| `config mapping set <name> --operation <id> --remove-alias <a>` | Remove an alias |
+| `config mapping set <name> --operation <id> --hidden` | Hide from help |
+| `config mapping set <name> --operation <id> --visible` | Unhide |
+| `config mapping list <name>` | List all mappings |
+| `config mapping remove <name> --group <original>` | Remove group mapping |
+| `config mapping remove <name> --operation <id>` | Remove operation mapping |
+
+### Settings Management (`config setting`)
+
+| Command | Description |
+|---------|-------------|
+| `config setting list` | List all settings with values |
+| `config setting list --json` | List settings as JSON |
+| `config setting get <key>` | Get a setting value |
+| `config setting set <key> <value>` | Set a setting value |
+
+### Compatibility Aliases
+
+Legacy flat commands remain available during migration. Examples:
+
+| Legacy | Nested replacement |
+|--------|--------------------|
+| `config set-url ...` | `config url set ...` |
+| `config get-url ...` | `config url get ...` |
+| `config list-urls` | `config url list` |
+| `config set-secret ...` | `config secret set ...` |
+| `config clear-cache ...` | `config cache clear ...` |
+| `config settings` | `config setting list` |

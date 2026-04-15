@@ -36,10 +36,10 @@ https://github.com/user-attachments/assets/5fe746e4-3a44-4f3b-801d-249df4901bd0
 cargo install aperture-cli
 
 # Register an API
-aperture config add petstore https://petstore3.swagger.io/api/v3/openapi.json
+aperture config api add petstore https://petstore3.swagger.io/api/v3/openapi.json
 
 # Configure authentication
-aperture config set-secret petstore api_key --env PETSTORE_API_KEY
+aperture config secret set petstore api_key --env PETSTORE_API_KEY
 
 # Discover available operations
 aperture api petstore --describe-json
