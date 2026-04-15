@@ -227,12 +227,15 @@ pub enum Commands {
     },
     /// List available commands for an API specification
     #[command(
+        name = "commands",
+        visible_alias = "list-commands",
         long_about = "Display a tree-like summary of all available commands for an API.\n\n\
                       Shows operations organized by tags, making it easy to discover\n\
                       what functionality is available in a registered API specification.\n\
                       This provides an overview without having to use --help on each operation.\n\n\
+                      Legacy alias: list-commands\n\n\
                       Example:\n  \
-                      aperture list-commands myapi"
+                      aperture commands myapi"
     )]
     ListCommands {
         /// Name of the API specification context.
@@ -281,18 +284,20 @@ pub enum Commands {
     },
     /// Execute API operations using shortcuts or direct operation IDs
     #[command(
-        name = "exec",
+        name = "run",
+        visible_alias = "exec",
         long_about = "Execute API operations using shortcuts instead of full paths.\n\n\
                       This command attempts to resolve shortcuts to their full command paths:\n\
                       - Direct operation IDs: getUserById --id 123\n\
                       - HTTP method + path: GET /users/123\n\
                       - Tag-based shortcuts: users list\n\n\
                       When multiple matches are found, you'll get suggestions to choose from.\n\n\
+                      Legacy alias: exec\n\n\
                       Examples:\n  \
-                      aperture exec getUserById --id 123\n  \
-                      aperture exec --api billing getUserById --id 123\n  \
-                      aperture exec GET /users/123\n  \
-                      aperture exec users list"
+                      aperture run getUserById --id 123\n  \
+                      aperture run --api billing getUserById --id 123\n  \
+                      aperture run GET /users/123\n  \
+                      aperture run users list"
     )]
     Exec {
         /// Limit shortcut resolution to a specific API context.
