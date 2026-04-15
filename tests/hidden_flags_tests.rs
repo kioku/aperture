@@ -130,35 +130,49 @@ fn test_global_flags_hidden_from_dynamic_command_tree() {
         .assert()
         .success();
 
-    // Check help at the operation level - this is the dynamic command tree help
-    // Note: Due to how clap handles dynamic commands, --help outputs to stderr
-    // and returns a non-zero exit code, but the help content is still shown
+    // Check help at the operation level - this is the dynamic command tree help.
+    // Help is a successful control-flow path and should not be wrapped as a validation error.
     let output = aperture_cmd()
         .env("APERTURE_CONFIG_DIR", temp_dir.path())
         .args(["api", "test-api", "users", "list-users", "--help"])
         .output()
         .expect("Failed to execute command");
 
-    // The help is output to stderr in this case
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "Expected --help to exit successfully; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     // Verify we got some help output (contains Options section)
     assert!(
-        stderr.contains("Options:") || stderr.contains("-h, --help"),
+        combined.contains("Options:") || combined.contains("-h, --help"),
         "Expected help output to contain Options section"
+    );
+
+    assert!(
+        !combined.contains("Validation: Invalid command"),
+        "Expected help output to avoid validation framing"
     );
 
     // The hidden flags should NOT appear in the dynamic command help
     assert!(
-        !stderr.contains("--jq"),
+        !combined.contains("--jq"),
         "Expected --jq to be hidden from dynamic command help"
     );
     assert!(
-        !stderr.contains("--format ") && !stderr.contains("--format\n"),
+        !combined.contains("--format ") && !combined.contains("--format\n"),
         "Expected --format to be hidden from dynamic command help"
     );
     assert!(
-        !stderr.contains("--server-var"),
+        !combined.contains("--server-var"),
         "Expected --server-var to be hidden from dynamic command help"
     );
 }
