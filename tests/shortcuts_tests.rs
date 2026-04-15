@@ -247,7 +247,7 @@ fn test_ambiguous_suggestions_format() {
     let mut resolver = ShortcutResolver::new();
     resolver.index_specs(&specs);
 
-    // Create some mock ambiguous matches for formatting test
+    // Create mock ambiguous matches with one duplicate entry
     let matches = vec![
         aperture_cli::shortcuts::ResolvedShortcut {
             full_command: vec![
@@ -265,6 +265,17 @@ fn test_ambiguous_suggestions_format() {
                 "api".to_string(),
                 "petstore".to_string(),
                 "pets".to_string(),
+                "get-pet-by-id".to_string(),
+            ],
+            spec: specs.get("petstore").unwrap().clone(),
+            command: specs.get("petstore").unwrap().commands[0].clone(),
+            confidence: 50,
+        },
+        aperture_cli::shortcuts::ResolvedShortcut {
+            full_command: vec![
+                "api".to_string(),
+                "petstore".to_string(),
+                "pets".to_string(),
                 "create-pet".to_string(),
             ],
             spec: specs.get("petstore").unwrap().clone(),
@@ -274,10 +285,13 @@ fn test_ambiguous_suggestions_format() {
     ];
 
     let suggestion_text = resolver.format_ambiguous_suggestions(&matches);
-    assert!(suggestion_text.contains("Multiple commands match"));
+    assert!(suggestion_text.contains("Multiple commands match this shortcut"));
+    assert!(suggestion_text.contains("--api <name>"));
+    assert!(suggestion_text.contains("[api: petstore]"));
     assert!(suggestion_text.contains("aperture api petstore"));
     assert!(suggestion_text.contains("Get pet by ID"));
     assert!(suggestion_text.contains("Create a new pet"));
+    assert_eq!(suggestion_text.matches("get-pet-by-id").count(), 1);
 }
 
 #[test]

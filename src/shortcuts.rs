@@ -427,21 +427,27 @@ impl ShortcutResolver {
     /// Generate suggestions for ambiguous matches
     #[must_use]
     pub fn format_ambiguous_suggestions(&self, matches: &[ResolvedShortcut]) -> String {
-        let mut suggestions = Vec::new();
+        let mut candidates = Self::deduplicate_candidates(matches.to_vec());
+        Self::sort_candidates_by_confidence(&mut candidates);
 
-        for (i, shortcut) in matches.iter().take(5).enumerate() {
+        let mut suggestions = Vec::new();
+        for (i, shortcut) in candidates.iter().take(5).enumerate() {
             let cmd = shortcut.full_command.join(" ");
+            let api_name = shortcut
+                .full_command
+                .get(1)
+                .map_or("unknown", String::as_str);
             let desc = shortcut
                 .command
                 .description
                 .as_deref()
                 .unwrap_or("No description");
             let num = i + 1;
-            suggestions.push(format!("{num}. aperture {cmd} - {desc}"));
+            suggestions.push(format!("{num}. [api: {api_name}] aperture {cmd} - {desc}"));
         }
 
         format!(
-            "Multiple commands match. Did you mean:\n{}",
+            "Multiple commands match this shortcut. Narrow by API with `--api <name>` or run one of these full paths:\n{}",
             suggestions.join("\n")
         )
     }

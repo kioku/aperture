@@ -521,11 +521,9 @@ async fn handle_shortcut_resolution(
         ResolutionResult::Ambiguous(matches) => {
             // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
             // ast-grep-ignore: no-println
-            eprintln!("Ambiguous shortcut. Multiple commands match:");
-            // ast-grep-ignore: no-println
             eprintln!("{}", resolver.format_ambiguous_suggestions(&matches));
             // ast-grep-ignore: no-println
-            eprintln!("\nTip: Use 'aperture search <term>' to explore available commands");
+            eprintln!("\nTip: Also try 'aperture search <term>' to explore available commands");
             std::process::exit(1);
         }
         ResolutionResult::NotFound => {
