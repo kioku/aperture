@@ -25,12 +25,14 @@ pub fn list_commands(context: &str, output: &Output) -> Result<(), Error> {
     // ast-grep-ignore: no-println
     println!("{formatted_output}");
     output.tip(format!(
-        "Use 'aperture docs {context}' for detailed API documentation"
+        "Next: 'aperture overview {context}' for high-level API orientation"
     ));
     output.tip(format!(
-        "Use 'aperture search <term> --api {context}' to find specific operations"
+        "Next: 'aperture search <term> --api {context}' to find operations by intent"
     ));
-    output.tip("Use shortcuts: 'aperture run <operation-id> --help'");
+    output.tip(format!(
+        "Next: 'aperture docs {context} <tag> <operation>' for deep operation docs"
+    ));
     Ok(())
 }
 
@@ -44,8 +46,8 @@ pub fn execute_help_command(
     output: &Output,
 ) -> Result<(), Error> {
     match (api_name, tag, operation) {
-        (None, None, None) => render_interactive_menu(manager),
-        (Some(api), None, None) => render_api_reference_index(manager, api),
+        (None, None, None) => render_interactive_menu(manager, output),
+        (Some(api), None, None) => render_api_reference_index(manager, api, output),
         (Some(api), Some(tag), Some(op)) => {
             render_command_help(manager, api, tag, op, enhanced, output)
         }
@@ -58,23 +60,34 @@ pub fn execute_help_command(
     }
 }
 
-fn render_interactive_menu(manager: &ConfigManager<OsFileSystem>) -> Result<(), Error> {
+fn render_interactive_menu(
+    manager: &ConfigManager<OsFileSystem>,
+    output: &Output,
+) -> Result<(), Error> {
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
     // ast-grep-ignore: no-println
     println!("{}", doc_gen.generate_interactive_menu());
+    output.tip("Try 'aperture overview <api>' to orient to one API before drilling in");
     Ok(())
 }
 
 fn render_api_reference_index(
     manager: &ConfigManager<OsFileSystem>,
     api: &str,
+    output: &Output,
 ) -> Result<(), Error> {
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
     let reference = doc_gen.generate_api_reference_index(api)?;
     // ast-grep-ignore: no-println
     println!("{reference}");
+    output.tip(format!(
+        "Execute operations with 'aperture api {api} <tag> <operation> ...'"
+    ));
+    output.tip(format!(
+        "Machine workflow: 'aperture api {api} --describe-json'"
+    ));
     Ok(())
 }
 
@@ -97,6 +110,9 @@ fn render_command_help(
         println!("{}", help.lines().take(20).collect::<Vec<_>>().join("\n"));
         output.tip("Use --enhanced for full documentation with examples");
     }
+    output.tip(format!(
+        "Execute with 'aperture api {api} <tag> <operation> ...' after inspection"
+    ));
     Ok(())
 }
 
@@ -132,7 +148,7 @@ pub fn execute_overview_command(
         let Some(api) = api_name else {
             print_overview_usage();
         };
-        return render_single_api_overview(manager, api);
+        return render_single_api_overview(manager, api, output);
     }
 
     render_all_api_overviews(manager, output)
@@ -141,12 +157,22 @@ pub fn execute_overview_command(
 fn render_single_api_overview(
     manager: &ConfigManager<OsFileSystem>,
     api: &str,
+    output: &Output,
 ) -> Result<(), Error> {
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
     let overview = doc_gen.generate_api_overview(api)?;
     // ast-grep-ignore: no-println
     println!("{overview}");
+    output.tip(format!(
+        "Next: 'aperture search <term> --api {api}' to find specific operations"
+    ));
+    output.tip(format!(
+        "Next: 'aperture docs {api} <tag> <operation>' for deep operation reference"
+    ));
+    output.tip(format!(
+        "Machine workflow: 'aperture api {api} --describe-json'"
+    ));
     Ok(())
 }
 
@@ -183,7 +209,9 @@ fn render_all_api_overviews(
     }
     // ast-grep-ignore: no-println
     println!("\n{}", "=".repeat(60));
-    output.tip("Use 'aperture overview <api>' for detailed information about a specific API");
+    output.tip("Use 'aperture overview <api>' to orient to a specific API");
+    output.tip("Then use 'aperture search <term> --api <api>' to find operations by intent");
+    output.tip("Use 'aperture docs <api> <tag> <operation>' for deep operation reference");
     Ok(())
 }
 
