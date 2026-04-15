@@ -33,6 +33,9 @@ pub fn list_commands(context: &str, output: &Output) -> Result<(), Error> {
     output.tip(format!(
         "Next: 'aperture docs {context} <tag> <operation>' for deep operation docs"
     ));
+    output.tip(format!(
+        "Execute: 'aperture api {context} <tag> <operation> ...'"
+    ));
     Ok(())
 }
 
@@ -168,6 +171,9 @@ fn render_single_api_overview(
         "Next: 'aperture search <term> --api {api}' to find specific operations"
     ));
     output.tip(format!(
+        "Next: 'aperture commands {api}' for a terse command tree"
+    ));
+    output.tip(format!(
         "Next: 'aperture docs {api} <tag> <operation>' for deep operation reference"
     ));
     output.tip(format!(
@@ -211,6 +217,7 @@ fn render_all_api_overviews(
     println!("\n{}", "=".repeat(60));
     output.tip("Use 'aperture overview <api>' to orient to a specific API");
     output.tip("Then use 'aperture search <term> --api <api>' to find operations by intent");
+    output.tip("Use 'aperture commands <api>' for a terse command tree");
     output.tip("Use 'aperture docs <api> <tag> <operation>' for deep operation reference");
     Ok(())
 }
