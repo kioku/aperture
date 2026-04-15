@@ -310,6 +310,55 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_variables_duplicate_key_uses_last_value() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let args = vec![
+            "region=us".to_string(),
+            "region=eu".to_string(),
+            "env=prod".to_string(),
+        ];
+        let result = resolver.resolve_variables(&args).unwrap();
+
+        assert_eq!(result.get("region"), Some(&"eu".to_string()));
+        assert_eq!(result.get("env"), Some(&"prod".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_variables_trims_surrounding_whitespace() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let args = vec![" region = eu ".to_string(), " env = staging ".to_string()];
+        let result = resolver.resolve_variables(&args).unwrap();
+
+        assert_eq!(result.get("region"), Some(&"eu".to_string()));
+        assert_eq!(result.get("env"), Some(&"staging".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_variables_rejects_whitespace_only_value() {
+        let spec = create_test_spec_with_variables();
+        let resolver = ServerVariableResolver::new(&spec);
+
+        let args = vec!["region=   ".to_string(), "env=prod".to_string()];
+        let result = resolver.resolve_variables(&args);
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::Internal {
+                kind: ErrorKind::ServerVariable,
+                message,
+                ..
+            } => {
+                assert!(message.contains("Empty variable value"));
+            }
+            _ => panic!("Expected Internal ServerVariable error"),
+        }
+    }
+
+    #[test]
     fn test_resolve_variables_with_defaults() {
         let spec = create_test_spec_with_variables();
         let resolver = ServerVariableResolver::new(&spec);

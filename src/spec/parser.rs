@@ -397,6 +397,36 @@ paths: {}
     }
 
     #[test]
+    fn test_parse_openapi_31_json_format() {
+        let spec_31_json = r#"{"openapi": "3.1.0", "info": {"title": "Test API", "version": "1.0.0"}, "paths": {}}"#;
+
+        let result = parse_openapi(spec_31_json);
+
+        #[cfg(feature = "openapi31")]
+        {
+            assert!(result.is_ok());
+            if let Ok(spec) = result {
+                assert!(spec.openapi.starts_with("3."));
+            }
+        }
+
+        #[cfg(not(feature = "openapi31"))]
+        {
+            assert!(result.is_err());
+            if let Err(Error::Internal {
+                kind: crate::error::ErrorKind::Validation,
+                message,
+                ..
+            }) = result
+            {
+                assert!(message.contains("OpenAPI 3.1 support is not enabled"));
+            } else {
+                panic!("Expected validation error about missing 3.1 support");
+            }
+        }
+    }
+
+    #[test]
     fn test_parse_invalid_yaml() {
         let invalid_yaml = "not: valid: yaml: at: all:";
 
