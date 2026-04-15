@@ -81,87 +81,122 @@ impl ShortcutResolver {
 
     /// Index all available commands for shortcut resolution
     pub fn index_specs(&mut self, specs: &BTreeMap<String, CachedSpec>) {
-        // Clear existing indexes
-        self.operation_map.clear();
-        self.method_path_map.clear();
-        self.tag_map.clear();
+        self.clear_indexes();
 
         for (api_name, spec) in specs {
             for command in &spec.commands {
-                // Index by operation ID (both original and kebab-case)
-                let operation_kebab = to_kebab_case(&command.operation_id);
-
-                // Original operation ID
-                if !command.operation_id.is_empty() {
-                    self.operation_map
-                        .entry(command.operation_id.clone())
-                        .or_default()
-                        .push((api_name.clone(), spec.clone(), command.clone()));
-                }
-
-                // Kebab-case operation ID
-                if operation_kebab != command.operation_id {
-                    self.operation_map
-                        .entry(operation_kebab.clone())
-                        .or_default()
-                        .push((api_name.clone(), spec.clone(), command.clone()));
-                }
-
-                // Index by HTTP method + path
-                let method = command.method.to_uppercase();
-                let path = &command.path;
-                let method_path_key = format!("{method} {path}");
-                self.method_path_map
-                    .entry(method_path_key)
-                    .or_default()
-                    .push((api_name.clone(), spec.clone(), command.clone()));
-
-                // Index by display name (custom command name override)
-                if let Some(ref display_name) = command.display_name {
-                    let display_kebab = to_kebab_case(display_name);
-                    self.operation_map.entry(display_kebab).or_default().push((
-                        api_name.clone(),
-                        spec.clone(),
-                        command.clone(),
-                    ));
-                }
-
-                // Index by aliases
-                for alias in &command.aliases {
-                    let alias_kebab = to_kebab_case(alias);
-                    self.operation_map.entry(alias_kebab).or_default().push((
-                        api_name.clone(),
-                        spec.clone(),
-                        command.clone(),
-                    ));
-                }
-
-                // Index by tags (and display_group override)
-                let mut effective_tags: Vec<String> =
-                    command.tags.iter().map(|t| to_kebab_case(t)).collect();
-                if let Some(dg) = &command.display_group {
-                    effective_tags.push(to_kebab_case(dg));
-                }
-
-                let effective_name = command.display_name.as_deref().unwrap_or(&operation_kebab);
-
-                for tag_key in &effective_tags {
-                    self.tag_map.entry(tag_key.clone()).or_default().push((
-                        api_name.clone(),
-                        spec.clone(),
-                        command.clone(),
-                    ));
-
-                    // Also index tag + operation combinations (with effective name)
-                    let tag_operation_key = format!("{tag_key} {}", to_kebab_case(effective_name));
-                    self.tag_map.entry(tag_operation_key).or_default().push((
-                        api_name.clone(),
-                        spec.clone(),
-                        command.clone(),
-                    ));
-                }
+                self.index_single_command(api_name, spec, command);
             }
         }
+    }
+
+    fn clear_indexes(&mut self) {
+        self.operation_map.clear();
+        self.method_path_map.clear();
+        self.tag_map.clear();
+    }
+
+    fn index_single_command(&mut self, api_name: &str, spec: &CachedSpec, command: &CachedCommand) {
+        let operation_kebab = to_kebab_case(&command.operation_id);
+        self.index_operation_identifiers(api_name, spec, command, &operation_kebab);
+        self.index_method_path(api_name, spec, command);
+        self.index_display_and_aliases(api_name, spec, command);
+        self.index_tags(api_name, spec, command, &operation_kebab);
+    }
+
+    fn index_operation_identifiers(
+        &mut self,
+        api_name: &str,
+        spec: &CachedSpec,
+        command: &CachedCommand,
+        operation_kebab: &str,
+    ) {
+        if !command.operation_id.is_empty() {
+            self.push_operation_entry(&command.operation_id, api_name, spec, command);
+        }
+
+        if operation_kebab != command.operation_id {
+            self.push_operation_entry(operation_kebab, api_name, spec, command);
+        }
+    }
+
+    fn index_method_path(&mut self, api_name: &str, spec: &CachedSpec, command: &CachedCommand) {
+        let method_path_key = format!("{} {}", command.method.to_uppercase(), command.path);
+        self.method_path_map
+            .entry(method_path_key)
+            .or_default()
+            .push((api_name.to_string(), spec.clone(), command.clone()));
+    }
+
+    fn index_display_and_aliases(
+        &mut self,
+        api_name: &str,
+        spec: &CachedSpec,
+        command: &CachedCommand,
+    ) {
+        if let Some(display_name) = command.display_name.as_deref() {
+            self.push_operation_entry(&to_kebab_case(display_name), api_name, spec, command);
+        }
+
+        for alias in &command.aliases {
+            self.push_operation_entry(&to_kebab_case(alias), api_name, spec, command);
+        }
+    }
+
+    fn index_tags(
+        &mut self,
+        api_name: &str,
+        spec: &CachedSpec,
+        command: &CachedCommand,
+        operation_kebab: &str,
+    ) {
+        let mut effective_tags: Vec<String> =
+            command.tags.iter().map(|tag| to_kebab_case(tag)).collect();
+        if let Some(display_group) = command.display_group.as_deref() {
+            effective_tags.push(to_kebab_case(display_group));
+        }
+
+        let effective_name = command
+            .display_name
+            .as_deref()
+            .map_or_else(|| operation_kebab.to_string(), to_kebab_case);
+
+        for tag_key in effective_tags {
+            self.push_tag_entry(&tag_key, api_name, spec, command);
+            self.push_tag_entry(
+                &format!("{tag_key} {effective_name}"),
+                api_name,
+                spec,
+                command,
+            );
+        }
+    }
+
+    fn push_operation_entry(
+        &mut self,
+        key: &str,
+        api_name: &str,
+        spec: &CachedSpec,
+        command: &CachedCommand,
+    ) {
+        self.operation_map
+            .entry(key.to_string())
+            .or_default()
+            .push((api_name.to_string(), spec.clone(), command.clone()));
+    }
+
+    fn push_tag_entry(
+        &mut self,
+        key: &str,
+        api_name: &str,
+        spec: &CachedSpec,
+        command: &CachedCommand,
+    ) {
+        self.tag_map.entry(key.to_string()).or_default().push((
+            api_name.to_string(),
+            spec.clone(),
+            command.clone(),
+        ));
     }
 
     /// Resolve a command shortcut to full command path

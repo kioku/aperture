@@ -92,6 +92,20 @@ fn find_operation_from_matches<'a>(
     spec: &'a CachedSpec,
     matches: &'a ArgMatches,
 ) -> Result<(&'a CachedCommand, &'a ArgMatches), Error> {
+    let (subcommand_path, current_matches) = collect_subcommand_path(matches);
+
+    let operation_name = subcommand_path
+        .last()
+        .ok_or_else(|| operation_not_found_error(spec, "unknown"))?;
+    let group_name = group_name_from_subcommand_path(&subcommand_path);
+
+    let operation = resolve_operation_from_path(spec, group_name, operation_name)
+        .ok_or_else(|| operation_not_found_error(spec, operation_name))?;
+
+    Ok((operation, current_matches))
+}
+
+fn collect_subcommand_path(matches: &ArgMatches) -> (Vec<String>, &ArgMatches) {
     let mut current_matches = matches;
     let mut subcommand_path = Vec::new();
 
@@ -100,20 +114,23 @@ fn find_operation_from_matches<'a>(
         current_matches = sub_matches;
     }
 
-    let operation_name = subcommand_path.last().ok_or_else(|| {
-        let name = "unknown".to_string();
-        let suggestions = crate::suggestions::suggest_similar_operations(spec, &name);
-        Error::operation_not_found_with_suggestions(name, &suggestions)
-    })?;
+    (subcommand_path, current_matches)
+}
 
-    // Dynamic tree shape is: <group> <operation>
-    let group_name = subcommand_path
+fn group_name_from_subcommand_path(subcommand_path: &[String]) -> Option<&String> {
+    // Dynamic tree shape is: <group> <operation>.
+    subcommand_path
         .len()
         .checked_sub(2)
-        .and_then(|idx| subcommand_path.get(idx));
+        .and_then(|idx| subcommand_path.get(idx))
+}
 
-    let operation = spec
-        .commands
+fn resolve_operation_from_path<'a>(
+    spec: &'a CachedSpec,
+    group_name: Option<&String>,
+    operation_name: &str,
+) -> Option<&'a CachedCommand> {
+    spec.commands
         .iter()
         .find(|cmd| matches_effective_command_path(cmd, group_name, operation_name))
         // Backward-compatible fallback: resolve by operation name only.
@@ -124,12 +141,11 @@ fn find_operation_from_matches<'a>(
                 .iter()
                 .find(|cmd| matches_effective_command_path(cmd, None, operation_name))
         })
-        .ok_or_else(|| {
-            let suggestions = crate::suggestions::suggest_similar_operations(spec, operation_name);
-            Error::operation_not_found_with_suggestions(operation_name.clone(), &suggestions)
-        })?;
+}
 
-    Ok((operation, current_matches))
+fn operation_not_found_error(spec: &CachedSpec, operation_name: &str) -> Error {
+    let suggestions = crate::suggestions::suggest_similar_operations(spec, operation_name);
+    Error::operation_not_found_with_suggestions(operation_name.to_string(), &suggestions)
 }
 
 /// Returns true when a command matches a parsed group/operation subcommand path.

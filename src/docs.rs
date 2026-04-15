@@ -106,7 +106,17 @@ impl DocumentationGenerator {
 
         let effective_tag = Self::effective_group(command);
         let effective_operation = Self::effective_operation(command);
+        let (legacy_tag, legacy_operation) = Self::legacy_command_reference(command);
 
+        let tag_match = requested_tag == effective_tag || requested_tag == legacy_tag;
+        let operation_match = requested_operation == effective_operation
+            || requested_operation == legacy_operation
+            || Self::is_operation_alias_match(command, &requested_operation);
+
+        tag_match && operation_match
+    }
+
+    fn legacy_command_reference(command: &CachedCommand) -> (String, String) {
         let legacy_tag = command.tags.first().map_or_else(
             || {
                 if command.name.is_empty() {
@@ -115,7 +125,7 @@ impl DocumentationGenerator {
                     to_kebab_case(&command.name)
                 }
             },
-            |t| to_kebab_case(t),
+            |tag| to_kebab_case(tag),
         );
 
         let legacy_operation = if command.operation_id.is_empty() {
@@ -124,17 +134,14 @@ impl DocumentationGenerator {
             to_kebab_case(&command.operation_id)
         };
 
-        let alias_match = command
+        (legacy_tag, legacy_operation)
+    }
+
+    fn is_operation_alias_match(command: &CachedCommand, requested_operation: &str) -> bool {
+        command
             .aliases
             .iter()
-            .any(|alias| to_kebab_case(alias) == requested_operation);
-
-        let tag_match = requested_tag == effective_tag || requested_tag == legacy_tag;
-        let operation_match = requested_operation == effective_operation
-            || requested_operation == legacy_operation
-            || alias_match;
-
-        tag_match && operation_match
+            .any(|alias| to_kebab_case(alias) == requested_operation)
     }
 
     /// Add command header with title and description
@@ -333,28 +340,36 @@ impl DocumentationGenerator {
             .get(api_name)
             .ok_or_else(|| Error::spec_not_found(api_name))?;
 
-        let mut overview = String::new();
-
-        // API header
-        write!(overview, "# {} API\n\n", spec.name).ok();
-        writeln!(overview, "**Version**: {}", spec.version).ok();
-
-        if let Some(ref base_url) = spec.base_url {
-            writeln!(overview, "**Base URL**: {base_url}").ok();
-        }
-        overview.push('\n');
-
-        // Statistics (hidden commands are excluded from docs-style listings)
         let visible_commands: Vec<&CachedCommand> = spec
             .commands
             .iter()
             .filter(|command| !command.hidden)
             .collect();
-        let total_operations = visible_commands.len();
+
+        let mut overview = String::new();
+        Self::write_api_overview_header(&mut overview, spec);
+        Self::write_api_overview_statistics(&mut overview, &visible_commands);
+        Self::write_api_overview_quick_start(&mut overview, api_name);
+        Self::write_api_overview_samples(&mut overview, api_name, &visible_commands);
+
+        Ok(overview)
+    }
+
+    fn write_api_overview_header(overview: &mut String, spec: &CachedSpec) {
+        write!(overview, "# {} API\n\n", spec.name).ok();
+        writeln!(overview, "**Version**: {}", spec.version).ok();
+
+        if let Some(base_url) = spec.base_url.as_deref() {
+            writeln!(overview, "**Base URL**: {base_url}").ok();
+        }
+        overview.push('\n');
+    }
+
+    fn write_api_overview_statistics(overview: &mut String, visible_commands: &[&CachedCommand]) {
         let mut method_counts = BTreeMap::new();
         let mut tag_counts = BTreeMap::new();
 
-        for command in &visible_commands {
+        for command in visible_commands {
             *method_counts.entry(command.method.clone()).or_insert(0) += 1;
             *tag_counts
                 .entry(Self::effective_group(command))
@@ -362,7 +377,12 @@ impl DocumentationGenerator {
         }
 
         overview.push_str("## Statistics\n\n");
-        writeln!(overview, "- **Total Operations**: {total_operations}").ok();
+        writeln!(
+            overview,
+            "- **Total Operations**: {}",
+            visible_commands.len()
+        )
+        .ok();
         overview.push_str("- **Methods**:\n");
         for (method, count) in method_counts {
             writeln!(overview, "  - {method}: {count}").ok();
@@ -372,8 +392,9 @@ impl DocumentationGenerator {
             writeln!(overview, "  - {tag}: {count}").ok();
         }
         overview.push('\n');
+    }
 
-        // Quick start examples
+    fn write_api_overview_quick_start(overview: &mut String, api_name: &str) {
         overview.push_str("## Quick Start\n\n");
         write!(
             overview,
@@ -384,27 +405,33 @@ impl DocumentationGenerator {
         write!(
             overview,
             "Search for specific operations:\n```bash\naperture search \"keyword\" --api {api_name}\n```\n\n"
-        ).ok();
+        )
+        .ok();
+    }
 
-        // Show first few operations as examples
-        if !visible_commands.is_empty() {
-            overview.push_str("## Sample Operations\n\n");
-            for (i, command) in visible_commands.iter().take(3).enumerate() {
-                let tag = Self::effective_group(command);
-                let operation = Self::effective_operation(command);
-                write!(
-                    overview,
-                    "{}. **{}** ({})\n   ```bash\n   aperture api {api_name} {tag} {operation}\n   ```\n   {}\n\n",
-                    i + 1,
-                    command.summary.as_deref().unwrap_or(&operation),
-                    command.method.to_uppercase(),
-                    command.description.as_deref().unwrap_or("No description")
-                )
-                .ok();
-            }
+    fn write_api_overview_samples(
+        overview: &mut String,
+        api_name: &str,
+        visible_commands: &[&CachedCommand],
+    ) {
+        if visible_commands.is_empty() {
+            return;
         }
 
-        Ok(overview)
+        overview.push_str("## Sample Operations\n\n");
+        for (i, command) in visible_commands.iter().take(3).enumerate() {
+            let tag = Self::effective_group(command);
+            let operation = Self::effective_operation(command);
+            write!(
+                overview,
+                "{}. **{}** ({})\n   ```bash\n   aperture api {api_name} {tag} {operation}\n   ```\n   {}\n\n",
+                i + 1,
+                command.summary.as_deref().unwrap_or(&operation),
+                command.method.to_uppercase(),
+                command.description.as_deref().unwrap_or("No description")
+            )
+            .ok();
+        }
     }
 
     /// Generate interactive help menu

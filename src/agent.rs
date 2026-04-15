@@ -823,38 +823,10 @@ fn extract_security_schemes(spec: &CachedSpec) -> HashMap<String, SecurityScheme
     let mut security_schemes = HashMap::new();
 
     for (name, scheme) in &spec.security_schemes {
-        let details = match scheme.scheme_type.as_str() {
-            constants::SECURITY_TYPE_HTTP => match scheme.scheme.as_deref() {
-                Some(constants::AUTH_SCHEME_BEARER) => SecuritySchemeDetails::HttpBearer {
-                    bearer_format: scheme.bearer_format.clone(),
-                },
-                Some(constants::AUTH_SCHEME_BASIC) => SecuritySchemeDetails::HttpBasic,
-                _ => SecuritySchemeDetails::HttpBearer {
-                    bearer_format: None,
-                },
-            },
-            constants::AUTH_SCHEME_APIKEY => SecuritySchemeDetails::ApiKey {
-                location: scheme
-                    .location
-                    .clone()
-                    .unwrap_or_else(|| constants::LOCATION_HEADER.to_string()),
-                name: scheme
-                    .parameter_name
-                    .clone()
-                    .unwrap_or_else(|| constants::HEADER_AUTHORIZATION.to_string()),
-            },
-            _ => {
-                // Default to bearer for unknown types
-                SecuritySchemeDetails::HttpBearer {
-                    bearer_format: None,
-                }
-            }
-        };
-
         let scheme_info = SecuritySchemeInfo {
             scheme_type: scheme.scheme_type.clone(),
             description: scheme.description.clone(),
-            details,
+            details: cached_security_scheme_details(scheme),
             aperture_secret: scheme.aperture_secret.clone(),
         };
 
@@ -862,6 +834,42 @@ fn extract_security_schemes(spec: &CachedSpec) -> HashMap<String, SecurityScheme
     }
 
     security_schemes
+}
+
+fn cached_security_scheme_details(
+    scheme: &crate::cache::models::CachedSecurityScheme,
+) -> SecuritySchemeDetails {
+    match scheme.scheme_type.as_str() {
+        constants::SECURITY_TYPE_HTTP => cached_http_security_details(scheme),
+        constants::AUTH_SCHEME_APIKEY => SecuritySchemeDetails::ApiKey {
+            location: scheme
+                .location
+                .clone()
+                .unwrap_or_else(|| constants::LOCATION_HEADER.to_string()),
+            name: scheme
+                .parameter_name
+                .clone()
+                .unwrap_or_else(|| constants::HEADER_AUTHORIZATION.to_string()),
+        },
+        // Default to bearer for unknown types.
+        _ => SecuritySchemeDetails::HttpBearer {
+            bearer_format: None,
+        },
+    }
+}
+
+fn cached_http_security_details(
+    scheme: &crate::cache::models::CachedSecurityScheme,
+) -> SecuritySchemeDetails {
+    match scheme.scheme.as_deref() {
+        Some(constants::AUTH_SCHEME_BEARER) => SecuritySchemeDetails::HttpBearer {
+            bearer_format: scheme.bearer_format.clone(),
+        },
+        Some(constants::AUTH_SCHEME_BASIC) => SecuritySchemeDetails::HttpBasic,
+        _ => SecuritySchemeDetails::HttpBearer {
+            bearer_format: None,
+        },
+    }
 }
 
 fn operation_command_name(operation: &Operation, method: &str) -> String {
@@ -1094,28 +1102,31 @@ fn serialize_enum_value(v: &String) -> String {
 fn extract_schema_type_from_schema_kind(
     schema_kind: &openapiv3::SchemaKind,
 ) -> (String, Option<String>, Vec<String>) {
-    match schema_kind {
-        openapiv3::SchemaKind::Type(type_val) => match type_val {
-            openapiv3::Type::String(string_type) => {
-                let enum_values: Vec<String> = string_type
-                    .enumeration
-                    .iter()
-                    .filter_map(|v| v.as_ref())
-                    .map(serialize_enum_value)
-                    .collect();
-                (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
-            }
-            openapiv3::Type::Number(_) => (constants::SCHEMA_TYPE_NUMBER.to_string(), None, vec![]),
-            openapiv3::Type::Integer(_) => {
-                (constants::SCHEMA_TYPE_INTEGER.to_string(), None, vec![])
-            }
-            openapiv3::Type::Boolean(_) => {
-                (constants::SCHEMA_TYPE_BOOLEAN.to_string(), None, vec![])
-            }
-            openapiv3::Type::Array(_) => (constants::SCHEMA_TYPE_ARRAY.to_string(), None, vec![]),
-            openapiv3::Type::Object(_) => (constants::SCHEMA_TYPE_OBJECT.to_string(), None, vec![]),
-        },
-        _ => (constants::SCHEMA_TYPE_STRING.to_string(), None, vec![]),
+    let openapiv3::SchemaKind::Type(type_val) = schema_kind else {
+        return (constants::SCHEMA_TYPE_STRING.to_string(), None, vec![]);
+    };
+
+    extract_schema_type_from_openapi_type(type_val)
+}
+
+fn extract_schema_type_from_openapi_type(
+    type_val: &openapiv3::Type,
+) -> (String, Option<String>, Vec<String>) {
+    match type_val {
+        openapiv3::Type::String(string_type) => {
+            let enum_values: Vec<String> = string_type
+                .enumeration
+                .iter()
+                .filter_map(|v| v.as_ref())
+                .map(serialize_enum_value)
+                .collect();
+            (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
+        }
+        openapiv3::Type::Number(_) => (constants::SCHEMA_TYPE_NUMBER.to_string(), None, vec![]),
+        openapiv3::Type::Integer(_) => (constants::SCHEMA_TYPE_INTEGER.to_string(), None, vec![]),
+        openapiv3::Type::Boolean(_) => (constants::SCHEMA_TYPE_BOOLEAN.to_string(), None, vec![]),
+        openapiv3::Type::Array(_) => (constants::SCHEMA_TYPE_ARRAY.to_string(), None, vec![]),
+        openapiv3::Type::Object(_) => (constants::SCHEMA_TYPE_OBJECT.to_string(), None, vec![]),
     }
 }
 
@@ -1194,51 +1205,71 @@ fn convert_openapi_security_scheme(
             name: param_name,
             description,
             ..
-        } => {
-            let location_str = match location {
-                openapiv3::APIKeyLocation::Query => constants::PARAM_LOCATION_QUERY,
-                openapiv3::APIKeyLocation::Header => constants::PARAM_LOCATION_HEADER,
-                openapiv3::APIKeyLocation::Cookie => constants::PARAM_LOCATION_COOKIE,
-            };
-
-            let aperture_secret = extract_aperture_secret_from_extensions(scheme);
-
-            Some(SecuritySchemeInfo {
-                scheme_type: constants::AUTH_SCHEME_APIKEY.to_string(),
-                description: description.clone(),
-                details: SecuritySchemeDetails::ApiKey {
-                    location: location_str.to_string(),
-                    name: param_name.clone(),
-                },
-                aperture_secret,
-            })
-        }
+        } => Some(convert_openapi_api_key_security_scheme(
+            location,
+            param_name,
+            description.as_ref(),
+            extract_aperture_secret_from_extensions(scheme),
+        )),
         SecurityScheme::HTTP {
             scheme: http_scheme,
             bearer_format,
             description,
             ..
-        } => {
-            let details = match http_scheme.as_str() {
-                constants::AUTH_SCHEME_BEARER => SecuritySchemeDetails::HttpBearer {
-                    bearer_format: bearer_format.clone(),
-                },
-                constants::AUTH_SCHEME_BASIC => SecuritySchemeDetails::HttpBasic,
-                _ => SecuritySchemeDetails::HttpBearer {
-                    bearer_format: None,
-                },
-            };
-
-            let aperture_secret = extract_aperture_secret_from_extensions(scheme);
-
-            Some(SecuritySchemeInfo {
-                scheme_type: constants::SECURITY_TYPE_HTTP.to_string(),
-                description: description.clone(),
-                details,
-                aperture_secret,
-            })
-        }
+        } => Some(convert_openapi_http_security_scheme(
+            http_scheme,
+            bearer_format.as_ref(),
+            description.as_ref(),
+            extract_aperture_secret_from_extensions(scheme),
+        )),
         SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+    }
+}
+
+fn convert_openapi_api_key_security_scheme(
+    location: &openapiv3::APIKeyLocation,
+    parameter_name: &str,
+    description: Option<&String>,
+    aperture_secret: Option<CachedApertureSecret>,
+) -> SecuritySchemeInfo {
+    let location_str = match location {
+        openapiv3::APIKeyLocation::Query => constants::PARAM_LOCATION_QUERY,
+        openapiv3::APIKeyLocation::Header => constants::PARAM_LOCATION_HEADER,
+        openapiv3::APIKeyLocation::Cookie => constants::PARAM_LOCATION_COOKIE,
+    };
+
+    SecuritySchemeInfo {
+        scheme_type: constants::AUTH_SCHEME_APIKEY.to_string(),
+        description: description.cloned(),
+        details: SecuritySchemeDetails::ApiKey {
+            location: location_str.to_string(),
+            name: parameter_name.to_string(),
+        },
+        aperture_secret,
+    }
+}
+
+fn convert_openapi_http_security_scheme(
+    http_scheme: &str,
+    bearer_format: Option<&String>,
+    description: Option<&String>,
+    aperture_secret: Option<CachedApertureSecret>,
+) -> SecuritySchemeInfo {
+    let details = match http_scheme {
+        constants::AUTH_SCHEME_BEARER => SecuritySchemeDetails::HttpBearer {
+            bearer_format: bearer_format.cloned(),
+        },
+        constants::AUTH_SCHEME_BASIC => SecuritySchemeDetails::HttpBasic,
+        _ => SecuritySchemeDetails::HttpBearer {
+            bearer_format: None,
+        },
+    };
+
+    SecuritySchemeInfo {
+        scheme_type: constants::SECURITY_TYPE_HTTP.to_string(),
+        description: description.cloned(),
+        details,
+        aperture_secret,
     }
 }
 
@@ -1246,29 +1277,35 @@ fn convert_openapi_security_scheme(
 fn extract_aperture_secret_from_extensions(
     scheme: &SecurityScheme,
 ) -> Option<CachedApertureSecret> {
-    let extensions = match scheme {
+    security_scheme_extensions(scheme)
+        .and_then(|extensions| extensions.get(constants::EXT_APERTURE_SECRET))
+        .and_then(parse_aperture_secret_extension)
+}
+
+const fn security_scheme_extensions(
+    scheme: &SecurityScheme,
+) -> Option<&indexmap::IndexMap<String, serde_json::Value>> {
+    match scheme {
         SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. } => {
-            extensions
+            Some(extensions)
         }
-        SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => return None,
-    };
+        SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+    }
+}
 
-    extensions
-        .get(constants::EXT_APERTURE_SECRET)
-        .and_then(|value| {
-            let obj = value.as_object()?;
-            let source = obj.get(constants::EXT_KEY_SOURCE)?.as_str()?;
-            let name = obj.get(constants::EXT_KEY_NAME)?.as_str()?;
+fn parse_aperture_secret_extension(value: &serde_json::Value) -> Option<CachedApertureSecret> {
+    let obj = value.as_object()?;
+    let source = obj.get(constants::EXT_KEY_SOURCE)?.as_str()?;
+    let name = obj.get(constants::EXT_KEY_NAME)?.as_str()?;
 
-            if source != constants::SOURCE_ENV {
-                return None;
-            }
+    if source != constants::SOURCE_ENV {
+        return None;
+    }
 
-            Some(CachedApertureSecret {
-                source: source.to_string(),
-                name: name.to_string(),
-            })
-        })
+    Some(CachedApertureSecret {
+        source: source.to_string(),
+        name: name.to_string(),
+    })
 }
 
 #[cfg(test)]

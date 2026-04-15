@@ -194,21 +194,13 @@ impl ResponseCache {
             return Ok(());
         }
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
-            .as_secs();
-
-        let ttl_seconds = ttl.unwrap_or(self.config.default_ttl).as_secs();
-
-        let cached_response = CachedResponse {
-            body: body.to_string(),
+        let cached_response = Self::build_cached_response(
+            body,
             status_code,
-            headers: headers.clone(),
-            cached_at: now,
-            ttl_seconds,
+            headers,
             request_info,
-        };
+            ttl.unwrap_or(self.config.default_ttl),
+        )?;
 
         let cache_file = self.config.cache_dir.join(key.to_filename());
         let json_content = serde_json::to_string_pretty(&cached_response).map_err(|e| {
@@ -230,6 +222,30 @@ impl ResponseCache {
         Ok(())
     }
 
+    fn build_cached_response(
+        body: &str,
+        status_code: u16,
+        headers: &HashMap<String, String>,
+        request_info: CachedRequestInfo,
+        ttl: Duration,
+    ) -> Result<CachedResponse, Error> {
+        Ok(CachedResponse {
+            body: body.to_string(),
+            status_code,
+            headers: headers.clone(),
+            cached_at: Self::current_unix_timestamp()?,
+            ttl_seconds: ttl.as_secs(),
+            request_info,
+        })
+    }
+
+    fn current_unix_timestamp() -> Result<u64, Error> {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| Error::invalid_config(format!("System time error: {e}")))
+            .map(|duration| duration.as_secs())
+    }
+
     /// Retrieve a response from the cache if it exists and is still valid
     ///
     /// # Errors
@@ -243,25 +259,12 @@ impl ResponseCache {
         }
 
         let cache_file = self.config.cache_dir.join(key.to_filename());
-
         if !cache_file.exists() {
             return Ok(None);
         }
 
-        let json_content = tokio::fs::read_to_string(&cache_file)
-            .await
-            .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
-        let cached_response: CachedResponse = serde_json::from_str(&json_content).map_err(|e| {
-            Error::serialization_error(format!("Failed to deserialize cached response: {e}"))
-        })?;
-
-        // Check if the cache entry is still valid
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| Error::invalid_config(format!("System time error: {e}")))?
-            .as_secs();
-
-        if now > cached_response.cached_at + cached_response.ttl_seconds {
+        let cached_response = Self::read_cached_response(&cache_file).await?;
+        if Self::is_expired(&cached_response)? {
             // Cache entry has expired — don't eagerly delete here because
             // deletion is a mutating operation that should be coordinated
             // under the advisory lock. Expired entries are cleaned up by
@@ -270,6 +273,21 @@ impl ResponseCache {
         }
 
         Ok(Some(cached_response))
+    }
+
+    async fn read_cached_response(cache_file: &std::path::Path) -> Result<CachedResponse, Error> {
+        let json_content = tokio::fs::read_to_string(cache_file)
+            .await
+            .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
+
+        serde_json::from_str(&json_content).map_err(|e| {
+            Error::serialization_error(format!("Failed to deserialize cached response: {e}"))
+        })
+    }
+
+    fn is_expired(cached_response: &CachedResponse) -> Result<bool, Error> {
+        Ok(Self::current_unix_timestamp()?
+            > cached_response.cached_at + cached_response.ttl_seconds)
     }
 
     /// Check if a response is cached and valid for the given key
@@ -291,33 +309,11 @@ impl ResponseCache {
     /// Returns an error if cache files cannot be removed
     pub async fn clear_api_cache(&self, api_name: &str) -> Result<usize, Error> {
         let _lock = self.acquire_lock().await?;
-
-        let mut cleared_count = 0;
-        let mut entries = tokio::fs::read_dir(&self.config.cache_dir)
-            .await
-            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?
-        {
-            let filename = entry.file_name();
-            if Self::is_api_cache_entry(api_name, &filename) {
-                tokio::fs::remove_file(entry.path())
-                    .await
-                    .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
-                cleared_count += 1;
-            }
-        }
-
-        Ok(cleared_count)
-    }
-
-    fn is_api_cache_entry(api_name: &str, filename: &std::ffi::OsStr) -> bool {
-        let filename = filename.to_string_lossy();
-        filename.starts_with(&format!("{api_name}_"))
-            && filename.ends_with(constants::CACHE_FILE_SUFFIX)
+        self.clear_matching_entries(|filename| {
+            filename.starts_with(&format!("{api_name}_"))
+                && filename.ends_with(constants::CACHE_FILE_SUFFIX)
+        })
+        .await
     }
 
     /// Clear all cached responses
@@ -330,7 +326,14 @@ impl ResponseCache {
     /// Returns an error if cache directory cannot be cleared
     pub async fn clear_all(&self) -> Result<usize, Error> {
         let _lock = self.acquire_lock().await?;
+        self.clear_matching_entries(|filename| filename.ends_with(constants::CACHE_FILE_SUFFIX))
+            .await
+    }
 
+    async fn clear_matching_entries(
+        &self,
+        should_remove: impl Fn(&str) -> bool,
+    ) -> Result<usize, Error> {
         let mut cleared_count = 0;
         let mut entries = tokio::fs::read_dir(&self.config.cache_dir)
             .await
@@ -342,14 +345,14 @@ impl ResponseCache {
             .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?
         {
             let filename = entry.file_name();
-            let filename_str = filename.to_string_lossy();
-
-            if filename_str.ends_with(constants::CACHE_FILE_SUFFIX) {
-                tokio::fs::remove_file(entry.path())
-                    .await
-                    .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
-                cleared_count += 1;
+            if !should_remove(&filename.to_string_lossy()) {
+                continue;
             }
+
+            tokio::fs::remove_file(entry.path())
+                .await
+                .map_err(|e| Error::io_error(format!("I/O operation failed: {e}")))?;
+            cleared_count += 1;
         }
 
         Ok(cleared_count)
@@ -515,20 +518,31 @@ impl ResponseCache {
             .await;
         }
 
-        for path in &stale_tmp_files {
-            let _ = tokio::fs::remove_file(path).await;
-        }
-
-        if entries.len() > self.config.max_entries {
-            entries.sort_by_key(|(_, modified)| *modified);
-            let to_remove = entries.len() - self.config.max_entries;
-
-            for (path, _) in entries.iter().take(to_remove) {
-                let _ = tokio::fs::remove_file(path).await;
-            }
-        }
+        Self::remove_files_ignoring_errors(&stale_tmp_files).await;
+        Self::trim_cache_entries(entries, self.config.max_entries).await;
 
         Ok(())
+    }
+
+    async fn remove_files_ignoring_errors(paths: &[std::path::PathBuf]) {
+        for path in paths {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+    }
+
+    async fn trim_cache_entries(
+        mut entries: Vec<(std::path::PathBuf, SystemTime)>,
+        max_entries: usize,
+    ) {
+        if entries.len() <= max_entries {
+            return;
+        }
+
+        entries.sort_by_key(|(_, modified)| *modified);
+        let to_remove = entries.len() - max_entries;
+        for (path, _) in entries.iter().take(to_remove) {
+            let _ = tokio::fs::remove_file(path).await;
+        }
     }
 }
 

@@ -150,22 +150,35 @@ impl SpecTransformer {
         skip_endpoints: &[(String, String)],
         warnings: &[crate::spec::validator::ValidationWarning],
     ) -> Result<CachedSpec, Error> {
-        let mut commands = Vec::new();
-
-        // Extract version from info
-        let version = spec.info.version.clone();
-
-        // Extract server URLs
-        let servers: Vec<String> = spec.servers.iter().map(|s| s.url.clone()).collect();
-        let base_url = servers.first().cloned();
-
-        // Extract server variables from the first server (if any)
-        let server_variables: HashMap<String, crate::cache::models::ServerVariable> = spec
+        let servers: Vec<String> = spec
             .servers
+            .iter()
+            .map(|server| server.url.clone())
+            .collect();
+        let commands = Self::collect_commands(spec, skip_endpoints)?;
+
+        Ok(CachedSpec {
+            cache_format_version: CACHE_FORMAT_VERSION,
+            name: name.to_string(),
+            version: spec.info.version.clone(),
+            commands,
+            base_url: servers.first().cloned(),
+            servers,
+            security_schemes: Self::extract_security_schemes(spec),
+            skipped_endpoints: Self::build_skipped_endpoints(warnings),
+            server_variables: Self::extract_server_variables(spec),
+        })
+    }
+
+    fn extract_server_variables(
+        spec: &OpenAPI,
+    ) -> HashMap<String, crate::cache::models::ServerVariable> {
+        spec.servers
             .first()
             .and_then(|server| server.variables.as_ref())
-            .map(|vars| {
-                vars.iter()
+            .map(|variables| {
+                variables
+                    .iter()
                     .map(|(name, variable)| {
                         (
                             name.clone(),
@@ -178,20 +191,27 @@ impl SpecTransformer {
                     })
                     .collect()
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
 
-        // Extract global security requirements
-        let global_security_requirements: Vec<String> = spec
-            .security
+    fn extract_global_security_requirements(spec: &OpenAPI) -> Vec<String> {
+        spec.security
             .iter()
-            .flat_map(|security_vec| {
-                security_vec
+            .flat_map(|security_group| {
+                security_group
                     .iter()
                     .flat_map(|security_req| security_req.keys().cloned())
             })
-            .collect();
+            .collect()
+    }
 
-        // Process all paths and operations
+    fn collect_commands(
+        spec: &OpenAPI,
+        skip_endpoints: &[(String, String)],
+    ) -> Result<Vec<CachedCommand>, Error> {
+        let global_security_requirements = Self::extract_global_security_requirements(spec);
+        let mut commands = Vec::new();
+
         for (path, path_item) in spec.paths.iter() {
             Self::process_path_item(
                 spec,
@@ -203,31 +223,21 @@ impl SpecTransformer {
             )?;
         }
 
-        // Extract security schemes
-        let security_schemes = Self::extract_security_schemes(spec);
+        Ok(commands)
+    }
 
-        // Convert warnings to skipped endpoints
-        let skipped_endpoints: Vec<SkippedEndpoint> = warnings
+    fn build_skipped_endpoints(
+        warnings: &[crate::spec::validator::ValidationWarning],
+    ) -> Vec<SkippedEndpoint> {
+        warnings
             .iter()
-            .map(|w| SkippedEndpoint {
-                path: w.endpoint.path.clone(),
-                method: w.endpoint.method.clone(),
-                content_type: w.endpoint.content_type.clone(),
-                reason: w.reason.clone(),
+            .map(|warning| SkippedEndpoint {
+                path: warning.endpoint.path.clone(),
+                method: warning.endpoint.method.clone(),
+                content_type: warning.endpoint.content_type.clone(),
+                reason: warning.reason.clone(),
             })
-            .collect();
-
-        Ok(CachedSpec {
-            cache_format_version: CACHE_FORMAT_VERSION,
-            name: name.to_string(),
-            version,
-            commands,
-            base_url,
-            servers,
-            security_schemes,
-            skipped_endpoints,
-            server_variables,
-        })
+            .collect()
     }
 
     /// Process a single path item and its operations
@@ -754,33 +764,35 @@ impl SpecTransformer {
 
     /// Extracts x-aperture-secret extension from a security scheme
     fn extract_aperture_secret(scheme: &SecurityScheme) -> Option<CachedApertureSecret> {
-        // Get extensions from the security scheme
-        let extensions = match scheme {
+        Self::security_scheme_extensions(scheme)
+            .and_then(|extensions| extensions.get(crate::constants::EXT_APERTURE_SECRET))
+            .and_then(Self::parse_aperture_secret_extension)
+    }
+
+    const fn security_scheme_extensions(
+        scheme: &SecurityScheme,
+    ) -> Option<&indexmap::IndexMap<String, serde_json::Value>> {
+        match scheme {
             SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. } => {
-                extensions
+                Some(extensions)
             }
-            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => return None,
-        };
+            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+        }
+    }
 
-        // Parse the x-aperture-secret extension
-        extensions
-            .get(crate::constants::EXT_APERTURE_SECRET)
-            .and_then(|value| {
-                // The extension should be an object with "source" and "name" fields
-                let obj = value.as_object()?;
-                let source = obj.get(crate::constants::EXT_KEY_SOURCE)?.as_str()?;
-                let name = obj.get(crate::constants::EXT_KEY_NAME)?.as_str()?;
+    fn parse_aperture_secret_extension(value: &serde_json::Value) -> Option<CachedApertureSecret> {
+        let obj = value.as_object()?;
+        let source = obj.get(crate::constants::EXT_KEY_SOURCE)?.as_str()?;
+        let name = obj.get(crate::constants::EXT_KEY_NAME)?.as_str()?;
 
-                // Currently only "env" source is supported
-                if source != constants::SOURCE_ENV {
-                    return None;
-                }
+        if source != constants::SOURCE_ENV {
+            return None;
+        }
 
-                Some(CachedApertureSecret {
-                    source: source.to_string(),
-                    name: name.to_string(),
-                })
-            })
+        Some(CachedApertureSecret {
+            source: source.to_string(),
+            name: name.to_string(),
+        })
     }
 
     /// Resolves a parameter reference to its actual parameter definition
@@ -1157,43 +1169,50 @@ fn detect_offset_from_parameters(
     let mut limit_param: Option<String> = None;
 
     for param_ref in params {
-        let param = match param_ref {
-            openapiv3::ReferenceOr::Item(p) => std::borrow::Cow::Borrowed(p),
-            openapiv3::ReferenceOr::Reference { reference } => {
-                let Ok(resolved) = crate::spec::resolve_parameter_reference(spec, reference) else {
-                    continue;
-                };
-                std::borrow::Cow::Owned(resolved)
-            }
-        };
-
-        // Only consider query parameters
-        let openapiv3::Parameter::Query { parameter_data, .. } = param.as_ref() else {
+        let Some(param) = resolve_parameter_for_pagination(param_ref, spec) else {
             continue;
         };
 
-        let name = parameter_data.name.as_str();
-        match () {
-            () if constants::PAGINATION_PAGE_PARAMS.contains(&name) => {
-                page_param = Some(name.to_string());
-            }
-            () if constants::PAGINATION_LIMIT_PARAMS.contains(&name) => {
-                limit_param = Some(name.to_string());
-            }
-            () => {}
+        update_offset_pagination_params(param.as_ref(), &mut page_param, &mut limit_param);
+    }
+
+    page_param.map(|page_param| PaginationInfo {
+        strategy: PaginationStrategy::Offset,
+        page_param: Some(page_param),
+        limit_param,
+        ..Default::default()
+    })
+}
+
+fn resolve_parameter_for_pagination<'a>(
+    param_ref: &'a openapiv3::ReferenceOr<openapiv3::Parameter>,
+    spec: &'a OpenAPI,
+) -> Option<std::borrow::Cow<'a, openapiv3::Parameter>> {
+    match param_ref {
+        openapiv3::ReferenceOr::Item(param) => Some(std::borrow::Cow::Borrowed(param)),
+        openapiv3::ReferenceOr::Reference { reference } => {
+            crate::spec::resolve_parameter_reference(spec, reference)
+                .ok()
+                .map(std::borrow::Cow::Owned)
         }
     }
+}
 
-    if page_param.is_some() {
-        return Some(PaginationInfo {
-            strategy: PaginationStrategy::Offset,
-            page_param,
-            limit_param,
-            ..Default::default()
-        });
+fn update_offset_pagination_params(
+    parameter: &openapiv3::Parameter,
+    page_param: &mut Option<String>,
+    limit_param: &mut Option<String>,
+) {
+    let openapiv3::Parameter::Query { parameter_data, .. } = parameter else {
+        return;
+    };
+
+    let name = parameter_data.name.as_str();
+    if constants::PAGINATION_PAGE_PARAMS.contains(&name) {
+        *page_param = Some(name.to_string());
+    } else if constants::PAGINATION_LIMIT_PARAMS.contains(&name) {
+        *limit_param = Some(name.to_string());
     }
-
-    None
 }
 
 #[cfg(test)]
