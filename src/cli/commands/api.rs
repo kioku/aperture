@@ -11,6 +11,7 @@ use crate::error::Error;
 use crate::fs::OsFileSystem;
 use crate::output::Output;
 use crate::shortcuts::{ResolutionResult, ShortcutResolver};
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 /// Adds connection/timeout context to network errors.
@@ -153,6 +154,85 @@ fn handle_show_examples_command(
         .ok_or_else(|| Error::spec_not_found(context))?;
     crate::cli::render::render_examples(operation);
     Ok(())
+}
+
+fn render_api_context_landing(context: &str, spec: &CachedSpec) -> Result<(), Error> {
+    let mut specs = std::collections::BTreeMap::new();
+    specs.insert(context.to_string(), spec.clone());
+
+    let doc_gen = crate::docs::DocumentationGenerator::new(specs);
+    let mut overview = doc_gen.generate_api_overview(context)?;
+
+    overview.push_str("## Next Steps\n\n");
+    writeln!(
+        overview,
+        "- Discover by intent: `aperture search \"<keyword>\" --api {context}`"
+    )
+    .ok();
+    writeln!(
+        overview,
+        "- Inspect command paths: `aperture commands {context}`"
+    )
+    .ok();
+    writeln!(
+        overview,
+        "- Read operation docs: `aperture docs {context} <tag> <operation>`"
+    )
+    .ok();
+    writeln!(
+        overview,
+        "- Execute an operation: `aperture api {context} <tag> <operation> ...`"
+    )
+    .ok();
+    writeln!(
+        overview,
+        "- Machine manifest: `aperture api {context} --describe-json`"
+    )
+    .ok();
+
+    // ast-grep-ignore: no-println
+    println!("{overview}");
+    Ok(())
+}
+
+const LANDING_INCOMPATIBLE_GLOBAL_FLAGS: &[&str] = &[
+    "--json-errors",
+    "--dry-run",
+    "--idempotency-key",
+    "--format",
+    "--jq",
+    "--batch-file",
+    "--batch-concurrency",
+    "--batch-rate-limit",
+    "--cache",
+    "--no-cache",
+    "--cache-ttl",
+    "--positional-args",
+    "--auto-paginate",
+    "--retry",
+    "--retry-delay",
+    "--retry-max-delay",
+    "--force-retry",
+];
+
+fn has_explicit_flag(argv: &[String], flag: &str) -> bool {
+    argv.iter()
+        .any(|arg| arg == flag || arg.starts_with(&format!("{flag}=")))
+}
+
+fn has_explicit_landing_incompatible_global_flags(argv: &[String]) -> bool {
+    LANDING_INCOMPATIBLE_GLOBAL_FLAGS
+        .iter()
+        .any(|flag| has_explicit_flag(argv, flag))
+}
+
+fn should_render_api_context_landing(args: &[String]) -> bool {
+    if !args.is_empty() {
+        return false;
+    }
+
+    let raw_argv: Vec<String> = std::env::args().collect();
+    !has_explicit_landing_incompatible_global_flags(&raw_argv)
 }
 
 async fn execute_api_runtime(
@@ -318,6 +398,10 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
 
     if let Some(batch_file_path) = &cli.batch_file {
         return handle_batch_file_command(context, batch_file_path, &command_context, cli).await;
+    }
+
+    if should_render_api_context_landing(&args) {
+        return render_api_context_landing(context, &command_context.spec);
     }
 
     let Some(matches) = parse_matches_with_examples_fallback(
@@ -588,7 +672,10 @@ fn count_shortcut_args(args: &[String]) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_output_format;
+    use super::{
+        has_explicit_landing_incompatible_global_flags, resolve_output_format,
+        should_render_api_context_landing, LANDING_INCOMPATIBLE_GLOBAL_FLAGS,
+    };
     use crate::cli::OutputFormat;
     use clap::{Arg, Command};
 
@@ -617,5 +704,39 @@ mod tests {
         let resolved = resolve_output_format(&matches, &OutputFormat::Yaml);
 
         assert!(matches!(resolved, OutputFormat::Json));
+    }
+
+    #[test]
+    fn landing_incompatible_global_flags_are_detected() {
+        for flag in LANDING_INCOMPATIBLE_GLOBAL_FLAGS {
+            let argv = vec![
+                "aperture".to_string(),
+                "api".to_string(),
+                "test-api".to_string(),
+                (*flag).to_string(),
+            ];
+
+            assert!(
+                has_explicit_landing_incompatible_global_flags(&argv),
+                "expected {flag} to block landing output"
+            );
+        }
+    }
+
+    #[test]
+    fn landing_incompatible_global_flags_support_equals_syntax() {
+        let argv = vec![
+            "aperture".to_string(),
+            "--format=yaml".to_string(),
+            "api".to_string(),
+            "test-api".to_string(),
+        ];
+
+        assert!(has_explicit_landing_incompatible_global_flags(&argv));
+    }
+
+    #[test]
+    fn landing_only_renders_without_operation_args() {
+        assert!(!should_render_api_context_landing(&["users".to_string()]));
     }
 }

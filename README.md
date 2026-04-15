@@ -41,11 +41,14 @@ aperture config api add petstore https://petstore3.swagger.io/api/v3/openapi.jso
 # Configure authentication
 aperture config secret set petstore api_key --env PETSTORE_API_KEY
 
-# Orient: understand the API surface
-aperture overview petstore
+# Land in context: get a concise API overview + next steps
+aperture api petstore
 
 # Find: search by intent
 aperture search "get pet by id" --api petstore
+
+# Orient: high-level overview command
+aperture overview petstore
 
 # Inspect: read deep operation docs
 aperture docs petstore pet get-pet-by-id
@@ -59,6 +62,7 @@ aperture api petstore --describe-json
 
 ### Discovery Commands (Canonical Roles)
 
+- `api <context>` → landing page for that API (overview + next actions)
 - `overview` → orient to an API at a high level
 - `search` → primary intent-first discovery (cross-API or scoped)
 - `commands` (`list-commands`) → terse structural tree
