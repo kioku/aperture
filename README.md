@@ -93,6 +93,46 @@ Stable top-level JSON shapes:
 - `docs <api> <tag> <operation> --format json` → `{ mode: "operation", api, operation }`
 - `config api list --json` → `[{ name, ... }]` (verbose mode adds version/endpoint detail)
 
+## Shell Completion
+
+Generate shell completion scripts:
+
+```bash
+aperture completion bash
+aperture completion zsh
+aperture completion fish
+aperture completion powershell
+```
+
+Install examples:
+
+```bash
+# bash
+aperture completion bash > ~/.local/share/bash-completion/completions/aperture
+
+# zsh
+mkdir -p ~/.zfunc
+aperture completion zsh > ~/.zfunc/_aperture
+
+# fish
+aperture completion fish > ~/.config/fish/completions/aperture.fish
+
+# PowerShell (current user profile)
+aperture completion powershell | Out-String | Invoke-Expression
+```
+
+Completion covers:
+
+- static top-level and `config` command paths,
+- configured context names,
+- dynamic `api <context> <group> <operation>` names,
+- operation flags derived from cached specs.
+
+Trade-offs:
+
+- dynamic suggestions come from local cached specs, so run `aperture config api add` / `aperture config api reinit` after spec changes,
+- value completion is not provided for parameter values (only command/flag names).
+
 ## Agent Integration
 
 Aperture provides features specifically for programmatic use:
