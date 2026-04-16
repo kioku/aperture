@@ -85,6 +85,6 @@ fn maybe_render_examples(spec: &CachedSpec, matches: &ArgMatches) -> Result<bool
         .iter()
         .find(|cmd| cmd.operation_id == operation_id)
         .ok_or_else(|| Error::spec_not_found(&spec.name))?;
-    crate::cli::render::render_examples(operation);
+    crate::cli::render::render_examples("<api>", operation);
     Ok(true)
 }

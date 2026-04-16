@@ -163,7 +163,7 @@ fn handle_show_examples_command(
         .iter()
         .find(|cmd| cmd.operation_id == operation_id)
         .ok_or_else(|| Error::spec_not_found(context))?;
-    crate::cli::render::render_examples(operation);
+    crate::cli::render::render_examples(context, operation);
     Ok(())
 }
 
@@ -318,21 +318,24 @@ async fn execute_standard_api_runtime(
 }
 
 fn parse_dynamic_matches(
+    context: &str,
     spec: &CachedSpec,
     args: &[String],
     use_positional_args: bool,
 ) -> Result<clap::ArgMatches, clap::Error> {
-    generator::generate_command_tree_with_flags(spec, use_positional_args).try_get_matches_from(
-        std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args.iter().cloned()),
-    )
+    generator::generate_command_tree_for_api_with_flags(spec, context, use_positional_args)
+        .try_get_matches_from(
+            std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args.iter().cloned()),
+        )
 }
 
 fn parse_dynamic_matches_relaxed(
+    context: &str,
     spec: &CachedSpec,
     args: &[String],
     use_positional_args: bool,
 ) -> Result<clap::ArgMatches, clap::Error> {
-    generator::generate_command_tree_with_flags(spec, use_positional_args)
+    generator::generate_command_tree_for_api_with_flags(spec, context, use_positional_args)
         .ignore_errors(true)
         .try_get_matches_from(
             std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args.iter().cloned()),
@@ -363,7 +366,7 @@ fn parse_matches_with_examples_fallback(
     args: &[String],
     use_positional_args: bool,
 ) -> Result<Option<clap::ArgMatches>, Error> {
-    match parse_dynamic_matches(spec, args, use_positional_args) {
+    match parse_dynamic_matches(context, spec, args, use_positional_args) {
         Ok(matches) => Ok(Some(matches)),
         Err(parse_error) => handle_parse_error_with_examples_fallback(
             context,
@@ -391,7 +394,7 @@ fn handle_parse_error_with_examples_fallback(
         return Err(Error::invalid_command(context, parse_error.to_string()));
     }
 
-    let relaxed_matches = parse_dynamic_matches_relaxed(spec, args, use_positional_args)
+    let relaxed_matches = parse_dynamic_matches_relaxed(context, spec, args, use_positional_args)
         .map_err(|e| Error::invalid_command(context, e.to_string()))?;
 
     if crate::cli::translate::has_show_examples_flag(&relaxed_matches) {
