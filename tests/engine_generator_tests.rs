@@ -478,7 +478,7 @@ fn test_help_examples_use_effective_context_and_kebab_flags() {
         .map(std::string::ToString::to_string)
         .unwrap_or_default();
 
-    assert!(about.contains("aperture api test-api accounts fetch --user-id <value>"));
+    assert!(about.contains("aperture api test-api accounts fetch --user-id example"));
     assert!(!about.contains("--userId"));
 }
 

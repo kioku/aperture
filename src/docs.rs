@@ -300,7 +300,7 @@ impl DocumentationGenerator {
 
         let mut command_line = base_cmd.to_string();
         for param in required_params {
-            Self::append_example_parameter(&mut command_line, param, "<value>");
+            Self::append_example_parameter(&mut command_line, param, "example");
         }
         examples.push(CommandExample {
             description: "Basic usage with required parameters".to_string(),
@@ -398,8 +398,20 @@ impl DocumentationGenerator {
             return;
         }
 
-        let value = param.example.as_deref().unwrap_or(fallback);
+        let value = param
+            .example
+            .as_deref()
+            .unwrap_or_else(|| Self::default_example_value(param.schema_type.as_deref(), fallback));
         write!(command_line, " {value}").ok();
+    }
+
+    fn default_example_value<'a>(schema_type: Option<&'a str>, fallback: &'a str) -> &'a str {
+        match schema_type {
+            Some("integer" | "number") => "123",
+            Some("array") => "[item1,item2]",
+            Some("object") => "{\"key\":\"value\"}",
+            _ => fallback,
+        }
     }
 
     fn is_boolean_parameter(param: &CachedParameter) -> bool {

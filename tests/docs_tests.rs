@@ -359,7 +359,9 @@ fn test_command_help_examples_use_effective_names_and_kebab_flags() {
         .unwrap();
 
     assert!(help.contains("aperture api testapi accounts fetch --user-id <USER_ID>"));
+    assert!(help.contains("aperture api testapi accounts fetch --user-id example"));
     assert!(!help.contains("--userId"));
+    assert!(!help.contains("--user-id <value>"));
 }
 
 #[test]
