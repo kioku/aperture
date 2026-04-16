@@ -755,7 +755,7 @@ impl BatchProcessor {
             cache_dir: config_dir
                 .join(crate::constants::DIR_CACHE)
                 .join(crate::constants::DIR_RESPONSES),
-            default_ttl: std::time::Duration::from_secs(300),
+            default_ttl: std::time::Duration::from_mins(5),
             max_entries: 1000,
             enabled: true,
             allow_authenticated: false,

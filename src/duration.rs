@@ -94,29 +94,26 @@ mod tests {
     fn test_parse_duration_milliseconds() {
         assert_eq!(parse_duration("100ms").unwrap(), Duration::from_millis(100));
         assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
-        assert_eq!(
-            parse_duration("1000ms").unwrap(),
-            Duration::from_millis(1000)
-        );
+        assert_eq!(parse_duration("1000ms").unwrap(), Duration::from_secs(1));
     }
 
     #[test]
     fn test_parse_duration_seconds() {
         assert_eq!(parse_duration("1s").unwrap(), Duration::from_secs(1));
         assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
-        assert_eq!(parse_duration("120s").unwrap(), Duration::from_secs(120));
+        assert_eq!(parse_duration("120s").unwrap(), Duration::from_mins(2));
     }
 
     #[test]
     fn test_parse_duration_minutes() {
-        assert_eq!(parse_duration("1m").unwrap(), Duration::from_secs(60));
-        assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
+        assert_eq!(parse_duration("1m").unwrap(), Duration::from_mins(1));
+        assert_eq!(parse_duration("5m").unwrap(), Duration::from_mins(5));
     }
 
     #[test]
     fn test_parse_duration_plain_number() {
         assert_eq!(parse_duration("500").unwrap(), Duration::from_millis(500));
-        assert_eq!(parse_duration("1000").unwrap(), Duration::from_millis(1000));
+        assert_eq!(parse_duration("1000").unwrap(), Duration::from_secs(1));
     }
 
     #[test]

@@ -417,7 +417,7 @@ mod tests {
         headers.insert("retry-after", "120".parse().unwrap());
 
         let duration = parse_retry_after_header(&headers);
-        assert_eq!(duration, Some(Duration::from_secs(120)));
+        assert_eq!(duration, Some(Duration::from_mins(2)));
     }
 
     #[test]
@@ -504,7 +504,7 @@ mod tests {
         };
 
         // Server says wait 60 seconds, but we cap at 5 seconds
-        let retry_after = Some(Duration::from_secs(60));
+        let retry_after = Some(Duration::from_mins(1));
         let delay = calculate_retry_delay_with_header(&config, 0, retry_after);
         assert_eq!(delay.as_millis(), 5000);
     }

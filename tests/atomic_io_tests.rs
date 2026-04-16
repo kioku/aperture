@@ -124,7 +124,7 @@ async fn test_concurrent_response_cache_store_no_corruption() {
     let dir = TempDir::new().unwrap();
     let config = CacheConfig {
         cache_dir: dir.path().to_path_buf(),
-        default_ttl: Duration::from_secs(300),
+        default_ttl: Duration::from_mins(5),
         max_entries: 100,
         enabled: true,
         allow_authenticated: false,
@@ -184,7 +184,7 @@ async fn test_concurrent_store_same_key_no_corruption() {
     let dir = TempDir::new().unwrap();
     let config = CacheConfig {
         cache_dir: dir.path().to_path_buf(),
-        default_ttl: Duration::from_secs(300),
+        default_ttl: Duration::from_mins(5),
         max_entries: 100,
         enabled: true,
         allow_authenticated: false,
