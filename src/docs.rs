@@ -320,12 +320,8 @@ impl DocumentationGenerator {
         }
 
         let mut command_line = base_cmd.to_string();
-        for param in required_params
-            .iter()
-            .copied()
-            .filter(|p| p.location == "path" || p.location == "query")
-        {
-            Self::append_example_parameter(&mut command_line, param, "123");
+        for param in required_params {
+            Self::append_example_parameter(&mut command_line, param, "example");
         }
         command_line.push_str(" --body '{\"name\": \"example\", \"value\": 42}'");
 

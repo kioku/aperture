@@ -170,6 +170,33 @@ fn test_generate_command_help_with_request_body() {
 }
 
 #[test]
+fn test_request_body_example_includes_all_required_flags() {
+    let mut spec = create_test_spec();
+    spec.commands[1].parameters.push(CachedParameter {
+        name: "traceId".to_string(),
+        location: "header".to_string(),
+        required: true,
+        description: Some("Trace ID".to_string()),
+        schema: None,
+        schema_type: Some("string".to_string()),
+        format: None,
+        default_value: None,
+        enum_values: vec![],
+        example: None,
+    });
+
+    let mut specs = BTreeMap::new();
+    specs.insert("testapi".to_string(), spec);
+
+    let doc_gen = DocumentationGenerator::new(specs);
+    let help = doc_gen
+        .generate_command_help("testapi", "users", "create-user")
+        .unwrap();
+
+    assert!(help.contains("aperture api testapi users create-user --trace-id example --body"));
+}
+
+#[test]
 fn test_generate_api_overview() {
     let mut specs = BTreeMap::new();
     specs.insert("testapi".to_string(), create_test_spec());
