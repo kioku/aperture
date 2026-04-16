@@ -158,6 +158,15 @@ fn runtime_completion_suggests_config_domains_after_global_flags() {
 }
 
 #[test]
+fn runtime_completion_tolerates_unknown_top_level_flag_prefix() {
+    aperture_cmd()
+        .args(["__complete", "bash", "2", "aperture", "--unknown", "a"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("api"));
+}
+
+#[test]
 fn runtime_completion_suggests_contexts_groups_operations_and_flags() {
     let fixture = write_completion_fixture();
 

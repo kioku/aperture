@@ -142,7 +142,7 @@ fn is_binary_name(word: &str) -> bool {
 }
 
 fn complete_words(input: &CompletionInput, catalog: &CompletionCatalog) -> Vec<String> {
-    let before_cursor = strip_leading_global_flags(&input.before_cursor);
+    let before_cursor = strip_leading_option_tokens(&input.before_cursor);
 
     let Some(command) = before_cursor.first().map(String::as_str) else {
         return filter_candidates(top_level_candidates(), &input.current);
@@ -155,6 +155,19 @@ fn complete_words(input: &CompletionInput, catalog: &CompletionCatalog) -> Vec<S
     }
 
     complete_secondary_command(command, args_after_command, input, catalog)
+}
+
+fn strip_leading_option_tokens(tokens: &[String]) -> &[String] {
+    let mut index = 0;
+
+    while tokens
+        .get(index)
+        .is_some_and(|token| token.starts_with('-'))
+    {
+        index += 1;
+    }
+
+    &tokens[index..]
 }
 
 fn strip_leading_global_flags(tokens: &[String]) -> &[String] {
