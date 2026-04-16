@@ -1,11 +1,7 @@
-//! Integration tests for hidden global flags functionality.
+//! Integration tests for hidden dynamic flags functionality.
 //!
-//! Tests that global flags (--jq, --format, --server-var) are hidden from
-//! dynamic subcommand help but remain functional.
-//!
-//! Note: The hiding only affects the DYNAMIC command tree generated from `OpenAPI` specs,
-//! not the main CLI help. The main `aperture api <spec> --help` shows static CLI help
-//! which includes all flags. The dynamic help is shown at deeper levels (e.g., `users`, `list-users`).
+//! Tests that dynamic-operation flags (--jq, --format, --server-var) remain hidden from
+//! generated operation help while staying functional where supported.
 
 #![cfg(feature = "integration")]
 
@@ -63,20 +59,23 @@ paths:
 }
 
 #[test]
-fn test_global_flags_visible_in_main_help() {
-    // Check main help - should show --jq, --format (these are in the main CLI)
+fn test_execution_only_flags_hidden_in_main_help() {
+    // Main help should stay focused on universal flags only.
     let output = aperture_cmd().args(["--help"]).assert().success();
 
     let stdout = String::from_utf8_lossy(&output.get_output().stdout);
 
-    // These flags should be visible in the main help
     assert!(
-        stdout.contains("--jq"),
-        "Expected --jq to be visible in main help"
+        !stdout.contains("--jq"),
+        "Expected --jq to be hidden from main help"
     );
     assert!(
-        stdout.contains("--format"),
-        "Expected --format to be visible in main help"
+        !stdout.contains("--format"),
+        "Expected --format to be hidden from main help"
+    );
+    assert!(
+        stdout.contains("--json-errors"),
+        "Expected universal flags to remain visible"
     );
 }
 

@@ -121,7 +121,7 @@ paths:
     // Should work with default values using dry-run to avoid network calls
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(["--dry-run", "api", "regional", "health", "get-status"])
+        .args(["api", "regional", "--dry-run", "health", "get-status"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -132,9 +132,9 @@ paths:
     aperture_cmd()
         .env("HOME", home_dir.path())
         .args([
-            "--dry-run",
             "api",
             "regional",
+            "--dry-run",
             "health",
             "get-status",
             "--server-var",
@@ -161,7 +161,7 @@ paths:
     // Config override should take precedence (non-template URL)
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(["--dry-run", "api", "regional", "health", "get-status"])
+        .args(["api", "regional", "--dry-run", "health", "get-status"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -212,7 +212,7 @@ paths:
     // Should work with default values
     aperture_cmd()
         .env("HOME", home_dir.path())
-        .args(["--dry-run", "api", "multi", "health", "ping"])
+        .args(["api", "multi", "--dry-run", "health", "ping"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -223,9 +223,9 @@ paths:
     aperture_cmd()
         .env("HOME", home_dir.path())
         .args([
-            "--dry-run",
             "api",
             "multi",
+            "--dry-run",
             "health",
             "ping",
             "--server-var",

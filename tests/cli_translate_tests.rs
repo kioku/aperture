@@ -5,7 +5,7 @@ use aperture_cli::cli::translate::{
     cli_to_execution_context, extract_server_var_args, has_show_examples_flag,
     matches_to_operation_call, matches_to_operation_id,
 };
-use aperture_cli::cli::{Cli, Commands, OutputFormat};
+use aperture_cli::cli::{ExecutionFlags, OutputFormat};
 use aperture_cli::config::models::GlobalConfig;
 use aperture_cli::engine::generator::generate_command_tree_with_flags;
 use clap::{Arg, ArgAction, Command};
@@ -129,12 +129,9 @@ fn build_matches(include_show_examples: bool) -> clap::ArgMatches {
 }
 
 #[allow(clippy::missing_const_for_fn)]
-fn base_cli() -> Cli {
-    Cli {
+fn base_execution_flags() -> ExecutionFlags {
+    ExecutionFlags {
         describe_json: false,
-        json_errors: false,
-        quiet: false,
-        verbosity: 0,
         dry_run: false,
         idempotency_key: None,
         format: OutputFormat::Json,
@@ -151,10 +148,6 @@ fn base_cli() -> Cli {
         retry_delay: None,
         retry_max_delay: None,
         force_retry: false,
-        command: Commands::Exec {
-            api: None,
-            args: vec![],
-        },
     }
 }
 
@@ -299,17 +292,17 @@ fn matches_to_operation_id_does_not_validate_body_json() {
 
 #[test]
 fn cli_to_execution_context_builds_retry_and_cache_settings() {
-    let mut cli = base_cli();
-    cli.dry_run = true;
-    cli.idempotency_key = Some("idem-1".to_string());
-    cli.cache = true;
-    cli.cache_ttl = Some(42);
-    cli.retry = Some(3);
-    cli.retry_delay = Some("750ms".to_string());
-    cli.retry_max_delay = Some("5s".to_string());
-    cli.force_retry = true;
+    let mut execution = base_execution_flags();
+    execution.dry_run = true;
+    execution.idempotency_key = Some("idem-1".to_string());
+    execution.cache = true;
+    execution.cache_ttl = Some(42);
+    execution.retry = Some(3);
+    execution.retry_delay = Some("750ms".to_string());
+    execution.retry_max_delay = Some("5s".to_string());
+    execution.force_retry = true;
 
-    let ctx = cli_to_execution_context(&cli, Some(GlobalConfig::default()))
+    let ctx = cli_to_execution_context(&execution, Some(GlobalConfig::default()))
         .expect("context construction should succeed");
 
     assert!(ctx.dry_run);
@@ -332,11 +325,12 @@ fn cli_to_execution_context_builds_retry_and_cache_settings() {
 
 #[test]
 fn cli_to_execution_context_disables_cache_when_no_cache_flag_is_set() {
-    let mut cli = base_cli();
-    cli.cache = true;
-    cli.no_cache = true;
+    let mut execution = base_execution_flags();
+    execution.cache = true;
+    execution.no_cache = true;
 
-    let ctx = cli_to_execution_context(&cli, None).expect("context construction should succeed");
+    let ctx =
+        cli_to_execution_context(&execution, None).expect("context construction should succeed");
     assert!(ctx.cache_config.is_none());
 }
 
