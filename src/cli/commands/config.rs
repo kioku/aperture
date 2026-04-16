@@ -195,6 +195,7 @@ fn handle_remove_mapping_command(
 fn handle_list_specs(
     manager: &ConfigManager<OsFileSystem>,
     verbose: bool,
+    json: bool,
     output: &Output,
 ) -> Result<(), Error> {
     let specs = manager.list_specs()?;
@@ -202,7 +203,7 @@ fn handle_list_specs(
         output.info("No API specifications found.");
     } else {
         output.info("Registered API specifications:");
-        list_specs_with_details(manager, specs, verbose, output);
+        list_specs_with_details(manager, specs, verbose, json, output);
     }
     Ok(())
 }
@@ -436,8 +437,8 @@ fn normalize_api_config_command(
             force,
             strict,
         },
-        crate::cli::ConfigApiCommands::List { verbose } => {
-            crate::cli::ConfigCommands::List { verbose }
+        crate::cli::ConfigApiCommands::List { verbose, json } => {
+            crate::cli::ConfigCommands::List { verbose, json }
         }
         crate::cli::ConfigApiCommands::Remove { name } => {
             crate::cli::ConfigCommands::Remove { name }
@@ -644,7 +645,9 @@ async fn execute_specs_catalog_command(
             force,
             strict,
         } => handle_add_spec_command(manager, name, file_or_url, force, strict, output).await,
-        crate::cli::ConfigCommands::List { verbose } => handle_list_specs(manager, verbose, output),
+        crate::cli::ConfigCommands::List { verbose, json } => {
+            handle_list_specs(manager, verbose, json, output)
+        }
         crate::cli::ConfigCommands::Remove { name } => {
             handle_remove_spec_command(manager, name, output)
         }
@@ -920,6 +923,7 @@ pub fn list_specs_with_details(
     manager: &ConfigManager<OsFileSystem>,
     specs: Vec<String>,
     verbose: bool,
+    _json: bool,
     output: &Output,
 ) {
     let cache_dir = manager.config_dir().join(constants::DIR_CACHE);

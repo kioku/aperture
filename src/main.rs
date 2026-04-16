@@ -1,5 +1,5 @@
 use aperture_cli::cli::commands::config::validate_api_name;
-use aperture_cli::cli::{Cli, Commands};
+use aperture_cli::cli::{Cli, Commands, DiscoveryFormat};
 use aperture_cli::config::manager::ConfigManager;
 use aperture_cli::constants;
 use aperture_cli::error::Error;
@@ -36,9 +36,13 @@ async fn main() {
     }
 }
 
-fn run_list_commands(context: &str, output: &Output) -> Result<(), Error> {
+fn run_list_commands(
+    context: &str,
+    format: &DiscoveryFormat,
+    output: &Output,
+) -> Result<(), Error> {
     let context = validate_api_name(context)?;
-    aperture_cli::cli::commands::docs::list_commands(&context, output)
+    aperture_cli::cli::commands::docs::list_commands(&context, format, output)
 }
 
 async fn run_api_command(cli: &Cli, context: &str, args: &[String]) -> Result<(), Error> {
@@ -85,6 +89,7 @@ fn run_docs_command(
     tag: Option<&str>,
     operation: Option<&str>,
     enhanced: bool,
+    format: &DiscoveryFormat,
     output: &Output,
 ) -> Result<(), Error> {
     let validated_api = api.map(validate_api_name).transpose()?;
@@ -94,6 +99,7 @@ fn run_docs_command(
         tag,
         operation,
         enhanced,
+        format,
         output,
     )
 }
@@ -102,6 +108,7 @@ fn run_overview_command(
     manager: &ConfigManager<OsFileSystem>,
     api: Option<&str>,
     all: bool,
+    format: &DiscoveryFormat,
     output: &Output,
 ) -> Result<(), Error> {
     let validated_api = api.map(validate_api_name).transpose()?;
@@ -109,6 +116,7 @@ fn run_overview_command(
         manager,
         validated_api.as_deref(),
         all,
+        format,
         output,
     )
 }
@@ -119,7 +127,7 @@ async fn run_non_config_command(
     output: &Output,
 ) -> Result<(), Error> {
     match &cli.command {
-        Commands::ListCommands { context } => run_list_commands(context, output),
+        Commands::ListCommands { context, format } => run_list_commands(context, format, output),
         Commands::Api { context, args, .. } => run_api_command(cli, context, args).await,
         Commands::Search {
             query,
@@ -134,16 +142,18 @@ async fn run_non_config_command(
             tag,
             operation,
             enhanced,
+            format,
         } => run_docs_command(
             manager,
             api.as_deref(),
             tag.as_deref(),
             operation.as_deref(),
             *enhanced,
+            format,
             output,
         ),
-        Commands::Overview { api, all } => {
-            run_overview_command(manager, api.as_deref(), *all, output)
+        Commands::Overview { api, all, format } => {
+            run_overview_command(manager, api.as_deref(), *all, format, output)
         }
         Commands::Config { .. } => unreachable!("config commands are handled separately"),
     }

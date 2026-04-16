@@ -17,6 +17,14 @@ pub enum OutputFormat {
     Table,
 }
 
+#[derive(ValueEnum, Clone, Debug)]
+pub enum DiscoveryFormat {
+    /// Human-readable output (default)
+    Text,
+    /// Structured JSON output
+    Json,
+}
+
 /// Flags that are only meaningful for execution-oriented commands (`api`, `run`).
 #[derive(Args, Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)]
@@ -242,6 +250,14 @@ pub enum Commands {
         /// Name of the API specification context.
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         context: String,
+        /// Output format for discovery data
+        #[arg(
+            long,
+            value_enum,
+            default_value = "text",
+            help = "Output format for discovery data"
+        )]
+        format: DiscoveryFormat,
     },
     /// Execute API operations for a specific context
     #[command(
@@ -349,9 +365,20 @@ pub enum Commands {
         tag: Option<String>,
         /// Operation name (optional)
         operation: Option<String>,
-        /// Show enhanced formatting with examples
-        #[arg(long, help = "Enhanced formatting with examples and tips")]
+        /// Show enhanced formatting with examples (text format only)
+        #[arg(
+            long,
+            help = "Enhanced formatting with examples and tips (text format only)"
+        )]
         enhanced: bool,
+        /// Output format for discovery data
+        #[arg(
+            long,
+            value_enum,
+            default_value = "text",
+            help = "Output format for discovery data"
+        )]
+        format: DiscoveryFormat,
     },
     /// Show API overview with statistics and quick start guide
     #[command(
@@ -373,6 +400,14 @@ pub enum Commands {
         /// Show overview for all registered APIs
         #[arg(long, conflicts_with = "api", help = "Show overview for all APIs")]
         all: bool,
+        /// Output format for discovery data
+        #[arg(
+            long,
+            value_enum,
+            default_value = "text",
+            help = "Output format for discovery data"
+        )]
+        format: DiscoveryFormat,
     },
 }
 
@@ -400,6 +435,9 @@ pub enum ConfigApiCommands {
         /// Show detailed information including skipped endpoints
         #[arg(long, help = "Show detailed information about each API")]
         verbose: bool,
+        /// Output as JSON
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
     },
     /// Remove an API specification from configuration
     Remove {
@@ -654,6 +692,9 @@ pub enum ConfigCommands {
         /// Show detailed information including skipped endpoints
         #[arg(long, help = "Show detailed information about each API")]
         verbose: bool,
+        /// Output as JSON
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
     },
     #[command(hide = true)]
     /// Remove an API specification from configuration
@@ -995,7 +1036,10 @@ mod tests {
     fn commands_canonical_name_parses() {
         let cli = Cli::try_parse_from(["aperture", "commands", "my-api"]).unwrap();
         match cli.command {
-            Commands::ListCommands { context } => assert_eq!(context, "my-api"),
+            Commands::ListCommands { context, format } => {
+                assert_eq!(context, "my-api");
+                assert!(matches!(format, super::DiscoveryFormat::Text));
+            }
             other => panic!("expected Commands::ListCommands, got {other:?}"),
         }
     }
@@ -1004,7 +1048,10 @@ mod tests {
     fn list_commands_alias_parses() {
         let cli = Cli::try_parse_from(["aperture", "list-commands", "my-api"]).unwrap();
         match cli.command {
-            Commands::ListCommands { context } => assert_eq!(context, "my-api"),
+            Commands::ListCommands { context, format } => {
+                assert_eq!(context, "my-api");
+                assert!(matches!(format, super::DiscoveryFormat::Text));
+            }
             other => panic!("expected Commands::ListCommands, got {other:?}"),
         }
     }

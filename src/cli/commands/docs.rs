@@ -1,6 +1,7 @@
 //! Handlers for `aperture docs`, `aperture overview`, and `aperture commands`.
 
 use crate::cache::models::CachedSpec;
+use crate::cli::DiscoveryFormat;
 use crate::config::manager::{get_config_dir, ConfigManager};
 use crate::constants;
 use crate::docs::{DocumentationGenerator, HelpFormatter};
@@ -10,7 +11,11 @@ use crate::fs::OsFileSystem;
 use crate::output::Output;
 use std::path::PathBuf;
 
-pub fn list_commands(context: &str, output: &Output) -> Result<(), Error> {
+pub fn list_commands(
+    context: &str,
+    _format: &DiscoveryFormat,
+    output: &Output,
+) -> Result<(), Error> {
     let config_dir = if let Ok(dir) = std::env::var(constants::ENV_APERTURE_CONFIG_DIR) {
         PathBuf::from(dir)
     } else {
@@ -46,6 +51,7 @@ pub fn execute_help_command(
     tag: Option<&str>,
     operation: Option<&str>,
     enhanced: bool,
+    _format: &DiscoveryFormat,
     output: &Output,
 ) -> Result<(), Error> {
     match (api_name, tag, operation) {
@@ -145,6 +151,7 @@ pub fn execute_overview_command(
     manager: &ConfigManager<OsFileSystem>,
     api_name: Option<&str>,
     all: bool,
+    _format: &DiscoveryFormat,
     output: &Output,
 ) -> Result<(), Error> {
     if !all {
