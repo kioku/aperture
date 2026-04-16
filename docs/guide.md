@@ -52,6 +52,51 @@ Top-level response shapes are stable for scripting:
 - `docs <api> <tag> <operation> --format json` → `{ mode: "operation", api, operation }`
 - `config api list --json` → `[{ name, ... }]` (`--verbose` adds endpoint details)
 
+### Shell Completion
+
+Aperture can generate completion scripts for major shells:
+
+```bash
+aperture completion bash
+aperture completion zsh
+aperture completion fish
+aperture completion nu
+aperture completion powershell
+```
+
+Install generated scripts:
+
+```bash
+# bash
+aperture completion bash > ~/.local/share/bash-completion/completions/aperture
+
+# zsh
+mkdir -p ~/.zfunc
+aperture completion zsh > ~/.zfunc/_aperture
+
+# fish
+aperture completion fish > ~/.config/fish/completions/aperture.fish
+
+# Nushell
+aperture completion nu > ~/.config/nushell/completions/aperture.nu
+# then add this to ~/.config/nushell/config.nu if not already sourced:
+source ~/.config/nushell/completions/aperture.nu
+
+# PowerShell
+aperture completion powershell | Out-String | Invoke-Expression
+```
+
+Completion behavior:
+
+- completes static top-level and `config` command paths,
+- completes configured API context names,
+- completes dynamic groups, operations, and operation flags under `aperture api <context> ...`.
+
+Known trade-offs:
+
+- dynamic suggestions are driven by local cached specs; refresh cache after spec updates,
+- completion suggests command/flag names, not parameter values.
+
 ### 3. Execute Commands
 
 ```bash
