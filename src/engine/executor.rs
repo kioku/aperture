@@ -1195,7 +1195,7 @@ fn build_url_from_params(
     // Append query parameters
     if !query_params.is_empty() {
         let mut qs_pairs: Vec<(&String, &String)> = query_params.iter().collect();
-        qs_pairs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        qs_pairs.sort_by_key(|(k1, _)| *k1);
 
         let qs: Vec<String> = qs_pairs
             .into_iter()

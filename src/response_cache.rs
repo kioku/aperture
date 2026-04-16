@@ -26,7 +26,7 @@ impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             cache_dir: PathBuf::from(".cache/responses"),
-            default_ttl: Duration::from_secs(300), // 5 minutes
+            default_ttl: Duration::from_mins(5), // 5 minutes
             max_entries: 1000,
             enabled: true,
             allow_authenticated: false, // Secure by default
@@ -440,7 +440,7 @@ impl ResponseCache {
             .ok()
             .and_then(|m| m.modified().ok())
             .is_some_and(|modified| {
-                now.duration_since(modified).unwrap_or(Duration::ZERO) > Duration::from_secs(3600)
+                now.duration_since(modified).unwrap_or(Duration::ZERO) > Duration::from_hours(1)
             });
         if is_stale {
             stale_files.push(entry.path());

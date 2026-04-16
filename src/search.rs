@@ -101,7 +101,7 @@ impl CommandSearcher {
         }
 
         // Sort by score (highest first)
-        results.sort_by(|a, b| b.score.cmp(&a.score));
+        results.sort_by_key(|b| std::cmp::Reverse(b.score));
 
         Ok(results)
     }
@@ -315,7 +315,7 @@ impl CommandSearcher {
         }
 
         // Sort by score and take top results
-        suggestions.sort_by(|a, b| b.1.cmp(&a.1));
+        suggestions.sort_by_key(|b| std::cmp::Reverse(b.1));
         suggestions.truncate(max_results);
 
         suggestions
