@@ -30,6 +30,28 @@ aperture commands my-api
 aperture api my-api --describe-json
 ```
 
+### Structured Discovery Output
+
+For script-friendly discovery data, use structured output modes:
+
+```bash
+aperture commands my-api --format json
+aperture overview my-api --format json
+aperture docs my-api --format json
+aperture docs my-api users get-user-by-id --format json
+aperture config api list --json
+```
+
+Top-level response shapes are stable for scripting:
+
+- `commands --format json` → `{ api, groups[] }`
+- `overview <api> --format json` → `{ api, statistics, quick_start, sample_operations[] }`
+- `overview --all --format json` → `{ apis[] }`
+- `docs --format json` → `{ mode: "interactive", apis[] }`
+- `docs <api> --format json` → `{ mode: "api-reference", api, categories[], example_paths[] }`
+- `docs <api> <tag> <operation> --format json` → `{ mode: "operation", api, operation }`
+- `config api list --json` → `[{ name, ... }]` (`--verbose` adds endpoint details)
+
 ### 3. Execute Commands
 
 ```bash
