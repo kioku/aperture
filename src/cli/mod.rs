@@ -1058,7 +1058,7 @@ pub enum ConfigCommands {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, ConfigCommands, ConfigUrlCommands};
+    use super::{Cli, Commands, CompletionShell, ConfigCommands, ConfigUrlCommands};
     use clap::{CommandFactory, Parser};
 
     #[test]
@@ -1108,6 +1108,37 @@ mod tests {
                 assert_eq!(args, vec!["get-user-by-id", "--id", "123"]);
             }
             other => panic!("expected Commands::Exec, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn completion_command_parses() {
+        let cli = Cli::try_parse_from(["aperture", "completion", "bash"]).unwrap();
+
+        match cli.command {
+            Commands::Completion { shell } => {
+                assert!(matches!(shell, CompletionShell::Bash));
+            }
+            other => panic!("expected completion command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hidden_complete_command_parses() {
+        let cli = Cli::try_parse_from(["aperture", "__complete", "bash", "2", "aperture", "api"])
+            .unwrap();
+
+        match cli.command {
+            Commands::Complete {
+                shell,
+                cword,
+                words,
+            } => {
+                assert!(matches!(shell, CompletionShell::Bash));
+                assert_eq!(cword, 2);
+                assert_eq!(words, vec!["aperture", "api"]);
+            }
+            other => panic!("expected hidden complete command, got {other:?}"),
         }
     }
 
