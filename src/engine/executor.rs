@@ -22,6 +22,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use tokio::time::sleep;
 
+const DEFAULT_USER_AGENT: &str = concat!("aperture/", env!("CARGO_PKG_VERSION"));
+
 #[cfg(feature = "jq")]
 use jaq_core::{Ctx, RcIter};
 #[cfg(feature = "jq")]
@@ -1228,7 +1230,7 @@ fn build_headers_from_params(
 
 fn default_request_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.insert("User-Agent", HeaderValue::from_static("aperture/0.1.0"));
+    headers.insert("User-Agent", HeaderValue::from_static(DEFAULT_USER_AGENT));
     headers.insert(
         constants::HEADER_ACCEPT,
         HeaderValue::from_static(constants::CONTENT_TYPE_JSON),
@@ -1470,6 +1472,17 @@ fn parse_bracket_index(part: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_default_request_headers_use_current_package_version() {
+        let headers = default_request_headers();
+        let user_agent = headers
+            .get("User-Agent")
+            .and_then(|value| value.to_str().ok())
+            .expect("user agent header should be present and valid");
+
+        assert_eq!(user_agent, concat!("aperture/", env!("CARGO_PKG_VERSION")));
+    }
 
     #[test]
     fn test_build_url_from_params_sorts_query_parameters() {
