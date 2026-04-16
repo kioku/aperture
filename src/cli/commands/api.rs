@@ -430,13 +430,11 @@ fn find_misplaced_execution_flag_after_operation_path_started(
     None
 }
 
-fn build_misplaced_execution_flag_hint(context: &str, args: &[String]) -> Option<String> {
-    let flag = find_misplaced_execution_flag_after_operation_path_started(args)?;
-
+fn misplaced_execution_flag_hint_for_flag(context: &str, flag: &str) -> String {
     if flag == "--api" {
-        return Some(format!(
+        return format!(
             "Detected `--api` after shortcut arguments. Place it before the shortcut, for example: `aperture run --api {context} <shortcut> ...`"
-        ));
+        );
     }
 
     let example_flag = if reserved_execution_flag(flag).is_some_and(|(_, takes_value)| takes_value)
@@ -446,23 +444,37 @@ fn build_misplaced_execution_flag_hint(context: &str, args: &[String]) -> Option
         flag.to_string()
     };
 
-    Some(format!(
+    format!(
         "Detected `{flag}` after the operation path. Place execution flags before `<tag> <operation>`, for example: `aperture api {context} {example_flag} <tag> <operation> ...`"
-    ))
+    )
+}
+
+fn build_misplaced_execution_flag_hint(context: &str, args: &[String]) -> Option<String> {
+    find_misplaced_execution_flag_after_operation_path_started(args)
+        .map(|flag| misplaced_execution_flag_hint_for_flag(context, flag))
 }
 
 fn invalid_dynamic_parse_error(context: &str, args: &[String], parse_error: &clap::Error) -> Error {
-    let base_error = Error::invalid_command(context, parse_error.to_string());
+    let parse_error_text = parse_error.to_string();
+    let base_error = Error::invalid_command(context, parse_error_text.clone());
 
     if parse_error.kind() != clap::error::ErrorKind::UnknownArgument {
         return base_error;
     }
 
-    if let Some(hint) = build_misplaced_execution_flag_hint(context, args) {
-        base_error.with_suggestion(&hint)
-    } else {
-        base_error
+    let Some(flag) = find_misplaced_execution_flag_after_operation_path_started(args) else {
+        return base_error;
+    };
+
+    if !parse_error_text.contains(flag) {
+        return base_error;
     }
+
+    let Some(hint) = build_misplaced_execution_flag_hint(context, args) else {
+        return base_error;
+    };
+
+    base_error.with_suggestion(&hint)
 }
 
 fn render_clap_control_flow_output(parse_error: &clap::Error) -> Result<(), Error> {
