@@ -29,7 +29,42 @@ async fn handle_add_spec_command(
         .add_spec_auto(&name, &file_or_url, force, strict)
         .await?;
     output.success(format!("Spec '{name}' added successfully."));
+    print_partial_add_acceptance_summary(manager, &name, output);
+    print_config_add_next_steps(&name, output);
     Ok(())
+}
+
+fn print_partial_add_acceptance_summary(
+    manager: &ConfigManager<OsFileSystem>,
+    name: &ApiContextName,
+    output: &Output,
+) {
+    let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
+    let Ok(cached_spec) = crate::engine::loader::load_cached_spec(&cache_dir, name.as_str()) else {
+        return;
+    };
+
+    let skipped = cached_spec.skipped_endpoints.len();
+    if skipped == 0 {
+        return;
+    }
+
+    let available = cached_spec.commands.len();
+    let total = available + skipped;
+    output.info(format!(
+        "Partial spec acceptance: {available} of {total} endpoints available ({skipped} skipped)."
+    ));
+    output.tip("Review skipped endpoints with 'aperture config list --verbose'.");
+}
+
+fn print_config_add_next_steps(name: &ApiContextName, output: &Output) {
+    let context = name.as_str();
+    output.info("Next steps:");
+    output.tip(format!("  1. aperture overview {context}"));
+    output.tip(format!("  2. aperture search <term> --api {context}"));
+    output.tip(format!("  3. aperture list-commands {context}"));
+    output.tip(format!("  4. aperture docs {context} <tag> <operation>"));
+    output.tip(format!("  5. aperture api {context} --describe-json"));
 }
 
 #[allow(clippy::needless_pass_by_value)]
