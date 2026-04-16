@@ -70,7 +70,7 @@ impl DocumentationGenerator {
     }
 
     /// Returns the effective command group shown in CLI paths.
-    fn effective_group(command: &CachedCommand) -> String {
+    pub(crate) fn effective_group(command: &CachedCommand) -> String {
         command.display_group.as_ref().map_or_else(
             || {
                 if command.name.is_empty() {
@@ -84,7 +84,7 @@ impl DocumentationGenerator {
     }
 
     /// Returns the effective command name shown in CLI paths.
-    fn effective_operation(command: &CachedCommand) -> String {
+    pub(crate) fn effective_operation(command: &CachedCommand) -> String {
         command.display_name.as_ref().map_or_else(
             || {
                 if command.operation_id.is_empty() {
@@ -100,7 +100,11 @@ impl DocumentationGenerator {
     /// Returns true when the provided docs path references this command.
     ///
     /// Supports both effective (mapped) names and original names for compatibility.
-    fn matches_command_reference(command: &CachedCommand, tag: &str, operation: &str) -> bool {
+    pub(crate) fn matches_command_reference(
+        command: &CachedCommand,
+        tag: &str,
+        operation: &str,
+    ) -> bool {
         let requested_tag = to_kebab_case(tag);
         let requested_operation = to_kebab_case(operation);
 
