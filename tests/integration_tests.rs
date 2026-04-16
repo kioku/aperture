@@ -84,7 +84,10 @@ paths:
 
     Mock::given(method("GET"))
         .and(path("/users/123"))
-        .and(header("User-Agent", "aperture/0.1.0"))
+        .and(header(
+            "User-Agent",
+            format!("aperture/{}", env!("CARGO_PKG_VERSION")),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": "123",
             "name": "John Doe",

@@ -689,8 +689,9 @@ paths:
         .args(["api", "--dry-run", "simple-api", "default", "get-users"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "\"user-agent\": \"aperture/0.1.0\"",
-        ))
+        .stdout(predicate::str::contains(format!(
+            "\"user-agent\": \"aperture/{}\"",
+            env!("CARGO_PKG_VERSION")
+        )))
         .stdout(predicate::str::contains("\"accept\": \"application/json\""));
 }
