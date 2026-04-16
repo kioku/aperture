@@ -305,6 +305,30 @@ fn runtime_completion_tolerates_server_var_value_before_group() {
 }
 
 #[test]
+fn runtime_completion_tolerates_duplicate_server_var_flags_before_group() {
+    let fixture = write_completion_fixture();
+
+    aperture_cmd()
+        .env(constants::ENV_APERTURE_CONFIG_DIR, fixture.path())
+        .args([
+            "__complete",
+            "bash",
+            "7",
+            "aperture",
+            "api",
+            "petstore",
+            "--server-var",
+            "region=us",
+            "--server-var",
+            "env=prod",
+            "u",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("users"));
+}
+
+#[test]
 fn runtime_completion_recovers_config_subcommands_and_contexts_after_unknown_flag_prefix() {
     let fixture = write_completion_fixture();
 

@@ -1127,6 +1127,13 @@ mod tests {
     }
 
     #[test]
+    fn completion_command_rejects_unknown_shell_name() {
+        let err = Cli::try_parse_from(["aperture", "completion", "invalid-shell"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
+    }
+
+    #[test]
     fn hidden_complete_command_parses() {
         let cli = Cli::try_parse_from(["aperture", "__complete", "bash", "2", "aperture", "api"])
             .unwrap();
@@ -1204,6 +1211,13 @@ mod tests {
             }
             other => panic!("expected hidden complete command, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn hidden_complete_command_rejects_empty_shell_name() {
+        let err = Cli::try_parse_from(["aperture", "__complete", "", "2", "aperture"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
     }
 
     #[test]
