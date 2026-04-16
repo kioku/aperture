@@ -812,6 +812,8 @@ fn count_shortcut_args(args: &[String]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
+        build_misplaced_execution_flag_hint,
+        find_misplaced_execution_flag_after_operation_path_started,
         has_explicit_landing_incompatible_global_flags, resolve_output_format,
         should_render_api_context_landing, LANDING_INCOMPATIBLE_GLOBAL_FLAGS,
     };
@@ -877,5 +879,48 @@ mod tests {
     #[test]
     fn landing_only_renders_without_operation_args() {
         assert!(!should_render_api_context_landing(&["users".to_string()]));
+    }
+
+    #[test]
+    fn detects_misplaced_api_execution_flag_after_operation_path() {
+        let args = vec![
+            "users".to_string(),
+            "get-user-by-id".to_string(),
+            "--id".to_string(),
+            "123".to_string(),
+            "--dry-run".to_string(),
+        ];
+
+        let detected = find_misplaced_execution_flag_after_operation_path_started(&args);
+        assert_eq!(detected, Some("--dry-run"));
+    }
+
+    #[test]
+    fn does_not_flag_execution_option_before_operation_path() {
+        let args = vec![
+            "--dry-run".to_string(),
+            "users".to_string(),
+            "get-user-by-id".to_string(),
+            "--id".to_string(),
+            "123".to_string(),
+        ];
+
+        let detected = find_misplaced_execution_flag_after_operation_path_started(&args);
+        assert_eq!(detected, None);
+    }
+
+    #[test]
+    fn misplaced_run_api_flag_hint_uses_run_guidance() {
+        let args = vec![
+            "users".to_string(),
+            "get-user-by-id".to_string(),
+            "--api".to_string(),
+            "test-api".to_string(),
+        ];
+
+        let hint = build_misplaced_execution_flag_hint("test-api", &args)
+            .expect("misplaced --api should generate a hint");
+
+        assert!(hint.contains("aperture run --api test-api <shortcut> ..."));
     }
 }
