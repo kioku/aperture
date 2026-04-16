@@ -60,6 +60,7 @@ Aperture can generate completion scripts for major shells:
 aperture completion bash
 aperture completion zsh
 aperture completion fish
+aperture completion nu
 aperture completion powershell
 ```
 
@@ -75,6 +76,11 @@ aperture completion zsh > ~/.zfunc/_aperture
 
 # fish
 aperture completion fish > ~/.config/fish/completions/aperture.fish
+
+# Nushell
+aperture completion nu > ~/.config/nushell/completions/aperture.nu
+# then add this to ~/.config/nushell/config.nu if not already sourced:
+source ~/.config/nushell/completions/aperture.nu
 
 # PowerShell
 aperture completion powershell | Out-String | Invoke-Expression

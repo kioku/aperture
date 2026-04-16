@@ -32,7 +32,7 @@ const CONFIG_CACHE_COMMANDS: &[&str] = &["clear", "stats"];
 const CONFIG_SETTING_COMMANDS: &[&str] = &["set", "get", "list"];
 const CONFIG_MAPPING_COMMANDS: &[&str] = &["set", "list", "remove"];
 
-const SHELL_NAMES: &[&str] = &["bash", "zsh", "fish", "powershell"];
+const SHELL_NAMES: &[&str] = &["bash", "zsh", "fish", "nu", "powershell"];
 
 const API_EXECUTION_FLAGS: &[&str] = &[
     "--help",
@@ -92,6 +92,7 @@ pub fn execute_completion_script_command(shell: &CompletionShell) -> Result<(), 
         CompletionShell::Bash => bash_completion_script(),
         CompletionShell::Zsh => zsh_completion_script(),
         CompletionShell::Fish => fish_completion_script(),
+        CompletionShell::Nu => nu_completion_script(),
         CompletionShell::PowerShell => powershell_completion_script(),
     };
 
@@ -664,6 +665,38 @@ fn fish_completion_script() -> String {
 end
 
 complete -c aperture -f -a "(__aperture_complete)"
+"#
+    .to_string()
+}
+
+fn nu_completion_script() -> String {
+    r#"let previous_aperture_completer = (try {
+    $env.config.completions.external.completer
+} catch {
+    null
+})
+
+let aperture_completer = {|spans|
+    if ($spans | is-empty) {
+        return []
+    }
+
+    if $spans.0 == "aperture" {
+        ^aperture __complete nu (($spans | length) - 1) ...$spans
+        | lines
+        | where {|line| $line != "" }
+        | each {|line| { value: $line, description: "" } }
+    } else if $previous_aperture_completer != null {
+        do $previous_aperture_completer $spans
+    } else {
+        []
+    }
+}
+
+$env.config = ($env.config
+    | upsert completions.external.enable true
+    | upsert completions.external.completer $aperture_completer
+)
 "#
     .to_string()
 }
