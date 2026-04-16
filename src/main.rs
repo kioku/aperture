@@ -120,13 +120,13 @@ async fn run_non_config_command(
 ) -> Result<(), Error> {
     match &cli.command {
         Commands::ListCommands { context } => run_list_commands(context, output),
-        Commands::Api { context, args } => run_api_command(cli, context, args).await,
+        Commands::Api { context, args, .. } => run_api_command(cli, context, args).await,
         Commands::Search {
             query,
             api,
             verbose,
         } => run_search_command(manager, query, api.as_deref(), *verbose, output),
-        Commands::Exec { api, args } => {
+        Commands::Exec { api, args, .. } => {
             run_shortcut_command(manager, args, api.as_deref(), cli).await
         }
         Commands::Docs {

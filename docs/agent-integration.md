@@ -206,10 +206,10 @@ The `--auto-paginate` flag loops through all pages of a paginated API endpoint a
 
 ```bash
 # Stream all users as NDJSON
-aperture --auto-paginate api myapi users list-users
+aperture api myapi --auto-paginate users list-users
 
 # Pipe to jq for processing
-aperture --auto-paginate api myapi issues list-issues | jq '.title'
+aperture api myapi --auto-paginate issues list-issues | jq '.title'
 ```
 
 **Strategy detection** is automatic — Aperture inspects the OpenAPI spec at cache time and selects the appropriate strategy:
@@ -241,7 +241,7 @@ aperture api myapi --describe-json | jq '.commands[][] | select(.pagination.supp
 
 **Mid-stream error handling:** when `--json-errors` is active and an error occurs after partial output has been emitted, a structured JSON error object is written as the final NDJSON line on stdout. Consumers can detect failure by checking the last line for an `error_type` key.
 
-**Flag interactions:** `--jq` and `--format` are ignored when `--auto-paginate` is active (a warning is emitted for `--jq`). Output is always NDJSON — apply jq externally via pipe: `aperture --auto-paginate api myapi users list | jq '.name'`.
+**Flag interactions:** `--jq` and `--format` are ignored when `--auto-paginate` is active (a warning is emitted for `--jq`). Output is always NDJSON — apply jq externally via pipe: `aperture api myapi --auto-paginate users list | jq '.name'`.
 
 **Batch interaction:** `--auto-paginate` is not applied inside batch operations. Each batch operation executes as a single request. To paginate within a batch workflow, use `capture` / `capture_append` with explicit cursor forwarding across dependent operations.
 
