@@ -121,7 +121,25 @@ fn run_overview_command(
     )
 }
 
-async fn run_non_config_command(
+fn run_completion_command(cli: &Cli) -> Option<Result<(), Error>> {
+    match &cli.command {
+        Commands::Completion { shell } => {
+            Some(aperture_cli::cli::commands::completion::execute_completion_script_command(shell))
+        }
+        Commands::Complete {
+            shell,
+            cword,
+            words,
+        } => Some(
+            aperture_cli::cli::commands::completion::execute_completion_runtime_command(
+                shell, *cword, words,
+            ),
+        ),
+        _ => None,
+    }
+}
+
+async fn run_user_command(
     cli: &Cli,
     manager: &ConfigManager<OsFileSystem>,
     output: &Output,
@@ -155,8 +173,21 @@ async fn run_non_config_command(
         Commands::Overview { api, all, format } => {
             run_overview_command(manager, api.as_deref(), *all, format, output)
         }
+        Commands::Completion { .. } | Commands::Complete { .. } => unreachable!(),
         Commands::Config { .. } => unreachable!("config commands are handled separately"),
     }
+}
+
+async fn run_non_config_command(
+    cli: &Cli,
+    manager: &ConfigManager<OsFileSystem>,
+    output: &Output,
+) -> Result<(), Error> {
+    if let Some(result) = run_completion_command(cli) {
+        return result;
+    }
+
+    run_user_command(cli, manager, output).await
 }
 
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]

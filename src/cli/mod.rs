@@ -25,6 +25,18 @@ pub enum DiscoveryFormat {
     Json,
 }
 
+#[derive(ValueEnum, Clone, Debug)]
+pub enum CompletionShell {
+    /// GNU Bash
+    Bash,
+    /// Z shell
+    Zsh,
+    /// Fish shell
+    Fish,
+    /// `PowerShell`
+    PowerShell,
+}
+
 /// Flags that are only meaningful for execution-oriented commands (`api`, `run`).
 #[derive(Args, Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)]
@@ -214,6 +226,23 @@ impl Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Generate shell completion scripts
+    Completion {
+        /// Target shell
+        #[arg(value_enum)]
+        shell: CompletionShell,
+    },
+    #[command(name = "__complete", hide = true)]
+    Complete {
+        /// Target shell
+        #[arg(value_enum)]
+        shell: CompletionShell,
+        /// Zero-based index of the word currently being completed
+        cword: usize,
+        /// Command words for the current invocation
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        words: Vec<String>,
+    },
     /// Manage configuration in domain-specific groups
     #[command(
         long_about = "Manage Aperture configuration using domain-oriented subcommands.\n\n\

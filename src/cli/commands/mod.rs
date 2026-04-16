@@ -10,6 +10,8 @@
     clippy::implicit_hasher
 )]
 pub mod api;
+#[allow(clippy::missing_errors_doc)]
+pub mod completion;
 #[allow(
     clippy::missing_errors_doc,
     clippy::missing_panics_doc,
