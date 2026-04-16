@@ -69,6 +69,30 @@ aperture api petstore --describe-json
 - `docs` → deep operation reference before execution
 - `api --describe-json` → machine-readable capability manifest
 
+### Structured Discovery Output
+
+Primary discovery commands support machine-readable output:
+
+```bash
+aperture commands <api> --format json
+aperture overview <api> --format json
+aperture overview --all --format json
+aperture docs --format json
+aperture docs <api> --format json
+aperture docs <api> <tag> <operation> --format json
+aperture config api list --json
+```
+
+Stable top-level JSON shapes:
+
+- `commands --format json` → `{ api, groups[] }`
+- `overview <api> --format json` → `{ api, statistics, quick_start, sample_operations[] }`
+- `overview --all --format json` → `{ apis[] }`
+- `docs --format json` → `{ mode: "interactive", apis[] }`
+- `docs <api> --format json` → `{ mode: "api-reference", api, categories[], example_paths[] }`
+- `docs <api> <tag> <operation> --format json` → `{ mode: "operation", api, operation }`
+- `config api list --json` → `[{ name, ... }]` (verbose mode adds version/endpoint detail)
+
 ## Agent Integration
 
 Aperture provides features specifically for programmatic use:

@@ -8,6 +8,7 @@ use crate::error::Error;
 use crate::fs::OsFileSystem;
 use crate::output::Output;
 use crate::response_cache::{CacheConfig, ResponseCache};
+use serde::Serialize;
 use std::path::PathBuf;
 
 /// Validates and returns the API context name, returning an error for invalid names.
@@ -195,9 +196,17 @@ fn handle_remove_mapping_command(
 fn handle_list_specs(
     manager: &ConfigManager<OsFileSystem>,
     verbose: bool,
+    json: bool,
     output: &Output,
 ) -> Result<(), Error> {
     let specs = manager.list_specs()?;
+    if json {
+        let payload = collect_specs_with_details(manager, specs, verbose);
+        // ast-grep-ignore: no-println
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
     if specs.is_empty() {
         output.info("No API specifications found.");
     } else {
@@ -436,8 +445,8 @@ fn normalize_api_config_command(
             force,
             strict,
         },
-        crate::cli::ConfigApiCommands::List { verbose } => {
-            crate::cli::ConfigCommands::List { verbose }
+        crate::cli::ConfigApiCommands::List { verbose, json } => {
+            crate::cli::ConfigCommands::List { verbose, json }
         }
         crate::cli::ConfigApiCommands::Remove { name } => {
             crate::cli::ConfigCommands::Remove { name }
@@ -644,7 +653,9 @@ async fn execute_specs_catalog_command(
             force,
             strict,
         } => handle_add_spec_command(manager, name, file_or_url, force, strict, output).await,
-        crate::cli::ConfigCommands::List { verbose } => handle_list_specs(manager, verbose, output),
+        crate::cli::ConfigCommands::List { verbose, json } => {
+            handle_list_specs(manager, verbose, json, output)
+        }
         crate::cli::ConfigCommands::Remove { name } => {
             handle_remove_spec_command(manager, name, output)
         }
@@ -914,6 +925,88 @@ pub fn reinit_all_specs(
     }
     output.success("Reinitialization complete.");
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct SpecEndpointStatsJson {
+    available: usize,
+    skipped: usize,
+    total: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct SkippedEndpointJson {
+    method: String,
+    path: String,
+    content_type: String,
+    reason: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SpecListItemJson {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    endpoints: Option<SpecEndpointStatsJson>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skipped_endpoints: Vec<SkippedEndpointJson>,
+}
+
+fn collect_specs_with_details(
+    manager: &ConfigManager<OsFileSystem>,
+    specs: Vec<String>,
+    verbose: bool,
+) -> Vec<SpecListItemJson> {
+    let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
+    specs
+        .into_iter()
+        .map(|spec_name| {
+            if !verbose {
+                return SpecListItemJson {
+                    name: spec_name,
+                    version: None,
+                    endpoints: None,
+                    skipped_endpoints: vec![],
+                };
+            }
+
+            let Ok(cached_spec) = crate::engine::loader::load_cached_spec(&cache_dir, &spec_name)
+            else {
+                return SpecListItemJson {
+                    name: spec_name,
+                    version: None,
+                    endpoints: None,
+                    skipped_endpoints: vec![],
+                };
+            };
+
+            let available = cached_spec.commands.len();
+            let skipped = cached_spec.skipped_endpoints.len();
+            let total = available + skipped;
+            let skipped_endpoints = cached_spec
+                .skipped_endpoints
+                .iter()
+                .map(|endpoint| SkippedEndpointJson {
+                    method: endpoint.method.clone(),
+                    path: endpoint.path.clone(),
+                    content_type: endpoint.content_type.clone(),
+                    reason: endpoint.reason.clone(),
+                })
+                .collect::<Vec<_>>();
+
+            SpecListItemJson {
+                name: spec_name,
+                version: Some(cached_spec.version),
+                endpoints: Some(SpecEndpointStatsJson {
+                    available,
+                    skipped,
+                    total,
+                }),
+                skipped_endpoints,
+            }
+        })
+        .collect()
 }
 
 pub fn list_specs_with_details(
