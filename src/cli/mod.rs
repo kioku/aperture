@@ -34,6 +34,7 @@ pub enum CompletionShell {
     /// Fish shell
     Fish,
     /// `PowerShell`
+    #[value(name = "powershell", alias = "power-shell")]
     PowerShell,
 }
 
@@ -1137,6 +1138,37 @@ mod tests {
                 assert!(matches!(shell, CompletionShell::Bash));
                 assert_eq!(cword, 2);
                 assert_eq!(words, vec!["aperture", "api"]);
+            }
+            other => panic!("expected hidden complete command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn completion_command_accepts_documented_powershell_name() {
+        let cli = Cli::try_parse_from(["aperture", "completion", "powershell"]).unwrap();
+
+        match cli.command {
+            Commands::Completion { shell } => {
+                assert!(matches!(shell, CompletionShell::PowerShell));
+            }
+            other => panic!("expected completion command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hidden_complete_command_accepts_documented_powershell_name() {
+        let cli =
+            Cli::try_parse_from(["aperture", "__complete", "powershell", "2", "aperture"]).unwrap();
+
+        match cli.command {
+            Commands::Complete {
+                shell,
+                cword,
+                words,
+            } => {
+                assert!(matches!(shell, CompletionShell::PowerShell));
+                assert_eq!(cword, 2);
+                assert_eq!(words, vec!["aperture"]);
             }
             other => panic!("expected hidden complete command, got {other:?}"),
         }

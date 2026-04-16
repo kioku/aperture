@@ -108,6 +108,18 @@ fn completion_command_generates_bash_script() {
 }
 
 #[test]
+fn completion_command_generates_powershell_script_with_documented_shell_name() {
+    aperture_cmd()
+        .args(["completion", "powershell"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "aperture __complete powershell $cword",
+        ))
+        .stdout(predicate::str::contains("Register-ArgumentCompleter"));
+}
+
+#[test]
 fn runtime_completion_suggests_contexts_groups_operations_and_flags() {
     let fixture = write_completion_fixture();
 
@@ -166,4 +178,38 @@ fn runtime_completion_suggests_contexts_groups_operations_and_flags() {
         .success()
         .stdout(predicate::str::contains("--user-id"))
         .stdout(predicate::str::contains("--header"));
+}
+
+#[test]
+fn runtime_completion_accepts_documented_powershell_shell_name() {
+    let fixture = write_completion_fixture();
+
+    aperture_cmd()
+        .env(constants::ENV_APERTURE_CONFIG_DIR, fixture.path())
+        .args(["__complete", "powershell", "2", "aperture", "api", "p"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("petstore"));
+}
+
+#[test]
+fn runtime_completion_tolerates_missing_execution_flag_value() {
+    let fixture = write_completion_fixture();
+
+    aperture_cmd()
+        .env(constants::ENV_APERTURE_CONFIG_DIR, fixture.path())
+        .args([
+            "__complete",
+            "bash",
+            "4",
+            "aperture",
+            "api",
+            "petstore",
+            "--format",
+            "",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("users"))
+        .stdout(predicate::str::contains("--dry-run"));
 }
