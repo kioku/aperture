@@ -277,6 +277,22 @@ fn test_format_search_results() {
 }
 
 #[test]
+fn test_search_verbose_parameters_use_kebab_case_flags() {
+    let searcher = CommandSearcher::new();
+    let mut spec = create_test_spec("test-api");
+    spec.commands[0].parameters[0].name = "userId".to_string();
+
+    let mut specs = BTreeMap::new();
+    specs.insert("test-api".to_string(), spec);
+
+    let results = searcher.search(&specs, "getUser", None).unwrap();
+    let output = format_search_results(&results, true);
+
+    assert!(output.iter().any(|line| line.contains("--user-id*")));
+    assert!(!output.iter().any(|line| line.contains("--userId")));
+}
+
+#[test]
 fn test_empty_search_results() {
     let results = vec![];
     let output = format_search_results(&results, false);
