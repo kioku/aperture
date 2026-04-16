@@ -707,10 +707,11 @@ compdef _aperture_completion aperture
 fn fish_completion_script() -> String {
     r#"function __aperture_complete
     set -l words (commandline -opc)
-    set -l cword (math (count $words) - 1)
+    set -l current (commandline -ct)
+    set -l cword (count $words)
 
-    if test $cword -lt 0
-        set cword 0
+    if test -n "$current"
+        set words $words $current
     end
 
     aperture __complete fish $cword $words 2>/dev/null
@@ -762,7 +763,16 @@ fn powershell_completion_script() -> String {
         return
     }
 
-    $cword = $words.Count - 1
+    if ([string]::IsNullOrEmpty($wordToComplete)) {
+        $cword = $words.Count
+    } else {
+        if ($words[-1] -ne $wordToComplete) {
+            $words += $wordToComplete
+        }
+
+        $cword = $words.Count - 1
+    }
+
     $results = aperture __complete powershell $cword @words 2>$null
 
     foreach ($result in $results) {

@@ -108,6 +108,16 @@ fn completion_command_generates_bash_script() {
 }
 
 #[test]
+fn completion_command_generates_fish_script_with_cursor_handling() {
+    aperture_cmd()
+        .args(["completion", "fish"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("commandline -ct"))
+        .stdout(predicate::str::contains("set -l cword (count $words)"));
+}
+
+#[test]
 fn completion_command_generates_nu_script() {
     aperture_cmd()
         .args(["completion", "nu"])
@@ -128,7 +138,11 @@ fn completion_command_generates_powershell_script_with_documented_shell_name() {
         .stdout(predicate::str::contains(
             "aperture __complete powershell $cword",
         ))
-        .stdout(predicate::str::contains("Register-ArgumentCompleter"));
+        .stdout(predicate::str::contains("Register-ArgumentCompleter"))
+        .stdout(predicate::str::contains(
+            "[string]::IsNullOrEmpty($wordToComplete)",
+        ))
+        .stdout(predicate::str::contains("$words += $wordToComplete"));
 }
 
 #[test]
