@@ -437,7 +437,7 @@ fn find_docs_command<'a>(
 fn build_operation_details_json(api: &str, command: &CachedCommand) -> OperationDetailsJson {
     let group = DocumentationGenerator::effective_group(command);
     let operation_name = DocumentationGenerator::effective_operation(command);
-    let usage = format!("aperture api {api} {group} {operation_name}");
+    let usage = DocumentationGenerator::canonical_usage(api, command);
 
     OperationDetailsJson {
         group,
@@ -449,12 +449,12 @@ fn build_operation_details_json(api: &str, command: &CachedCommand) -> Operation
         description: command.description.clone(),
         deprecated: command.deprecated,
         external_docs_url: command.external_docs_url.clone(),
-        usage: usage.clone(),
+        usage,
         parameters: serialize_parameters(command),
         request_body: serialize_request_body(command),
         responses: serialize_responses(command),
         security_requirements: command.security_requirements.clone(),
-        examples: serialize_examples(command, &usage),
+        examples: serialize_examples(api, command),
     }
 }
 
@@ -502,26 +502,15 @@ fn serialize_responses(command: &CachedCommand) -> Vec<ResponseJson> {
         .collect()
 }
 
-fn serialize_examples(command: &CachedCommand, usage: &str) -> Vec<CommandExampleJson> {
-    let mut examples = command
-        .examples
-        .iter()
+fn serialize_examples(api: &str, command: &CachedCommand) -> Vec<CommandExampleJson> {
+    DocumentationGenerator::canonical_examples(api, command)
+        .into_iter()
         .map(|example| CommandExampleJson {
-            description: example.description.clone(),
-            command_line: example.command_line.clone(),
-            explanation: example.explanation.clone(),
+            description: example.description,
+            command_line: example.command_line,
+            explanation: example.explanation,
         })
-        .collect::<Vec<_>>();
-
-    if examples.is_empty() {
-        examples.push(CommandExampleJson {
-            description: "Basic example".to_string(),
-            command_line: usage.to_string(),
-            explanation: None,
-        });
-    }
-
-    examples
+        .collect()
 }
 
 fn print_invalid_docs_usage() -> ! {

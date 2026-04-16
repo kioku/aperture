@@ -1,6 +1,6 @@
 //! Documentation and help system for improved CLI discoverability
 
-use crate::cache::models::{CachedCommand, CachedSpec};
+use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec, CommandExample};
 use crate::constants;
 use crate::error::Error;
 use crate::utils::to_kebab_case;
@@ -45,23 +45,14 @@ impl DocumentationGenerator {
                 ))
             })?;
 
-        let effective_tag = Self::effective_group(command);
-        let effective_operation = Self::effective_operation(command);
-
         let mut help = String::new();
 
         // Build help sections
         Self::add_command_header(&mut help, command);
-        Self::add_usage_section(&mut help, api_name, &effective_tag, &effective_operation);
+        Self::add_usage_section(&mut help, api_name, command);
         Self::add_parameters_section(&mut help, command);
         Self::add_request_body_section(&mut help, command);
-        Self::add_examples_section(
-            &mut help,
-            api_name,
-            &effective_tag,
-            &effective_operation,
-            command,
-        );
+        Self::add_examples_section(&mut help, api_name, command);
         Self::add_responses_section(&mut help, command);
         Self::add_authentication_section(&mut help, command);
         Self::add_metadata_section(&mut help, command);
@@ -168,13 +159,38 @@ impl DocumentationGenerator {
     }
 
     /// Add usage section with command syntax
-    fn add_usage_section(help: &mut String, api_name: &str, tag: &str, operation_id: &str) {
+    fn add_usage_section(help: &mut String, api_name: &str, command: &CachedCommand) {
         help.push_str("## Usage\n\n");
         write!(
             help,
-            "```bash\naperture api {api_name} {tag} {operation_id}\n```\n\n"
+            "```bash\n{}\n```\n\n",
+            Self::canonical_usage(api_name, command)
         )
         .ok();
+    }
+
+    /// Builds canonical usage output from the effective runtime command model.
+    #[must_use]
+    pub(crate) fn canonical_usage(api_name: &str, command: &CachedCommand) -> String {
+        let mut usage = Self::base_command(api_name, command);
+
+        for param in &command.parameters {
+            if !param.required {
+                continue;
+            }
+            usage.push(' ');
+            usage.push_str(&Self::required_parameter_usage_fragment(param));
+        }
+
+        if command
+            .request_body
+            .as_ref()
+            .is_some_and(|body| body.required)
+        {
+            usage.push_str(" --body '{\"key\": \"value\"}'");
+        }
+
+        usage
     }
 
     /// Add parameters section if parameters exist
@@ -218,33 +234,176 @@ impl DocumentationGenerator {
     }
 
     /// Add examples section with command examples
-    fn add_examples_section(
-        help: &mut String,
-        api_name: &str,
-        tag: &str,
-        operation_id: &str,
-        command: &CachedCommand,
-    ) {
-        if command.examples.is_empty() {
-            help.push_str("## Example\n\n");
-            help.push_str(&Self::generate_basic_example(
-                api_name,
-                tag,
-                operation_id,
-                command,
-            ));
-            return;
-        }
+    fn add_examples_section(help: &mut String, api_name: &str, command: &CachedCommand) {
+        let examples = Self::canonical_examples(api_name, command);
 
-        help.push_str("## Examples\n\n");
-        for (i, example) in command.examples.iter().enumerate() {
-            write!(help, "### Example {}\n\n", i + 1).ok();
+        help.push_str(if examples.len() > 1 {
+            "## Examples\n\n"
+        } else {
+            "## Example\n\n"
+        });
+
+        for (i, example) in examples.iter().enumerate() {
+            if examples.len() > 1 {
+                write!(help, "### Example {}\n\n", i + 1).ok();
+            }
             write!(help, "**{}**\n\n", example.description).ok();
             if let Some(ref explanation) = example.explanation {
                 write!(help, "{explanation}\n\n").ok();
             }
             write!(help, "```bash\n{}\n```\n\n", example.command_line).ok();
         }
+    }
+
+    /// Builds canonical examples from the effective runtime command model.
+    #[must_use]
+    pub(crate) fn canonical_examples(
+        api_name: &str,
+        command: &CachedCommand,
+    ) -> Vec<CommandExample> {
+        let base_cmd = Self::base_command(api_name, command);
+        let required_params: Vec<&CachedParameter> =
+            command.parameters.iter().filter(|p| p.required).collect();
+        let optional_query_params: Vec<&CachedParameter> = command
+            .parameters
+            .iter()
+            .filter(|p| !p.required && p.location == "query")
+            .take(2)
+            .collect();
+
+        let mut examples = Vec::new();
+        Self::push_required_parameters_example(&mut examples, &base_cmd, command, &required_params);
+        Self::push_request_body_example(&mut examples, &base_cmd, command, &required_params);
+        Self::push_optional_parameters_example(
+            &mut examples,
+            &base_cmd,
+            &required_params,
+            &optional_query_params,
+        );
+
+        if examples.is_empty() {
+            examples.push(Self::build_basic_example(&base_cmd, command));
+        }
+
+        examples
+    }
+
+    fn push_required_parameters_example(
+        examples: &mut Vec<CommandExample>,
+        base_cmd: &str,
+        command: &CachedCommand,
+        required_params: &[&CachedParameter],
+    ) {
+        if required_params.is_empty() {
+            return;
+        }
+
+        let mut command_line = base_cmd.to_string();
+        for param in required_params {
+            Self::append_example_parameter(&mut command_line, param, "<value>");
+        }
+        examples.push(CommandExample {
+            description: "Basic usage with required parameters".to_string(),
+            command_line,
+            explanation: Some(format!("{} {}", command.method, command.path)),
+        });
+    }
+
+    fn push_request_body_example(
+        examples: &mut Vec<CommandExample>,
+        base_cmd: &str,
+        command: &CachedCommand,
+        required_params: &[&CachedParameter],
+    ) {
+        if command.request_body.is_none() {
+            return;
+        }
+
+        let mut command_line = base_cmd.to_string();
+        for param in required_params
+            .iter()
+            .copied()
+            .filter(|p| p.location == "path" || p.location == "query")
+        {
+            Self::append_example_parameter(&mut command_line, param, "123");
+        }
+        command_line.push_str(" --body '{\"name\": \"example\", \"value\": 42}'");
+
+        examples.push(CommandExample {
+            description: "With request body".to_string(),
+            command_line,
+            explanation: Some("Sends JSON data in the request body".to_string()),
+        });
+    }
+
+    fn push_optional_parameters_example(
+        examples: &mut Vec<CommandExample>,
+        base_cmd: &str,
+        required_params: &[&CachedParameter],
+        optional_query_params: &[&CachedParameter],
+    ) {
+        if required_params.is_empty() || optional_query_params.is_empty() {
+            return;
+        }
+
+        let mut command_line = base_cmd.to_string();
+        for param in required_params {
+            Self::append_example_parameter(&mut command_line, param, "value");
+        }
+        for param in optional_query_params {
+            Self::append_example_parameter(&mut command_line, param, "optional");
+        }
+
+        examples.push(CommandExample {
+            description: "With optional parameters".to_string(),
+            command_line,
+            explanation: Some(
+                "Includes optional query parameters for filtering or customization".to_string(),
+            ),
+        });
+    }
+
+    fn build_basic_example(base_cmd: &str, command: &CachedCommand) -> CommandExample {
+        CommandExample {
+            description: "Basic usage".to_string(),
+            command_line: base_cmd.to_string(),
+            explanation: Some(format!("Executes {} {}", command.method, command.path)),
+        }
+    }
+
+    fn base_command(api_name: &str, command: &CachedCommand) -> String {
+        let group = Self::effective_group(command);
+        let operation = Self::effective_operation(command);
+        format!("aperture api {api_name} {group} {operation}")
+    }
+
+    fn required_parameter_usage_fragment(param: &CachedParameter) -> String {
+        let flag = format!("--{}", to_kebab_case(&param.name));
+        if Self::is_boolean_parameter(param) {
+            return flag;
+        }
+
+        let placeholder = to_kebab_case(&param.name).replace('-', "_").to_uppercase();
+        format!("{flag} <{placeholder}>")
+    }
+
+    fn append_example_parameter(
+        command_line: &mut String,
+        param: &CachedParameter,
+        fallback: &str,
+    ) {
+        write!(command_line, " --{}", to_kebab_case(&param.name)).ok();
+
+        if Self::is_boolean_parameter(param) {
+            return;
+        }
+
+        let value = param.example.as_deref().unwrap_or(fallback);
+        write!(command_line, " {value}").ok();
+    }
+
+    fn is_boolean_parameter(param: &CachedParameter) -> bool {
+        param.schema_type.as_ref().is_some_and(|t| t == "boolean")
     }
 
     /// Add responses section if responses exist
@@ -284,53 +443,6 @@ impl DocumentationGenerator {
 
         if let Some(ref docs_url) = command.external_docs_url {
             write!(help, "📖 **External Documentation**: {docs_url}\n\n").ok();
-        }
-    }
-
-    /// Generate a basic example for a command
-    fn generate_basic_example(
-        api_name: &str,
-        tag: &str,
-        operation_id: &str,
-        command: &CachedCommand,
-    ) -> String {
-        let mut example = format!("```bash\naperture api {api_name} {tag} {operation_id}");
-
-        // Add required parameters
-        for param in &command.parameters {
-            if param.required {
-                let param_type = param.schema_type.as_deref().unwrap_or("string");
-                let example_value = Self::generate_example_value(param_type);
-                write!(
-                    example,
-                    " --{} {}",
-                    to_kebab_case(&param.name),
-                    example_value
-                )
-                .ok();
-            }
-        }
-
-        // Add request body if required
-        match command.request_body {
-            Some(ref body) if body.required => {
-                example.push_str(" --body '{\"key\": \"value\"}'");
-            }
-            _ => {}
-        }
-
-        example.push_str("\n```\n\n");
-        example
-    }
-
-    /// Generate example values for different parameter types
-    fn generate_example_value(param_type: &str) -> &'static str {
-        match param_type.to_lowercase().as_str() {
-            "string" => "\"example\"",
-            "integer" | "number" => "123",
-            "boolean" => "true",
-            "array" => "[\"item1\",\"item2\"]",
-            _ => "\"value\"",
         }
     }
 

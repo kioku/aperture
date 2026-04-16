@@ -194,7 +194,7 @@ fn docs_support_json_for_all_modes() {
     assert_eq!(op_json["operation"]["name"], "get-user-by-id");
     assert_eq!(
         op_json["operation"]["usage"],
-        "aperture api test-api users get-user-by-id"
+        "aperture api test-api users get-user-by-id --id <ID>"
     );
     assert!(op_json["operation"]["parameters"]
         .as_array()
