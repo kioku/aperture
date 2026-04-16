@@ -153,7 +153,7 @@ async fn execute_returns_cached_result_on_repeat_call() {
     let cache_dir = tempdir().expect("tempdir should be created");
     let cache_config = CacheConfig {
         cache_dir: cache_dir.path().to_path_buf(),
-        default_ttl: Duration::from_secs(60),
+        default_ttl: Duration::from_mins(1),
         max_entries: 100,
         enabled: true,
         allow_authenticated: false,

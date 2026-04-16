@@ -118,7 +118,7 @@ fn create_test_cache_config() -> (CacheConfig, TempDir) {
     let temp_dir = TempDir::new().unwrap();
     let cache_config = CacheConfig {
         cache_dir: temp_dir.path().to_path_buf(),
-        default_ttl: Duration::from_secs(60),
+        default_ttl: Duration::from_mins(1),
         max_entries: 100,
         enabled: true,
         allow_authenticated: false,
@@ -547,7 +547,7 @@ async fn test_cache_with_custom_ttl() {
     assert_eq!(stats.valid_entries, 1);
 
     // Wait for TTL to expire (800ms TTL + buffer)
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     // Second request should hit API again due to expiration
     let result2 = execute_request(

@@ -64,7 +64,7 @@ fn create_test_cache_config() -> (CacheConfig, TempDir) {
     let temp_dir = TempDir::new().unwrap();
     let cache_config = CacheConfig {
         cache_dir: temp_dir.path().to_path_buf(),
-        default_ttl: Duration::from_secs(60),
+        default_ttl: Duration::from_mins(1),
         max_entries: 10,
         enabled: true,
         allow_authenticated: false,
@@ -466,7 +466,7 @@ async fn test_authenticated_requests_not_cached_by_default() {
     let temp_dir = TempDir::new().unwrap();
     let cache_config = CacheConfig {
         cache_dir: temp_dir.path().to_path_buf(),
-        default_ttl: Duration::from_secs(300),
+        default_ttl: Duration::from_mins(5),
         max_entries: 100,
         enabled: true,
         allow_authenticated: false, // Default: don't cache authenticated requests
@@ -549,7 +549,7 @@ async fn test_auth_headers_scrubbed_when_caching_opted_in() {
     let temp_dir = TempDir::new().unwrap();
     let cache_config = CacheConfig {
         cache_dir: temp_dir.path().to_path_buf(),
-        default_ttl: Duration::from_secs(300),
+        default_ttl: Duration::from_mins(5),
         max_entries: 100,
         enabled: true,
         allow_authenticated: true, // Opt-in: allow caching but headers must be scrubbed
