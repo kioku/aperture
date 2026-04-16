@@ -66,6 +66,7 @@ const API_PREFIX_FLAGS_WITH_VALUES: &[&str] = &[
     "--retry",
     "--retry-delay",
     "--retry-max-delay",
+    "--server-var",
 ];
 
 const API_DYNAMIC_GLOBAL_FLAGS: &[&str] = &["--help", "--jq", "--format", "--server-var"];

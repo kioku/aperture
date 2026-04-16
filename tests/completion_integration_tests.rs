@@ -243,6 +243,28 @@ fn runtime_completion_accepts_documented_powershell_shell_name() {
 }
 
 #[test]
+fn runtime_completion_tolerates_server_var_value_before_group() {
+    let fixture = write_completion_fixture();
+
+    aperture_cmd()
+        .env(constants::ENV_APERTURE_CONFIG_DIR, fixture.path())
+        .args([
+            "__complete",
+            "bash",
+            "5",
+            "aperture",
+            "api",
+            "petstore",
+            "--server-var",
+            "region=us",
+            "u",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("users"));
+}
+
+#[test]
 fn runtime_completion_tolerates_missing_execution_flag_value() {
     let fixture = write_completion_fixture();
 
