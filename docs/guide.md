@@ -86,6 +86,21 @@ echo '{"name": "John"}' | aperture api my-api users create --body-file -
 aperture api my-api orders search --status pending --created-after 2024-01-01
 ```
 
+### Flag Scoping Model
+
+Execution-oriented flags are scoped to execution commands (`api`, `run`) instead of being global.
+
+```bash
+# ✅ Scoped execution flags on execution commands
+aperture api my-api --dry-run users get-user-by-id --id 123
+aperture run --dry-run getUserById --id 123
+
+# ❌ Rejected on non-execution commands
+aperture docs --dry-run
+```
+
+Universal flags remain available everywhere: `--json-errors`, `--quiet`, and `-v`.
+
 ### Legacy Positional Syntax
 
 For backwards compatibility, positional arguments are available:
