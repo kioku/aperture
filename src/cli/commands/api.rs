@@ -110,7 +110,6 @@ fn handle_describe_json_command(
 ) -> Result<(), Error> {
     let specs_dir = command_context.config_dir.join(constants::DIR_SPECS);
     let spec_path = specs_dir.join(format!("{context}.yaml"));
-    // ast-grep-ignore: no-nested-if
     if !spec_path.exists() {
         return Err(Error::spec_not_found(context));
     }
@@ -354,6 +353,130 @@ fn should_attempt_examples_fallback(args: &[String], parse_error: &clap::Error) 
         && parse_error.kind() == clap::error::ErrorKind::MissingRequiredArgument
 }
 
+const RESERVED_EXECUTION_FLAGS: &[(&str, bool)] = &[
+    ("--api", true),
+    ("--describe-json", false),
+    ("--dry-run", false),
+    ("--idempotency-key", true),
+    ("--format", true),
+    ("--jq", true),
+    ("--batch-file", true),
+    ("--batch-concurrency", true),
+    ("--batch-rate-limit", true),
+    ("--cache", false),
+    ("--no-cache", false),
+    ("--cache-ttl", true),
+    ("--positional-args", false),
+    ("--auto-paginate", false),
+    ("--retry", true),
+    ("--retry-delay", true),
+    ("--retry-max-delay", true),
+    ("--force-retry", false),
+    ("--json-errors", false),
+    ("--quiet", false),
+];
+
+fn parse_long_flag(arg: &str) -> Option<(&str, bool)> {
+    if !arg.starts_with("--") {
+        return None;
+    }
+
+    match arg.split_once('=') {
+        Some((flag, _)) => Some((flag, true)),
+        None => Some((arg, false)),
+    }
+}
+
+fn reserved_execution_flag(flag: &str) -> Option<(&'static str, bool)> {
+    RESERVED_EXECUTION_FLAGS
+        .iter()
+        .find(|(name, _)| *name == flag)
+        .copied()
+}
+
+fn find_misplaced_execution_flag_after_operation_path_started(
+    args: &[String],
+) -> Option<&'static str> {
+    let mut operation_path_started = false;
+    let mut index = 0;
+
+    while index < args.len() {
+        let arg = &args[index];
+
+        let Some((flag, has_inline_value)) = parse_long_flag(arg) else {
+            if !arg.starts_with('-') {
+                operation_path_started = true;
+            }
+            index += 1;
+            continue;
+        };
+
+        let Some((canonical_flag, takes_value)) = reserved_execution_flag(flag) else {
+            index += 1;
+            continue;
+        };
+
+        if operation_path_started {
+            return Some(canonical_flag);
+        }
+
+        if takes_value && !has_inline_value && index + 1 < args.len() {
+            index += 1;
+        }
+
+        index += 1;
+    }
+
+    None
+}
+
+fn misplaced_execution_flag_hint_for_flag(context: &str, flag: &str) -> String {
+    if flag == "--api" {
+        return format!(
+            "Detected `--api` after shortcut arguments. Place it before the shortcut, for example: `aperture run --api {context} <shortcut> ...`"
+        );
+    }
+
+    let example_flag = if reserved_execution_flag(flag).is_some_and(|(_, takes_value)| takes_value)
+    {
+        format!("{flag} <value>")
+    } else {
+        flag.to_string()
+    };
+
+    format!(
+        "Detected `{flag}` after the operation path. Place execution flags before `<tag> <operation>`, for example: `aperture api {context} {example_flag} <tag> <operation> ...`"
+    )
+}
+
+fn build_misplaced_execution_flag_hint(context: &str, args: &[String]) -> Option<String> {
+    find_misplaced_execution_flag_after_operation_path_started(args)
+        .map(|flag| misplaced_execution_flag_hint_for_flag(context, flag))
+}
+
+fn invalid_dynamic_parse_error(context: &str, args: &[String], parse_error: &clap::Error) -> Error {
+    let parse_error_text = parse_error.to_string();
+    let base_error = Error::invalid_command(context, parse_error_text.clone());
+
+    if parse_error.kind() != clap::error::ErrorKind::UnknownArgument {
+        return base_error;
+    }
+
+    let Some(flag) = find_misplaced_execution_flag_after_operation_path_started(args) else {
+        return base_error;
+    };
+
+    if !parse_error_text.contains(flag) {
+        return base_error;
+    }
+
+    let Some(hint) = build_misplaced_execution_flag_hint(context, args) else {
+        return base_error;
+    };
+
+    base_error.with_suggestion(&hint)
+}
+
 fn render_clap_control_flow_output(parse_error: &clap::Error) -> Result<(), Error> {
     parse_error
         .print()
@@ -391,7 +514,7 @@ fn handle_parse_error_with_examples_fallback(
     }
 
     if !should_attempt_examples_fallback(args, parse_error) {
-        return Err(Error::invalid_command(context, parse_error.to_string()));
+        return Err(invalid_dynamic_parse_error(context, args, parse_error));
     }
 
     let relaxed_matches = parse_dynamic_matches_relaxed(context, spec, args, use_positional_args)
@@ -401,7 +524,7 @@ fn handle_parse_error_with_examples_fallback(
         return Ok(Some(relaxed_matches));
     }
 
-    Err(Error::invalid_command(context, parse_error.to_string()))
+    Err(invalid_dynamic_parse_error(context, args, parse_error))
 }
 
 pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
@@ -701,6 +824,8 @@ fn count_shortcut_args(args: &[String]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
+        build_misplaced_execution_flag_hint,
+        find_misplaced_execution_flag_after_operation_path_started,
         has_explicit_landing_incompatible_global_flags, resolve_output_format,
         should_render_api_context_landing, LANDING_INCOMPATIBLE_GLOBAL_FLAGS,
     };
@@ -766,5 +891,48 @@ mod tests {
     #[test]
     fn landing_only_renders_without_operation_args() {
         assert!(!should_render_api_context_landing(&["users".to_string()]));
+    }
+
+    #[test]
+    fn detects_misplaced_api_execution_flag_after_operation_path() {
+        let args = vec![
+            "users".to_string(),
+            "get-user-by-id".to_string(),
+            "--id".to_string(),
+            "123".to_string(),
+            "--dry-run".to_string(),
+        ];
+
+        let detected = find_misplaced_execution_flag_after_operation_path_started(&args);
+        assert_eq!(detected, Some("--dry-run"));
+    }
+
+    #[test]
+    fn does_not_flag_execution_option_before_operation_path() {
+        let args = vec![
+            "--dry-run".to_string(),
+            "users".to_string(),
+            "get-user-by-id".to_string(),
+            "--id".to_string(),
+            "123".to_string(),
+        ];
+
+        let detected = find_misplaced_execution_flag_after_operation_path_started(&args);
+        assert_eq!(detected, None);
+    }
+
+    #[test]
+    fn misplaced_run_api_flag_hint_uses_run_guidance() {
+        let args = vec![
+            "users".to_string(),
+            "get-user-by-id".to_string(),
+            "--api".to_string(),
+            "test-api".to_string(),
+        ];
+
+        let hint = build_misplaced_execution_flag_hint("test-api", &args)
+            .expect("misplaced --api should generate a hint");
+
+        assert!(hint.contains("aperture run --api test-api <shortcut> ..."));
     }
 }

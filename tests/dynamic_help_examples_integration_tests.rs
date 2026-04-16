@@ -425,3 +425,57 @@ fn exec_ambiguity_output_explains_api_disambiguation() {
         "expected per-API suggestions; got {combined}"
     );
 }
+
+#[test]
+fn api_trailing_dry_run_emits_targeted_placement_hint() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec(&temp_dir, &spec_file);
+
+    let output = run_with_config_dir(
+        &temp_dir,
+        &[
+            "api",
+            "test-api",
+            "users",
+            "get-user-by-id",
+            "--id",
+            "123",
+            "--dry-run",
+        ],
+    );
+
+    assert_failure_with_validation_framing(&output);
+    let combined = combined_output(&output);
+    assert!(
+        combined.contains("Detected `--dry-run` after the operation path"),
+        "expected misplaced --dry-run remediation hint; got {combined}"
+    );
+    assert!(
+        combined.contains("aperture api test-api --dry-run <tag> <operation> ..."),
+        "expected corrected aperture api placement example; got {combined}"
+    );
+}
+
+#[test]
+fn run_misplaced_api_filter_emits_targeted_placement_hint() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec(&temp_dir, &spec_file);
+
+    let output = run_with_config_dir(
+        &temp_dir,
+        &["run", "get-user-by-id", "--api", "test-api", "--id", "123"],
+    );
+
+    assert_failure_with_validation_framing(&output);
+    let combined = combined_output(&output);
+    assert!(
+        combined.contains("Detected `--api` after shortcut arguments"),
+        "expected misplaced --api remediation hint; got {combined}"
+    );
+    assert!(
+        combined.contains("aperture run --api test-api <shortcut> ..."),
+        "expected corrected aperture run placement example; got {combined}"
+    );
+}
