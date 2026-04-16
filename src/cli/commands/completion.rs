@@ -55,7 +55,7 @@ const API_EXECUTION_FLAGS: &[&str] = &[
     "--force-retry",
 ];
 
-const API_EXECUTION_FLAGS_WITH_VALUES: &[&str] = &[
+const API_PREFIX_FLAGS_WITH_VALUES: &[&str] = &[
     "--idempotency-key",
     "--format",
     "--jq",
@@ -141,17 +141,37 @@ fn is_binary_name(word: &str) -> bool {
 }
 
 fn complete_words(input: &CompletionInput, catalog: &CompletionCatalog) -> Vec<String> {
-    let Some(command) = input.before_cursor.first().map(String::as_str) else {
+    let before_cursor = strip_leading_global_flags(&input.before_cursor);
+
+    let Some(command) = before_cursor.first().map(String::as_str) else {
         return filter_candidates(top_level_candidates(), &input.current);
     };
 
-    let args_after_command = &input.before_cursor[1..];
+    let args_after_command = strip_leading_global_flags(&before_cursor[1..]);
 
     if let Some(primary) = complete_primary_command(command, args_after_command, input, catalog) {
         return primary;
     }
 
     complete_secondary_command(command, args_after_command, input, catalog)
+}
+
+fn strip_leading_global_flags(tokens: &[String]) -> &[String] {
+    let mut index = 0;
+
+    while tokens
+        .get(index)
+        .is_some_and(|token| is_global_flag_token(token))
+    {
+        index += 1;
+    }
+
+    &tokens[index..]
+}
+
+fn is_global_flag_token(token: &str) -> bool {
+    GLOBAL_FLAGS.iter().any(|flag| flag == &token)
+        || (token.starts_with('-') && token.chars().skip(1).all(|ch| ch == 'v'))
 }
 
 fn complete_primary_command(
@@ -470,7 +490,7 @@ fn api_execution_flag_step(token: &str) -> usize {
         return 1;
     }
 
-    if API_EXECUTION_FLAGS_WITH_VALUES
+    if API_PREFIX_FLAGS_WITH_VALUES
         .iter()
         .any(|flag| flag == &token)
     {

@@ -132,6 +132,32 @@ fn completion_command_generates_powershell_script_with_documented_shell_name() {
 }
 
 #[test]
+fn runtime_completion_suggests_commands_after_global_flags() {
+    aperture_cmd()
+        .args(["__complete", "bash", "2", "aperture", "--json-errors", "a"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("api"));
+}
+
+#[test]
+fn runtime_completion_suggests_config_domains_after_global_flags() {
+    aperture_cmd()
+        .args([
+            "__complete",
+            "bash",
+            "3",
+            "aperture",
+            "config",
+            "--json-errors",
+            "a",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("api"));
+}
+
+#[test]
 fn runtime_completion_suggests_contexts_groups_operations_and_flags() {
     let fixture = write_completion_fixture();
 
