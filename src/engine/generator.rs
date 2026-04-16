@@ -14,6 +14,7 @@
 
 use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use crate::constants;
+use crate::docs::DocumentationGenerator;
 use crate::utils::to_kebab_case;
 use clap::{Arg, ArgAction, Command};
 use std::collections::HashMap;
@@ -27,16 +28,17 @@ fn to_static_str(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
 
-/// Builds help text with examples for a command
-fn build_help_text_with_examples(cached_command: &CachedCommand) -> String {
+/// Builds help text with examples for a command.
+fn build_help_text_with_examples(cached_command: &CachedCommand, api_name: &str) -> String {
     let mut help_text = cached_command.description.clone().unwrap_or_default();
+    let examples = DocumentationGenerator::canonical_examples(api_name, cached_command);
 
-    if cached_command.examples.is_empty() {
+    if examples.is_empty() {
         return help_text;
     }
 
     help_text.push_str("\n\nExamples:");
-    for example in &cached_command.examples {
+    for example in examples {
         write!(
             &mut help_text,
             "\n  {}\n    {}",
@@ -45,7 +47,7 @@ fn build_help_text_with_examples(cached_command: &CachedCommand) -> String {
         .expect("writing to String buffer cannot fail");
 
         // Add explanation if present
-        if let Some(explanation) = example.explanation.as_ref() {
+        if let Some(explanation) = example.explanation {
             write!(&mut help_text, "\n    ({explanation})")
                 .expect("writing to String buffer cannot fail");
         }
@@ -82,6 +84,16 @@ pub fn generate_command_tree(spec: &CachedSpec) -> Command {
 /// Generates a dynamic clap command tree with optional legacy positional parameter syntax.
 #[must_use]
 pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: bool) -> Command {
+    generate_command_tree_for_api_with_flags(spec, "<api>", use_positional_args)
+}
+
+/// Generates a dynamic clap command tree with examples tied to the provided API context.
+#[must_use]
+pub fn generate_command_tree_for_api_with_flags(
+    spec: &CachedSpec,
+    api_name: &str,
+    use_positional_args: bool,
+) -> Command {
     let mut root_command = Command::new(constants::CLI_ROOT_COMMAND)
         .version(to_static_str(spec.version.clone()))
         .about(format!("CLI for {} API", spec.name))
@@ -138,7 +150,7 @@ pub fn generate_command_tree_with_flags(spec: &CachedSpec, use_positional_args: 
             let subcommand_name_static = to_static_str(subcommand_name);
 
             // Build help text with examples
-            let help_text = build_help_text_with_examples(cached_command);
+            let help_text = build_help_text_with_examples(cached_command, api_name);
 
             let mut operation_command = Command::new(subcommand_name_static).about(help_text);
 

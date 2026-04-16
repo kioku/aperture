@@ -2,7 +2,9 @@ use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, PaginationInfo,
 };
 use aperture_cli::constants;
-use aperture_cli::engine::generator::generate_command_tree;
+use aperture_cli::engine::generator::{
+    generate_command_tree, generate_command_tree_for_api_with_flags,
+};
 use std::collections::HashMap;
 
 // Helper macros for creating test data with default values
@@ -446,6 +448,38 @@ fn test_hidden_command_not_visible() {
     let group = command.get_subcommands().next().unwrap();
     let op = group.get_subcommands().next().unwrap();
     assert!(op.is_hide_set(), "Expected command to be hidden");
+}
+
+#[test]
+fn test_help_examples_use_effective_context_and_kebab_flags() {
+    let mut spec = empty_spec("mapping-test");
+    let mut cmd = cached_command!(
+        "User Management",
+        "getUserById",
+        "GET",
+        "/users/{id}",
+        vec![cached_parameter!("userId", "path", true)],
+        None,
+        vec![]
+    );
+    cmd.display_group = Some("accounts".to_string());
+    cmd.display_name = Some("fetch".to_string());
+    spec.commands.push(cmd);
+
+    let command = generate_command_tree_for_api_with_flags(&spec, "test-api", false);
+    let group = command
+        .find_subcommand("accounts")
+        .expect("accounts group should exist");
+    let operation = group
+        .find_subcommand("fetch")
+        .expect("fetch operation should exist");
+    let about = operation
+        .get_about()
+        .map(std::string::ToString::to_string)
+        .unwrap_or_default();
+
+    assert!(about.contains("aperture api test-api accounts fetch --user-id example"));
+    assert!(!about.contains("--userId"));
 }
 
 #[test]

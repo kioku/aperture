@@ -95,9 +95,12 @@ pub fn render_result_to_string(
 }
 
 /// Renders extended examples for a command to stdout.
-pub fn render_examples(operation: &CachedCommand) {
+pub fn render_examples(api_name: &str, operation: &CachedCommand) {
+    let operation_name = crate::docs::DocumentationGenerator::effective_operation(operation);
+    let examples = crate::docs::DocumentationGenerator::canonical_examples(api_name, operation);
+
     // ast-grep-ignore: no-println
-    println!("Command: {}\n", to_kebab_case(&operation.operation_id));
+    println!("Command: {operation_name}\n");
 
     if let Some(ref summary) = operation.summary {
         // ast-grep-ignore: no-println
@@ -107,15 +110,9 @@ pub fn render_examples(operation: &CachedCommand) {
     // ast-grep-ignore: no-println
     println!("Method: {} {}\n", operation.method, operation.path);
 
-    if operation.examples.is_empty() {
-        // ast-grep-ignore: no-println
-        println!("No examples available for this command.");
-        return;
-    }
-
     // ast-grep-ignore: no-println
     println!("Examples:\n");
-    for (i, example) in operation.examples.iter().enumerate() {
+    for (i, example) in examples.iter().enumerate() {
         // ast-grep-ignore: no-println
         println!("{}. {}", i + 1, example.description);
         // ast-grep-ignore: no-println
@@ -139,7 +136,12 @@ pub fn render_examples(operation: &CachedCommand) {
         let required = if param.required { " (required)" } else { "" };
         let param_type = param.schema_type.as_deref().unwrap_or("string");
         // ast-grep-ignore: no-println
-        println!("  --{}{} [{}]", param.name, required, param_type);
+        println!(
+            "  --{}{} [{}]",
+            to_kebab_case(&param.name),
+            required,
+            param_type
+        );
 
         let Some(ref desc) = param.description else {
             continue;

@@ -370,7 +370,7 @@ fn effective_command_path(command: &CachedCommand) -> String {
 
 fn format_param_flag(p: &CachedParameter) -> String {
     let required = if p.required { "*" } else { "" };
-    format!("--{}{}", p.name, required)
+    format!("--{}{}", to_kebab_case(&p.name), required)
 }
 
 /// Format search results for display

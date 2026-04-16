@@ -140,11 +140,11 @@ fn test_generate_command_help() {
     assert!(help.contains("# GET /users/{id}"));
     assert!(help.contains("**Get user by ID**"));
     assert!(help.contains("## Usage"));
-    assert!(help.contains("aperture api testapi users get-user-by-id"));
+    assert!(help.contains("aperture api testapi users get-user-by-id --id <ID>"));
     assert!(help.contains("## Parameters"));
     assert!(help.contains("--id"));
     assert!(help.contains("**(required)**"));
-    assert!(help.contains("## Examples"));
+    assert!(help.contains("## Example"));
     assert!(help.contains("## Responses"));
     assert!(help.contains("**200**: User found successfully"));
     assert!(help.contains("**404**: User not found"));
@@ -167,6 +167,33 @@ fn test_generate_command_help_with_request_body() {
     assert!(help.contains("User data"));
     assert!(help.contains("Required: true"));
     assert!(help.contains("--body"));
+}
+
+#[test]
+fn test_request_body_example_includes_all_required_flags() {
+    let mut spec = create_test_spec();
+    spec.commands[1].parameters.push(CachedParameter {
+        name: "traceId".to_string(),
+        location: "header".to_string(),
+        required: true,
+        description: Some("Trace ID".to_string()),
+        schema: None,
+        schema_type: Some("string".to_string()),
+        format: None,
+        default_value: None,
+        enum_values: vec![],
+        example: None,
+    });
+
+    let mut specs = BTreeMap::new();
+    specs.insert("testapi".to_string(), spec);
+
+    let doc_gen = DocumentationGenerator::new(specs);
+    let help = doc_gen
+        .generate_command_help("testapi", "users", "create-user")
+        .unwrap();
+
+    assert!(help.contains("aperture api testapi users create-user --trace-id example --body"));
 }
 
 #[test]
@@ -328,19 +355,40 @@ fn test_command_help_resolves_and_displays_mapped_names() {
     let help = doc_gen
         .generate_command_help("testapi", "accounts", "fetch")
         .unwrap();
-    assert!(help.contains("aperture api testapi accounts fetch"));
+    assert!(help.contains("aperture api testapi accounts fetch --id <ID>"));
 
     // Aliases should resolve too.
     let help_by_alias = doc_gen
         .generate_command_help("testapi", "accounts", "get")
         .unwrap();
-    assert!(help_by_alias.contains("aperture api testapi accounts fetch"));
+    assert!(help_by_alias.contains("aperture api testapi accounts fetch --id <ID>"));
 
     // Legacy names still resolve, but output should show effective mapped path.
     let help_legacy = doc_gen
         .generate_command_help("testapi", "users", "get-user-by-id")
         .unwrap();
-    assert!(help_legacy.contains("aperture api testapi accounts fetch"));
+    assert!(help_legacy.contains("aperture api testapi accounts fetch --id <ID>"));
+}
+
+#[test]
+fn test_command_help_examples_use_effective_names_and_kebab_flags() {
+    let mut spec = create_test_spec();
+    spec.commands[0].parameters[0].name = "userId".to_string();
+    spec.commands[0].display_group = Some("Accounts".to_string());
+    spec.commands[0].display_name = Some("Fetch".to_string());
+
+    let mut specs = BTreeMap::new();
+    specs.insert("testapi".to_string(), spec);
+
+    let doc_gen = DocumentationGenerator::new(specs);
+    let help = doc_gen
+        .generate_command_help("testapi", "accounts", "fetch")
+        .unwrap();
+
+    assert!(help.contains("aperture api testapi accounts fetch --user-id <USER_ID>"));
+    assert!(help.contains("aperture api testapi accounts fetch --user-id example"));
+    assert!(!help.contains("--userId"));
+    assert!(!help.contains("--user-id <value>"));
 }
 
 #[test]
