@@ -2,7 +2,7 @@
 
 use crate::batch::{BatchConfig, BatchProcessor};
 use crate::cache::models::CachedSpec;
-use crate::cli::Cli;
+use crate::cli::{Cli, ExecutionFlags};
 use crate::config::manager::{get_config_dir, ConfigManager};
 use crate::config::models::GlobalConfig;
 use crate::constants;
@@ -37,6 +37,15 @@ fn emit_pagination_error_ndjson(cli: &Cli, writer: &mut impl std::io::Write, err
         return;
     };
     let _ = writeln!(writer, "{json}");
+}
+
+fn require_execution_flags(cli: &Cli) -> Result<&ExecutionFlags, Error> {
+    cli.execution_flags().ok_or_else(|| {
+        Error::invalid_command(
+            "cli",
+            "execution flags are only available for the 'api' and 'run' commands",
+        )
+    })
 }
 
 /// Resolves the output format from dynamic matches vs CLI global flag.
@@ -97,7 +106,7 @@ fn load_api_command_context(context: &str) -> Result<ApiCommandContext, Error> {
 fn handle_describe_json_command(
     context: &str,
     command_context: &ApiCommandContext,
-    cli: &Cli,
+    execution: &ExecutionFlags,
 ) -> Result<(), Error> {
     let specs_dir = command_context.config_dir.join(constants::DIR_SPECS);
     let spec_path = specs_dir.join(format!("{context}.yaml"));
@@ -114,7 +123,7 @@ fn handle_describe_json_command(
         &command_context.spec,
         command_context.global_config.as_ref(),
     )?;
-    let output = match &cli.jq {
+    let output = match &execution.jq {
         Some(jq_filter) => executor::apply_jq_filter(&manifest, jq_filter)?,
         None => manifest,
     };
@@ -128,6 +137,7 @@ async fn handle_batch_file_command(
     batch_file_path: &str,
     command_context: &ApiCommandContext,
     cli: &Cli,
+    execution: &ExecutionFlags,
 ) -> Result<(), Error> {
     execute_batch_operations(
         context,
@@ -135,6 +145,7 @@ async fn handle_batch_file_command(
         &command_context.spec,
         command_context.global_config.as_ref(),
         cli,
+        execution,
     )
     .await
 }
@@ -239,15 +250,16 @@ async fn execute_api_runtime(
     spec: &CachedSpec,
     matches: &clap::ArgMatches,
     cli: &Cli,
+    execution: &ExecutionFlags,
     global_config: Option<GlobalConfig>,
 ) -> Result<(), Error> {
     let jq_filter = matches
         .get_one::<String>("jq")
         .map(String::as_str)
-        .or(cli.jq.as_deref());
-    let output_format = resolve_output_format(matches, &cli.format);
+        .or(execution.jq.as_deref());
+    let output_format = resolve_output_format(matches, &execution.format);
     let call = crate::cli::translate::matches_to_operation_call(spec, matches)?;
-    let mut ctx = crate::cli::translate::cli_to_execution_context(cli, global_config)?;
+    let mut ctx = crate::cli::translate::cli_to_execution_context(execution, global_config)?;
     ctx.server_var_args = crate::cli::translate::extract_server_var_args(matches);
 
     if ctx.auto_paginate {
@@ -391,13 +403,21 @@ fn handle_parse_error_with_examples_fallback(
 
 pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) -> Result<(), Error> {
     let command_context = load_api_command_context(context)?;
+    let execution = require_execution_flags(cli)?;
 
-    if cli.describe_json {
-        return handle_describe_json_command(context, &command_context, cli);
+    if execution.describe_json {
+        return handle_describe_json_command(context, &command_context, execution);
     }
 
-    if let Some(batch_file_path) = &cli.batch_file {
-        return handle_batch_file_command(context, batch_file_path, &command_context, cli).await;
+    if let Some(batch_file_path) = &execution.batch_file {
+        return handle_batch_file_command(
+            context,
+            batch_file_path,
+            &command_context,
+            cli,
+            execution,
+        )
+        .await;
     }
 
     if should_render_api_context_landing(&args) {
@@ -408,7 +428,7 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
         context,
         &command_context.spec,
         &args,
-        cli.positional_args,
+        execution.positional_args,
     )?
     else {
         return Ok(());
@@ -423,6 +443,7 @@ pub async fn execute_api_command(context: &str, args: Vec<String>, cli: &Cli) ->
         &command_context.spec,
         &matches,
         cli,
+        execution,
         command_context.global_config.clone(),
     )
     .await
@@ -436,12 +457,13 @@ pub async fn execute_batch_operations(
     spec: &CachedSpec,
     global_config: Option<&GlobalConfig>,
     cli: &Cli,
+    execution: &ExecutionFlags,
 ) -> Result<(), Error> {
     let batch_file =
         BatchProcessor::parse_batch_file(std::path::Path::new(batch_file_path)).await?;
     let batch_config = BatchConfig {
-        max_concurrency: cli.batch_concurrency,
-        rate_limit: cli.batch_rate_limit,
+        max_concurrency: execution.batch_concurrency,
+        rate_limit: execution.batch_rate_limit,
         continue_on_error: true,
         show_progress: !cli.quiet && !cli.json_errors,
         suppress_output: cli.json_errors,
@@ -453,15 +475,15 @@ pub async fn execute_batch_operations(
             batch_file,
             global_config,
             None,
-            cli.dry_run,
-            &cli.format,
+            execution.dry_run,
+            &execution.format,
             None,
         )
         .await?;
 
     let output = Output::new(cli.quiet, cli.json_errors);
     if cli.json_errors {
-        render_batch_json_summary(&result, cli)?;
+        render_batch_json_summary(&result, execution)?;
         return Ok(());
     }
 
@@ -469,7 +491,10 @@ pub async fn execute_batch_operations(
     Ok(())
 }
 
-fn render_batch_json_summary(result: &crate::batch::BatchResult, cli: &Cli) -> Result<(), Error> {
+fn render_batch_json_summary(
+    result: &crate::batch::BatchResult,
+    execution: &ExecutionFlags,
+) -> Result<(), Error> {
     let summary = serde_json::json!({
         "batch_execution_summary": {
             "total_operations": result.results.len(),
@@ -485,7 +510,7 @@ fn render_batch_json_summary(result: &crate::batch::BatchResult, cli: &Cli) -> R
             })).collect::<Vec<_>>()
         }
     });
-    let json_output = match &cli.jq {
+    let json_output = match &execution.jq {
         Some(jq_filter) => {
             let summary_json = serde_json::to_string(&summary)
                 .expect("JSON serialization of valid structure cannot fail");

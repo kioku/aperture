@@ -5,7 +5,7 @@
 //! by the execution engine.
 
 use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
-use crate::cli::Cli;
+use crate::cli::ExecutionFlags;
 use crate::config::models::GlobalConfig;
 use crate::constants;
 use crate::duration::parse_duration;
@@ -309,7 +309,7 @@ pub fn has_show_examples_flag(matches: &ArgMatches) -> bool {
 /// Returns an error if duration parsing fails for retry delay values.
 #[allow(clippy::cast_possible_truncation)]
 pub fn cli_to_execution_context(
-    cli: &Cli,
+    execution: &ExecutionFlags,
     global_config: Option<GlobalConfig>,
 ) -> Result<ExecutionContext, Error> {
     let config_dir = if let Ok(dir) = std::env::var(crate::constants::ENV_APERTURE_CONFIG_DIR) {
@@ -319,32 +319,32 @@ pub fn cli_to_execution_context(
     };
 
     // Build cache config from CLI flags
-    let cache_config = if cli.no_cache {
+    let cache_config = if execution.no_cache {
         None
     } else {
         Some(CacheConfig {
             cache_dir: config_dir
                 .join(crate::constants::DIR_CACHE)
                 .join(crate::constants::DIR_RESPONSES),
-            default_ttl: Duration::from_secs(cli.cache_ttl.unwrap_or(300)),
+            default_ttl: Duration::from_secs(execution.cache_ttl.unwrap_or(300)),
             max_entries: 1000,
-            enabled: cli.cache || cli.cache_ttl.is_some(),
+            enabled: execution.cache || execution.cache_ttl.is_some(),
             allow_authenticated: false,
         })
     };
 
     // Build retry context
-    let retry_context = build_retry_context(cli, global_config.as_ref())?;
+    let retry_context = build_retry_context(execution, global_config.as_ref())?;
 
     Ok(ExecutionContext {
-        dry_run: cli.dry_run,
-        idempotency_key: cli.idempotency_key.clone(),
+        dry_run: execution.dry_run,
+        idempotency_key: execution.idempotency_key.clone(),
         cache_config,
         retry_context,
         base_url: None, // Resolved by BaseUrlResolver
         global_config,
         server_var_args: Vec::new(), // Populated from dynamic matches in the caller
-        auto_paginate: cli.auto_paginate,
+        auto_paginate: execution.auto_paginate,
     })
 }
 
@@ -353,22 +353,22 @@ pub fn cli_to_execution_context(
 /// CLI flags take precedence over global config defaults.
 #[allow(clippy::cast_possible_truncation)]
 fn build_retry_context(
-    cli: &Cli,
+    execution: &ExecutionFlags,
     global_config: Option<&GlobalConfig>,
 ) -> Result<Option<RetryContext>, Error> {
     let defaults = global_config.map(|c| &c.retry_defaults);
-    let max_attempts = resolve_retry_attempts(cli.retry, defaults.map(|d| d.max_attempts));
+    let max_attempts = resolve_retry_attempts(execution.retry, defaults.map(|d| d.max_attempts));
 
     if max_attempts == 0 {
         return Ok(None);
     }
 
     let initial_delay_ms = resolve_retry_delay_ms(
-        cli.retry_delay.as_deref(),
+        execution.retry_delay.as_deref(),
         defaults.map_or(500, |d| d.initial_delay_ms),
     )?;
     let max_delay_ms = resolve_retry_delay_ms(
-        cli.retry_max_delay.as_deref(),
+        execution.retry_max_delay.as_deref(),
         defaults.map_or(30_000, |d| d.max_delay_ms),
     )?;
 
@@ -376,9 +376,9 @@ fn build_retry_context(
         max_attempts,
         initial_delay_ms,
         max_delay_ms,
-        force_retry: cli.force_retry,
+        force_retry: execution.force_retry,
         method: None, // Determined by executor at execution time
-        has_idempotency_key: cli.idempotency_key.is_some(),
+        has_idempotency_key: execution.idempotency_key.is_some(),
     }))
 }
 

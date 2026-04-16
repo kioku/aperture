@@ -5,7 +5,7 @@ pub mod render;
 pub mod tracing_init;
 pub mod translate;
 
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(ValueEnum, Clone, Debug)]
 pub enum OutputFormat {
@@ -17,8 +17,137 @@ pub enum OutputFormat {
     Table,
 }
 
-#[derive(Parser, Debug)]
+/// Flags that are only meaningful for execution-oriented commands (`api`, `run`).
+#[derive(Args, Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)]
+pub struct ExecutionFlags {
+    /// Output a JSON manifest of all available commands and parameters
+    #[arg(
+        long,
+        help = "Output capability manifest as JSON (can be filtered with --jq)"
+    )]
+    pub describe_json: bool,
+
+    /// Show the HTTP request that would be made without executing it
+    #[arg(long, help = "Show request details without executing")]
+    pub dry_run: bool,
+
+    /// Set the Idempotency-Key header for safe retries
+    #[arg(long, value_name = "KEY", help = "Set idempotency key header")]
+    pub idempotency_key: Option<String>,
+
+    /// Output format for response data
+    #[arg(
+        long,
+        value_enum,
+        default_value = "json",
+        help = "Output format for response data"
+    )]
+    pub format: OutputFormat,
+
+    /// Apply JQ filter to response data, describe-json output, or batch results (with --json-errors)
+    #[arg(
+        long,
+        value_name = "FILTER",
+        help = "Apply JQ filter to JSON output (e.g., '.name', '.[] | select(.active)', '.batch_execution_summary.operations[] | select(.success == false)')"
+    )]
+    pub jq: Option<String>,
+
+    /// Execute operations from a batch file
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Path to batch file (JSON or YAML) containing multiple operations"
+    )]
+    pub batch_file: Option<String>,
+
+    /// Maximum concurrent requests for batch operations
+    #[arg(
+        long,
+        value_name = "N",
+        default_value = "5",
+        help = "Maximum number of concurrent requests for batch operations"
+    )]
+    pub batch_concurrency: usize,
+
+    /// Rate limit for batch operations (requests per second)
+    #[arg(
+        long,
+        value_name = "N",
+        help = "Rate limit for batch operations (requests per second)"
+    )]
+    pub batch_rate_limit: Option<u32>,
+
+    /// Enable response caching
+    #[arg(
+        long,
+        help = "Enable response caching (can speed up repeated requests)"
+    )]
+    pub cache: bool,
+
+    /// Disable response caching
+    #[arg(long, conflicts_with = "cache", help = "Disable response caching")]
+    pub no_cache: bool,
+
+    /// TTL for cached responses in seconds
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        help = "Cache TTL in seconds (default: 300)"
+    )]
+    pub cache_ttl: Option<u64>,
+
+    /// Use positional arguments for path parameters (legacy syntax)
+    #[arg(
+        long,
+        help = "Use positional arguments for path parameters (legacy syntax)"
+    )]
+    pub positional_args: bool,
+
+    /// Automatically paginate through all pages, streaming results as NDJSON
+    ///
+    /// Detects the pagination strategy from the `OpenAPI` spec (cursor, offset,
+    /// or Link header) and loops until the last page, printing each page's
+    /// array items as newline-delimited JSON objects.
+    #[arg(
+        long,
+        help = "Stream all pages as NDJSON (auto-detects pagination strategy)"
+    )]
+    pub auto_paginate: bool,
+
+    /// Maximum number of retry attempts for failed requests
+    #[arg(
+        long,
+        value_name = "N",
+        help = "Maximum retry attempts (0 = disabled, overrides config)"
+    )]
+    pub retry: Option<u32>,
+
+    /// Initial delay between retries (e.g., "500ms", "1s")
+    #[arg(
+        long,
+        value_name = "DURATION",
+        help = "Initial retry delay (e.g., '500ms', '1s', '2s')"
+    )]
+    pub retry_delay: Option<String>,
+
+    /// Maximum delay cap between retries (e.g., "30s", "1m")
+    #[arg(
+        long,
+        value_name = "DURATION",
+        help = "Maximum retry delay cap (e.g., '30s', '1m')"
+    )]
+    pub retry_max_delay: Option<String>,
+
+    /// Force retry on non-idempotent requests without an idempotency key
+    #[arg(
+        long,
+        help = "Allow retrying non-idempotent requests without idempotency key"
+    )]
+    pub force_retry: bool,
+}
+
+#[derive(Parser, Debug)]
 #[command(
     author,
     version,
@@ -37,14 +166,6 @@ pub enum OutputFormat {
                   aperture api myapi --dry-run ...      # Show request without executing"
 )]
 pub struct Cli {
-    /// Output a JSON manifest of all available commands and parameters
-    #[arg(
-        long,
-        global = true,
-        help = "Output capability manifest as JSON (can be filtered with --jq)"
-    )]
-    pub describe_json: bool,
-
     /// Output all errors as structured JSON to stderr
     /// When used with batch operations, outputs a clean JSON summary at the end
     #[arg(long, global = true, help = "Output errors in JSON format")]
@@ -69,149 +190,18 @@ pub struct Cli {
     )]
     pub verbosity: u8,
 
-    /// Show the HTTP request that would be made without executing it
-    #[arg(long, global = true, help = "Show request details without executing")]
-    pub dry_run: bool,
-
-    /// Set the Idempotency-Key header for safe retries
-    #[arg(
-        long,
-        global = true,
-        value_name = "KEY",
-        help = "Set idempotency key header"
-    )]
-    pub idempotency_key: Option<String>,
-
-    /// Output format for response data
-    #[arg(
-        long,
-        global = true,
-        value_enum,
-        default_value = "json",
-        help = "Output format for response data"
-    )]
-    pub format: OutputFormat,
-
-    /// Apply JQ filter to response data, describe-json output, or batch results (with --json-errors)
-    #[arg(
-        long,
-        global = true,
-        value_name = "FILTER",
-        help = "Apply JQ filter to JSON output (e.g., '.name', '.[] | select(.active)', '.batch_execution_summary.operations[] | select(.success == false)')"
-    )]
-    pub jq: Option<String>,
-
-    /// Execute operations from a batch file
-    #[arg(
-        long,
-        global = true,
-        value_name = "PATH",
-        help = "Path to batch file (JSON or YAML) containing multiple operations"
-    )]
-    pub batch_file: Option<String>,
-
-    /// Maximum concurrent requests for batch operations
-    #[arg(
-        long,
-        global = true,
-        value_name = "N",
-        default_value = "5",
-        help = "Maximum number of concurrent requests for batch operations"
-    )]
-    pub batch_concurrency: usize,
-
-    /// Rate limit for batch operations (requests per second)
-    #[arg(
-        long,
-        global = true,
-        value_name = "N",
-        help = "Rate limit for batch operations (requests per second)"
-    )]
-    pub batch_rate_limit: Option<u32>,
-
-    /// Enable response caching
-    #[arg(
-        long,
-        global = true,
-        help = "Enable response caching (can speed up repeated requests)"
-    )]
-    pub cache: bool,
-
-    /// Disable response caching
-    #[arg(
-        long,
-        global = true,
-        conflicts_with = "cache",
-        help = "Disable response caching"
-    )]
-    pub no_cache: bool,
-
-    /// TTL for cached responses in seconds
-    #[arg(
-        long,
-        global = true,
-        value_name = "SECONDS",
-        help = "Cache TTL in seconds (default: 300)"
-    )]
-    pub cache_ttl: Option<u64>,
-
-    /// Use positional arguments for path parameters (legacy syntax)
-    #[arg(
-        long,
-        global = true,
-        help = "Use positional arguments for path parameters (legacy syntax)"
-    )]
-    pub positional_args: bool,
-
-    /// Automatically paginate through all pages, streaming results as NDJSON
-    ///
-    /// Detects the pagination strategy from the `OpenAPI` spec (cursor, offset,
-    /// or Link header) and loops until the last page, printing each page's
-    /// array items as newline-delimited JSON objects.
-    #[arg(
-        long,
-        global = true,
-        help = "Stream all pages as NDJSON (auto-detects pagination strategy)"
-    )]
-    pub auto_paginate: bool,
-
-    /// Maximum number of retry attempts for failed requests
-    #[arg(
-        long,
-        global = true,
-        value_name = "N",
-        help = "Maximum retry attempts (0 = disabled, overrides config)"
-    )]
-    pub retry: Option<u32>,
-
-    /// Initial delay between retries (e.g., "500ms", "1s")
-    #[arg(
-        long,
-        global = true,
-        value_name = "DURATION",
-        help = "Initial retry delay (e.g., '500ms', '1s', '2s')"
-    )]
-    pub retry_delay: Option<String>,
-
-    /// Maximum delay cap between retries (e.g., "30s", "1m")
-    #[arg(
-        long,
-        global = true,
-        value_name = "DURATION",
-        help = "Maximum retry delay cap (e.g., '30s', '1m')"
-    )]
-    pub retry_max_delay: Option<String>,
-
-    /// Force retry on non-idempotent requests without an idempotency key
-    #[arg(
-        long,
-        global = true,
-        help = "Allow retrying non-idempotent requests without idempotency key"
-    )]
-    pub force_retry: bool,
-
     #[command(subcommand)]
     pub command: Commands,
+}
+
+impl Cli {
+    #[must_use]
+    pub const fn execution_flags(&self) -> Option<&ExecutionFlags> {
+        match &self.command {
+            Commands::Api { execution, .. } | Commands::Exec { execution, .. } => Some(execution),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -271,6 +261,9 @@ pub enum Commands {
         /// Name of the API specification context.
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         context: String,
+        /// Flags honored by execution-oriented workflows for this command.
+        #[command(flatten)]
+        execution: ExecutionFlags,
         /// Remaining arguments will be parsed dynamically based on the `OpenAPI` spec
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -327,6 +320,9 @@ pub enum Commands {
             help = "Resolve shortcuts only within specified API"
         )]
         api: Option<String>,
+        /// Flags honored by execution-oriented workflows for this command.
+        #[command(flatten)]
+        execution: ExecutionFlags,
         /// Shortcut command arguments
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -1018,7 +1014,7 @@ mod tests {
         let cli =
             Cli::try_parse_from(["aperture", "run", "get-user-by-id", "--id", "123"]).unwrap();
         match cli.command {
-            Commands::Exec { api, args } => {
+            Commands::Exec { api, args, .. } => {
                 assert!(api.is_none());
                 assert_eq!(args, vec!["get-user-by-id", "--id", "123"]);
             }
@@ -1031,7 +1027,7 @@ mod tests {
         let cli =
             Cli::try_parse_from(["aperture", "exec", "get-user-by-id", "--id", "123"]).unwrap();
         match cli.command {
-            Commands::Exec { api, args } => {
+            Commands::Exec { api, args, .. } => {
                 assert!(api.is_none());
                 assert_eq!(args, vec!["get-user-by-id", "--id", "123"]);
             }
@@ -1110,6 +1106,35 @@ mod tests {
 
         assert!(!help.contains("set-url"));
         assert!(!help.contains("list-urls"));
+        assert!(!help.contains("--dry-run"));
+        assert!(!help.contains("--batch-file"));
+        assert!(!help.contains("--retry"));
+    }
+
+    #[test]
+    fn api_help_includes_execution_flags() {
+        let mut command = Cli::command();
+        let api_command = command
+            .find_subcommand_mut("api")
+            .expect("api command should exist");
+
+        let mut help = Vec::new();
+        api_command
+            .write_long_help(&mut help)
+            .expect("api help should render");
+        let help = String::from_utf8(help).expect("help should be valid UTF-8");
+
+        assert!(help.contains("--dry-run"));
+        assert!(help.contains("--batch-file"));
+        assert!(help.contains("--retry"));
+    }
+
+    #[test]
+    fn docs_rejects_execution_only_flag() {
+        let err = Cli::try_parse_from(["aperture", "docs", "--dry-run"]).unwrap_err();
+        let err = err.to_string();
+
+        assert!(err.contains("unexpected argument '--dry-run'"));
     }
 
     #[test]
