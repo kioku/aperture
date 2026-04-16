@@ -297,6 +297,8 @@ fn complete_docs(args: &[String], current: &str, catalog: &CompletionCatalog) ->
 }
 
 fn complete_config(args: &[String], current: &str, catalog: &CompletionCatalog) -> Vec<String> {
+    let args = strip_leading_option_tokens(args);
+
     let Some(domain) = args.first().map(String::as_str) else {
         return filter_candidates(CONFIG_DOMAINS.iter().map(ToString::to_string), current);
     };
@@ -315,6 +317,8 @@ fn complete_config(args: &[String], current: &str, catalog: &CompletionCatalog) 
 }
 
 fn complete_config_api(args: &[String], current: &str, contexts: &[String]) -> Vec<String> {
+    let args = strip_leading_option_tokens(args);
+
     let Some(command) = args.first().map(String::as_str) else {
         return filter_candidates(CONFIG_API_COMMANDS.iter().map(ToString::to_string), current);
     };
@@ -338,6 +342,8 @@ fn complete_config_api(args: &[String], current: &str, contexts: &[String]) -> V
 }
 
 fn complete_config_url(args: &[String], current: &str, contexts: &[String]) -> Vec<String> {
+    let args = strip_leading_option_tokens(args);
+
     let Some(command) = args.first().map(String::as_str) else {
         return filter_candidates(CONFIG_URL_COMMANDS.iter().map(ToString::to_string), current);
     };
@@ -349,6 +355,8 @@ fn complete_config_url(args: &[String], current: &str, contexts: &[String]) -> V
 }
 
 fn complete_config_secret(args: &[String], current: &str, contexts: &[String]) -> Vec<String> {
+    let args = strip_leading_option_tokens(args);
+
     let Some(command) = args.first().map(String::as_str) else {
         return filter_candidates(
             CONFIG_SECRET_COMMANDS.iter().map(ToString::to_string),
@@ -365,6 +373,8 @@ fn complete_config_secret(args: &[String], current: &str, contexts: &[String]) -
 }
 
 fn complete_config_cache(args: &[String], current: &str, contexts: &[String]) -> Vec<String> {
+    let args = strip_leading_option_tokens(args);
+
     let Some(command) = args.first().map(String::as_str) else {
         return filter_candidates(
             CONFIG_CACHE_COMMANDS.iter().map(ToString::to_string),
@@ -391,6 +401,8 @@ fn complete_config_cache(args: &[String], current: &str, contexts: &[String]) ->
 }
 
 fn complete_config_setting(args: &[String], current: &str) -> Vec<String> {
+    let args = strip_leading_option_tokens(args);
+
     if args.is_empty() {
         return filter_candidates(
             CONFIG_SETTING_COMMANDS.iter().map(ToString::to_string),
@@ -402,6 +414,8 @@ fn complete_config_setting(args: &[String], current: &str) -> Vec<String> {
 }
 
 fn complete_config_mapping(args: &[String], current: &str, contexts: &[String]) -> Vec<String> {
+    let args = strip_leading_option_tokens(args);
+
     let Some(command) = args.first().map(String::as_str) else {
         return filter_candidates(
             CONFIG_MAPPING_COMMANDS.iter().map(ToString::to_string),
@@ -420,7 +434,11 @@ fn complete_when_only_subcommand_token(
     current: &str,
     contexts: &[String],
 ) -> Vec<String> {
-    if args.len() == 1 {
+    let remaining = args
+        .split_first()
+        .map_or(&[][..], |(_, rest)| strip_leading_option_tokens(rest));
+
+    if remaining.is_empty() {
         return filter_candidates(contexts.iter().cloned(), current);
     }
 

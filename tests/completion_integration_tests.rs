@@ -158,6 +158,23 @@ fn runtime_completion_suggests_config_domains_after_global_flags() {
 }
 
 #[test]
+fn runtime_completion_recovers_config_domains_after_unknown_flag_prefix() {
+    aperture_cmd()
+        .args([
+            "__complete",
+            "bash",
+            "3",
+            "aperture",
+            "config",
+            "--unknown",
+            "a",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("api"));
+}
+
+#[test]
 fn runtime_completion_tolerates_unknown_top_level_flag_prefix() {
     aperture_cmd()
         .args(["__complete", "bash", "2", "aperture", "--unknown", "a"])
@@ -271,6 +288,44 @@ fn runtime_completion_tolerates_server_var_value_before_group() {
         .assert()
         .success()
         .stdout(predicate::str::contains("users"));
+}
+
+#[test]
+fn runtime_completion_recovers_config_subcommands_and_contexts_after_unknown_flag_prefix() {
+    let fixture = write_completion_fixture();
+
+    aperture_cmd()
+        .env(constants::ENV_APERTURE_CONFIG_DIR, fixture.path())
+        .args([
+            "__complete",
+            "bash",
+            "4",
+            "aperture",
+            "config",
+            "api",
+            "--unknown",
+            "r",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("remove"));
+
+    aperture_cmd()
+        .env(constants::ENV_APERTURE_CONFIG_DIR, fixture.path())
+        .args([
+            "__complete",
+            "bash",
+            "5",
+            "aperture",
+            "config",
+            "api",
+            "remove",
+            "--unknown",
+            "p",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("petstore"));
 }
 
 #[test]
