@@ -108,6 +108,19 @@ fn completion_command_generates_bash_script() {
 }
 
 #[test]
+fn completion_command_generates_zsh_script() {
+    aperture_cmd()
+        .args(["completion", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("#compdef aperture"))
+        .stdout(predicate::str::contains("aperture __complete zsh"))
+        .stdout(predicate::str::contains(
+            "compdef _aperture_completion aperture",
+        ));
+}
+
+#[test]
 fn completion_command_generates_fish_script_with_cursor_handling() {
     aperture_cmd()
         .args(["completion", "fish"])
