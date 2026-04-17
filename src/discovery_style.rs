@@ -117,4 +117,29 @@ mod tests {
         let style = DiscoveryStyle::from_detection(true, Some(std::ffi::OsStr::new("1")));
         assert!(!style.is_enabled());
     }
+
+    #[test]
+    fn empty_no_color_value_disables_when_tty() {
+        let style = DiscoveryStyle::from_detection(true, Some(std::ffi::OsStr::new("")));
+        assert!(!style.is_enabled());
+    }
+
+    #[test]
+    fn method_normalizes_lowercase_tokens() {
+        let style = DiscoveryStyle::new(false);
+        assert_eq!(style.method("get"), "GET");
+    }
+
+    #[test]
+    fn method_falls_back_to_bold_for_unknown_tokens() {
+        let style = DiscoveryStyle::new(true);
+        assert_eq!(style.method("BREW"), "\u{1b}[1mBREW\u{1b}[0m");
+    }
+
+    #[test]
+    fn method_handles_empty_or_whitespace_tokens_safely() {
+        let style = DiscoveryStyle::new(false);
+        assert_eq!(style.method(""), "");
+        assert_eq!(style.method("   "), "   ");
+    }
 }
