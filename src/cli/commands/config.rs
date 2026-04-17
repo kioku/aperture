@@ -4,6 +4,7 @@ use crate::config::context_name::ApiContextName;
 use crate::config::manager::{get_config_dir, ConfigManager};
 use crate::config::models::SecretSource;
 use crate::constants;
+use crate::discovery_style::DiscoveryStyle;
 use crate::error::Error;
 use crate::fs::OsFileSystem;
 use crate::output::Output;
@@ -29,9 +30,10 @@ async fn handle_add_spec_command(
     manager
         .add_spec_auto(&name, &file_or_url, force, strict)
         .await?;
-    output.success(format!("Spec '{name}' added successfully."));
-    print_partial_add_acceptance_summary(manager, &name, output);
-    print_config_add_next_steps(&name, output);
+    let style = DiscoveryStyle::for_stdout();
+    output.success(style.success(format!("Spec '{name}' added successfully.")));
+    print_partial_add_acceptance_summary(manager, &name, output, style);
+    print_config_add_next_steps(&name, output, style);
     Ok(())
 }
 
@@ -39,6 +41,7 @@ fn print_partial_add_acceptance_summary(
     manager: &ConfigManager<OsFileSystem>,
     name: &ApiContextName,
     output: &Output,
+    style: DiscoveryStyle,
 ) {
     let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
     let Ok(cached_spec) = crate::engine::loader::load_cached_spec(&cache_dir, name.as_str()) else {
@@ -52,20 +55,38 @@ fn print_partial_add_acceptance_summary(
 
     let available = cached_spec.commands.len();
     let total = available + skipped;
-    output.info(format!(
+    output.info(style.warning(format!(
         "Partial spec acceptance: {available} of {total} endpoints available ({skipped} skipped)."
+    )));
+    output.tip(format!(
+        "{} skipped endpoints with 'aperture config list --verbose'.",
+        style.next_label("Review")
     ));
-    output.tip("Review skipped endpoints with 'aperture config list --verbose'.");
 }
 
-fn print_config_add_next_steps(name: &ApiContextName, output: &Output) {
+fn print_config_add_next_steps(name: &ApiContextName, output: &Output, style: DiscoveryStyle) {
     let context = name.as_str();
-    output.info("Next steps:");
-    output.tip(format!("  1. aperture overview {context}"));
-    output.tip(format!("  2. aperture search <term> --api {context}"));
-    output.tip(format!("  3. aperture list-commands {context}"));
-    output.tip(format!("  4. aperture docs {context} <tag> <operation>"));
-    output.tip(format!("  5. aperture api {context} --describe-json"));
+    output.info(style.next_label("Next steps:"));
+    output.tip(format!(
+        "  {} aperture overview {context}",
+        style.next_label("1.")
+    ));
+    output.tip(format!(
+        "  {} aperture search <term> --api {context}",
+        style.next_label("2.")
+    ));
+    output.tip(format!(
+        "  {} aperture list-commands {context}",
+        style.next_label("3.")
+    ));
+    output.tip(format!(
+        "  {} aperture docs {context} <tag> <operation>",
+        style.next_label("4.")
+    ));
+    output.tip(format!(
+        "  {} aperture api {context} --describe-json",
+        style.next_label("5.")
+    ));
 }
 
 #[allow(clippy::needless_pass_by_value)]

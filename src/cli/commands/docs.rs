@@ -4,6 +4,7 @@ use crate::cache::models::{CachedCommand, CachedSpec};
 use crate::cli::DiscoveryFormat;
 use crate::config::manager::{get_config_dir, ConfigManager};
 use crate::constants;
+use crate::discovery_style::DiscoveryStyle;
 use crate::docs::{DocumentationGenerator, HelpFormatter};
 use crate::engine::loader;
 use crate::error::Error;
@@ -201,20 +202,25 @@ pub fn list_commands(
 
     match format {
         DiscoveryFormat::Text => {
-            let formatted_output = HelpFormatter::format_command_list(&spec);
+            let style = DiscoveryStyle::for_stdout();
+            let formatted_output = HelpFormatter::format_command_list_with_style(&spec, style);
             // ast-grep-ignore: no-println
             println!("{formatted_output}");
             output.tip(format!(
-                "Next: 'aperture overview {context}' for high-level API orientation"
+                "{} 'aperture overview {context}' for high-level API orientation",
+                style.next_label("Next:")
             ));
             output.tip(format!(
-                "Next: 'aperture search <term> --api {context}' to find operations by intent"
+                "{} 'aperture search <term> --api {context}' to find operations by intent",
+                style.next_label("Next:")
             ));
             output.tip(format!(
-                "Next: 'aperture docs {context} <tag> <operation>' for deep operation docs"
+                "{} 'aperture docs {context} <tag> <operation>' for deep operation docs",
+                style.next_label("Next:")
             ));
             output.tip(format!(
-                "Execute: 'aperture api {context} <tag> <operation> ...'"
+                "{} 'aperture api {context} <tag> <operation> ...'",
+                style.next_label("Execute:")
             ));
             Ok(())
         }
@@ -311,16 +317,19 @@ fn render_api_reference_index(
     api: &str,
     output: &Output,
 ) -> Result<(), Error> {
+    let style = DiscoveryStyle::for_stdout();
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
-    let reference = doc_gen.generate_api_reference_index(api)?;
+    let reference = doc_gen.generate_api_reference_index_styled(api, style)?;
     // ast-grep-ignore: no-println
     println!("{reference}");
     output.tip(format!(
-        "Execute operations with 'aperture api {api} <tag> <operation> ...'"
+        "{} operations with 'aperture api {api} <tag> <operation> ...'",
+        style.next_label("Execute")
     ));
     output.tip(format!(
-        "Machine workflow: 'aperture api {api} --describe-json'"
+        "{} 'aperture api {api} --describe-json'",
+        style.next_label("Machine workflow:")
     ));
     Ok(())
 }
@@ -384,19 +393,24 @@ fn render_command_help(
     enhanced: bool,
     output: &Output,
 ) -> Result<(), Error> {
+    let style = DiscoveryStyle::for_stdout();
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
-    let help = doc_gen.generate_command_help(api, tag, operation)?;
+    let help = doc_gen.generate_command_help_styled(api, tag, operation, style)?;
     if enhanced {
         // ast-grep-ignore: no-println
         println!("{help}");
     } else {
         // ast-grep-ignore: no-println
         println!("{}", help.lines().take(20).collect::<Vec<_>>().join("\n"));
-        output.tip("Use --enhanced for full documentation with examples");
+        output.tip(format!(
+            "{} --enhanced for full documentation with examples",
+            style.next_label("Use")
+        ));
     }
     output.tip(format!(
-        "Execute with 'aperture api {api} <tag> <operation> ...' after inspection"
+        "{} with 'aperture api {api} <tag> <operation> ...' after inspection",
+        style.next_label("Execute")
     ));
     Ok(())
 }
@@ -563,22 +577,27 @@ fn render_single_api_overview(
     api: &str,
     output: &Output,
 ) -> Result<(), Error> {
+    let style = DiscoveryStyle::for_stdout();
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
-    let overview = doc_gen.generate_api_overview(api)?;
+    let overview = doc_gen.generate_api_overview_styled(api, style)?;
     // ast-grep-ignore: no-println
     println!("{overview}");
     output.tip(format!(
-        "Next: 'aperture search <term> --api {api}' to find specific operations"
+        "{} 'aperture search <term> --api {api}' to find specific operations",
+        style.next_label("Next:")
     ));
     output.tip(format!(
-        "Next: 'aperture commands {api}' for a terse command tree"
+        "{} 'aperture commands {api}' for a terse command tree",
+        style.next_label("Next:")
     ));
     output.tip(format!(
-        "Next: 'aperture docs {api} <tag> <operation>' for deep operation reference"
+        "{} 'aperture docs {api} <tag> <operation>' for deep operation reference",
+        style.next_label("Next:")
     ));
     output.tip(format!(
-        "Machine workflow: 'aperture api {api} --describe-json'"
+        "{} 'aperture api {api} --describe-json'",
+        style.next_label("Machine workflow:")
     ));
     Ok(())
 }

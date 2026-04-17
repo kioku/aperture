@@ -6,6 +6,7 @@ use crate::cli::{Cli, ExecutionFlags};
 use crate::config::manager::{get_config_dir, ConfigManager};
 use crate::config::models::GlobalConfig;
 use crate::constants;
+use crate::discovery_style::DiscoveryStyle;
 use crate::engine::{executor, generator, loader};
 use crate::error::Error;
 use crate::fs::OsFileSystem;
@@ -167,36 +168,42 @@ fn handle_show_examples_command(
 }
 
 fn render_api_context_landing(context: &str, spec: &CachedSpec) -> Result<(), Error> {
+    let style = DiscoveryStyle::for_stdout();
     let mut specs = std::collections::BTreeMap::new();
     specs.insert(context.to_string(), spec.clone());
 
     let doc_gen = crate::docs::DocumentationGenerator::new(specs);
-    let mut overview = doc_gen.generate_api_overview(context)?;
+    let mut overview = doc_gen.generate_api_overview_styled(context, style)?;
 
-    overview.push_str("## Next Steps\n\n");
+    writeln!(overview, "## {}\n", style.heading("Next Steps")).ok();
     writeln!(
         overview,
-        "- Discover by intent: `aperture search \"<keyword>\" --api {context}`"
+        "- {} `aperture search \"<keyword>\" --api {context}`",
+        style.next_label("Discover by intent:")
     )
     .ok();
     writeln!(
         overview,
-        "- Inspect command paths: `aperture commands {context}`"
+        "- {} `aperture commands {context}`",
+        style.next_label("Inspect command paths:")
     )
     .ok();
     writeln!(
         overview,
-        "- Read operation docs: `aperture docs {context} <tag> <operation>`"
+        "- {} `aperture docs {context} <tag> <operation>`",
+        style.next_label("Read operation docs:")
     )
     .ok();
     writeln!(
         overview,
-        "- Execute an operation: `aperture api {context} <tag> <operation> ...`"
+        "- {} `aperture api {context} <tag> <operation> ...`",
+        style.next_label("Execute an operation:")
     )
     .ok();
     writeln!(
         overview,
-        "- Machine manifest: `aperture api {context} --describe-json`"
+        "- {} `aperture api {context} --describe-json`",
+        style.next_label("Machine manifest:")
     )
     .ok();
 

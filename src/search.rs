@@ -6,6 +6,7 @@
 
 use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use crate::constants;
+use crate::discovery_style::DiscoveryStyle;
 use crate::error::Error;
 use crate::utils::to_kebab_case;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -376,6 +377,16 @@ fn format_param_flag(p: &CachedParameter) -> String {
 /// Format search results for display
 #[must_use]
 pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> Vec<String> {
+    format_search_results_with_style(results, verbose, DiscoveryStyle::new(false))
+}
+
+/// Format search results for display with optional semantic styling.
+#[must_use]
+pub fn format_search_results_with_style(
+    results: &[CommandSearchResult],
+    verbose: bool,
+    style: DiscoveryStyle,
+) -> Vec<String> {
     let mut lines = Vec::new();
 
     if results.is_empty() {
@@ -387,7 +398,11 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
         return lines;
     }
 
-    lines.push(format!("Found {} matching operation(s):", results.len()));
+    lines.push(format!(
+        "{} {} matching operation(s):",
+        style.heading("Found"),
+        results.len()
+    ));
     lines.push(String::new());
 
     for (idx, result) in results.iter().enumerate() {
@@ -402,8 +417,8 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
         // Method and path
         lines.push(format!(
             "   {} {}",
-            result.command.method.to_uppercase(),
-            result.command.path
+            style.method(&result.command.method),
+            style.metadata(&result.command.path)
         ));
 
         // Description if available
@@ -412,12 +427,16 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
         }
 
         lines.push(format!(
-            "   Inspect: aperture docs {} {}",
-            result.api_context, result.command_path
+            "   {} aperture docs {} {}",
+            style.next_label("Inspect:"),
+            result.api_context,
+            result.command_path
         ));
         lines.push(format!(
-            "   Execute: aperture api {} {} ...",
-            result.api_context, result.command_path
+            "   {} aperture api {} {} ...",
+            style.next_label("Execute:"),
+            result.api_context,
+            result.command_path
         ));
 
         if !verbose {
@@ -427,7 +446,11 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
 
         // Show highlights
         if !result.highlights.is_empty() {
-            lines.push(format!("   Matches: {}", result.highlights.join(", ")));
+            lines.push(format!(
+                "   {} {}",
+                style.next_label("Matches:"),
+                result.highlights.join(", ")
+            ));
         }
 
         // Show parameters
@@ -438,7 +461,11 @@ pub fn format_search_results(results: &[CommandSearchResult], verbose: bool) -> 
                 .iter()
                 .map(format_param_flag)
                 .collect();
-            lines.push(format!("   Parameters: {}", params.join(" ")));
+            lines.push(format!(
+                "   {} {}",
+                style.next_label("Parameters:"),
+                params.join(" ")
+            ));
         }
 
         // Show request body if present
