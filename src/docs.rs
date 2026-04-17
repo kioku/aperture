@@ -446,11 +446,11 @@ impl DocumentationGenerator {
     /// Add metadata section with deprecation and external docs
     fn add_metadata_section(help: &mut String, command: &CachedCommand) {
         if command.deprecated {
-            help.push_str("⚠️  **This operation is deprecated**\n\n");
+            help.push_str("Deprecated: this operation is deprecated\n\n");
         }
 
         if let Some(ref docs_url) = command.external_docs_url {
-            write!(help, "📖 **External Documentation**: {docs_url}\n\n").ok();
+            write!(help, "External documentation: {docs_url}\n\n").ok();
         }
     }
 
@@ -721,7 +721,7 @@ impl HelpFormatter {
         let mut output = String::new();
 
         // Header with API info
-        writeln!(output, "📋 {} API Commands", spec.name).ok();
+        writeln!(output, "{} API Commands", spec.name).ok();
         let visible_commands: Vec<&CachedCommand> = spec
             .commands
             .iter()
@@ -750,7 +750,7 @@ impl HelpFormatter {
         }
 
         for (tag, commands) in tag_groups {
-            writeln!(output, "\n📁 {tag}").ok();
+            writeln!(output, "\nGroup: {tag}").ok();
             output.push_str(&"─".repeat(40));
             output.push('\n');
 
@@ -769,7 +769,7 @@ impl HelpFormatter {
                     "  {} {} {}{}",
                     method_badge,
                     operation_kebab,
-                    if command.deprecated { "⚠️" } else { "" },
+                    if command.deprecated { "Deprecated" } else { "" },
                     description
                 )
                 .ok();
@@ -783,17 +783,8 @@ impl HelpFormatter {
         output
     }
 
-    /// Format HTTP method with color/styling
+    /// Format HTTP method for display.
     fn format_method_badge(method: &str) -> String {
-        match method.to_uppercase().as_str() {
-            "GET" => "🔍 GET   ".to_string(),
-            "POST" => "📝 POST  ".to_string(),
-            "PUT" => "✏️  PUT   ".to_string(),
-            "DELETE" => "🗑️  DELETE".to_string(),
-            "PATCH" => "🔧 PATCH ".to_string(),
-            "HEAD" => "👁️  HEAD  ".to_string(),
-            "OPTIONS" => "⚙️  OPTIONS".to_string(),
-            _ => format!("📋 {:<7}", method.to_uppercase()),
-        }
+        format!("{:<7}", method.to_uppercase())
     }
 }

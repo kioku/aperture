@@ -148,7 +148,7 @@ fn test_generate_command_help() {
     assert!(help.contains("## Responses"));
     assert!(help.contains("**200**: User found successfully"));
     assert!(help.contains("**404**: User not found"));
-    assert!(help.contains("📖 **External Documentation**"));
+    assert!(help.contains("External documentation:"));
     assert!(help.contains("https://docs.test.com/users"));
 }
 
@@ -292,13 +292,13 @@ fn test_help_formatter_command_list() {
     let spec = create_test_spec();
     let formatted = HelpFormatter::format_command_list(&spec);
 
-    assert!(formatted.contains("📋 TestAPI API Commands"));
+    assert!(formatted.contains("TestAPI API Commands"));
     assert!(formatted.contains("Version: 1.0.0"));
     assert!(formatted.contains("Operations: 2"));
     assert!(formatted.contains("Base URL: https://api.test.com"));
-    assert!(formatted.contains("📁 users"));
-    assert!(formatted.contains("🔍 GET"));
-    assert!(formatted.contains("📝 POST"));
+    assert!(formatted.contains("Group: users"));
+    assert!(formatted.contains("GET"));
+    assert!(formatted.contains("POST"));
     assert!(formatted.contains("get-user"));
     assert!(formatted.contains("create-user"));
     assert!(formatted.contains("Path: /users/{id}"));
@@ -310,9 +310,9 @@ fn test_help_formatter_method_badges() {
     let spec = create_test_spec();
     let formatted = HelpFormatter::format_command_list(&spec);
 
-    // Check that different HTTP methods get different badges
-    assert!(formatted.contains("🔍 GET"));
-    assert!(formatted.contains("📝 POST"));
+    // Check that different HTTP methods remain distinguishable
+    assert!(formatted.contains("GET"));
+    assert!(formatted.contains("POST"));
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn test_deprecated_command_indication() {
     spec.commands[0].deprecated = true;
 
     let formatted = HelpFormatter::format_command_list(&spec);
-    assert!(formatted.contains("⚠️"));
+    assert!(formatted.contains("Deprecated"));
 }
 
 #[test]
@@ -401,7 +401,7 @@ fn test_help_formatter_uses_effective_names_and_hides_hidden_commands() {
     let formatted = HelpFormatter::format_command_list(&spec);
 
     assert!(formatted.contains("Operations: 1"));
-    assert!(formatted.contains("📁 accounts"));
+    assert!(formatted.contains("Group: accounts"));
     assert!(formatted.contains("fetch"));
     assert!(!formatted.contains("create-user"));
 }
