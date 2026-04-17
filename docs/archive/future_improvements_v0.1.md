@@ -2,7 +2,7 @@
 
 Based on comprehensive testing across multiple APIs (Assembla, PokéAPI, OpenWeatherMap, Sentry), this document outlines areas for enhancement to improve user experience and functionality. Each improvement is analyzed for architectural impact and integration with Aperture's existing module structure.
 
-## 🏗️ Architectural Context
+## Architectural Context
 
 Aperture follows key design patterns that must be preserved during improvements:
 
@@ -22,7 +22,7 @@ Aperture follows key design patterns that must be preserved during improvements:
 ## 🎯 High Priority Improvements
 
 ### 1. Query Parameter Authentication Support
-**🏗️ Architectural Impact: HIGH** | **Module: `src/config/models.rs`, `src/engine/executor.rs`**
+**Architectural Impact: HIGH** | **Module: `src/config/models.rs`, `src/engine/executor.rs`**
 
 **Current Limitation:** Environment variable injection only works for header-based authentication
 ```bash
@@ -50,7 +50,7 @@ aperture api openweathermap default get-forecast --lat "44.4268"
 - Ensure cached specs regenerate to include new security handling
 
 ### 2. Parameter Syntax Standardization
-**🏗️ Architectural Impact: MEDIUM** | **Module: `src/engine/generator.rs`**
+**Architectural Impact: MEDIUM** | **Module: `src/engine/generator.rs`**
 
 **Current State:** Inconsistent parameter styles across different APIs
 ```bash
@@ -86,7 +86,7 @@ aperture api sentry default get-project-issues --org "ouro" --project "core" --s
 - Update cached command generation to include both parameter styles
 
 ### 3. Enhanced Error Messages
-**🏗️ Architectural Impact: LOW** | **Module: `src/error.rs`**
+**Architectural Impact: LOW** | **Module: `src/error.rs`**
 
 **Current State:** Generic error messages with limited actionable guidance
 ```
@@ -121,10 +121,10 @@ Need help? Run: aperture api openweathermap --help
 - Configuration issues - Guide to `aperture config` commands
 - Network connectivity problems - Suggest `--dry-run` for debugging
 
-## 🚀 Medium Priority Enhancements
+## Medium Priority Enhancements
 
 ### 4. Configuration Management UX
-**🏗️ Architectural Impact: MEDIUM** | **Module: `src/config/manager.rs`, `src/config/url_resolver.rs`**
+**Architectural Impact: MEDIUM** | **Module: `src/config/manager.rs`, `src/config/url_resolver.rs`**
 
 **Current Limitations:**
 - Only supports local file paths
@@ -173,7 +173,7 @@ aperture config add myapi --interactive
 ```bash
 # Enhanced feedback during add
 aperture config add myapi spec.yaml
-✅ Spec validated successfully
+Spec validated successfully
 📊 Discovered 15 operations across 3 categories:
    • users (5 operations)
    • orders (7 operations) 
@@ -187,7 +187,7 @@ aperture config add myapi spec.yaml
 - Display security requirements from `x-aperture-secret` extensions
 
 ### 5. Output Formatting Options
-**🏗️ Architectural Impact: MEDIUM** | **Module: `src/engine/executor.rs`, `src/agent.rs`**
+**Architectural Impact: MEDIUM** | **Module: `src/engine/executor.rs`, `src/agent.rs`**
 
 **Current State:** JSON-only output
 
@@ -227,9 +227,9 @@ aperture api pokeapi pokemon api_v2_pokemon_retrieve pikachu --quiet
 aperture api assembla tickets get-ticket-by-number "tech-demonstrator" "3501" --verbose
 🔗 Request: GET https://api.assembla.com/v1/spaces/tech-demonstrator/tickets/3501
 📤 Headers: x-api-key, x-api-secret, user-agent
-⏱️  Response time: 234ms
+Response time: 234ms
 📥 Response size: 2.1KB
-✅ Status: 200 OK
+Status: 200 OK
 ```
 
 **Implementation Strategy:**
@@ -242,7 +242,7 @@ aperture api assembla tickets get-ticket-by-number "tech-demonstrator" "3501" --
 ## 🌟 Future Feature Requests
 
 ### 6. Response Filtering & Transformation
-**🏗️ Architectural Impact: HIGH** | **Module: `src/engine/executor.rs`, `src/filters/` (new)**
+**Architectural Impact: HIGH** | **Module: `src/engine/executor.rs`, `src/filters/` (new)**
 
 **JQ Integration:**
 ```bash
@@ -272,7 +272,7 @@ aperture api openweathermap forecast --extract "list[].main.temp_max"
 - Add filter validation and error handling through existing error system
 
 ### 7. Bulk Operations
-**🏗️ Architectural Impact: HIGH** | **Module: `src/engine/executor.rs`, `src/batch/` (new)**
+**Architectural Impact: HIGH** | **Module: `src/engine/executor.rs`, `src/batch/` (new)**
 
 **Batch Requests:**
 ```bash
@@ -302,7 +302,7 @@ aperture api myapi users get-user --batch user-ids.txt --parallel 5 --rate-limit
 - Preserve individual request error handling within batch context
 
 ### 8. Configuration Profiles
-**🏗️ Architectural Impact: MEDIUM** | **Module: `src/config/models.rs`, `src/config/manager.rs`**
+**Architectural Impact: MEDIUM** | **Module: `src/config/models.rs`, `src/config/manager.rs`**
 
 **Environment-based Profiles:**
 ```bash
@@ -339,7 +339,7 @@ aperture config profile delete staging
 - Environment variable substitution within profile context
 
 ### 9. Request/Response Caching
-**🏗️ Architectural Impact: MEDIUM** | **Module: `src/cache/` (extend existing), `src/engine/executor.rs`**
+**Architectural Impact: MEDIUM** | **Module: `src/cache/` (extend existing), `src/engine/executor.rs`**
 
 **Response Caching:**
 ```bash
@@ -364,7 +364,7 @@ aperture cache stats
 - Integration with existing file system abstraction for testability
 
 ### 10. Plugin System
-**🏗️ Architectural Impact: HIGH** | **Module: `src/plugins/` (new), `src/engine/loader.rs`**
+**Architectural Impact: HIGH** | **Module: `src/plugins/` (new), `src/engine/loader.rs`**
 
 **Custom Extensions:**
 ```bash
@@ -388,7 +388,7 @@ aperture api myapi data export --processor csv-converter
 - Plugin discovery through configuration directory scanning
 - Sandboxed execution environment with restricted file system access
 
-## 📋 Implementation Roadmap
+## Implementation Roadmap
 
 ### Phase 1: Core UX Improvements (Foundation)
 **Target Module Integration:**
@@ -418,7 +418,7 @@ aperture api myapi data export --processor csv-converter
 - [ ] **Advanced authentication flows** → Plugin-based auth extensions
 - [ ] **Testing & monitoring tools** → Plugin-based development tooling
 
-## 🏗️ Critical Architectural Decisions
+## Critical Architectural Decisions
 
 ### Design Principles Preservation
 All improvements must maintain Aperture's core architectural principles:
@@ -457,7 +457,7 @@ All improvements must maintain Aperture's core architectural principles:
 - Migration tooling for configuration format changes
 - Deprecation warnings with clear upgrade paths
 
-## 🧪 Testing Strategy
+## Testing Strategy
 
 Each improvement should include:
 
@@ -467,7 +467,7 @@ Each improvement should include:
 4. **Performance Tests:** Response time and resource usage
 5. **User Experience Tests:** Real-world usage scenarios
 
-## 📖 Documentation Updates
+## Documentation Updates
 
 Improvements should be accompanied by:
 
