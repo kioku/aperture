@@ -19,7 +19,7 @@ Aperture follows key design patterns that must be preserved during improvements:
 - **`src/error.rs`**: Centralized error handling using `thiserror`
 - **`src/agent.rs`**: Agent-friendly feature implementations
 
-## 🎯 High Priority Improvements
+## High Priority Improvements
 
 ### 1. Query Parameter Authentication Support
 **Architectural Impact: HIGH** | **Module: `src/config/models.rs`, `src/engine/executor.rs`**
@@ -90,13 +90,13 @@ aperture api sentry default get-project-issues --org "ouro" --project "core" --s
 
 **Current State:** Generic error messages with limited actionable guidance
 ```
-🚫 Configuration Error
+Configuration Error
 Request failed with status 401 Unauthorized
 ```
 
 **Proposed Improvements:**
 ```
-🚫 Authentication Error (401 Unauthorized)
+Authentication Error (401 Unauthorized)
 API key invalid or expired for OpenWeatherMap API.
 
 Troubleshooting:
@@ -174,11 +174,11 @@ aperture config add myapi --interactive
 # Enhanced feedback during add
 aperture config add myapi spec.yaml
 Spec validated successfully
-📊 Discovered 15 operations across 3 categories:
+Discovered 15 operations across 3 categories:
    • users (5 operations)
    • orders (7 operations) 
    • products (3 operations)
-🔐 Authentication: Bearer token (MYAPI_TOKEN required)
+Authentication: Bearer token (MYAPI_TOKEN required)
 ```
 
 **Implementation Strategy:**
@@ -225,10 +225,10 @@ aperture api pokeapi pokemon api_v2_pokemon_retrieve pikachu --quiet
 #### Verbose Mode
 ```bash
 aperture api assembla tickets get-ticket-by-number "tech-demonstrator" "3501" --verbose
-🔗 Request: GET https://api.assembla.com/v1/spaces/tech-demonstrator/tickets/3501
-📤 Headers: x-api-key, x-api-secret, user-agent
+Request: GET https://api.assembla.com/v1/spaces/tech-demonstrator/tickets/3501
+Headers: x-api-key, x-api-secret, user-agent
 Response time: 234ms
-📥 Response size: 2.1KB
+Response size: 2.1KB
 Status: 200 OK
 ```
 
@@ -239,7 +239,7 @@ Status: 200 OK
 - Extend `--describe-json` to include format options metadata
 - Ensure verbose mode integrates with existing request timing infrastructure
 
-## 🌟 Future Feature Requests
+## Future Feature Requests
 
 ### 6. Response Filtering & Transformation
 **Architectural Impact: HIGH** | **Module: `src/engine/executor.rs`, `src/filters/` (new)**
