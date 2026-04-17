@@ -97,6 +97,10 @@ fn commands_support_json_format() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("\u{1b}["),
+        "structured output must not include ANSI color escapes"
+    );
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
 
     assert_eq!(parsed["api"]["context"], "test-api");

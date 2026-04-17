@@ -2,11 +2,12 @@
 
 use crate::config::manager::ConfigManager;
 use crate::constants;
+use crate::discovery_style::DiscoveryStyle;
 use crate::engine::loader;
 use crate::error::Error;
 use crate::fs::OsFileSystem;
 use crate::output::Output;
-use crate::search::{format_search_results, CommandSearcher};
+use crate::search::CommandSearcher;
 
 pub fn execute_search_command(
     manager: &ConfigManager<OsFileSystem>,
@@ -34,7 +35,9 @@ pub fn execute_search_command(
 
     let searcher = CommandSearcher::new();
     let results = searcher.search(&all_specs, query, api_filter)?;
-    let formatted_results = format_search_results(&results, verbose);
+    let style = DiscoveryStyle::for_stdout();
+    let formatted_results =
+        crate::search::format_search_results_with_style(&results, verbose, style);
     for line in formatted_results {
         // ast-grep-ignore: no-println
         println!("{line}");
