@@ -6,6 +6,7 @@ pub mod cli;
 pub mod command_guidance;
 pub mod config;
 pub mod constants;
+pub mod discovery_style;
 pub mod docs;
 pub mod duration;
 pub mod engine;
