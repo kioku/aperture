@@ -132,14 +132,14 @@ All development will adhere to the following principles:
   - **Action:** Create `src/engine/loader.rs`. Implement a function to load and deserialize a `.bin` file from the cache directory based on a context name.
   - **Test:** Write a unit test that saves a mock cache file and asserts that the loader can read it back correctly.
   - **Commit:** `feat(engine): Implement cached spec loader`
-  - **Status:** ✅ **COMPLETED** - Full implementation with comprehensive error handling and unit tests
+  - **Status:** **COMPLETED** - Full implementation with comprehensive error handling and unit tests
 
 - `[x]` **Task 4.2: Implement Dynamic Command Generator**
 
   - **Action:** Create `src/engine/generator.rs`. Implement a function that takes the cached spec data and recursively builds a `clap::Command` tree according to the rules in SDD §5.1.
   - **Test:** Write a unit test with a sample cached spec. Generate the `clap::Command` and then inspect the generated structure to assert that subcommands and flags are created as expected.
   - **Commit:** `feat(engine): Implement dynamic CLI generator from cached spec`
-  - **Status:** ✅ **COMPLETED** - Dynamic CLI generation with tag-based organization and parameter mapping
+  - **Status:** **COMPLETED** - Dynamic CLI generation with tag-based organization and parameter mapping
 
 - `[x]` **Task 4.3: Implement the HTTP Request Executor**
 
@@ -156,13 +156,13 @@ All development will adhere to the following principles:
     - Assert that the mock server received a request with the correct method, path, query params, headers (including auth), and body.
     - Assert that the executor correctly handles both successful responses and API error responses (e.g., 404, 500).
   - **Commit:** `feat(engine): Implement HTTP request executor and response validator`
-  - **Status:** ✅ **COMPLETED** - Full HTTP executor with authentication, custom headers, and comprehensive error handling
+  - **Status:** **COMPLETED** - Full HTTP executor with authentication, custom headers, and comprehensive error handling
 
 - `[x]` **Task 4.4: Integrate the Engine into `main.rs`**
   - **Action:** Modify `main.rs`. After parsing the context name, it should invoke the loader, generator, and executor in sequence.
   - **Test:** Write full end-to-end tests with `assert_cmd` and a running `wiremock` server.
   - **Commit:** `feat(app): Integrate execution engine into main application flow`
-  - **Status:** ✅ **COMPLETED** - Full pipeline integration with end-to-end testing
+  - **Status:** **COMPLETED** - Full pipeline integration with end-to-end testing
 
 ---
 
@@ -177,20 +177,20 @@ All development will adhere to the following principles:
   - **Action:** Add the global flag. If present, load the cached spec and serialize it into the specified JSON format. Print to stdout and exit.
   - **Test:** Use `assert_cmd` to run `aperture <context> --describe-json`. Capture the stdout and validate it against a JSON schema or a snapshot file.
   - **Commit:** `feat(agent): Implement --describe-json capability manifest`
-  - **Status:** ✅ **COMPLETED** - Full capability manifest generation with security information extraction
+  - **Status:** **COMPLETED** - Full capability manifest generation with security information extraction
 
 - `[x]` **Task 5.2: Implement `--json-errors`**
 
   - **Action:** Add the global flag. Modify the top-level error handling in `main.rs` to serialize the `Error` enum to JSON and print to stderr if the flag is active.
   - **Test:** Use `assert_cmd` to trigger various known errors (e.g., pointing to a non-existent spec) with the flag enabled. Assert that the stderr output is the expected JSON.
   - **Commit:** `feat(agent): Implement --json-errors for structured error reporting`
-  - **Status:** ✅ **COMPLETED** - Structured JSON error output for programmatic error handling
+  - **Status:** **COMPLETED** - Structured JSON error output for programmatic error handling
 
 - `[x]` **Task 5.3: Implement `--dry-run` and Idempotency**
   - **Action:** Modify the `engine::executor`. Before executing the request, check for the `--dry-run` flag. Also, check for the auto-idempotency configuration and the `--idempotency-key` flag to add the correct header.
   - **Test:** For `--dry-run`, use `assert_cmd` to check the JSON output. For idempotency, use `wiremock-rs` to assert the header is present on the request.
   - **Commit:** `feat(agent): Implement --dry-run and idempotency controls`
-  - **Status:** ✅ **COMPLETED** - Request introspection and idempotency support for safe automation
+  - **Status:** **COMPLETED** - Request introspection and idempotency support for safe automation
 
 ---
 
@@ -204,13 +204,13 @@ All development will adhere to the following principles:
   - **Action:** Create a `README.md` that explains the project's purpose, installation, and basic usage.
   - **Action:** Create user documentation (e.g., in a `/docs` directory) that details all commands, the `config.toml` file, and the supported OpenAPI features.
   - **Commit:** `docs: Write initial user and project documentation`
-  - **Status:** ✅ **COMPLETED** - Comprehensive README, architecture docs, ADRs, and SECURITY.md
+  - **Status:** **COMPLETED** - Comprehensive README, architecture docs, ADRs, and SECURITY.md
 
 - `[x]` **Task 6.2: Prepare for Release**
   - **Action:** Integrate `cargo-release` to automate version bumping, tagging, and publishing.
   - **Action:** Enhance the `ci.yml` workflow to build release binaries for multiple targets and attach them to a GitHub Release when a tag is pushed.
   - **Commit:** `chore(release): Configure cargo-release and binary release workflow`
-  - **Status:** ✅ **COMPLETED** - Release automation with GitHub Actions and crates.io publishing
+  - **Status:** **COMPLETED** - Release automation with GitHub Actions and crates.io publishing
 
 ---
 
@@ -239,15 +239,15 @@ Beyond the original plan, the following major features have been successfully im
 
 ---
 
-## **Project Status: Experimental** 🧪
+## **Project Status: Experimental**
 
 **All planned phases completed successfully.** Aperture CLI has been released as an experimental tool and continues to evolve with:
 
-- ✅ **Full Feature Set**: Dynamic CLI generation, authentication, base URL management, agent features
-- ✅ **Comprehensive Testing**: Unit and integration tests, error handling, documentation
-- ✅ **Agent-First Design**: JSON output modes, capability manifests, structured errors
-- ✅ **Security Model**: Environment variable-based authentication with strict separation
-- ✅ **Release Pipeline**: Automated publishing, quality gates, comprehensive changelog
+- **Full Feature Set**: Dynamic CLI generation, authentication, base URL management, agent features
+- **Comprehensive Testing**: Unit and integration tests, error handling, documentation
+- **Agent-First Design**: JSON output modes, capability manifests, structured errors
+- **Security Model**: Environment variable-based authentication with strict separation
+- **Release Pipeline**: Automated publishing, quality gates, comprehensive changelog
 
 **Note**: This is experimental software. While core features are implemented and tested, APIs and behavior may change as we gather feedback and iterate on the design.
 

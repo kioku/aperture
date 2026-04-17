@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.9] - 2026-03-04
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Batch update cargo dependencies (#112)
 - Trigger binary-size workflow on push to feature branch
@@ -15,7 +15,7 @@ All notable changes to this project will be documented in this file.
 - Align artifact action versions with rest of project
 - Bump version to 0.1.9
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Ensure dependent batch captures raw unfiltered response
 - Validate duplicate operation IDs in batch dependency graph
@@ -60,7 +60,7 @@ All notable changes to this project will be documented in this file.
 - Treat "skip" as record-offset in advance_offset_strategy
 - Warn when --format is ignored with --auto-paginate
 
-### 📚 Documentation
+### Documentation
 
 - Update changelog for v0.1.8 and automate via release CI
 - Add documentation for v0.1.8 features
@@ -74,7 +74,7 @@ All notable changes to this project will be documented in this file.
 - Update binary size claim to < 6 MB (default features, all platforms)
 - Add --auto-paginate section to agent integration guide
 
-### 🚀 Features
+### Features
 
 - Extend BatchOperation with capture, capture_append, and depends_on fields
 - Implement dependency graph validation and topological sort
@@ -88,7 +88,7 @@ All notable changes to this project will be documented in this file.
 - Add binary-sizes.json and automate population from CI
 - Implement --auto-paginate flag with cursor, offset, and link-header strategies
 
-### 🧪 Testing
+### Testing
 
 - Add integration tests for dependent batch workflows
 - Add coverage for --body-file flag
@@ -105,7 +105,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.8] - 2026-02-15
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Remove duplicate crates.io publish step
 - Move entire release process to GitHub Actions
@@ -122,7 +122,7 @@ All notable changes to this project will be documented in this file.
 - Add nix build and flake check steps to CI workflow
 - Add nix result symlink to .gitignore
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Prevent panic on Unicode body truncation in logging
 - Standardize redaction markers to [REDACTED]
@@ -152,7 +152,7 @@ All notable changes to this project will be documented in this file.
 - Honor mapped command names in help and listings
 - Resolve mapped command names in operation translation
 
-### 📚 Documentation
+### Documentation
 
 - Add homebrew and cargo-binstall installation options
 - Add comprehensive debugging and logging guide
@@ -161,7 +161,7 @@ All notable changes to this project will be documented in this file.
 - Add Nix installation instructions to README
 - Add ADR 009 for custom command mapping approach
 
-### 🚀 Features
+### Features
 
 - Initialize tracing-subscriber for debug logging
 - Add -v flag for debug logging control
@@ -184,12 +184,12 @@ All notable changes to this project will be documented in this file.
 - Add CLI commands for managing command mappings
 - Add --remove-alias flag to config set-mapping command
 
-### 🚜 Refactor
+### Refactor
 
 - Decouple execution core from CLI layer (clap, stdout) (#77)
 - Resolve PR review findings for executor/CLI decoupling
 
-### 🧪 Testing
+### Testing
 
 - Add integration tests for logging functionality
 - **cache:** Add security tests for auth header scrubbing
@@ -200,7 +200,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.7] - 2026-01-26
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Add ast-grep configuration with custom Rust linting rules
 - Suppress no-println warnings with ast-grep-ignore comments
@@ -212,11 +212,11 @@ All notable changes to this project will be documented in this file.
 - Upgrade reqwest from 0.12 to 0.13
 - Improve pre-commit hooks for better local testing
 
-### 🎨 Styling
+### Styling
 
 - Fix ast-grep linting issues
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Use sibling relationship for #[cfg(test)] module exclusion
 - Resolve clippy warnings in test files and align pre-commit with CI
@@ -234,14 +234,14 @@ All notable changes to this project will be documented in this file.
 - **config:** Add debug assertions for type mismatches in set_setting
 - Commit changelog before cargo release
 
-### 📚 Documentation
+### Documentation
 
 - Restructure README and split into focused documentation (#61)
 - Update binary size to 4.0MB (aws-lc-rs crypto backend)
 - **config:** Add checklist for adding new settings
 - Add documentation for v0.1.7 features
 
-### 🚀 Features
+### Features
 
 - **agent:** Expose response schemas in describe manifest (#60)
 - Add quiet mode for agent-friendly output suppression
@@ -266,7 +266,7 @@ All notable changes to this project will be documented in this file.
 - Integrate retry logic into batch execution
 - Enhance JSON error output with detailed retry info
 
-### 🚜 Refactor
+### Refactor
 
 - Replace .unwrap() with .expect() in production code
 - Eliminate all nested if statements (138 violations)
@@ -279,7 +279,7 @@ All notable changes to this project will be documented in this file.
 - Improve retry logic code quality
 - Remove unused retry_status_codes config field
 
-### 🧪 Testing
+### Testing
 
 - Add batch operations quiet mode integration test
 - Add assertion verifying command count matches available endpoints
@@ -292,12 +292,12 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.6] - 2025-11-12
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Clean up unused imports and fix warnings
 - Enhance release script with changelog automation
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Resolve panic conditions and improve error handling
 - Resolve panic conditions and improve error handling for production stability
@@ -313,12 +313,12 @@ All notable changes to this project will be documented in this file.
 - Make boolean path parameters consistently optional
 - Ensure boolean parameters work correctly in positional args mode
 
-### 📚 Documentation
+### Documentation
 
 - Update CLAUDE.md to reflect working jq feature with v2.x
 - Update README to reflect working jq feature
 
-### 🚀 Features
+### Features
 
 - Add search command to CLI interface
 - Add enhanced help with examples
@@ -328,7 +328,7 @@ All notable changes to this project will be documented in this file.
 - Add original_tags field for full tag consistency in JSON manifests
 - Add boolean header parameter support
 
-### 🚜 Refactor
+### Refactor
 
 - Break down long generate_command_help function
 - Move inline imports to module/function level for better performance and readability
@@ -337,7 +337,7 @@ All notable changes to this project will be documented in this file.
 - Complete inline import elimination - move all remaining imports to proper scope
 - Complete standardization of import patterns
 
-### 🧪 Testing
+### Testing
 
 - Fix list-commands assertion to expect 'General' instead of 'default'
 - Add integration tests for --show-examples execution path
@@ -346,7 +346,7 @@ All notable changes to this project will be documented in this file.
 
 ### Release Highlights
 
-- **⚠️ Breaking**: CLI parameter flags now use kebab-case (e.g., `--user-id` instead of `--userId`)
+- **Breaking**: CLI parameter flags now use kebab-case (e.g., `--user-id` instead of `--userId`)
 - **Performance**: Binary size reduced by 67% (11MB → 3.6MB), test suite 75% faster (~30s → ~8s)
 - **New Feature**: Optional OpenAPI 3.1 support via `--features openapi31`
 - **Architecture**: Error system consolidated from 47+ types to 8 categories
@@ -356,17 +356,17 @@ All notable changes to this project will be documented in this file.
 
 - Add cargo-nextest configuration for optimized testing
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Optimize GitHub Actions workflow for faster testing
 
-### ⚡ Performance
+### Performance
 
 - Implement binary caching in integration_tests.rs
 - Migrate remaining tests to cached binary
 - Implement MockServer pooling infrastructure
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Redact authentication headers in dry-run output
 - Convert parameter flags to kebab-case for CLI consistency
@@ -385,21 +385,21 @@ All notable changes to this project will be documented in this file.
 - Remove broken pooling infrastructure from test optimizations
 - Correct nextest thread configuration syntax
 
-### 📚 Documentation
+### Documentation
 
 - Update table of contents for JQ Support section
 - Add comprehensive code-level optimization analysis and plan
 - Add comprehensive documentation to error module
 - Add comprehensive ADR for test suite optimization
 
-### 🚀 Features
+### Features
 
 - Add OpenAPI 3.1 support with oas3 fallback parser
 - Make OpenAPI 3.1 support optional via openapi31 feature flag
 - Complete error consolidation with helper methods and direct usage migration
 - Complete error type consolidation for binary size reduction
 
-### 🚜 Refactor
+### Refactor
 
 - Optimize string allocations in error module using Cow
 - Centralize string literals into constants module
@@ -414,7 +414,7 @@ All notable changes to this project will be documented in this file.
 - Replace error macros with builder methods
 - Split HttpRequest into Network and HttpRequest error kinds
 
-### 🧪 Testing
+### Testing
 
 - Add comprehensive integration tests for kebab-case parameters
 - Update existing tests for kebab-case parameter flags
@@ -423,12 +423,12 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.4] - 2025-08-01
 
-### 🎨 Styling
+### Styling
 
 - Remove emojis from interactive configuration output
 - Remove all emojis from source code
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Include auth-related warnings when building skip_endpoints list
 - Add base64 encoding for basic auth credentials
@@ -448,7 +448,7 @@ All notable changes to this project will be documented in this file.
 - Preserve empty string defaults for server variables
 - Add URL encoding for server variable values
 
-### 📚 Documentation
+### Documentation
 
 - Update documentation for custom HTTP authentication support
 - Update documentation for partial API support with unsupported auth
@@ -459,7 +459,7 @@ All notable changes to this project will be documented in this file.
 - Add table of contents to README
 - Update documentation and reorganize historical files
 
-### 🚀 Features
+### Features
 
 - Add support for custom HTTP authentication schemes
 - Update validator to handle unsupported auth schemes in non-strict mode
@@ -487,7 +487,7 @@ All notable changes to this project will be documented in this file.
 - Integrate server variable resolution into request execution
 - Add template variable name validation
 
-### 🚜 Refactor
+### Refactor
 
 - Introduce AuthScheme enum and improve code organization
 - Improve code organization
@@ -499,7 +499,7 @@ All notable changes to this project will be documented in this file.
 - Flatten nested conditionals in contains_template_variables
 - Improve code readability based on PR review feedback
 
-### 🧪 Testing
+### Testing
 
 - Add comprehensive tests for custom HTTP authentication schemes
 - Add header injection validation tests
@@ -513,11 +513,11 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.3] - 2025-07-22
 
-### ⚡ Performance
+### Performance
 
 - Optimize content type validation to single iteration
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Prevent stack overflow from circular parameter references
 - Resolve parameter references in describe-json output
@@ -532,12 +532,12 @@ All notable changes to this project will be documented in this file.
 - Preserve strict mode preference during reinit
 - Standardize warning display across commands
 
-### 📚 Documentation
+### Documentation
 
 - Restore CHANGELOG.md release history
 - Update README with parameter reference support
 
-### 🚀 Features
+### Features
 
 - Add support for parameter references in OpenAPI specifications
 - Enable JQ filtering for --describe-json output
@@ -548,14 +548,14 @@ All notable changes to this project will be documented in this file.
 - Add --strict flag for partial spec acceptance with warnings
 - Add warnings for endpoints with mixed content types
 
-### 🚜 Refactor
+### Refactor
 
 - Extract parameter reference resolution to shared module
 - Reduce MAX_REFERENCE_DEPTH from 50 to 10
 - Improve content type handling and update docs
 - Flatten deeply nested code for improved readability
 
-### 🧪 Testing
+### Testing
 
 - Add comprehensive tests for circular parameter references
 - Add coverage for parameter names with special characters
@@ -563,29 +563,29 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.2] - 2025-07-12
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Rename phase3_integration_tests.rs to command_syntax_integration_tests.rs
 - Prepare release v0.1.2
 
-### ⚡ Performance
+### Performance
 
 - Optimize cache version checking with global metadata file
 - Optimize timeout test execution with configurable timeouts
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Implement critical Phase 1 stability fixes
 - Replace jq-rs with jaq for pure Rust implementation
 - Resolve issues and improve JQ implementation
 - Address critical Phase 3 PR review issues
 
-### 📚 Documentation
+### Documentation
 
 - Add core enhancement roadmap for v0.1.x series
 - Add comprehensive Phase 3 features documentation
 
-### 🚀 Features
+### Features
 
 - Implement context-aware error messages for HTTP failures
 - Implement command discovery with list-commands subcommand
@@ -601,11 +601,11 @@ All notable changes to this project will be documented in this file.
 - Implement experimental flag-based parameter syntax
 - Stabilize flag-based parameter syntax as default
 
-### 🚜 Refactor
+### Refactor
 
 - Remove redundant HttpError variant
 
-### 🧪 Testing
+### Testing
 
 - Add ignored tests for remote spec support
 - Add ignored tests for JQ filtering feature
@@ -613,19 +613,19 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.1] - 2025-07-04
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Prepare for v0.1.1 release
 
-### 🎨 Styling
+### Styling
 
 - Remove emojis from error messages
 
-### 📚 Documentation
+### Documentation
 
 - Add comprehensive code review and future improvements documentation
 
-### 🚀 Features
+### Features
 
 - Add specific error variants to replace generic Config errors
 - Enrich cached models with OpenAPI metadata for better agent support
@@ -634,7 +634,7 @@ All notable changes to this project will be documented in this file.
 - Add description and bearer_format fields to CachedSecurityScheme
 - Add comprehensive x-aperture-secret validation
 
-### 🚜 Refactor
+### Refactor
 
 - Extract validation and transformation logic into spec module
 - Use new spec module components in ConfigManager
@@ -643,23 +643,23 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.0] - 2025-06-30
 
-### ⚙️ Miscellaneous Tasks
+### Miscellaneous Tasks
 
 - Init and add project docs
 - Update dependencies to latest compatible versions
 
-### 🎨 Styling
+### Styling
 
 - Apply cargo fmt formatting
 
-### 🐛 Bug Fixes
+### Bug Fixes
 
 - Add APERTURE_CONFIG_DIR support in main.rs
 - Implement mutex-based test isolation and resolve clippy warnings
 - Correct base URL resolution priority hierarchy
 - Resolve parallel test execution issues with environment variables
 
-### 📚 Documentation
+### Documentation
 
 - Update plan progress
 - Update plan.md to reflect Phase 2 completion
@@ -676,7 +676,7 @@ All notable changes to this project will be documented in this file.
 - Update ADR-005 to reflect complete x-aperture-secret implementation
 - Update documentation to reflect production-ready status
 
-### 🚀 Features
+### Features
 
 - Initialise project and configure development workflow
 - Define core application error enum and tests
@@ -719,12 +719,12 @@ All notable changes to this project will be documented in this file.
 - Prepare repository for open source release
 - Rename package to aperture-cli for crates.io uniqueness
 
-### 🚜 Refactor
+### Refactor
 
 - Move engine tests to tests directory
 - Pass base url as parameter to fix test isolation
 
-### 🧪 Testing
+### Testing
 
 - Add comprehensive integration tests with wiremock
 - Add comprehensive integration tests for agent features
