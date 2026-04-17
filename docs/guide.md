@@ -158,11 +158,11 @@ aperture api my-api orders search --status pending --created-after 2024-01-01
 Execution-oriented flags are scoped to execution commands (`api`, `run`) instead of being global.
 
 ```bash
-# ✅ Scoped execution flags on execution commands
+# Supported on execution commands
 aperture api my-api --dry-run users get-user-by-id --id 123
 aperture run --dry-run getUserById --id 123
 
-# ❌ Rejected on non-execution commands
+# Not allowed on non-execution commands
 aperture docs --dry-run
 ```
 
