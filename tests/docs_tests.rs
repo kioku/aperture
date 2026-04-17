@@ -153,6 +153,22 @@ fn test_generate_command_help() {
 }
 
 #[test]
+fn test_generate_command_help_includes_deprecation_notice() {
+    let mut spec = create_test_spec();
+    spec.commands[0].deprecated = true;
+
+    let mut specs = BTreeMap::new();
+    specs.insert("testapi".to_string(), spec);
+
+    let doc_gen = DocumentationGenerator::new(specs);
+    let help = doc_gen
+        .generate_command_help("testapi", "users", "get-user-by-id")
+        .unwrap();
+
+    assert!(help.contains("Deprecated: this operation is deprecated"));
+}
+
+#[test]
 fn test_generate_command_help_with_request_body() {
     let mut specs = BTreeMap::new();
     specs.insert("testapi".to_string(), create_test_spec());
