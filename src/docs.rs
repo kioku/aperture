@@ -2,6 +2,7 @@
 
 use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec, CommandExample};
 use crate::constants;
+use crate::discovery_style::DiscoveryStyle;
 use crate::error::Error;
 use crate::utils::to_kebab_case;
 use std::collections::BTreeMap;
@@ -30,6 +31,20 @@ impl DocumentationGenerator {
         tag: &str,
         operation_id: &str,
     ) -> Result<String, Error> {
+        self.generate_command_help_styled(api_name, tag, operation_id, DiscoveryStyle::new(false))
+    }
+
+    /// Generate command help documentation with optional semantic styling.
+    ///
+    /// # Errors
+    /// Returns an error if the API or operation is not found
+    pub fn generate_command_help_styled(
+        &self,
+        api_name: &str,
+        tag: &str,
+        operation_id: &str,
+        style: DiscoveryStyle,
+    ) -> Result<String, Error> {
         let spec = self
             .specs
             .get(api_name)
@@ -48,14 +63,14 @@ impl DocumentationGenerator {
         let mut help = String::new();
 
         // Build help sections
-        Self::add_command_header(&mut help, command);
-        Self::add_usage_section(&mut help, api_name, command);
-        Self::add_parameters_section(&mut help, command);
-        Self::add_request_body_section(&mut help, command);
-        Self::add_examples_section(&mut help, api_name, command);
-        Self::add_responses_section(&mut help, command);
-        Self::add_authentication_section(&mut help, command);
-        Self::add_metadata_section(&mut help, command);
+        Self::add_command_header(&mut help, command, style);
+        Self::add_usage_section(&mut help, api_name, command, style);
+        Self::add_parameters_section(&mut help, command, style);
+        Self::add_request_body_section(&mut help, command, style);
+        Self::add_examples_section(&mut help, api_name, command, style);
+        Self::add_responses_section(&mut help, command, style);
+        Self::add_authentication_section(&mut help, command, style);
+        Self::add_metadata_section(&mut help, command, style);
 
         Ok(help)
     }
@@ -140,11 +155,11 @@ impl DocumentationGenerator {
     }
 
     /// Add command header with title and description
-    fn add_command_header(help: &mut String, command: &CachedCommand) {
+    fn add_command_header(help: &mut String, command: &CachedCommand, style: DiscoveryStyle) {
         write!(
             help,
             "# {} {}\n\n",
-            command.method.to_uppercase(),
+            style.method(&command.method),
             command.path
         )
         .ok();
@@ -159,8 +174,13 @@ impl DocumentationGenerator {
     }
 
     /// Add usage section with command syntax
-    fn add_usage_section(help: &mut String, api_name: &str, command: &CachedCommand) {
-        help.push_str("## Usage\n\n");
+    fn add_usage_section(
+        help: &mut String,
+        api_name: &str,
+        command: &CachedCommand,
+        style: DiscoveryStyle,
+    ) {
+        writeln!(help, "## {}\n", style.heading("Usage")).ok();
         write!(
             help,
             "```bash\n{}\n```\n\n",
@@ -194,17 +214,17 @@ impl DocumentationGenerator {
     }
 
     /// Add parameters section if parameters exist
-    fn add_parameters_section(help: &mut String, command: &CachedCommand) {
+    fn add_parameters_section(help: &mut String, command: &CachedCommand, style: DiscoveryStyle) {
         if command.parameters.is_empty() {
             return;
         }
 
-        help.push_str("## Parameters\n\n");
+        writeln!(help, "## {}\n", style.heading("Parameters")).ok();
         for param in &command.parameters {
             let required_badge = if param.required {
-                " **(required)**"
+                format!(" {}", style.required("**(required)**"))
             } else {
-                ""
+                String::new()
             };
             let param_type = param.schema_type.as_deref().unwrap_or("string");
             writeln!(
@@ -221,12 +241,12 @@ impl DocumentationGenerator {
     }
 
     /// Add request body section if present
-    fn add_request_body_section(help: &mut String, command: &CachedCommand) {
+    fn add_request_body_section(help: &mut String, command: &CachedCommand, style: DiscoveryStyle) {
         let Some(ref body) = command.request_body else {
             return;
         };
 
-        help.push_str("## Request Body\n\n");
+        writeln!(help, "## {}\n", style.heading("Request Body")).ok();
         if let Some(ref description) = body.description {
             write!(help, "{description}\n\n").ok();
         }
@@ -234,14 +254,19 @@ impl DocumentationGenerator {
     }
 
     /// Add examples section with command examples
-    fn add_examples_section(help: &mut String, api_name: &str, command: &CachedCommand) {
+    fn add_examples_section(
+        help: &mut String,
+        api_name: &str,
+        command: &CachedCommand,
+        style: DiscoveryStyle,
+    ) {
         let examples = Self::canonical_examples(api_name, command);
 
-        help.push_str(if examples.len() > 1 {
-            "## Examples\n\n"
+        if examples.len() > 1 {
+            writeln!(help, "## {}\n", style.heading("Examples")).ok();
         } else {
-            "## Example\n\n"
-        });
+            writeln!(help, "## {}\n", style.heading("Example")).ok();
+        }
 
         for (i, example) in examples.iter().enumerate() {
             if examples.len() > 1 {
@@ -415,9 +440,9 @@ impl DocumentationGenerator {
     }
 
     /// Add responses section if responses exist
-    fn add_responses_section(help: &mut String, command: &CachedCommand) {
+    fn add_responses_section(help: &mut String, command: &CachedCommand, style: DiscoveryStyle) {
         if !command.responses.is_empty() {
-            help.push_str("## Responses\n\n");
+            writeln!(help, "## {}\n", style.heading("Responses")).ok();
             for response in &command.responses {
                 writeln!(
                     help,
@@ -432,9 +457,13 @@ impl DocumentationGenerator {
     }
 
     /// Add authentication section if security requirements exist
-    fn add_authentication_section(help: &mut String, command: &CachedCommand) {
+    fn add_authentication_section(
+        help: &mut String,
+        command: &CachedCommand,
+        style: DiscoveryStyle,
+    ) {
         if !command.security_requirements.is_empty() {
-            help.push_str("## Authentication\n\n");
+            writeln!(help, "## {}\n", style.heading("Authentication")).ok();
             help.push_str("This operation requires authentication. Available schemes:\n\n");
             for scheme_name in &command.security_requirements {
                 writeln!(help, "- {scheme_name}").ok();
@@ -444,9 +473,14 @@ impl DocumentationGenerator {
     }
 
     /// Add metadata section with deprecation and external docs
-    fn add_metadata_section(help: &mut String, command: &CachedCommand) {
+    fn add_metadata_section(help: &mut String, command: &CachedCommand, style: DiscoveryStyle) {
         if command.deprecated {
-            help.push_str("Deprecated: this operation is deprecated\n\n");
+            writeln!(
+                help,
+                "{}\n",
+                style.warning("Deprecated: this operation is deprecated")
+            )
+            .ok();
         }
 
         if let Some(ref docs_url) = command.external_docs_url {
@@ -459,6 +493,18 @@ impl DocumentationGenerator {
     /// # Errors
     /// Returns an error if the API is not found
     pub fn generate_api_overview(&self, api_name: &str) -> Result<String, Error> {
+        self.generate_api_overview_styled(api_name, DiscoveryStyle::new(false))
+    }
+
+    /// Generate API overview with statistics and optional semantic styling.
+    ///
+    /// # Errors
+    /// Returns an error if the API is not found
+    pub fn generate_api_overview_styled(
+        &self,
+        api_name: &str,
+        style: DiscoveryStyle,
+    ) -> Result<String, Error> {
         let spec = self
             .specs
             .get(api_name)
@@ -471,10 +517,10 @@ impl DocumentationGenerator {
             .collect();
 
         let mut overview = String::new();
-        Self::write_api_overview_header(&mut overview, spec);
-        Self::write_api_overview_statistics(&mut overview, &visible_commands);
-        Self::write_api_overview_quick_start(&mut overview, api_name);
-        Self::write_api_overview_samples(&mut overview, api_name, &visible_commands);
+        Self::write_api_overview_header(&mut overview, spec, style);
+        Self::write_api_overview_statistics(&mut overview, &visible_commands, style);
+        Self::write_api_overview_quick_start(&mut overview, api_name, style);
+        Self::write_api_overview_samples(&mut overview, api_name, &visible_commands, style);
 
         Ok(overview)
     }
@@ -484,6 +530,18 @@ impl DocumentationGenerator {
     /// # Errors
     /// Returns an error if the API is not found
     pub fn generate_api_reference_index(&self, api_name: &str) -> Result<String, Error> {
+        self.generate_api_reference_index_styled(api_name, DiscoveryStyle::new(false))
+    }
+
+    /// Generate API reference index with optional semantic styling.
+    ///
+    /// # Errors
+    /// Returns an error if the API is not found
+    pub fn generate_api_reference_index_styled(
+        &self,
+        api_name: &str,
+        style: DiscoveryStyle,
+    ) -> Result<String, Error> {
         let spec = self
             .specs
             .get(api_name)
@@ -503,25 +561,36 @@ impl DocumentationGenerator {
         }
 
         let mut reference = String::new();
-        Self::write_api_reference_header(&mut reference, spec);
-        Self::write_api_reference_navigation(&mut reference, api_name);
-        Self::write_api_reference_categories(&mut reference, &category_counts);
-        Self::write_api_reference_examples(&mut reference, api_name, &visible_commands);
+        Self::write_api_reference_header(&mut reference, spec, style);
+        Self::write_api_reference_navigation(&mut reference, api_name, style);
+        Self::write_api_reference_categories(&mut reference, &category_counts, style);
+        Self::write_api_reference_examples(&mut reference, api_name, &visible_commands, style);
 
         Ok(reference)
     }
 
-    fn write_api_overview_header(overview: &mut String, spec: &CachedSpec) {
-        write!(overview, "# {} API\n\n", spec.name).ok();
-        writeln!(overview, "**Version**: {}", spec.version).ok();
+    fn write_api_overview_header(overview: &mut String, spec: &CachedSpec, style: DiscoveryStyle) {
+        writeln!(overview, "# {} API", style.api_title(&spec.name)).ok();
+        overview.push('\n');
+        writeln!(
+            overview,
+            "{}: {}",
+            style.metadata("**Version**"),
+            spec.version
+        )
+        .ok();
 
         if let Some(base_url) = spec.base_url.as_deref() {
-            writeln!(overview, "**Base URL**: {base_url}").ok();
+            writeln!(overview, "{}: {base_url}", style.metadata("**Base URL**")).ok();
         }
         overview.push('\n');
     }
 
-    fn write_api_overview_statistics(overview: &mut String, visible_commands: &[&CachedCommand]) {
+    fn write_api_overview_statistics(
+        overview: &mut String,
+        visible_commands: &[&CachedCommand],
+        style: DiscoveryStyle,
+    ) {
         let mut method_counts = BTreeMap::new();
         let mut tag_counts = BTreeMap::new();
 
@@ -532,26 +601,31 @@ impl DocumentationGenerator {
                 .or_insert(0) += 1;
         }
 
-        overview.push_str("## Statistics\n\n");
+        writeln!(overview, "## {}\n", style.heading("Statistics")).ok();
         writeln!(
             overview,
-            "- **Total Operations**: {}",
+            "- {}: {}",
+            style.muted_count("**Total Operations**"),
             visible_commands.len()
         )
         .ok();
-        overview.push_str("- **Methods**:\n");
+        writeln!(overview, "- {}:", style.metadata("**Methods**")).ok();
         for (method, count) in method_counts {
-            writeln!(overview, "  - {method}: {count}").ok();
+            writeln!(overview, "  - {}: {count}", style.method(&method)).ok();
         }
-        overview.push_str("- **Categories**:\n");
+        writeln!(overview, "- {}:", style.metadata("**Categories**")).ok();
         for (tag, count) in tag_counts {
             writeln!(overview, "  - {tag}: {count}").ok();
         }
         overview.push('\n');
     }
 
-    fn write_api_overview_quick_start(overview: &mut String, api_name: &str) {
-        overview.push_str("## Quick Start\n\n");
+    fn write_api_overview_quick_start(
+        overview: &mut String,
+        api_name: &str,
+        style: DiscoveryStyle,
+    ) {
+        writeln!(overview, "## {}\n", style.heading("Quick Start")).ok();
         write!(
             overview,
             "List all available commands:\n```bash\naperture commands {api_name}\n```\n\n"
@@ -569,12 +643,13 @@ impl DocumentationGenerator {
         overview: &mut String,
         api_name: &str,
         visible_commands: &[&CachedCommand],
+        style: DiscoveryStyle,
     ) {
         if visible_commands.is_empty() {
             return;
         }
 
-        overview.push_str("## Sample Operations\n\n");
+        writeln!(overview, "## {}\n", style.heading("Sample Operations")).ok();
         for (i, command) in visible_commands.iter().take(3).enumerate() {
             let tag = Self::effective_group(command);
             let operation = Self::effective_operation(command);
@@ -583,18 +658,29 @@ impl DocumentationGenerator {
                 "{}. **{}** ({})\n   ```bash\n   aperture api {api_name} {tag} {operation}\n   ```\n   {}\n\n",
                 i + 1,
                 command.summary.as_deref().unwrap_or(&operation),
-                command.method.to_uppercase(),
+                style.method(&command.method),
                 command.description.as_deref().unwrap_or("No description")
             )
             .ok();
         }
     }
 
-    fn write_api_reference_header(reference: &mut String, spec: &CachedSpec) {
-        write!(reference, "# {} API Reference\n\n", spec.name).ok();
-        writeln!(reference, "**Version**: {}", spec.version).ok();
+    fn write_api_reference_header(
+        reference: &mut String,
+        spec: &CachedSpec,
+        style: DiscoveryStyle,
+    ) {
+        writeln!(reference, "# {} API Reference", style.api_title(&spec.name)).ok();
+        reference.push('\n');
+        writeln!(
+            reference,
+            "{}: {}",
+            style.metadata("**Version**"),
+            spec.version
+        )
+        .ok();
         if let Some(base_url) = spec.base_url.as_deref() {
-            writeln!(reference, "**Base URL**: {base_url}").ok();
+            writeln!(reference, "{}: {base_url}", style.metadata("**Base URL**")).ok();
         }
         reference.push('\n');
         reference.push_str(
@@ -602,8 +688,12 @@ impl DocumentationGenerator {
         );
     }
 
-    fn write_api_reference_navigation(reference: &mut String, api_name: &str) {
-        reference.push_str("## Reference Workflow\n\n");
+    fn write_api_reference_navigation(
+        reference: &mut String,
+        api_name: &str,
+        style: DiscoveryStyle,
+    ) {
+        writeln!(reference, "## {}\n", style.heading("Reference Workflow")).ok();
         write!(
             reference,
             "1. Find operations by intent:\n```bash\naperture search \"keyword\" --api {api_name}\n```\n\n"
@@ -624,8 +714,9 @@ impl DocumentationGenerator {
     fn write_api_reference_categories(
         reference: &mut String,
         category_counts: &BTreeMap<String, usize>,
+        style: DiscoveryStyle,
     ) {
-        reference.push_str("## Categories\n\n");
+        writeln!(reference, "## {}\n", style.heading("Categories")).ok();
 
         if category_counts.is_empty() {
             reference.push_str("No visible operations found.\n\n");
@@ -642,12 +733,13 @@ impl DocumentationGenerator {
         reference: &mut String,
         api_name: &str,
         visible_commands: &[&CachedCommand],
+        style: DiscoveryStyle,
     ) {
         if visible_commands.is_empty() {
             return;
         }
 
-        reference.push_str("## Example Docs Paths\n\n");
+        writeln!(reference, "## {}\n", style.heading("Example Docs Paths")).ok();
         for command in visible_commands.iter().take(3) {
             let tag = Self::effective_group(command);
             let operation = Self::effective_operation(command);
@@ -718,10 +810,16 @@ impl HelpFormatter {
     /// Format command list with enhanced styling
     #[must_use]
     pub fn format_command_list(spec: &CachedSpec) -> String {
+        Self::format_command_list_with_style(spec, DiscoveryStyle::new(false))
+    }
+
+    /// Format command list with optional semantic styling.
+    #[must_use]
+    pub fn format_command_list_with_style(spec: &CachedSpec, style: DiscoveryStyle) -> String {
         let mut output = String::new();
 
         // Header with API info
-        writeln!(output, "{} API Commands", spec.name).ok();
+        writeln!(output, "{} API Commands", style.api_title(&spec.name)).ok();
         let visible_commands: Vec<&CachedCommand> = spec
             .commands
             .iter()
@@ -730,14 +828,16 @@ impl HelpFormatter {
 
         writeln!(
             output,
-            "   Version: {} | Operations: {}",
+            "   {}: {} | {}: {}",
+            style.metadata("Version"),
             spec.version,
+            style.metadata("Operations"),
             visible_commands.len()
         )
         .ok();
 
         if let Some(ref base_url) = spec.base_url {
-            writeln!(output, "   Base URL: {base_url}").ok();
+            writeln!(output, "   {}: {base_url}", style.metadata("Base URL")).ok();
         }
         output.push_str(&"═".repeat(60));
         output.push('\n');
@@ -750,13 +850,13 @@ impl HelpFormatter {
         }
 
         for (tag, commands) in tag_groups {
-            writeln!(output, "\nGroup: {tag}").ok();
+            writeln!(output, "\n{}: {}", style.heading("Group"), tag).ok();
             output.push_str(&"─".repeat(40));
             output.push('\n');
 
             for command in commands {
                 let operation_kebab = DocumentationGenerator::effective_operation(command);
-                let method_badge = Self::format_method_badge(&command.method);
+                let method_badge = Self::format_method_badge(&command.method, style);
                 let description = command
                     .summary
                     .as_ref()
@@ -775,7 +875,7 @@ impl HelpFormatter {
                 .ok();
 
                 // Show path as subdued text
-                writeln!(output, "     Path: {}", command.path).ok();
+                writeln!(output, "     {}: {}", style.metadata("Path"), command.path).ok();
             }
         }
 
@@ -784,7 +884,7 @@ impl HelpFormatter {
     }
 
     /// Format HTTP method for display.
-    fn format_method_badge(method: &str) -> String {
-        format!("{:<7}", method.to_uppercase())
+    fn format_method_badge(method: &str, style: DiscoveryStyle) -> String {
+        format!("{:<7}", style.method(method))
     }
 }
