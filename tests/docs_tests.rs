@@ -7,6 +7,7 @@ use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, CommandExample,
     PaginationInfo,
 };
+use aperture_cli::discovery_style::DiscoveryStyle;
 use aperture_cli::docs::{DocumentationGenerator, HelpFormatter};
 use std::collections::{BTreeMap, HashMap};
 
@@ -329,6 +330,15 @@ fn test_help_formatter_method_badges() {
     // Check that different HTTP methods remain distinguishable
     assert!(formatted.contains("GET"));
     assert!(formatted.contains("POST"));
+}
+
+#[test]
+fn test_help_formatter_supports_semantic_color_when_enabled() {
+    let spec = create_test_spec();
+    let formatted = HelpFormatter::format_command_list_with_style(&spec, DiscoveryStyle::new(true));
+
+    assert!(formatted.contains("\u{1b}[32mGET\u{1b}[0m"));
+    assert!(formatted.contains("\u{1b}[34mPOST\u{1b}[0m"));
 }
 
 #[test]
