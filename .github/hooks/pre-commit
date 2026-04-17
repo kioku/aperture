@@ -30,12 +30,12 @@ run_step() {
     shift
 
     if "$@" > /dev/null 2>&1; then
-        echo -e "  ${GREEN}✓${NC} $label"
+        echo -e "  ${GREEN}[OK]${NC} $label"
         return 0
     fi
 
     FAILED=1
-    echo -e "  ${RED}✗${NC} $label"
+    echo -e "  ${RED}[FAIL]${NC} $label"
     # Re-run without suppression so the developer sees the actual errors.
     echo ""
     "$@" 2>&1 || true
@@ -71,7 +71,7 @@ echo "Staged Rust files: $STAGED_COUNT"
 
 if ! cargo fmt -- --check > /dev/null 2>&1; then
     if is_rustfmt_diff_failure cargo fmt -- --check; then
-        echo -e "  ${YELLOW}↻${NC} cargo fmt (auto-fixing)"
+        echo -e "  ${YELLOW}[FIX]${NC} cargo fmt (auto-fixing)"
         cargo fmt
 
         for file in $RUST_FILES; do
@@ -79,14 +79,14 @@ if ! cargo fmt -- --check > /dev/null 2>&1; then
         done
     else
         # Non-formatting failure (e.g. syntax error). Show it and bail.
-        echo -e "  ${RED}✗${NC} cargo fmt"
+        echo -e "  ${RED}[FAIL]${NC} cargo fmt"
         echo ""
         cargo fmt -- --check 2>&1 || true
         echo ""
         exit 1
     fi
 else
-    echo -e "  ${GREEN}✓${NC} cargo fmt"
+    echo -e "  ${GREEN}[OK]${NC} cargo fmt"
 fi
 
 # ── Clippy ────────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ run_step "cargo clippy" \
 
 if command -v ast-grep &> /dev/null && [ -f "sgconfig.yml" ]; then
     if [ "${SKIP_ASTGREP:-0}" = "1" ]; then
-        echo -e "  ${YELLOW}⚠${NC} ast-grep scan skipped (SKIP_ASTGREP=1)"
+        echo -e "  ${YELLOW}[WARN]${NC} ast-grep scan skipped (SKIP_ASTGREP=1)"
     else
         # shellcheck disable=SC2086
         run_step "ast-grep scan" ast-grep scan $RUST_FILES
@@ -123,4 +123,4 @@ if [ "$FAILED" -ne 0 ]; then
     exit 1
 fi
 
-echo -e "${GREEN}✅ All pre-commit checks passed.${NC}"
+echo -e "${GREEN}All pre-commit checks passed.${NC}"
