@@ -86,7 +86,7 @@ openapi31 = ["oas3"]
 integration = []
 
 [dev-dependencies]
-assert_cmd = "2.2.0"
+assert_cmd = "2.2.1"
 ctor = "0.6.3"
 wiremock = "0.6.5"
 aperture-cli = { path = "." }
