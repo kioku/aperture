@@ -8,6 +8,7 @@ use aperture_cli::cli::translate::{
 use aperture_cli::cli::{ExecutionFlags, OutputFormat};
 use aperture_cli::config::models::GlobalConfig;
 use aperture_cli::engine::generator::generate_command_tree_with_flags;
+use aperture_cli::invocation::ProxyOverride;
 use clap::{Arg, ArgAction, Command};
 use std::collections::HashMap;
 
@@ -134,6 +135,8 @@ fn base_execution_flags() -> ExecutionFlags {
         describe_json: false,
         dry_run: false,
         idempotency_key: None,
+        proxy: None,
+        no_proxy: false,
         format: OutputFormat::Json,
         jq: None,
         batch_file: None,
@@ -319,8 +322,32 @@ fn cli_to_execution_context_builds_retry_and_cache_settings() {
     assert!(retry.force_retry);
     assert!(retry.has_idempotency_key);
 
+    assert_eq!(ctx.proxy_override, ProxyOverride::Default);
     assert!(ctx.global_config.is_some());
     assert!(ctx.server_var_args.is_empty());
+}
+
+#[test]
+fn cli_to_execution_context_sets_proxy_override() {
+    let mut execution = base_execution_flags();
+    execution.proxy = Some("http://proxy.example:8080".to_string());
+
+    let ctx =
+        cli_to_execution_context(&execution, None).expect("context construction should succeed");
+    assert_eq!(
+        ctx.proxy_override,
+        ProxyOverride::Use("http://proxy.example:8080".to_string())
+    );
+}
+
+#[test]
+fn cli_to_execution_context_sets_no_proxy_override() {
+    let mut execution = base_execution_flags();
+    execution.no_proxy = true;
+
+    let ctx =
+        cli_to_execution_context(&execution, None).expect("context construction should succeed");
+    assert_eq!(ctx.proxy_override, ProxyOverride::Disable);
 }
 
 #[test]

@@ -11,7 +11,7 @@ use crate::constants;
 use crate::duration::parse_duration;
 use crate::engine::executor::RetryContext;
 use crate::error::Error;
-use crate::invocation::{ExecutionContext, OperationCall};
+use crate::invocation::{ExecutionContext, OperationCall, ProxyOverride};
 use crate::response_cache::CacheConfig;
 use crate::utils::to_kebab_case;
 use clap::ArgMatches;
@@ -336,12 +336,21 @@ pub fn cli_to_execution_context(
     // Build retry context
     let retry_context = build_retry_context(execution, global_config.as_ref())?;
 
+    let proxy_override = if execution.no_proxy {
+        ProxyOverride::Disable
+    } else if let Some(proxy) = &execution.proxy {
+        ProxyOverride::Use(proxy.clone())
+    } else {
+        ProxyOverride::Default
+    };
+
     Ok(ExecutionContext {
         dry_run: execution.dry_run,
         idempotency_key: execution.idempotency_key.clone(),
         cache_config,
         retry_context,
         base_url: None, // Resolved by BaseUrlResolver
+        proxy_override,
         global_config,
         server_var_args: Vec::new(), // Populated from dynamic matches in the caller
         auto_paginate: execution.auto_paginate,

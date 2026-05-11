@@ -50,6 +50,7 @@ pub async fn execute_request(
         cache_config: cache_config.cloned(),
         retry_context: retry_context.cloned(),
         base_url: base_url.map(String::from),
+        proxy_override: crate::invocation::ProxyOverride::Default,
         global_config: global_config.cloned(),
         server_var_args: translate::extract_server_var_args(matches),
         auto_paginate: false,

@@ -42,6 +42,17 @@ pub struct OperationCall {
 /// Controls retry behavior, caching, dry-run mode, and authentication
 /// context. Does **not** include rendering concerns (output format, JQ
 /// filters) — those belong in the CLI rendering layer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ProxyOverride {
+    /// Use normal proxy resolution: environment first, then config file.
+    #[default]
+    Default,
+    /// Use this proxy URL for this invocation.
+    Use(String),
+    /// Disable all proxy routing for this invocation.
+    Disable,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionContext {
     /// If true, show the request that would be made without executing it.
@@ -58,6 +69,9 @@ pub struct ExecutionContext {
 
     /// Base URL override. `None` uses `BaseUrlResolver` priority chain.
     pub base_url: Option<String>,
+
+    /// Per-invocation proxy behavior override.
+    pub proxy_override: ProxyOverride,
 
     /// Global configuration for URL resolution and secret lookup.
     pub global_config: Option<GlobalConfig>,

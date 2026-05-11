@@ -827,6 +827,7 @@ impl BatchProcessor {
             cache_config,
             retry_context,
             base_url: base_url.map(String::from),
+            proxy_override: crate::invocation::ProxyOverride::Default,
             global_config: global_config.cloned(),
             server_var_args: translate::extract_server_var_args(&matches),
             auto_paginate: false,

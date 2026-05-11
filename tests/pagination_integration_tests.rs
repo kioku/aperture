@@ -40,6 +40,7 @@ const fn base_ctx() -> ExecutionContext {
         cache_config: None,
         retry_context: None,
         base_url: None,
+        proxy_override: aperture_cli::invocation::ProxyOverride::Default,
         global_config: None,
         server_var_args: vec![],
         auto_paginate: true,
