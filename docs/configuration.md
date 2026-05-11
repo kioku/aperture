@@ -142,6 +142,77 @@ aperture api my-api users list --server-var region=eu --server-var version=v2
 - **With enum**: Validated against allowed values
 - **URL encoding**: Values are automatically URL-encoded
 
+## Proxy Configuration
+
+Aperture supports standard HTTP proxy environment variables and optional config-file proxy settings for corporate or restricted networks.
+
+### Priority Order
+
+Proxy configuration is resolved in this order for each API request:
+
+1. Per-invocation flags: `--proxy <url>` or `--no-proxy`
+2. Standard environment variables: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` (lowercase variants are also honored)
+3. The `[proxy]` section in `config.toml`
+
+### Environment Variables
+
+```bash
+export HTTP_PROXY="http://proxy.corp.example:8080"
+export HTTPS_PROXY="http://proxy.corp.example:8080"
+export NO_PROXY="localhost,127.0.0.1,.internal.corp.example"
+
+aperture api my-api users list
+```
+
+### Config File Setup
+
+Use `config setting` commands to persist proxy defaults:
+
+```bash
+aperture config setting set proxy.http "http://proxy.corp.example:8080"
+aperture config setting set proxy.https "http://proxy.corp.example:8080"
+aperture config setting set proxy.no_proxy "localhost,127.0.0.1,.internal.corp.example"
+```
+
+Equivalent `config.toml`:
+
+```toml
+[proxy]
+http = "http://proxy.corp.example:8080"
+https = "http://proxy.corp.example:8080"
+no_proxy = ["localhost", "127.0.0.1", ".internal.corp.example"]
+```
+
+### Proxy Authentication
+
+Avoid storing proxy passwords in `config.toml`. Store only the username and the environment variable name that contains the password:
+
+```bash
+aperture config setting set proxy.username "proxy-user"
+aperture config setting set proxy.password_env "CORP_PROXY_PASSWORD"
+export CORP_PROXY_PASSWORD="..."
+```
+
+```toml
+[proxy]
+http = "http://proxy.corp.example:8080"
+https = "http://proxy.corp.example:8080"
+username = "proxy-user"
+password_env = "CORP_PROXY_PASSWORD"
+```
+
+Aperture redacts proxy credentials in dry-run output, JSON errors, and debug logs. SOCKS proxies are not enabled in the default build.
+
+### Per-Request Overrides
+
+```bash
+# Use a different proxy just for this request
+aperture api my-api users list --proxy "http://other-proxy.example:8080"
+
+# Bypass all environment and config-file proxy settings
+aperture api my-api users list --no-proxy
+```
+
 ## Secret Management
 
 See [Security Model](security.md) for complete documentation.
@@ -339,6 +410,26 @@ Available configuration settings:
   retry_defaults.max_delay_ms = 30000
     Type: integer  Default: 30000
     Maximum delay cap in milliseconds
+
+  proxy.http = 
+    Type: proxy URL  Default: 
+    Proxy URL for HTTP requests
+
+  proxy.https = 
+    Type: proxy URL  Default: 
+    Proxy URL for HTTPS requests
+
+  proxy.no_proxy = 
+    Type: comma-separated list  Default: 
+    Hosts or domains that bypass configured proxies
+
+  proxy.username = 
+    Type: string  Default: 
+    Proxy username for config-file proxy authentication
+
+  proxy.password_env = 
+    Type: string  Default: 
+    Environment variable containing the proxy password
 ```
 
 ### Get a Setting
@@ -365,6 +456,10 @@ aperture config setting set retry_defaults.max_attempts 3
 
 # Set initial retry delay to 1 second
 aperture config setting set retry_defaults.initial_delay_ms 1000
+
+# Configure proxy defaults
+aperture config setting set proxy.http "http://proxy.corp.example:8080"
+aperture config setting set proxy.no_proxy "localhost,127.0.0.1,.internal"
 ```
 
 Settings are validated against their expected types. Comments and formatting in `config.toml` are preserved.
@@ -386,6 +481,14 @@ json_errors = false
 max_attempts = 3           # 0 = disabled
 initial_delay_ms = 500     # Starting delay for exponential backoff
 max_delay_ms = 30000       # Maximum delay cap (30 seconds)
+
+[proxy]
+# Optional proxy defaults used when proxy environment variables are absent
+http = "http://proxy.corp.example:8080"
+https = "http://proxy.corp.example:8080"
+no_proxy = ["localhost", "127.0.0.1", ".internal"]
+username = "proxy-user"
+password_env = "CORP_PROXY_PASSWORD"
 
 [api_configs.my-api]
 # Per-API base URL override
@@ -412,6 +515,8 @@ name = "API_TOKEN"
 |----------|-------------|---------|
 | `APERTURE_BASE_URL` | Global base URL override | `https://api.example.com` |
 | `APERTURE_ENV` | Environment selector | `staging`, `prod` |
+| `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` | Standard proxy URLs | `http://proxy.corp.example:8080` |
+| `NO_PROXY` | Comma-separated hosts/domains that bypass proxies | `localhost,127.0.0.1,.internal` |
 | `RUST_LOG` | Log level | `debug`, `info`, `warn` |
 
 ## Parameter References

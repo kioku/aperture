@@ -219,6 +219,40 @@ aperture -v api myapi users get-user --id 123
 
 The `← 200 OK (XXms)` line shows how long the request took.
 
+### Debugging Proxy Configuration
+
+Use `-v` to see which proxy source was selected. Proxy URLs are logged with credentials removed.
+
+```bash
+# Environment-variable proxy
+HTTP_PROXY="http://user:password@proxy.corp.example:8080" \
+  aperture -v api myapi users list
+
+# Config-file proxy
+aperture config setting set proxy.http "http://proxy.corp.example:8080"
+aperture -v api myapi users list
+
+# Per-request override
+aperture -v api myapi users list --proxy "http://other-proxy.example:8080"
+
+# Confirm proxy bypass
+aperture -v api myapi users list --no-proxy
+```
+
+`--dry-run` also includes sanitized proxy diagnostics:
+
+```bash
+aperture api myapi users list --dry-run
+```
+
+If a request unexpectedly uses or bypasses a proxy, check the priority order:
+
+1. `--proxy` / `--no-proxy`
+2. `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase variants
+3. `[proxy]` settings in `config.toml`
+
+`NO_PROXY` values are comma-separated hosts, IPs, or domains (for example `localhost,127.0.0.1,.internal.corp.example`). SOCKS proxies are not enabled in the default build.
+
 ### Debugging Header-Related Issues
 To inspect all headers being sent and received:
 
@@ -291,6 +325,7 @@ APERTURE_LOG=debug aperture api myapi --batch-file operations.yaml
 3. **Keep body size reasonable**: Increase `APERTURE_LOG_MAX_BODY` only when needed
 4. **Check redaction**: The `[REDACTED]` markers confirm sensitive headers are being protected
 5. **Use with --dry-run**: Combine `-v` with `--dry-run` to see the request without executing it
+6. **Sanitize proxy URLs**: Prefer `proxy.username` plus `proxy.password_env` over embedding credentials in proxy URLs
 
 ## Related Documentation
 
