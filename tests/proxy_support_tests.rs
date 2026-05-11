@@ -2,6 +2,7 @@
 
 mod test_helpers;
 
+use aperture_cli::batch::{BatchConfig, BatchFile, BatchOperation, BatchProcessor};
 use aperture_cli::cache::models::{CachedSpec, CACHE_FORMAT_VERSION};
 use aperture_cli::config::models::{GlobalConfig, ProxyConfig};
 use aperture_cli::engine::executor::execute;
@@ -470,4 +471,56 @@ async fn dry_run_proxy_diagnostics_redact_credentials() {
         request_info["proxy"]["http"].as_str(),
         Some("http://proxy.example:8080/")
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn batch_no_proxy_override_disables_env_and_config_proxy() {
+    let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let _env = EnvGuard::clear_proxy_env();
+    let target = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/resource"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true })))
+        .expect(1)
+        .mount(&target)
+        .await;
+    env::set_var("HTTP_PROXY", "http://127.0.0.1:9");
+    let config = GlobalConfig {
+        proxy: ProxyConfig {
+            http: Some("http://127.0.0.1:9".to_string()),
+            ..ProxyConfig::default()
+        },
+        ..GlobalConfig::default()
+    };
+    let batch = BatchFile {
+        metadata: None,
+        operations: vec![BatchOperation {
+            args: vec!["resource".to_string(), "get-resource".to_string()],
+            ..BatchOperation::default()
+        }],
+    };
+    let processor = BatchProcessor::new_with_proxy_override(
+        BatchConfig {
+            show_progress: false,
+            suppress_output: true,
+            ..BatchConfig::default()
+        },
+        ProxyOverride::Disable,
+    );
+
+    let result = processor
+        .execute_batch(
+            &test_spec(&target.uri()),
+            batch,
+            Some(&config),
+            None,
+            false,
+            &aperture_cli::cli::OutputFormat::Json,
+            None,
+        )
+        .await
+        .expect("batch request should bypass proxy and succeed");
+
+    assert_eq!(result.success_count, 1);
+    assert_eq!(result.failure_count, 0);
 }

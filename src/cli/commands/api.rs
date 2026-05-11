@@ -600,7 +600,8 @@ pub async fn execute_batch_operations(
         show_progress: !cli.quiet && !cli.json_errors,
         suppress_output: cli.json_errors,
     };
-    let processor = BatchProcessor::new(batch_config);
+    let proxy_override = crate::cli::translate::proxy_override_from_execution_flags(execution);
+    let processor = BatchProcessor::new_with_proxy_override(batch_config, proxy_override);
     let result = processor
         .execute_batch(
             spec,
