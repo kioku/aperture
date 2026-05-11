@@ -211,6 +211,10 @@ fn configure_config_proxy(
     mut builder: reqwest::ClientBuilder,
     config: &ProxyConfig,
 ) -> Result<(reqwest::ClientBuilder, ProxyDiagnostics), Error> {
+    if !has_config_proxy(config) {
+        return Ok((builder, ProxyDiagnostics::default()));
+    }
+
     builder = builder.no_proxy();
     let no_proxy_env = first_env_value(&["NO_PROXY", "no_proxy"]);
     let no_proxy = config_no_proxy(config, no_proxy_env.as_deref());
@@ -228,11 +232,11 @@ fn configure_config_proxy(
     let (builder, https) = add_config_https_proxy(builder, config, no_proxy)?;
     diagnostics.https = https;
 
-    if diagnostics.http.is_none() && diagnostics.https.is_none() {
-        return Ok((builder, ProxyDiagnostics::default()));
-    }
-
     Ok((builder, diagnostics))
+}
+
+fn has_config_proxy(config: &ProxyConfig) -> bool {
+    non_empty(config.http.as_deref()).is_some() || non_empty(config.https.as_deref()).is_some()
 }
 
 fn add_config_http_proxy(
