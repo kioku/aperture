@@ -290,6 +290,36 @@ async fn environment_proxy_beats_config_proxy() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn empty_environment_proxy_does_not_shadow_config_proxy() {
+    let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let _env = EnvGuard::clear_proxy_env();
+    let (proxy_url, proxy_handle) = spawn_proxy("HTTP/1.1 200 OK").await;
+    env::set_var("HTTP_PROXY", "   ");
+    let config = GlobalConfig {
+        proxy: ProxyConfig {
+            http: Some(proxy_url),
+            ..ProxyConfig::default()
+        },
+        ..GlobalConfig::default()
+    };
+
+    execute_ok(
+        test_spec("http://example.test"),
+        context_with_config(config),
+    )
+    .await;
+
+    let captured = proxy_handle
+        .await
+        .unwrap()
+        .expect("config proxy should receive request");
+    assert_eq!(
+        captured.request_line,
+        "GET http://example.test/resource HTTP/1.1"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn config_no_proxy_bypasses_config_proxy_for_matching_hosts() {
     let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let _env = EnvGuard::clear_proxy_env();

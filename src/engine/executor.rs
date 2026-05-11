@@ -204,7 +204,11 @@ fn env_proxy_diagnostics() -> Option<ProxyDiagnostics> {
 }
 
 fn first_env_value(names: &[&str]) -> Option<String> {
-    names.iter().find_map(|name| std::env::var(name).ok())
+    names.iter().find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    })
 }
 
 fn configure_config_proxy(
