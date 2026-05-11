@@ -500,7 +500,56 @@ impl<F: FileSystem> ConfigManager<F> {
         doc[table_name][key] = toml_edit::value(i64::try_from(value).unwrap_or(i64::MAX));
     }
 
+    fn set_nested_string(
+        doc: &mut toml_edit::DocumentMut,
+        table_name: &str,
+        key: &str,
+        value: &str,
+    ) {
+        Self::ensure_toml_table(doc, table_name);
+        doc[table_name][key] = toml_edit::value(value);
+    }
+
+    fn set_nested_string_array(
+        doc: &mut toml_edit::DocumentMut,
+        table_name: &str,
+        key: &str,
+        values: &[String],
+    ) {
+        Self::ensure_toml_table(doc, table_name);
+        let mut array = toml_edit::Array::new();
+        for value in values {
+            array.push(value.as_str());
+        }
+        doc[table_name][key] = toml_edit::value(array);
+    }
+
     fn apply_setting_to_document(
+        doc: &mut toml_edit::DocumentMut,
+        key: crate::config::settings::SettingKey,
+        value: &crate::config::settings::SettingValue,
+    ) {
+        if Self::is_proxy_setting(key) {
+            Self::apply_proxy_setting_to_document(doc, key, value);
+        } else {
+            Self::apply_core_setting_to_document(doc, key, value);
+        }
+    }
+
+    const fn is_proxy_setting(key: crate::config::settings::SettingKey) -> bool {
+        use crate::config::settings::SettingKey;
+
+        matches!(
+            key,
+            SettingKey::ProxyHttp
+                | SettingKey::ProxyHttps
+                | SettingKey::ProxyNoProxy
+                | SettingKey::ProxyUsername
+                | SettingKey::ProxyPasswordEnv
+        )
+    }
+
+    fn apply_core_setting_to_document(
         doc: &mut toml_edit::DocumentMut,
         key: crate::config::settings::SettingKey,
         value: &crate::config::settings::SettingValue,
@@ -524,17 +573,47 @@ impl<F: FileSystem> ConfigManager<F> {
             (SettingKey::RetryDefaultsMaxDelayMs, SettingValue::U64(v)) => {
                 Self::set_nested_u64(doc, "retry_defaults", "max_delay_ms", *v);
             }
-            (
-                SettingKey::DefaultTimeoutSecs
-                | SettingKey::RetryDefaultsMaxAttempts
-                | SettingKey::RetryDefaultsInitialDelayMs
-                | SettingKey::RetryDefaultsMaxDelayMs,
-                _,
-            ) => {
-                debug_assert!(false, "Integer settings require U64 value");
-            }
             (SettingKey::AgentDefaultsJsonErrors, _) => {
                 debug_assert!(false, "AgentDefaultsJsonErrors requires Bool value");
+            }
+            _ => {
+                debug_assert!(false, "Integer settings require U64 value");
+            }
+        }
+    }
+
+    fn apply_proxy_setting_to_document(
+        doc: &mut toml_edit::DocumentMut,
+        key: crate::config::settings::SettingKey,
+        value: &crate::config::settings::SettingValue,
+    ) {
+        use crate::config::settings::{SettingKey, SettingValue};
+
+        // Type mismatches are programming errors - parse_for_key guarantees correct types.
+        match (key, value) {
+            (SettingKey::ProxyHttp, SettingValue::ProxyUrl(v)) => {
+                Self::set_nested_string(doc, "proxy", "http", v);
+            }
+            (SettingKey::ProxyHttps, SettingValue::ProxyUrl(v)) => {
+                Self::set_nested_string(doc, "proxy", "https", v);
+            }
+            (SettingKey::ProxyNoProxy, SettingValue::StringList(v)) => {
+                Self::set_nested_string_array(doc, "proxy", "no_proxy", v);
+            }
+            (SettingKey::ProxyUsername, SettingValue::String(v)) => {
+                Self::set_nested_string(doc, "proxy", "username", v);
+            }
+            (SettingKey::ProxyPasswordEnv, SettingValue::String(v)) => {
+                Self::set_nested_string(doc, "proxy", "password_env", v);
+            }
+            (SettingKey::ProxyHttp | SettingKey::ProxyHttps, _) => {
+                debug_assert!(false, "Proxy URL settings require ProxyUrl value");
+            }
+            (SettingKey::ProxyNoProxy, _) => {
+                debug_assert!(false, "ProxyNoProxy requires StringList value");
+            }
+            _ => {
+                debug_assert!(false, "Proxy string settings require String value");
             }
         }
     }

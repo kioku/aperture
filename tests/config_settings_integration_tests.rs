@@ -20,6 +20,8 @@ fn test_config_settings_lists_all() {
         .success()
         .stdout(predicate::str::contains("default_timeout_secs"))
         .stdout(predicate::str::contains("agent_defaults.json_errors"))
+        .stdout(predicate::str::contains("proxy.http"))
+        .stdout(predicate::str::contains("proxy.no_proxy"))
         .stdout(predicate::str::contains("Type: integer"))
         .stdout(predicate::str::contains("Type: boolean"));
 }
@@ -35,7 +37,8 @@ fn test_config_setting_list_nested_command() {
         .assert()
         .success()
         .stdout(predicate::str::contains("default_timeout_secs"))
-        .stdout(predicate::str::contains("agent_defaults.json_errors"));
+        .stdout(predicate::str::contains("agent_defaults.json_errors"))
+        .stdout(predicate::str::contains("proxy.http"));
 }
 
 /// Test `aperture config setting set/get` nested commands roundtrip
@@ -76,8 +79,8 @@ fn test_config_settings_json_output() {
     assert!(parsed.is_array());
     let settings = parsed.as_array().unwrap();
 
-    // Should have 5 settings (default_timeout_secs, json_errors, and 3 retry_defaults)
-    assert_eq!(settings.len(), 5);
+    // Should have 10 settings (timeout, json_errors, 3 retry defaults, and 5 proxy settings)
+    assert_eq!(settings.len(), 10);
 
     // Check structure of first setting
     let first = &settings[0];
@@ -139,6 +142,74 @@ fn test_config_set_get_roundtrip() {
         .assert()
         .success()
         .stdout(predicate::str::contains("120"));
+}
+
+/// Test proxy settings roundtrip through nested config setting commands
+#[test]
+fn test_config_setting_proxy_roundtrip() {
+    let temp_dir = TempDir::new().unwrap();
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "config",
+            "setting",
+            "set",
+            "proxy.http",
+            "http://proxy.example:8080",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Set proxy.http = http://proxy.example:8080",
+        ));
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "config",
+            "setting",
+            "set",
+            "proxy.no_proxy",
+            "localhost,127.0.0.1,.internal",
+        ])
+        .assert()
+        .success();
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "setting", "get", "proxy.no_proxy"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("localhost,127.0.0.1,.internal"));
+}
+
+/// Test proxy URLs with credentials are redacted in setting output
+#[test]
+fn test_config_setting_proxy_url_redacts_credentials() {
+    let temp_dir = TempDir::new().unwrap();
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "config",
+            "setting",
+            "set",
+            "proxy.http",
+            "http://user:secret@proxy.example:8080",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("secret").not())
+        .stdout(predicate::str::contains("http://proxy.example:8080"));
+
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "setting", "get", "proxy.http"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("secret").not())
+        .stdout(predicate::str::contains("http://proxy.example:8080"));
 }
 
 /// Test `aperture config set` with nested key

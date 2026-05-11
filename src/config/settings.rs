@@ -43,6 +43,16 @@ pub enum SettingKey {
     RetryDefaultsInitialDelayMs,
     /// Maximum delay cap in milliseconds (`retry_defaults.max_delay_ms`)
     RetryDefaultsMaxDelayMs,
+    /// Proxy URL for HTTP requests (`proxy.http`)
+    ProxyHttp,
+    /// Proxy URL for HTTPS requests (`proxy.https`)
+    ProxyHttps,
+    /// Comma-separated no-proxy bypass list (`proxy.no_proxy`)
+    ProxyNoProxy,
+    /// Proxy username (`proxy.username`)
+    ProxyUsername,
+    /// Environment variable containing the proxy password (`proxy.password_env`)
+    ProxyPasswordEnv,
 }
 
 impl SettingKey {
@@ -53,17 +63,60 @@ impl SettingKey {
         Self::RetryDefaultsMaxAttempts,
         Self::RetryDefaultsInitialDelayMs,
         Self::RetryDefaultsMaxDelayMs,
+        Self::ProxyHttp,
+        Self::ProxyHttps,
+        Self::ProxyNoProxy,
+        Self::ProxyUsername,
+        Self::ProxyPasswordEnv,
     ];
 
     /// Returns the dot-notation key string for this setting.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
+        if (*self).is_proxy() {
+            return (*self).proxy_as_str();
+        }
+        (*self).core_as_str()
+    }
+
+    const fn is_proxy(self) -> bool {
+        matches!(
+            self,
+            Self::ProxyHttp
+                | Self::ProxyHttps
+                | Self::ProxyNoProxy
+                | Self::ProxyUsername
+                | Self::ProxyPasswordEnv
+        )
+    }
+
+    const fn core_as_str(self) -> &'static str {
         match self {
             Self::DefaultTimeoutSecs => "default_timeout_secs",
             Self::AgentDefaultsJsonErrors => "agent_defaults.json_errors",
             Self::RetryDefaultsMaxAttempts => "retry_defaults.max_attempts",
             Self::RetryDefaultsInitialDelayMs => "retry_defaults.initial_delay_ms",
             Self::RetryDefaultsMaxDelayMs => "retry_defaults.max_delay_ms",
+            Self::ProxyHttp
+            | Self::ProxyHttps
+            | Self::ProxyNoProxy
+            | Self::ProxyUsername
+            | Self::ProxyPasswordEnv => unreachable!(),
+        }
+    }
+
+    const fn proxy_as_str(self) -> &'static str {
+        match self {
+            Self::ProxyHttp => "proxy.http",
+            Self::ProxyHttps => "proxy.https",
+            Self::ProxyNoProxy => "proxy.no_proxy",
+            Self::ProxyUsername => "proxy.username",
+            Self::ProxyPasswordEnv => "proxy.password_env",
+            Self::DefaultTimeoutSecs
+            | Self::AgentDefaultsJsonErrors
+            | Self::RetryDefaultsMaxAttempts
+            | Self::RetryDefaultsInitialDelayMs
+            | Self::RetryDefaultsMaxDelayMs => unreachable!(),
         }
     }
 
@@ -76,18 +129,48 @@ impl SettingKey {
             | Self::RetryDefaultsInitialDelayMs
             | Self::RetryDefaultsMaxDelayMs => "integer",
             Self::AgentDefaultsJsonErrors => "boolean",
+            Self::ProxyHttp | Self::ProxyHttps => "proxy URL",
+            Self::ProxyNoProxy => "comma-separated list",
+            Self::ProxyUsername | Self::ProxyPasswordEnv => "string",
         }
     }
 
     /// Returns a human-readable description of this setting.
     #[must_use]
     pub const fn description(&self) -> &'static str {
+        if (*self).is_proxy() {
+            return (*self).proxy_description();
+        }
+        (*self).core_description()
+    }
+
+    const fn core_description(self) -> &'static str {
         match self {
             Self::DefaultTimeoutSecs => "Default timeout for API requests in seconds",
             Self::AgentDefaultsJsonErrors => "Output errors as JSON by default",
             Self::RetryDefaultsMaxAttempts => "Maximum retry attempts (0 = disabled)",
             Self::RetryDefaultsInitialDelayMs => "Initial delay between retries in milliseconds",
             Self::RetryDefaultsMaxDelayMs => "Maximum delay cap in milliseconds",
+            Self::ProxyHttp
+            | Self::ProxyHttps
+            | Self::ProxyNoProxy
+            | Self::ProxyUsername
+            | Self::ProxyPasswordEnv => unreachable!(),
+        }
+    }
+
+    const fn proxy_description(self) -> &'static str {
+        match self {
+            Self::ProxyHttp => "Proxy URL for HTTP requests",
+            Self::ProxyHttps => "Proxy URL for HTTPS requests",
+            Self::ProxyNoProxy => "Hosts or domains that bypass configured proxies",
+            Self::ProxyUsername => "Proxy username for config-file proxy authentication",
+            Self::ProxyPasswordEnv => "Environment variable containing the proxy password",
+            Self::DefaultTimeoutSecs
+            | Self::AgentDefaultsJsonErrors
+            | Self::RetryDefaultsMaxAttempts
+            | Self::RetryDefaultsInitialDelayMs
+            | Self::RetryDefaultsMaxDelayMs => unreachable!(),
         }
     }
 
@@ -100,22 +183,78 @@ impl SettingKey {
             Self::RetryDefaultsMaxAttempts => "0",
             Self::RetryDefaultsInitialDelayMs => "500",
             Self::RetryDefaultsMaxDelayMs => "30000",
+            Self::ProxyHttp
+            | Self::ProxyHttps
+            | Self::ProxyNoProxy
+            | Self::ProxyUsername
+            | Self::ProxyPasswordEnv => "",
         }
     }
 
     /// Extracts the current value for this setting from a `GlobalConfig`.
     #[must_use]
-    pub const fn value_from_config(&self, config: &super::models::GlobalConfig) -> SettingValue {
+    pub fn value_from_config(&self, config: &super::models::GlobalConfig) -> SettingValue {
+        if (*self).is_proxy() {
+            return (*self).proxy_value_from_config(config);
+        }
+        (*self).core_value_from_config(config)
+    }
+
+    fn core_value_from_config(self, config: &super::models::GlobalConfig) -> SettingValue {
         match self {
             Self::DefaultTimeoutSecs => SettingValue::U64(config.default_timeout_secs),
             Self::AgentDefaultsJsonErrors => SettingValue::Bool(config.agent_defaults.json_errors),
             Self::RetryDefaultsMaxAttempts => {
-                SettingValue::U64(config.retry_defaults.max_attempts as u64)
+                SettingValue::U64(u64::from(config.retry_defaults.max_attempts))
             }
             Self::RetryDefaultsInitialDelayMs => {
                 SettingValue::U64(config.retry_defaults.initial_delay_ms)
             }
             Self::RetryDefaultsMaxDelayMs => SettingValue::U64(config.retry_defaults.max_delay_ms),
+            Self::ProxyHttp
+            | Self::ProxyHttps
+            | Self::ProxyNoProxy
+            | Self::ProxyUsername
+            | Self::ProxyPasswordEnv => unreachable!(),
+        }
+    }
+
+    fn proxy_value_from_config(self, config: &super::models::GlobalConfig) -> SettingValue {
+        match self {
+            Self::ProxyHttp => SettingValue::ProxyUrl(
+                config
+                    .proxy
+                    .http
+                    .as_ref()
+                    .map_or_else(String::new, Clone::clone),
+            ),
+            Self::ProxyHttps => SettingValue::ProxyUrl(
+                config
+                    .proxy
+                    .https
+                    .as_ref()
+                    .map_or_else(String::new, Clone::clone),
+            ),
+            Self::ProxyNoProxy => SettingValue::StringList(config.proxy.no_proxy.clone()),
+            Self::ProxyUsername => SettingValue::String(
+                config
+                    .proxy
+                    .username
+                    .as_ref()
+                    .map_or_else(String::new, Clone::clone),
+            ),
+            Self::ProxyPasswordEnv => SettingValue::String(
+                config
+                    .proxy
+                    .password_env
+                    .as_ref()
+                    .map_or_else(String::new, Clone::clone),
+            ),
+            Self::DefaultTimeoutSecs
+            | Self::AgentDefaultsJsonErrors
+            | Self::RetryDefaultsMaxAttempts
+            | Self::RetryDefaultsInitialDelayMs
+            | Self::RetryDefaultsMaxDelayMs => unreachable!(),
         }
     }
 }
@@ -130,14 +269,32 @@ impl FromStr for SettingKey {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "default_timeout_secs" => Ok(Self::DefaultTimeoutSecs),
-            "agent_defaults.json_errors" => Ok(Self::AgentDefaultsJsonErrors),
-            "retry_defaults.max_attempts" => Ok(Self::RetryDefaultsMaxAttempts),
-            "retry_defaults.initial_delay_ms" => Ok(Self::RetryDefaultsInitialDelayMs),
-            "retry_defaults.max_delay_ms" => Ok(Self::RetryDefaultsMaxDelayMs),
-            _ => Err(Error::unknown_setting_key(s)),
+        if s.starts_with("proxy.") {
+            return parse_proxy_setting_key(s);
         }
+        parse_core_setting_key(s)
+    }
+}
+
+fn parse_core_setting_key(s: &str) -> Result<SettingKey, Error> {
+    match s {
+        "default_timeout_secs" => Ok(SettingKey::DefaultTimeoutSecs),
+        "agent_defaults.json_errors" => Ok(SettingKey::AgentDefaultsJsonErrors),
+        "retry_defaults.max_attempts" => Ok(SettingKey::RetryDefaultsMaxAttempts),
+        "retry_defaults.initial_delay_ms" => Ok(SettingKey::RetryDefaultsInitialDelayMs),
+        "retry_defaults.max_delay_ms" => Ok(SettingKey::RetryDefaultsMaxDelayMs),
+        _ => Err(Error::unknown_setting_key(s)),
+    }
+}
+
+fn parse_proxy_setting_key(s: &str) -> Result<SettingKey, Error> {
+    match s {
+        "proxy.http" => Ok(SettingKey::ProxyHttp),
+        "proxy.https" => Ok(SettingKey::ProxyHttps),
+        "proxy.no_proxy" => Ok(SettingKey::ProxyNoProxy),
+        "proxy.username" => Ok(SettingKey::ProxyUsername),
+        "proxy.password_env" => Ok(SettingKey::ProxyPasswordEnv),
+        _ => Err(Error::unknown_setting_key(s)),
     }
 }
 
@@ -148,6 +305,12 @@ pub enum SettingValue {
     U64(u64),
     /// Boolean value
     Bool(bool),
+    /// String value
+    String(String),
+    /// Proxy URL value whose credentials are redacted when displayed
+    ProxyUrl(String),
+    /// List of string values
+    StringList(Vec<String>),
 }
 
 /// Maximum allowed timeout value (1 year in seconds).
@@ -214,6 +377,40 @@ fn parse_bool_setting(key: SettingKey, value: &str) -> Result<SettingValue, Erro
     Ok(SettingValue::Bool(parsed))
 }
 
+fn parse_string_list_setting(value: &str) -> SettingValue {
+    let values = value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    SettingValue::StringList(values)
+}
+
+/// Returns a URL with proxy credentials removed for display or diagnostics.
+#[must_use]
+pub fn sanitize_proxy_url(value: &str) -> String {
+    let Ok(mut url) = reqwest::Url::parse(value) else {
+        return sanitize_unparseable_proxy_url(value);
+    };
+
+    if !url.username().is_empty() || url.password().is_some() {
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+    }
+    url.to_string()
+}
+
+fn sanitize_unparseable_proxy_url(value: &str) -> String {
+    let Some((scheme, rest)) = value.split_once("://") else {
+        return value.to_string();
+    };
+    let Some((_credentials, host)) = rest.rsplit_once('@') else {
+        return value.to_string();
+    };
+    format!("{scheme}://[REDACTED]@{host}")
+}
+
 impl SettingValue {
     /// Parse a string value into the appropriate type for the given key.
     ///
@@ -251,6 +448,11 @@ impl SettingValue {
                 MAX_DELAY_CAP_MS,
                 &format!("max_delay_ms cannot exceed {MAX_DELAY_CAP_MS}ms (5 minutes)"),
             ),
+            SettingKey::ProxyHttp | SettingKey::ProxyHttps => Ok(Self::ProxyUrl(value.to_string())),
+            SettingKey::ProxyNoProxy => Ok(parse_string_list_setting(value)),
+            SettingKey::ProxyUsername | SettingKey::ProxyPasswordEnv => {
+                Ok(Self::String(value.to_string()))
+            }
         }
     }
 
@@ -259,7 +461,7 @@ impl SettingValue {
     pub const fn as_u64(&self) -> Option<u64> {
         match self {
             Self::U64(v) => Some(*v),
-            Self::Bool(_) => None,
+            Self::Bool(_) | Self::String(_) | Self::ProxyUrl(_) | Self::StringList(_) => None,
         }
     }
 
@@ -268,7 +470,7 @@ impl SettingValue {
     pub const fn as_bool(&self) -> Option<bool> {
         match self {
             Self::Bool(v) => Some(*v),
-            Self::U64(_) => None,
+            Self::U64(_) | Self::String(_) | Self::ProxyUrl(_) | Self::StringList(_) => None,
         }
     }
 }
@@ -278,6 +480,9 @@ impl fmt::Display for SettingValue {
         match self {
             Self::U64(v) => write!(f, "{v}"),
             Self::Bool(v) => write!(f, "{v}"),
+            Self::String(v) => write!(f, "{v}"),
+            Self::ProxyUrl(v) => write!(f, "{}", sanitize_proxy_url(v)),
+            Self::StringList(v) => write!(f, "{}", v.join(",")),
         }
     }
 }
@@ -399,6 +604,64 @@ mod tests {
         assert_eq!(SettingValue::U64(30).to_string(), "30");
         assert_eq!(SettingValue::Bool(true).to_string(), "true");
         assert_eq!(SettingValue::Bool(false).to_string(), "false");
+        assert_eq!(
+            SettingValue::String("value".to_string()).to_string(),
+            "value"
+        );
+        assert_eq!(
+            SettingValue::StringList(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+                .to_string(),
+            "localhost,127.0.0.1"
+        );
+        assert_eq!(
+            SettingValue::ProxyUrl("http://user:secret@proxy.example:8080".to_string()).to_string(),
+            "http://proxy.example:8080/"
+        );
+    }
+
+    #[test]
+    fn test_proxy_settings_from_str() {
+        assert_eq!(
+            "proxy.http".parse::<SettingKey>().unwrap(),
+            SettingKey::ProxyHttp
+        );
+        assert_eq!(
+            "proxy.https".parse::<SettingKey>().unwrap(),
+            SettingKey::ProxyHttps
+        );
+        assert_eq!(
+            "proxy.no_proxy".parse::<SettingKey>().unwrap(),
+            SettingKey::ProxyNoProxy
+        );
+        assert_eq!(
+            "proxy.username".parse::<SettingKey>().unwrap(),
+            SettingKey::ProxyUsername
+        );
+        assert_eq!(
+            "proxy.password_env".parse::<SettingKey>().unwrap(),
+            SettingKey::ProxyPasswordEnv
+        );
+    }
+
+    #[test]
+    fn test_proxy_setting_value_parse() {
+        assert_eq!(
+            SettingValue::parse_for_key(SettingKey::ProxyHttp, "http://proxy.example:8080")
+                .unwrap(),
+            SettingValue::ProxyUrl("http://proxy.example:8080".to_string())
+        );
+        assert_eq!(
+            SettingValue::parse_for_key(
+                SettingKey::ProxyNoProxy,
+                "localhost, 127.0.0.1, .internal"
+            )
+            .unwrap(),
+            SettingValue::StringList(vec![
+                "localhost".to_string(),
+                "127.0.0.1".to_string(),
+                ".internal".to_string()
+            ])
+        );
     }
 
     #[test]

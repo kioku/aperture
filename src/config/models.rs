@@ -10,6 +10,9 @@ pub struct GlobalConfig {
     /// Default retry configuration for transient failures
     #[serde(default)]
     pub retry_defaults: RetryDefaults,
+    /// Default proxy configuration for API requests.
+    #[serde(default)]
+    pub proxy: ProxyConfig,
     /// Per-API configuration overrides
     #[serde(default)]
     pub api_configs: HashMap<String, ApiConfig>,
@@ -23,6 +26,25 @@ const fn default_timeout_secs_value() -> u64 {
 pub struct AgentDefaults {
     #[serde(default)]
     pub json_errors: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
+pub struct ProxyConfig {
+    /// Proxy URL for HTTP requests.
+    #[serde(default)]
+    pub http: Option<String>,
+    /// Proxy URL for HTTPS requests.
+    #[serde(default)]
+    pub https: Option<String>,
+    /// Hosts or domains that should bypass the configured proxy.
+    #[serde(default)]
+    pub no_proxy: Vec<String>,
+    /// Optional proxy username; the password should come from `password_env`.
+    #[serde(default)]
+    pub username: Option<String>,
+    /// Environment variable containing the proxy password.
+    #[serde(default)]
+    pub password_env: Option<String>,
 }
 
 /// Default retry configuration for API requests.
@@ -69,6 +91,7 @@ impl Default for GlobalConfig {
             default_timeout_secs: 30,
             agent_defaults: AgentDefaults::default(),
             retry_defaults: RetryDefaults::default(),
+            proxy: ProxyConfig::default(),
             api_configs: HashMap::new(),
         }
     }
