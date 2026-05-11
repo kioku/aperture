@@ -1,9 +1,9 @@
 use crate::cache::models::{CachedCommand, CachedSecurityScheme, CachedSpec};
-use crate::config::models::GlobalConfig;
+use crate::config::models::{GlobalConfig, ProxyConfig};
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
 use crate::error::Error;
-use crate::invocation::ExecutionResult;
+use crate::invocation::{ExecutionResult, ProxyOverride};
 use crate::logging;
 use crate::resilience::{
     calculate_retry_delay_with_header, is_retryable_status, parse_retry_after_value, RetryConfig,
@@ -109,17 +109,273 @@ impl RetryContext {
 
 // Helper functions
 
-/// Build HTTP client with default timeout
-fn build_http_client() -> Result<reqwest::Client, Error> {
-    reqwest::Client::builder()
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ProxyDiagnostics {
+    source: &'static str,
+    disabled: bool,
+    all: Option<String>,
+    http: Option<String>,
+    https: Option<String>,
+    no_proxy: Vec<String>,
+}
+
+impl ProxyDiagnostics {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "source": self.source,
+            "disabled": self.disabled,
+            "all": self.all,
+            "http": self.http,
+            "https": self.https,
+            "no_proxy": self.no_proxy,
+        })
+    }
+}
+
+struct ProxyBuildResult {
+    client: reqwest::Client,
+    diagnostics: ProxyDiagnostics,
+}
+
+fn configure_proxy(
+    builder: reqwest::ClientBuilder,
+    ctx: &crate::invocation::ExecutionContext,
+) -> Result<(reqwest::ClientBuilder, ProxyDiagnostics), Error> {
+    match &ctx.proxy_override {
+        ProxyOverride::Disable => Ok((builder.no_proxy(), disabled_proxy_diagnostics())),
+        ProxyOverride::Use(url) => configure_cli_proxy(builder, url),
+        ProxyOverride::Default => configure_default_proxy(builder, ctx.global_config.as_ref()),
+    }
+}
+
+fn disabled_proxy_diagnostics() -> ProxyDiagnostics {
+    ProxyDiagnostics {
+        source: "cli",
+        disabled: true,
+        ..ProxyDiagnostics::default()
+    }
+}
+
+fn configure_cli_proxy(
+    builder: reqwest::ClientBuilder,
+    url: &str,
+) -> Result<(reqwest::ClientBuilder, ProxyDiagnostics), Error> {
+    let proxy = proxy_all(url, "CLI")?;
+    let diagnostics = ProxyDiagnostics {
+        source: "cli",
+        all: Some(crate::config::settings::sanitize_proxy_url(url)),
+        ..ProxyDiagnostics::default()
+    };
+    Ok((builder.no_proxy().proxy(proxy), diagnostics))
+}
+
+fn configure_default_proxy(
+    builder: reqwest::ClientBuilder,
+    global_config: Option<&GlobalConfig>,
+) -> Result<(reqwest::ClientBuilder, ProxyDiagnostics), Error> {
+    if let Some(diagnostics) = env_proxy_diagnostics() {
+        return Ok((builder, diagnostics));
+    }
+
+    let Some(config) = global_config else {
+        return Ok((builder, ProxyDiagnostics::default()));
+    };
+    configure_config_proxy(builder, &config.proxy)
+}
+
+fn env_proxy_diagnostics() -> Option<ProxyDiagnostics> {
+    let http = first_env_value(&["HTTP_PROXY", "http_proxy"]);
+    let https = first_env_value(&["HTTPS_PROXY", "https_proxy"]);
+    let all = first_env_value(&["ALL_PROXY", "all_proxy"]);
+    let no_proxy = first_env_value(&["NO_PROXY", "no_proxy"]);
+
+    if http.is_none() && https.is_none() && all.is_none() {
+        return None;
+    }
+
+    Some(ProxyDiagnostics {
+        source: "environment",
+        all: all.map(|value| crate::config::settings::sanitize_proxy_url(&value)),
+        http: http.map(|value| crate::config::settings::sanitize_proxy_url(&value)),
+        https: https.map(|value| crate::config::settings::sanitize_proxy_url(&value)),
+        no_proxy: no_proxy.map_or_else(Vec::new, |value| parse_no_proxy_entries(&value)),
+        ..ProxyDiagnostics::default()
+    })
+}
+
+fn first_env_value(names: &[&str]) -> Option<String> {
+    names.iter().find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    })
+}
+
+fn configure_config_proxy(
+    mut builder: reqwest::ClientBuilder,
+    config: &ProxyConfig,
+) -> Result<(reqwest::ClientBuilder, ProxyDiagnostics), Error> {
+    if !has_config_proxy(config) {
+        return Ok((builder, ProxyDiagnostics::default()));
+    }
+
+    builder = builder.no_proxy();
+    let no_proxy_env = first_env_value(&["NO_PROXY", "no_proxy"]);
+    let no_proxy = config_no_proxy(config, no_proxy_env.as_deref());
+    let mut diagnostics = ProxyDiagnostics {
+        source: "config",
+        no_proxy: no_proxy_env.map_or_else(
+            || config.no_proxy.clone(),
+            |value| parse_no_proxy_entries(&value),
+        ),
+        ..ProxyDiagnostics::default()
+    };
+
+    let (builder, http) = add_config_http_proxy(builder, config, no_proxy.clone())?;
+    diagnostics.http = http;
+    let (builder, https) = add_config_https_proxy(builder, config, no_proxy)?;
+    diagnostics.https = https;
+
+    Ok((builder, diagnostics))
+}
+
+fn has_config_proxy(config: &ProxyConfig) -> bool {
+    non_empty(config.http.as_deref()).is_some() || non_empty(config.https.as_deref()).is_some()
+}
+
+fn add_config_http_proxy(
+    builder: reqwest::ClientBuilder,
+    config: &ProxyConfig,
+    no_proxy: Option<reqwest::NoProxy>,
+) -> Result<(reqwest::ClientBuilder, Option<String>), Error> {
+    let Some(url) = non_empty(config.http.as_deref()) else {
+        return Ok((builder, None));
+    };
+    let proxy = proxy_http(url, "config HTTP")?.no_proxy(no_proxy);
+    let builder = builder.proxy(apply_config_proxy_auth(proxy, config)?);
+    Ok((
+        builder,
+        Some(crate::config::settings::sanitize_proxy_url(url)),
+    ))
+}
+
+fn add_config_https_proxy(
+    builder: reqwest::ClientBuilder,
+    config: &ProxyConfig,
+    no_proxy: Option<reqwest::NoProxy>,
+) -> Result<(reqwest::ClientBuilder, Option<String>), Error> {
+    let Some(url) = non_empty(config.https.as_deref()) else {
+        return Ok((builder, None));
+    };
+    let proxy = proxy_https(url, "config HTTPS")?.no_proxy(no_proxy);
+    let builder = builder.proxy(apply_config_proxy_auth(proxy, config)?);
+    Ok((
+        builder,
+        Some(crate::config::settings::sanitize_proxy_url(url)),
+    ))
+}
+
+fn config_no_proxy(config: &ProxyConfig, env_no_proxy: Option<&str>) -> Option<reqwest::NoProxy> {
+    env_no_proxy
+        .and_then(reqwest::NoProxy::from_string)
+        .or_else(|| reqwest::NoProxy::from_string(&config.no_proxy.join(",")))
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn apply_config_proxy_auth(
+    proxy: reqwest::Proxy,
+    config: &ProxyConfig,
+) -> Result<reqwest::Proxy, Error> {
+    match (
+        non_empty(config.username.as_deref()),
+        non_empty(config.password_env.as_deref()),
+    ) {
+        (Some(username), Some(password_env)) => {
+            let password = std::env::var(password_env).map_err(|_| {
+                Error::invalid_config(format!(
+                    "Proxy password environment variable '{password_env}' is not set"
+                ))
+            })?;
+            Ok(proxy.basic_auth(username, &password))
+        }
+        (None, None) => Ok(proxy),
+        _ => Err(Error::invalid_config(
+            "Proxy authentication requires both proxy.username and proxy.password_env",
+        )),
+    }
+}
+
+fn proxy_http(url: &str, label: &str) -> Result<reqwest::Proxy, Error> {
+    reqwest::Proxy::http(url).map_err(|_| invalid_proxy_url(label, url))
+}
+
+fn proxy_https(url: &str, label: &str) -> Result<reqwest::Proxy, Error> {
+    reqwest::Proxy::https(url).map_err(|_| invalid_proxy_url(label, url))
+}
+
+fn proxy_all(url: &str, label: &str) -> Result<reqwest::Proxy, Error> {
+    reqwest::Proxy::all(url).map_err(|_| invalid_proxy_url(label, url))
+}
+
+fn invalid_proxy_url(label: &str, url: &str) -> Error {
+    Error::invalid_config(format!(
+        "Invalid {label} proxy URL: {}",
+        crate::config::settings::sanitize_proxy_url(url)
+    ))
+}
+
+fn parse_no_proxy_entries(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn log_proxy_diagnostics(diagnostics: &ProxyDiagnostics) {
+    if diagnostics.disabled {
+        tracing::debug!(target: "aperture::executor", "Proxy routing disabled for request");
+        return;
+    }
+
+    if diagnostics.source.is_empty() {
+        tracing::debug!(target: "aperture::executor", "No proxy configuration selected");
+        return;
+    }
+
+    tracing::debug!(
+        target: "aperture::executor",
+        source = diagnostics.source,
+        all = diagnostics.all.as_deref().unwrap_or(""),
+        http = diagnostics.http.as_deref().unwrap_or(""),
+        https = diagnostics.https.as_deref().unwrap_or(""),
+        no_proxy = diagnostics.no_proxy.join(","),
+        "Proxy configuration selected"
+    );
+}
+
+/// Build HTTP client with default timeout and resolved proxy behavior.
+fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyBuildResult, Error> {
+    let (builder, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
+    let client = builder
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| {
+        .map_err(|_| {
             Error::request_failed(
                 reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create HTTP client: {e}"),
+                "Failed to create HTTP client",
             )
-        })
+        })?;
+
+    log_proxy_diagnostics(&diagnostics);
+    Ok(ProxyBuildResult {
+        client,
+        diagnostics,
+    })
 }
 
 /// Send HTTP request and get response
@@ -856,6 +1112,7 @@ fn build_dry_run_result(
     headers: &HeaderMap,
     body: Option<&str>,
     operation_id: &str,
+    proxy: &ProxyDiagnostics,
 ) -> Option<ExecutionResult> {
     if !dry_run {
         return None;
@@ -879,7 +1136,8 @@ fn build_dry_run_result(
         "url": url,
         "headers": headers_map,
         "body": body,
-        "operation_id": operation_id
+        "operation_id": operation_id,
+        "proxy": proxy.to_json()
     });
 
     Some(ExecutionResult::DryRun { request_info })
@@ -938,26 +1196,32 @@ async fn finalize_execution_result(
 ///
 /// Returns errors for authentication failures, network issues, or response
 /// validation problems.
-async fn resolve_pre_execution_result(
-    cache_context: Option<&(CacheKey, ResponseCache)>,
+struct PreExecutionInput<'a> {
+    cache_context: Option<&'a (CacheKey, ResponseCache)>,
     dry_run: bool,
-    method: &Method,
-    url: &str,
-    headers: &HeaderMap,
-    body: Option<&str>,
-    operation_id: &str,
+    method: &'a Method,
+    url: &'a str,
+    headers: &'a HeaderMap,
+    body: Option<&'a str>,
+    operation_id: &'a str,
+    proxy: &'a ProxyDiagnostics,
+}
+
+async fn resolve_pre_execution_result(
+    input: PreExecutionInput<'_>,
 ) -> Result<Option<ExecutionResult>, Error> {
-    if let Some(result) = cached_execution_result(cache_context).await? {
+    if let Some(result) = cached_execution_result(input.cache_context).await? {
         return Ok(Some(result));
     }
 
     Ok(build_dry_run_result(
-        dry_run,
-        method,
-        url,
-        headers,
-        body,
-        operation_id,
+        input.dry_run,
+        input.method,
+        input.url,
+        input.headers,
+        input.body,
+        input.operation_id,
+        input.proxy,
     ))
 }
 
@@ -975,15 +1239,16 @@ pub async fn execute(
 ) -> Result<crate::invocation::ExecutionResult, Error> {
     let prepared = prepare_execution(spec, call, &ctx)?;
 
-    if let Some(result) = resolve_pre_execution_result(
-        prepared.cache_context.as_ref(),
-        ctx.dry_run,
-        &prepared.method,
-        &prepared.url,
-        &prepared.headers_clone,
-        prepared.body.as_deref(),
-        &prepared.operation.operation_id,
-    )
+    if let Some(result) = resolve_pre_execution_result(PreExecutionInput {
+        cache_context: prepared.cache_context.as_ref(),
+        dry_run: ctx.dry_run,
+        method: &prepared.method,
+        url: &prepared.url,
+        headers: &prepared.headers_clone,
+        body: prepared.body.as_deref(),
+        operation_id: &prepared.operation.operation_id,
+        proxy: &prepared.proxy_diagnostics,
+    })
     .await?
     {
         return Ok(result);
@@ -1022,6 +1287,7 @@ struct PreparedExecution<'a> {
     method: Method,
     url: String,
     client: reqwest::Client,
+    proxy_diagnostics: ProxyDiagnostics,
     headers: HeaderMap,
     headers_clone: HeaderMap,
     cache_context: Option<(CacheKey, ResponseCache)>,
@@ -1036,6 +1302,7 @@ struct PreparedRequest<'a> {
     method: Method,
     url: String,
     client: reqwest::Client,
+    proxy_diagnostics: ProxyDiagnostics,
     headers: HeaderMap,
     headers_clone: HeaderMap,
     body: Option<String>,
@@ -1069,6 +1336,7 @@ fn prepare_execution<'a>(
         method: request.method,
         url: request.url,
         client: request.client,
+        proxy_diagnostics: request.proxy_diagnostics,
         headers: request.headers,
         headers_clone: request.headers_clone,
         cache_context: runtime.cache_context,
@@ -1094,7 +1362,7 @@ fn prepare_request<'a>(
         &call.path_params,
         &call.query_params,
     )?;
-    let client = build_http_client()?;
+    let proxy_build_result = build_http_client(ctx)?;
     let mut headers = build_headers_from_params(
         spec,
         operation,
@@ -1112,7 +1380,8 @@ fn prepare_request<'a>(
         operation,
         method,
         url,
-        client,
+        client: proxy_build_result.client,
+        proxy_diagnostics: proxy_build_result.diagnostics,
         headers,
         headers_clone,
         body: call.body,

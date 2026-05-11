@@ -158,7 +158,7 @@ fn handle_set_setting_command(
     let setting_key: SettingKey = key.parse()?;
     let setting_value = SettingValue::parse_for_key(setting_key, &value)?;
     manager.set_setting(&setting_key, &setting_value)?;
-    output.success(format!("Set {key} = {value}"));
+    output.success(format!("Set {key} = {setting_value}"));
     Ok(())
 }
 

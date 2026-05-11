@@ -59,6 +59,19 @@ pub struct ExecutionFlags {
     #[arg(long, value_name = "KEY", help = "Set idempotency key header")]
     pub idempotency_key: Option<String>,
 
+    /// Use a specific HTTP/HTTPS proxy for this invocation
+    #[arg(
+        long,
+        value_name = "URL",
+        conflicts_with = "no_proxy",
+        help = "Route this request through the specified proxy URL"
+    )]
+    pub proxy: Option<String>,
+
+    /// Disable environment and config-file proxy routing for this invocation
+    #[arg(long, help = "Bypass all proxy configuration for this request")]
+    pub no_proxy: bool,
+
     /// Output format for response data
     #[arg(
         long,

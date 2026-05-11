@@ -8,6 +8,7 @@ use crate::duration::parse_duration;
 use crate::engine::executor::RetryContext;
 use crate::engine::generator;
 use crate::error::Error;
+use crate::invocation::ProxyOverride;
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
@@ -159,6 +160,7 @@ pub struct BatchResult {
 /// Batch processor for executing multiple API operations
 pub struct BatchProcessor {
     config: BatchConfig,
+    proxy_override: ProxyOverride,
     rate_limiter: Option<Arc<DefaultDirectRateLimiter>>,
     semaphore: Arc<Semaphore>,
 }
@@ -171,6 +173,16 @@ impl BatchProcessor {
     /// Panics if the rate limit is configured as 0 (which would be invalid)
     #[must_use]
     pub fn new(config: BatchConfig) -> Self {
+        Self::new_with_proxy_override(config, ProxyOverride::Default)
+    }
+
+    /// Creates a new batch processor with a shared proxy override for every operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the rate limit is configured as 0 (which would be invalid).
+    #[must_use]
+    pub fn new_with_proxy_override(config: BatchConfig, proxy_override: ProxyOverride) -> Self {
         let rate_limiter = config.rate_limit.map(|limit| {
             Arc::new(RateLimiter::direct(Quota::per_second(
                 NonZeroU32::new(limit).unwrap_or(NonZeroU32::new(1).expect("1 is non-zero")),
@@ -181,6 +193,7 @@ impl BatchProcessor {
 
         Self {
             config,
+            proxy_override,
             rate_limiter,
             semaphore,
         }
@@ -253,6 +266,7 @@ impl BatchProcessor {
                 dry_run,
                 output_format,
                 jq_filter,
+                self.proxy_override.clone(),
             )
             .await
         } else {
@@ -264,6 +278,7 @@ impl BatchProcessor {
                 dry_run,
                 output_format,
                 jq_filter,
+                self.proxy_override.clone(),
             )
             .await
         }
@@ -281,6 +296,7 @@ impl BatchProcessor {
         dry_run: bool,
         _output_format: &crate::cli::OutputFormat,
         _jq_filter: Option<&str>,
+        proxy_override: ProxyOverride,
     ) -> Result<BatchResult, Error> {
         let start_time = std::time::Instant::now();
         let operations = batch_file.operations;
@@ -312,6 +328,7 @@ impl BatchProcessor {
                 base_url,
                 dry_run,
                 self.config.show_progress,
+                proxy_override.clone(),
             )
             .await;
 
@@ -357,6 +374,7 @@ impl BatchProcessor {
         base_url: Option<&str>,
         dry_run: bool,
         show_progress: bool,
+        proxy_override: ProxyOverride,
     ) -> BatchOperationResult {
         let op_id = operation
             .id
@@ -382,6 +400,7 @@ impl BatchProcessor {
             global_config,
             base_url,
             dry_run,
+            proxy_override,
         )
         .await
         {
@@ -411,6 +430,7 @@ impl BatchProcessor {
         global_config: Option<&GlobalConfig>,
         base_url: Option<&str>,
         dry_run: bool,
+        proxy_override: ProxyOverride,
     ) -> Result<String, Error> {
         // Suppress output and skip jq_filter: capture needs JSON text that
         // preserves the raw response structure regardless of caller formatting.
@@ -423,6 +443,7 @@ impl BatchProcessor {
             &crate::cli::OutputFormat::Json,
             None,
             true,
+            proxy_override,
         )
         .await
     }
@@ -540,6 +561,7 @@ impl BatchProcessor {
         dry_run: bool,
         output_format: &crate::cli::OutputFormat,
         jq_filter: Option<&str>,
+        proxy_override: ProxyOverride,
     ) -> Result<BatchResult, Error> {
         let start_time = std::time::Instant::now();
         let total_operations = batch_file.operations.len();
@@ -553,6 +575,7 @@ impl BatchProcessor {
             dry_run,
             output_format,
             jq_filter,
+            &proxy_override,
         );
         let results = Self::collect_batch_operation_results(handles).await?;
 
@@ -609,6 +632,7 @@ impl BatchProcessor {
         dry_run: bool,
         output_format: &crate::cli::OutputFormat,
         jq_filter: Option<&str>,
+        proxy_override: &ProxyOverride,
     ) -> Vec<tokio::task::JoinHandle<BatchOperationResult>> {
         let mut handles = Vec::new();
         for (index, operation) in operations.into_iter().enumerate() {
@@ -621,6 +645,7 @@ impl BatchProcessor {
             let rate_limiter = self.rate_limiter.clone();
             let show_progress = self.config.show_progress;
             let suppress_output = self.config.suppress_output;
+            let proxy_override = proxy_override.clone();
 
             handles.push(tokio::spawn(async move {
                 Self::execute_batch_operation_task(
@@ -636,6 +661,7 @@ impl BatchProcessor {
                     show_progress,
                     suppress_output,
                     index,
+                    proxy_override,
                 )
                 .await
             }));
@@ -657,6 +683,7 @@ impl BatchProcessor {
         show_progress: bool,
         suppress_output: bool,
         index: usize,
+        proxy_override: ProxyOverride,
     ) -> BatchOperationResult {
         let _permit = semaphore
             .acquire()
@@ -677,6 +704,7 @@ impl BatchProcessor {
             &output_format,
             jq_filter.as_deref(),
             suppress_output,
+            proxy_override,
         )
         .await;
         let duration = operation_start.elapsed();
@@ -797,6 +825,7 @@ impl BatchProcessor {
         output_format: &crate::cli::OutputFormat,
         jq_filter: Option<&str>,
         suppress_output: bool,
+        proxy_override: ProxyOverride,
     ) -> Result<String, Error> {
         use crate::cli::translate;
         use crate::invocation::ExecutionContext;
@@ -827,6 +856,7 @@ impl BatchProcessor {
             cache_config,
             retry_context,
             base_url: base_url.map(String::from),
+            proxy_override,
             global_config: global_config.cloned(),
             server_var_args: translate::extract_server_var_args(&matches),
             auto_paginate: false,
