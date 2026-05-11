@@ -32,6 +32,16 @@ fn write_line(writer: &mut impl Write, msg: &str) -> Result<(), Error> {
     }
 }
 
+#[macro_export]
+macro_rules! stdoutln {
+    () => {
+        let _ = $crate::output::write_stdout_line("");
+    };
+    ($($arg:tt)*) => {
+        let _ = $crate::output::write_stdout_line(&format!($($arg)*));
+    };
+}
+
 /// Output handler that respects quiet mode.
 ///
 /// Quiet mode is enabled if either `--quiet` is passed or `--json-errors` is used.

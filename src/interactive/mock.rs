@@ -51,7 +51,7 @@ impl InputOutput for RealInputOutput {
     }
 
     fn println(&self, text: &str) -> Result<(), Error> {
-        println!("{text}");
+        crate::stdoutln!("{text}");
         Ok(())
     }
 

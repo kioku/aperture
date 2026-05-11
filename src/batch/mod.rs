@@ -290,7 +290,7 @@ impl BatchProcessor {
 
         if self.config.show_progress {
             // ast-grep-ignore: no-println
-            println!("Starting dependent batch execution: {total_operations} operations");
+            crate::stdoutln!("Starting dependent batch execution: {total_operations} operations");
         }
 
         let mut store = interpolation::VariableStore::default();
@@ -330,7 +330,7 @@ impl BatchProcessor {
 
         if self.config.show_progress {
             // ast-grep-ignore: no-println
-            println!(
+            crate::stdoutln!(
                 "Dependent batch completed: {success_count}/{total_operations} operations successful in {:.2}s",
                 total_duration.as_secs_f64()
             );
@@ -505,7 +505,7 @@ impl BatchProcessor {
     fn log_progress(show_progress: bool, msg: impl FnOnce() -> String) {
         if show_progress {
             // ast-grep-ignore: no-println
-            println!("{}", msg());
+            crate::stdoutln!("{}", msg());
         }
     }
 
@@ -578,7 +578,7 @@ impl BatchProcessor {
     fn log_batch_start(show_progress: bool, total_operations: usize) {
         if show_progress {
             // ast-grep-ignore: no-println
-            println!("Starting batch execution: {total_operations} operations");
+            crate::stdoutln!("Starting batch execution: {total_operations} operations");
         }
     }
 
@@ -590,7 +590,7 @@ impl BatchProcessor {
     ) {
         if show_progress {
             // ast-grep-ignore: no-println
-            println!(
+            crate::stdoutln!(
                 "Batch execution completed: {}/{} operations successful in {:.2}s",
                 success_count,
                 total_operations,
@@ -685,14 +685,14 @@ impl BatchProcessor {
             Ok(resp) => {
                 if show_progress {
                     // ast-grep-ignore: no-println
-                    println!("Operation {} completed", index + 1);
+                    crate::stdoutln!("Operation {} completed", index + 1);
                 }
                 (true, None, Some(resp))
             }
             Err(e) => {
                 if show_progress {
                     // ast-grep-ignore: no-println
-                    println!("Operation {} failed: {}", index + 1, e);
+                    crate::stdoutln!("Operation {} failed: {}", index + 1, e);
                 }
                 (false, Some(e.to_string()), None)
             }

@@ -224,7 +224,7 @@ fn handle_list_specs(
     if json {
         let payload = collect_specs_with_details(manager, specs, verbose);
         // ast-grep-ignore: no-println
-        println!("{}", serde_json::to_string_pretty(&payload)?);
+        crate::stdoutln!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
     }
 
@@ -422,13 +422,13 @@ fn handle_get_setting(
     let value = manager.get_setting(&setting_key)?;
     if json {
         // ast-grep-ignore: no-println
-        println!(
+        crate::stdoutln!(
             "{}",
             serde_json::json!({ "key": key, "value": value.to_string() })
         );
     } else {
         // ast-grep-ignore: no-println
-        println!("{value}");
+        crate::stdoutln!("{value}");
     }
     Ok(())
 }
@@ -830,7 +830,7 @@ pub fn print_secrets_list(
         match secret.source {
             SecretSource::Env => {
                 // ast-grep-ignore: no-println
-                println!("  {scheme_name}: environment variable '{}'", secret.name);
+                crate::stdoutln!("  {scheme_name}: environment variable '{}'", secret.name);
             }
         }
     }
@@ -844,16 +844,16 @@ pub fn print_api_url_entry(
     output: &Output,
 ) {
     // ast-grep-ignore: no-println
-    println!("\n{api_name}:");
+    crate::stdoutln!("\n{api_name}:");
     if let Some(base) = base_override {
         // ast-grep-ignore: no-println
-        println!("  Base override: {base}");
+        crate::stdoutln!("  Base override: {base}");
     }
     if !env_urls.is_empty() {
         output.info("  Environment URLs:");
         for (env, url) in env_urls {
             // ast-grep-ignore: no-println
-            println!("    {env}: {url}");
+            crate::stdoutln!("    {env}: {url}");
         }
     }
 }
@@ -869,21 +869,21 @@ pub fn print_url_configuration(
     output.info(format!("Base URL configuration for '{name}':"));
     if let Some(base) = base_override {
         // ast-grep-ignore: no-println
-        println!("  Base override: {base}");
+        crate::stdoutln!("  Base override: {base}");
     } else {
         // ast-grep-ignore: no-println
-        println!("  Base override: (none)");
+        crate::stdoutln!("  Base override: (none)");
     }
     if !env_urls.is_empty() {
         // ast-grep-ignore: no-println
-        println!("  Environment URLs:");
+        crate::stdoutln!("  Environment URLs:");
         for (env, url) in env_urls {
             // ast-grep-ignore: no-println
-            println!("    {env}: {url}");
+            crate::stdoutln!("    {env}: {url}");
         }
     }
     // ast-grep-ignore: no-println
-    println!("\nResolved URL (current): {resolved}");
+    crate::stdoutln!("\nResolved URL (current): {resolved}");
     if let Ok(current_env) = std::env::var(constants::ENV_APERTURE_ENV) {
         output.info(format!("(Using APERTURE_ENV={current_env})"));
     }
@@ -1040,17 +1040,17 @@ pub fn list_specs_with_details(
     for spec_name in specs {
         if !verbose {
             // ast-grep-ignore: no-println
-            println!("- {spec_name}");
+            crate::stdoutln!("- {spec_name}");
             continue;
         }
         let Ok(cached_spec) = crate::engine::loader::load_cached_spec(&cache_dir, &spec_name)
         else {
             // ast-grep-ignore: no-println
-            println!("- {spec_name}");
+            crate::stdoutln!("- {spec_name}");
             continue;
         };
         // ast-grep-ignore: no-println
-        println!("- {spec_name}:");
+        crate::stdoutln!("- {spec_name}:");
         output.info(format!("  Version: {}", cached_spec.version));
         let available = cached_spec.commands.len();
         let skipped = cached_spec.skipped_endpoints.len();
@@ -1083,24 +1083,25 @@ pub fn print_settings_list(
 ) -> Result<(), Error> {
     if json {
         // ast-grep-ignore: no-println
-        println!("{}", serde_json::to_string_pretty(&settings)?);
+        crate::stdoutln!("{}", serde_json::to_string_pretty(&settings)?);
         return Ok(());
     }
     output.info("Available configuration settings:");
     // ast-grep-ignore: no-println
-    println!();
+    crate::stdoutln!();
     for setting in settings {
         // ast-grep-ignore: no-println
-        println!("  {} = {}", setting.key, setting.value);
+        crate::stdoutln!("  {} = {}", setting.key, setting.value);
         // ast-grep-ignore: no-println
-        println!(
+        crate::stdoutln!(
             "    Type: {}  Default: {}",
-            setting.type_name, setting.default
+            setting.type_name,
+            setting.default
         );
         // ast-grep-ignore: no-println
-        println!("    {}", setting.description);
+        crate::stdoutln!("    {}", setting.description);
         // ast-grep-ignore: no-println
-        println!();
+        crate::stdoutln!();
     }
     Ok(())
 }
@@ -1175,20 +1176,20 @@ pub async fn show_cache_stats(
         output.info("Cache statistics for all APIs:");
     }
     // ast-grep-ignore: no-println
-    println!("  Total entries: {}", stats.total_entries);
+    crate::stdoutln!("  Total entries: {}", stats.total_entries);
     // ast-grep-ignore: no-println
-    println!("  Valid entries: {}", stats.valid_entries);
+    crate::stdoutln!("  Valid entries: {}", stats.valid_entries);
     // ast-grep-ignore: no-println
-    println!("  Expired entries: {}", stats.expired_entries);
+    crate::stdoutln!("  Expired entries: {}", stats.expired_entries);
     #[allow(clippy::cast_precision_loss)]
     let size_mb = stats.total_size_bytes as f64 / 1024.0 / 1024.0;
     // ast-grep-ignore: no-println
-    println!("  Total size: {size_mb:.2} MB");
+    crate::stdoutln!("  Total size: {size_mb:.2} MB");
     if stats.total_entries != 0 {
         #[allow(clippy::cast_precision_loss)]
         let hit_rate = stats.valid_entries as f64 / stats.total_entries as f64 * 100.0;
         // ast-grep-ignore: no-println
-        println!("  Hit rate: {hit_rate:.1}%");
+        crate::stdoutln!("  Hit rate: {hit_rate:.1}%");
     }
     Ok(())
 }
@@ -1309,16 +1310,16 @@ pub fn handle_list_mappings(
 
     if !mapping.groups.is_empty() {
         // ast-grep-ignore: no-println
-        println!("\n  Group renames:");
+        crate::stdoutln!("\n  Group renames:");
         for (original, new_name) in &mapping.groups {
             // ast-grep-ignore: no-println
-            println!("    '{original}' → '{new_name}'");
+            crate::stdoutln!("    '{original}' → '{new_name}'");
         }
     }
 
     if !mapping.operations.is_empty() {
         // ast-grep-ignore: no-println
-        println!("\n  Operation mappings:");
+        crate::stdoutln!("\n  Operation mappings:");
         for (op_id, op_mapping) in &mapping.operations {
             print_operation_mapping(op_id, op_mapping);
         }
@@ -1366,21 +1367,21 @@ pub fn handle_remove_mapping(
 /// Prints details of a single operation mapping
 fn print_operation_mapping(op_id: &str, op_mapping: &crate::config::models::OperationMapping) {
     // ast-grep-ignore: no-println
-    println!("    {op_id}:");
+    crate::stdoutln!("    {op_id}:");
     if let Some(ref name) = op_mapping.name {
         // ast-grep-ignore: no-println
-        println!("      name: {name}");
+        crate::stdoutln!("      name: {name}");
     }
     if let Some(ref group) = op_mapping.group {
         // ast-grep-ignore: no-println
-        println!("      group: {group}");
+        crate::stdoutln!("      group: {group}");
     }
     if !op_mapping.aliases.is_empty() {
         // ast-grep-ignore: no-println
-        println!("      aliases: {}", op_mapping.aliases.join(", "));
+        crate::stdoutln!("      aliases: {}", op_mapping.aliases.join(", "));
     }
     if op_mapping.hidden {
         // ast-grep-ignore: no-println
-        println!("      hidden: true");
+        crate::stdoutln!("      hidden: true");
     }
 }
