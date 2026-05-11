@@ -390,6 +390,10 @@ fn parse_string_list_setting(value: &str) -> SettingValue {
 /// Returns a URL with proxy credentials removed for display or diagnostics.
 #[must_use]
 pub fn sanitize_proxy_url(value: &str) -> String {
+    if !value.contains("://") && value.contains('@') {
+        return sanitize_unparseable_proxy_url(value);
+    }
+
     let Ok(mut url) = reqwest::Url::parse(value) else {
         return sanitize_unparseable_proxy_url(value);
     };
@@ -402,13 +406,17 @@ pub fn sanitize_proxy_url(value: &str) -> String {
 }
 
 fn sanitize_unparseable_proxy_url(value: &str) -> String {
-    let Some((scheme, rest)) = value.split_once("://") else {
-        return value.to_string();
-    };
-    let Some((_credentials, host)) = rest.rsplit_once('@') else {
-        return value.to_string();
-    };
-    format!("{scheme}://[REDACTED]@{host}")
+    if let Some((scheme, rest)) = value.split_once("://") {
+        return rest.rsplit_once('@').map_or_else(
+            || value.to_string(),
+            |(_credentials, host)| format!("{scheme}://[REDACTED]@{host}"),
+        );
+    }
+
+    value.rsplit_once('@').map_or_else(
+        || value.to_string(),
+        |(_credentials, host)| format!("[REDACTED]@{host}"),
+    )
 }
 
 impl SettingValue {
@@ -617,6 +625,17 @@ mod tests {
             SettingValue::ProxyUrl("http://user:secret@proxy.example:8080".to_string()).to_string(),
             "http://proxy.example:8080/"
         );
+    }
+
+    #[test]
+    fn test_sanitize_proxy_url_redacts_unparseable_credentials() {
+        let sanitized = sanitize_proxy_url("user:secret@proxy.example:8080");
+        assert_eq!(sanitized, "[REDACTED]@proxy.example:8080");
+        assert!(!sanitized.contains("secret"));
+
+        let sanitized = sanitize_proxy_url("http://user:secret@");
+        assert_eq!(sanitized, "http://[REDACTED]@");
+        assert!(!sanitized.contains("secret"));
     }
 
     #[test]
