@@ -161,8 +161,7 @@ fn handle_show_examples_command(
         .iter()
         .find(|cmd| cmd.operation_id == operation_id)
         .ok_or_else(|| Error::spec_not_found(context))?;
-    crate::cli::render::render_examples(context, operation);
-    Ok(())
+    crate::cli::render::render_examples(context, operation)
 }
 
 fn render_api_context_landing(context: &str, spec: &CachedSpec) -> Result<(), Error> {

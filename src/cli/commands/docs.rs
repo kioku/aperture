@@ -9,10 +9,11 @@ use crate::docs::{DocumentationGenerator, HelpFormatter};
 use crate::engine::loader;
 use crate::error::Error;
 use crate::fs::OsFileSystem;
-use crate::output::Output;
+use crate::output::{write_stdout_line, Output};
 use crate::utils::to_kebab_case;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize)]
@@ -201,31 +202,36 @@ pub fn list_commands(
     })?;
 
     match format {
-        DiscoveryFormat::Text => {
-            let style = DiscoveryStyle::for_stdout();
-            let formatted_output = HelpFormatter::format_command_list_with_style(&spec, style);
-            // ast-grep-ignore: no-println
-            println!("{formatted_output}");
-            output.tip(format!(
-                "{} 'aperture overview {context}' for high-level API orientation",
-                style.next_label("Next:")
-            ));
-            output.tip(format!(
-                "{} 'aperture search <term> --api {context}' to find operations by intent",
-                style.next_label("Next:")
-            ));
-            output.tip(format!(
-                "{} 'aperture docs {context} <tag> <operation>' for deep operation docs",
-                style.next_label("Next:")
-            ));
-            output.tip(format!(
-                "{} 'aperture api {context} <tag> <operation> ...'",
-                style.next_label("Execute:")
-            ));
-            Ok(())
-        }
+        DiscoveryFormat::Text => render_command_list_text(context, &spec, output),
         DiscoveryFormat::Json => render_command_list_json(context, &spec),
     }
+}
+
+fn render_command_list_text(
+    context: &str,
+    spec: &CachedSpec,
+    output: &Output,
+) -> Result<(), Error> {
+    let style = DiscoveryStyle::for_stdout();
+    let formatted_output = HelpFormatter::format_command_list_with_style(spec, style);
+    write_stdout_line(&formatted_output)?;
+    output.tip(format!(
+        "{} 'aperture overview {context}' for high-level API orientation",
+        style.next_label("Next:")
+    ));
+    output.tip(format!(
+        "{} 'aperture search <term> --api {context}' to find operations by intent",
+        style.next_label("Next:")
+    ));
+    output.tip(format!(
+        "{} 'aperture docs {context} <tag> <operation>' for deep operation docs",
+        style.next_label("Next:")
+    ));
+    output.tip(format!(
+        "{} 'aperture api {context} <tag> <operation> ...'",
+        style.next_label("Execute:")
+    ));
+    Ok(())
 }
 
 /// Execute help command with enhanced documentation
@@ -294,8 +300,7 @@ fn render_interactive_menu(
 ) -> Result<(), Error> {
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
-    // ast-grep-ignore: no-println
-    println!("{}", doc_gen.generate_interactive_menu());
+    write_stdout_line(&doc_gen.generate_interactive_menu())?;
     output.tip("Try 'aperture overview <api>' to orient to one API before drilling in");
     Ok(())
 }
@@ -321,8 +326,7 @@ fn render_api_reference_index(
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
     let reference = doc_gen.generate_api_reference_index_styled(api, style)?;
-    // ast-grep-ignore: no-println
-    println!("{reference}");
+    write_stdout_line(&reference)?;
     output.tip(format!(
         "{} operations with 'aperture api {api} <tag> <operation> ...'",
         style.next_label("Execute")
@@ -398,11 +402,9 @@ fn render_command_help(
     let doc_gen = DocumentationGenerator::new(specs);
     let help = doc_gen.generate_command_help_styled(api, tag, operation, style)?;
     if enhanced {
-        // ast-grep-ignore: no-println
-        println!("{help}");
+        write_stdout_line(&help)?;
     } else {
-        // ast-grep-ignore: no-println
-        println!("{}", help.lines().take(20).collect::<Vec<_>>().join("\n"));
+        write_stdout_line(&help.lines().take(20).collect::<Vec<_>>().join("\n"))?;
         output.tip(format!(
             "{} --enhanced for full documentation with examples",
             style.next_label("Use")
@@ -581,8 +583,7 @@ fn render_single_api_overview(
     let specs = load_all_specs(manager)?;
     let doc_gen = DocumentationGenerator::new(specs);
     let overview = doc_gen.generate_api_overview_styled(api, style)?;
-    // ast-grep-ignore: no-println
-    println!("{overview}");
+    write_stdout_line(&overview)?;
     output.tip(format!(
         "{} 'aperture search <term> --api {api}' to find specific operations",
         style.next_label("Next:")
@@ -650,28 +651,30 @@ fn render_all_api_overviews(
         return Ok(());
     }
 
-    // ast-grep-ignore: no-println
-    println!("All APIs Overview\n");
-    // ast-grep-ignore: no-println
-    println!("{}", "=".repeat(60));
+    let mut overview = String::new();
+    writeln!(&mut overview, "All APIs Overview\n").expect("writing to String cannot fail");
+    writeln!(&mut overview, "{}", "=".repeat(60)).expect("writing to String cannot fail");
     for (api_name, spec) in &specs {
-        // ast-grep-ignore: no-println
-        println!("\n** {} ** (v{})", spec.name, spec.version);
+        writeln!(&mut overview, "\n** {} ** (v{})", spec.name, spec.version)
+            .expect("writing to String cannot fail");
         if let Some(ref base_url) = spec.base_url {
-            // ast-grep-ignore: no-println
-            println!("   Base URL: {base_url}");
+            writeln!(&mut overview, "   Base URL: {base_url}")
+                .expect("writing to String cannot fail");
         }
         let operation_count = spec.commands.len();
-        // ast-grep-ignore: no-println
-        println!("   Operations: {operation_count}");
+        writeln!(&mut overview, "   Operations: {operation_count}")
+            .expect("writing to String cannot fail");
         let method_summary = summarize_methods(&spec.commands);
-        // ast-grep-ignore: no-println
-        println!("   Methods: {}", method_summary.join(", "));
-        // ast-grep-ignore: no-println
-        println!("   Quick start: aperture commands {api_name}");
+        writeln!(&mut overview, "   Methods: {}", method_summary.join(", "))
+            .expect("writing to String cannot fail");
+        writeln!(
+            &mut overview,
+            "   Quick start: aperture commands {api_name}"
+        )
+        .expect("writing to String cannot fail");
     }
-    // ast-grep-ignore: no-println
-    println!("\n{}", "=".repeat(60));
+    writeln!(&mut overview, "\n{}", "=".repeat(60)).expect("writing to String cannot fail");
+    write_stdout_line(overview.trim_end())?;
     output.tip("Use 'aperture overview <api>' to orient to a specific API");
     output.tip("Then use 'aperture search <term> --api <api>' to find operations by intent");
     output.tip("Use 'aperture commands <api>' for a terse command tree");
@@ -773,8 +776,7 @@ fn operation_summary(command: &CachedCommand) -> OperationSummaryJson {
 }
 
 fn print_json<T: Serialize>(payload: &T) -> Result<(), Error> {
-    // ast-grep-ignore: no-println
-    println!("{}", serde_json::to_string_pretty(payload)?);
+    write_stdout_line(&serde_json::to_string_pretty(payload)?)?;
     Ok(())
 }
 

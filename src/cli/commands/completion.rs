@@ -5,6 +5,7 @@ use crate::constants;
 use crate::engine::loader;
 use crate::error::Error;
 use crate::fs::OsFileSystem;
+use crate::output::write_stdout_line;
 use crate::utils::to_kebab_case;
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -97,9 +98,7 @@ pub fn execute_completion_script_command(shell: &CompletionShell) -> Result<(), 
         CompletionShell::PowerShell => powershell_completion_script(),
     };
 
-    // ast-grep-ignore: no-println
-    println!("{script}");
-    Ok(())
+    write_stdout_line(&script)
 }
 
 pub fn execute_completion_runtime_command(
@@ -112,8 +111,7 @@ pub fn execute_completion_runtime_command(
     let suggestions = complete_words(&input, &catalog);
 
     for suggestion in suggestions {
-        // ast-grep-ignore: no-println
-        println!("{suggestion}");
+        write_stdout_line(&suggestion)?;
     }
 
     Ok(())
