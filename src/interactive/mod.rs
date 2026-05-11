@@ -481,7 +481,7 @@ pub fn confirm_with_io_and_timeout<T: InputOutput>(
 /// Returns an error if stdin operations fail
 pub fn confirm_exit() -> Result<bool, Error> {
     // ast-grep-ignore: no-println
-    println!("\nInteractive session interrupted.");
+    crate::stdoutln!("\nInteractive session interrupted.");
     confirm("Do you want to exit without saving changes?")
 }
 
@@ -492,7 +492,7 @@ pub fn confirm_exit() -> Result<bool, Error> {
 /// Returns an error if the confirmation input operation fails
 pub fn handle_cancellation_input() -> Result<bool, Error> {
     // ast-grep-ignore: no-println
-    println!("Empty input detected. This will cancel the current operation.");
+    crate::stdoutln!("Empty input detected. This will cancel the current operation.");
     confirm("Do you want to continue with the current operation?")
 }
 

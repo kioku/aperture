@@ -6,7 +6,7 @@ use crate::discovery_style::DiscoveryStyle;
 use crate::engine::loader;
 use crate::error::Error;
 use crate::fs::OsFileSystem;
-use crate::output::Output;
+use crate::output::{write_stdout_line, Output};
 use crate::search::CommandSearcher;
 
 pub fn execute_search_command(
@@ -39,8 +39,7 @@ pub fn execute_search_command(
     let formatted_results =
         crate::search::format_search_results_with_style(&results, verbose, style);
     for line in formatted_results {
-        // ast-grep-ignore: no-println
-        println!("{line}");
+        write_stdout_line(&line)?;
     }
     Ok(())
 }

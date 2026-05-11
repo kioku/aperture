@@ -1302,7 +1302,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
         if cached_spec.security_schemes.is_empty() {
             // ast-grep-ignore: no-println
-            println!("No security schemes found in API '{api_name}'.");
+            crate::stdoutln!("No security schemes found in API '{api_name}'.");
             return Ok(());
         }
 
@@ -1321,7 +1321,7 @@ impl<F: FileSystem> ConfigManager<F> {
         )?;
 
         // ast-grep-ignore: no-println
-        println!("\nInteractive configuration complete!");
+        crate::stdoutln!("\nInteractive configuration complete!");
         Ok(())
     }
 
@@ -1542,9 +1542,9 @@ impl<F: FileSystem> ConfigManager<F> {
     /// Displays the interactive configuration header
     fn display_interactive_header(api_name: &str, cached_spec: &crate::cache::models::CachedSpec) {
         // ast-grep-ignore: no-println
-        println!("Interactive Secret Configuration for API: {api_name}");
+        crate::stdoutln!("Interactive Secret Configuration for API: {api_name}");
         // ast-grep-ignore: no-println
-        println!(
+        crate::stdoutln!(
             "Found {} security scheme(s):\n",
             cached_spec.security_schemes.len()
         );
@@ -1656,7 +1656,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
             if env_var.is_empty() {
                 // ast-grep-ignore: no-println
-                println!("Skipping configuration for '{selected_scheme}'");
+                crate::stdoutln!("Skipping configuration for '{selected_scheme}'");
             } else {
                 self.handle_secret_configuration(
                     api_name,
@@ -1682,12 +1682,12 @@ impl<F: FileSystem> ConfigManager<F> {
         current_secrets: &std::collections::HashMap<String, ApertureSecret>,
     ) {
         // ast-grep-ignore: no-println
-        println!("\nConfiguration for '{selected_scheme}':");
+        crate::stdoutln!("\nConfiguration for '{selected_scheme}':");
         // ast-grep-ignore: no-println
-        println!("   Type: {}", scheme.scheme_type);
+        crate::stdoutln!("   Type: {}", scheme.scheme_type);
         if let Some(desc) = &scheme.description {
             // ast-grep-ignore: no-println
-            println!("   Description: {desc}");
+            crate::stdoutln!("   Description: {desc}");
         }
 
         // Show current configuration - use pattern matching to avoid nested if
@@ -1697,18 +1697,18 @@ impl<F: FileSystem> ConfigManager<F> {
         ) {
             (Some(current_secret), _) => {
                 // ast-grep-ignore: no-println
-                println!("   Current: environment variable '{}'", current_secret.name);
+                crate::stdoutln!("   Current: environment variable '{}'", current_secret.name);
             }
             (None, Some(aperture_secret)) => {
                 // ast-grep-ignore: no-println
-                println!(
+                crate::stdoutln!(
                     "   Current: x-aperture-secret -> '{}'",
                     aperture_secret.name
                 );
             }
             (None, None) => {
                 // ast-grep-ignore: no-println
-                println!("   Current: not configured");
+                crate::stdoutln!("   Current: not configured");
             }
         }
     }
@@ -1728,27 +1728,27 @@ impl<F: FileSystem> ConfigManager<F> {
         // Validate environment variable name using the comprehensive validator
         if let Err(e) = crate::interactive::validate_env_var_name(env_var) {
             // ast-grep-ignore: no-println
-            println!("Invalid environment variable name: {e}");
+            crate::stdoutln!("Invalid environment variable name: {e}");
             return Ok(()); // Continue the loop, don't fail completely
         }
 
         // Show preview and confirm
         // ast-grep-ignore: no-println
-        println!("\nConfiguration Preview:");
+        crate::stdoutln!("\nConfiguration Preview:");
         // ast-grep-ignore: no-println
-        println!("   API: {api_name}");
+        crate::stdoutln!("   API: {api_name}");
         // ast-grep-ignore: no-println
-        println!("   Scheme: {selected_scheme}");
+        crate::stdoutln!("   Scheme: {selected_scheme}");
         // ast-grep-ignore: no-println
-        println!("   Environment Variable: {env_var}");
+        crate::stdoutln!("   Environment Variable: {env_var}");
 
         if confirm("Apply this configuration?")? {
             self.set_secret(validated_name, selected_scheme, env_var)?;
             // ast-grep-ignore: no-println
-            println!("Configuration saved successfully!");
+            crate::stdoutln!("Configuration saved successfully!");
         } else {
             // ast-grep-ignore: no-println
-            println!("Configuration cancelled.");
+            crate::stdoutln!("Configuration cancelled.");
         }
 
         Ok(())

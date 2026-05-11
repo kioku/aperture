@@ -2,7 +2,7 @@
 //!
 //! Converts structured execution results into user-facing output
 //! (stdout) in the requested format (JSON, YAML, table). This module
-//! owns all `println!` calls for API response rendering.
+//! owns API response rendering writes.
 
 use crate::cache::models::CachedCommand;
 use crate::cli::OutputFormat;
@@ -10,6 +10,7 @@ use crate::constants;
 use crate::engine::executor::apply_jq_filter;
 use crate::error::Error;
 use crate::invocation::ExecutionResult;
+use crate::output::write_stdout_line;
 use crate::utils::to_kebab_case;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -57,8 +58,7 @@ pub fn render_result(
             let output = serde_json::to_string_pretty(request_info).map_err(|e| {
                 Error::serialization_error(format!("Failed to serialize dry run info: {e}"))
             })?;
-            // ast-grep-ignore: no-println
-            println!("{output}");
+            write_stdout_line(&output)?;
         }
         ExecutionResult::Empty => {}
     }
@@ -95,104 +95,105 @@ pub fn render_result_to_string(
 }
 
 /// Renders extended examples for a command to stdout.
-pub fn render_examples(api_name: &str, operation: &CachedCommand) {
+///
+/// # Errors
+///
+/// Returns an error when writing to stdout fails for a reason other than a
+/// broken pipe.
+pub fn render_examples(api_name: &str, operation: &CachedCommand) -> Result<(), Error> {
     let operation_name = crate::docs::DocumentationGenerator::effective_operation(operation);
     let examples = crate::docs::DocumentationGenerator::canonical_examples(api_name, operation);
+    let mut output = String::new();
 
-    // ast-grep-ignore: no-println
-    println!("Command: {operation_name}\n");
+    writeln!(&mut output, "Command: {operation_name}\n").expect("writing to String cannot fail");
 
     if let Some(ref summary) = operation.summary {
-        // ast-grep-ignore: no-println
-        println!("Description: {summary}\n");
+        writeln!(&mut output, "Description: {summary}\n").expect("writing to String cannot fail");
     }
 
-    // ast-grep-ignore: no-println
-    println!("Method: {} {}\n", operation.method, operation.path);
+    writeln!(
+        &mut output,
+        "Method: {} {}\n",
+        operation.method, operation.path
+    )
+    .expect("writing to String cannot fail");
 
-    // ast-grep-ignore: no-println
-    println!("Examples:\n");
+    writeln!(&mut output, "Examples:\n").expect("writing to String cannot fail");
     for (i, example) in examples.iter().enumerate() {
-        // ast-grep-ignore: no-println
-        println!("{}. {}", i + 1, example.description);
-        // ast-grep-ignore: no-println
-        println!("   {}", example.command_line);
+        writeln!(&mut output, "{}. {}", i + 1, example.description)
+            .expect("writing to String cannot fail");
+        writeln!(&mut output, "   {}", example.command_line)
+            .expect("writing to String cannot fail");
         if let Some(ref explanation) = example.explanation {
-            // ast-grep-ignore: no-println
-            println!("   {explanation}");
+            writeln!(&mut output, "   {explanation}").expect("writing to String cannot fail");
         }
-        // ast-grep-ignore: no-println
-        println!();
+        writeln!(&mut output).expect("writing to String cannot fail");
     }
 
     // Additional helpful information
     if operation.parameters.is_empty() {
-        return;
+        return write_stdout_line(output.trim_end());
     }
 
-    // ast-grep-ignore: no-println
-    println!("Parameters:");
+    writeln!(&mut output, "Parameters:").expect("writing to String cannot fail");
     for param in &operation.parameters {
         let required = if param.required { " (required)" } else { "" };
         let param_type = param.schema_type.as_deref().unwrap_or("string");
-        // ast-grep-ignore: no-println
-        println!(
+        writeln!(
+            &mut output,
             "  --{}{} [{}]",
             to_kebab_case(&param.name),
             required,
             param_type
-        );
+        )
+        .expect("writing to String cannot fail");
 
         let Some(ref desc) = param.description else {
             continue;
         };
-        // ast-grep-ignore: no-println
-        println!("      {desc}");
+        writeln!(&mut output, "      {desc}").expect("writing to String cannot fail");
     }
-    // ast-grep-ignore: no-println
-    println!();
+    writeln!(&mut output).expect("writing to String cannot fail");
 
     if operation.request_body.is_some() {
-        // ast-grep-ignore: no-println
-        println!("Request Body:");
-        // ast-grep-ignore: no-println
-        println!("  --body JSON (required)");
-        // ast-grep-ignore: no-println
-        println!("      JSON data to send in the request body");
+        writeln!(&mut output, "Request Body:").expect("writing to String cannot fail");
+        writeln!(&mut output, "  --body JSON (required)").expect("writing to String cannot fail");
+        writeln!(&mut output, "      JSON data to send in the request body")
+            .expect("writing to String cannot fail");
     }
+
+    write_stdout_line(output.trim_end())
 }
 
 // ── Internal helpers ────────────────────────────────────────────────
 
 /// Core formatting logic shared by `render_result` and `render_result_to_string`.
-fn render_json_output(processed_text: &str, capture_output: bool) -> Option<String> {
+fn render_json_output(processed_text: &str, capture_output: bool) -> Result<Option<String>, Error> {
     let output = serde_json::from_str::<Value>(processed_text)
         .ok()
         .and_then(|json_value| serde_json::to_string_pretty(&json_value).ok())
         .unwrap_or_else(|| processed_text.to_string());
 
     if capture_output {
-        return Some(output);
+        return Ok(Some(output));
     }
 
-    // ast-grep-ignore: no-println
-    println!("{output}");
-    None
+    write_stdout_line(&output)?;
+    Ok(None)
 }
 
-fn render_yaml_output(processed_text: &str, capture_output: bool) -> Option<String> {
+fn render_yaml_output(processed_text: &str, capture_output: bool) -> Result<Option<String>, Error> {
     let output = serde_json::from_str::<Value>(processed_text)
         .ok()
         .and_then(|json_value| serde_yaml::to_string(&json_value).ok())
         .unwrap_or_else(|| processed_text.to_string());
 
     if capture_output {
-        return Some(output);
+        return Ok(Some(output));
     }
 
-    // ast-grep-ignore: no-println
-    println!("{output}");
-    None
+    write_stdout_line(&output)?;
+    Ok(None)
 }
 
 fn render_table_output(
@@ -200,15 +201,10 @@ fn render_table_output(
     capture_output: bool,
 ) -> Result<Option<String>, Error> {
     let Ok(json_value) = serde_json::from_str::<Value>(processed_text) else {
-        return Ok(output_or_capture(processed_text, capture_output));
+        return output_or_capture(processed_text, capture_output);
     };
 
-    let table_output = print_as_table(&json_value, capture_output)?;
-    if capture_output {
-        return Ok(table_output);
-    }
-
-    Ok(None)
+    print_as_table(&json_value, capture_output)
 }
 
 fn format_and_print(
@@ -224,54 +220,52 @@ fn format_and_print(
     };
 
     match output_format {
-        OutputFormat::Json => Ok(render_json_output(&processed_text, capture_output)),
-        OutputFormat::Yaml => Ok(render_yaml_output(&processed_text, capture_output)),
+        OutputFormat::Json => render_json_output(&processed_text, capture_output),
+        OutputFormat::Yaml => render_yaml_output(&processed_text, capture_output),
         OutputFormat::Table => render_table_output(&processed_text, capture_output),
     }
 }
 
 /// Prints items as a numbered list.
-fn print_numbered_list(items: &[Value], capture_output: bool) -> Option<String> {
+fn print_numbered_list(items: &[Value], capture_output: bool) -> Result<Option<String>, Error> {
     if capture_output {
         let mut output = String::new();
         for (i, item) in items.iter().enumerate() {
             writeln!(&mut output, "{}: {}", i, format_value_for_table(item))
                 .expect("writing to String cannot fail");
         }
-        return Some(output.trim_end().to_string());
+        return Ok(Some(output.trim_end().to_string()));
     }
 
     for (i, item) in items.iter().enumerate() {
-        // ast-grep-ignore: no-println
-        println!("{}: {}", i, format_value_for_table(item));
+        write_stdout_line(&format!("{}: {}", i, format_value_for_table(item)))?;
     }
-    None
+    Ok(None)
 }
 
 /// Helper to output or capture a message.
-fn output_or_capture(message: &str, capture_output: bool) -> Option<String> {
+fn output_or_capture(message: &str, capture_output: bool) -> Result<Option<String>, Error> {
     if capture_output {
-        return Some(message.to_string());
+        return Ok(Some(message.to_string()));
     }
-    // ast-grep-ignore: no-println
-    println!("{message}");
-    None
+    write_stdout_line(message)?;
+    Ok(None)
 }
 
 /// Prints JSON data as a formatted table.
 #[allow(clippy::unnecessary_wraps, clippy::too_many_lines)]
 fn print_as_table(json_value: &Value, capture_output: bool) -> Result<Option<String>, Error> {
     match json_value {
-        Value::Array(items) => Ok(render_array_as_table(items, capture_output)),
-        Value::Object(obj) => Ok(render_object_as_table(obj, capture_output)),
+        Value::Array(items) => render_array_as_table(items, capture_output),
+        Value::Object(obj) => render_object_as_table(obj, capture_output),
         _ => {
             let formatted = format_value_for_table(json_value);
-            Ok(output_or_capture(&formatted, capture_output))
+            output_or_capture(&formatted, capture_output)
         }
     }
 }
 
-fn render_array_as_table(items: &[Value], capture_output: bool) -> Option<String> {
+fn render_array_as_table(items: &[Value], capture_output: bool) -> Result<Option<String>, Error> {
     if items.is_empty() {
         return output_or_capture(constants::EMPTY_ARRAY, capture_output);
     }
@@ -300,7 +294,7 @@ fn render_array_as_table(items: &[Value], capture_output: bool) -> Option<String
 fn render_object_as_table(
     obj: &serde_json::Map<String, Value>,
     capture_output: bool,
-) -> Option<String> {
+) -> Result<Option<String>, Error> {
     if obj.len() > MAX_TABLE_ROWS {
         return output_or_capture(
             &format_large_collection_message("Object", obj.len()),
