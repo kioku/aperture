@@ -211,6 +211,8 @@ const LANDING_INCOMPATIBLE_GLOBAL_FLAGS: &[&str] = &[
     "--json-errors",
     "--dry-run",
     "--idempotency-key",
+    "--proxy",
+    "--no-proxy",
     "--format",
     "--jq",
     "--batch-file",
@@ -360,6 +362,8 @@ const RESERVED_EXECUTION_FLAGS: &[(&str, bool)] = &[
     ("--describe-json", false),
     ("--dry-run", false),
     ("--idempotency-key", true),
+    ("--proxy", true),
+    ("--no-proxy", false),
     ("--format", true),
     ("--jq", true),
     ("--batch-file", true),
@@ -935,5 +939,29 @@ mod tests {
             .expect("misplaced --api should generate a hint");
 
         assert!(hint.contains("aperture run --api test-api <shortcut> ..."));
+    }
+
+    #[test]
+    fn detects_misplaced_proxy_execution_flags_after_operation_path() {
+        let args = vec![
+            "users".to_string(),
+            "get-user-by-id".to_string(),
+            "--proxy".to_string(),
+            "http://proxy.example:8080".to_string(),
+        ];
+        assert_eq!(
+            find_misplaced_execution_flag_after_operation_path_started(&args),
+            Some("--proxy")
+        );
+
+        let args = vec![
+            "users".to_string(),
+            "get-user-by-id".to_string(),
+            "--no-proxy".to_string(),
+        ];
+        assert_eq!(
+            find_misplaced_execution_flag_after_operation_path_started(&args),
+            Some("--no-proxy")
+        );
     }
 }

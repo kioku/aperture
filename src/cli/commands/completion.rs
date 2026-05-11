@@ -40,6 +40,8 @@ const API_EXECUTION_FLAGS: &[&str] = &[
     "--describe-json",
     "--dry-run",
     "--idempotency-key",
+    "--proxy",
+    "--no-proxy",
     "--format",
     "--jq",
     "--batch-file",
@@ -58,6 +60,7 @@ const API_EXECUTION_FLAGS: &[&str] = &[
 
 const API_PREFIX_FLAGS_WITH_VALUES: &[&str] = &[
     "--idempotency-key",
+    "--proxy",
     "--format",
     "--jq",
     "--batch-file",

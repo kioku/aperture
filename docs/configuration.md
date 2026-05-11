@@ -207,10 +207,10 @@ Aperture redacts proxy credentials in dry-run output, JSON errors, and debug log
 
 ```bash
 # Use a different proxy just for this request
-aperture api my-api users list --proxy "http://other-proxy.example:8080"
+aperture api my-api --proxy "http://other-proxy.example:8080" users list
 
 # Bypass all environment and config-file proxy settings
-aperture api my-api users list --no-proxy
+aperture api my-api --no-proxy users list
 ```
 
 ## Secret Management

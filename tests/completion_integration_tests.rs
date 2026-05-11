@@ -398,5 +398,7 @@ fn runtime_completion_tolerates_missing_execution_flag_value() {
         .assert()
         .success()
         .stdout(predicate::str::contains("users"))
-        .stdout(predicate::str::contains("--dry-run"));
+        .stdout(predicate::str::contains("--dry-run"))
+        .stdout(predicate::str::contains("--proxy"))
+        .stdout(predicate::str::contains("--no-proxy"));
 }

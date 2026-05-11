@@ -233,16 +233,16 @@ aperture config setting set proxy.http "http://proxy.corp.example:8080"
 aperture -v api myapi users list
 
 # Per-request override
-aperture -v api myapi users list --proxy "http://other-proxy.example:8080"
+aperture -v api myapi --proxy "http://other-proxy.example:8080" users list
 
 # Confirm proxy bypass
-aperture -v api myapi users list --no-proxy
+aperture -v api myapi --no-proxy users list
 ```
 
 `--dry-run` also includes sanitized proxy diagnostics:
 
 ```bash
-aperture api myapi users list --dry-run
+aperture api myapi --dry-run users list
 ```
 
 If a request unexpectedly uses or bypasses a proxy, check the priority order:
