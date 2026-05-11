@@ -46,13 +46,11 @@ pub struct RealInputOutput;
 
 impl InputOutput for RealInputOutput {
     fn print(&self, text: &str) -> Result<(), Error> {
-        print!("{text}");
-        Ok(())
+        crate::output::write_stdout(text)
     }
 
     fn println(&self, text: &str) -> Result<(), Error> {
-        crate::stdoutln!("{text}");
-        Ok(())
+        crate::output::write_stdout_line(text)
     }
 
     fn flush(&self) -> Result<(), Error> {
