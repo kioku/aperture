@@ -48,7 +48,11 @@ fn write_json_line<W: std::io::Write + ?Sized, T: serde::Serialize>(
 ) -> Result<(), Error> {
     let line = serde_json::to_string(value)
         .map_err(|e| Error::serialization_error(format!("Failed to serialize output line: {e}")))?;
-    writeln!(writer, "{line}").map_err(|e| Error::io_error(format!("Failed to write output: {e}")))
+    match writeln!(writer, "{line}") {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err(e) => Err(Error::io_error(format!("Failed to write output: {e}"))),
+    }
 }
 
 async fn fetch_page_payload<W: std::io::Write + ?Sized>(
@@ -535,6 +539,45 @@ mod tests {
     fn test_extract_items_empty_array() {
         let json = serde_json::json!([]);
         assert_eq!(extract_items(&json).len(), 0);
+    }
+
+    struct BrokenPipeWriter;
+
+    impl std::io::Write for BrokenPipeWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "closed pipe",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct OtherErrorWriter;
+
+    impl std::io::Write for OtherErrorWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("disk full"))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_write_json_line_ignores_broken_pipe() {
+        let mut writer = BrokenPipeWriter;
+        assert!(write_json_line(&mut writer, &serde_json::json!({"id": 1})).is_ok());
+    }
+
+    #[test]
+    fn test_write_json_line_surfaces_other_errors() {
+        let mut writer = OtherErrorWriter;
+        assert!(write_json_line(&mut writer, &serde_json::json!({"id": 1})).is_err());
     }
 
     // ── advance_offset_strategy ───────────────────────────────────────────
