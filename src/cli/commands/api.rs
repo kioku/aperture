@@ -10,7 +10,7 @@ use crate::discovery_style::DiscoveryStyle;
 use crate::engine::{executor, generator, loader};
 use crate::error::Error;
 use crate::fs::OsFileSystem;
-use crate::output::Output;
+use crate::output::{write_stdout_line, Output};
 use crate::shortcuts::{ResolutionResult, ShortcutResolver};
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -127,9 +127,7 @@ fn handle_describe_json_command(
         Some(jq_filter) => executor::apply_jq_filter(&manifest, jq_filter)?,
         None => manifest,
     };
-    // ast-grep-ignore: no-println
-    println!("{output}");
-    Ok(())
+    write_stdout_line(&output)
 }
 
 async fn handle_batch_file_command(
@@ -207,9 +205,7 @@ fn render_api_context_landing(context: &str, spec: &CachedSpec) -> Result<(), Er
     )
     .ok();
 
-    // ast-grep-ignore: no-println
-    println!("{overview}");
-    Ok(())
+    write_stdout_line(&overview)
 }
 
 const LANDING_INCOMPATIBLE_GLOBAL_FLAGS: &[&str] = &[
@@ -620,8 +616,7 @@ pub async fn execute_batch_operations(
         return Ok(());
     }
 
-    render_batch_text_summary(&result, &output);
-    Ok(())
+    render_batch_text_summary(&result, &output)
 }
 
 fn render_batch_json_summary(
@@ -652,27 +647,28 @@ fn render_batch_json_summary(
         None => serde_json::to_string_pretty(&summary)
             .expect("JSON serialization of valid structure cannot fail"),
     };
-    // ast-grep-ignore: no-println
-    println!("{json_output}");
+    write_stdout_line(&json_output)?;
     if result.failure_count > 0 {
         std::process::exit(1);
     }
     Ok(())
 }
 
-fn render_batch_text_summary(result: &crate::batch::BatchResult, output: &Output) {
+fn render_batch_text_summary(
+    result: &crate::batch::BatchResult,
+    output: &Output,
+) -> Result<(), Error> {
     output.info("\n=== Batch Execution Summary ===");
-    // ast-grep-ignore: no-println
-    println!("Total operations: {}", result.results.len());
-    // ast-grep-ignore: no-println
-    println!("Successful: {}", result.success_count);
-    // ast-grep-ignore: no-println
-    println!("Failed: {}", result.failure_count);
-    // ast-grep-ignore: no-println
-    println!("Total time: {:.2}s", result.total_duration.as_secs_f64());
+    write_stdout_line(&format!("Total operations: {}", result.results.len()))?;
+    write_stdout_line(&format!("Successful: {}", result.success_count))?;
+    write_stdout_line(&format!("Failed: {}", result.failure_count))?;
+    write_stdout_line(&format!(
+        "Total time: {:.2}s",
+        result.total_duration.as_secs_f64()
+    ))?;
 
     if result.failure_count == 0 {
-        return;
+        return Ok(());
     }
 
     output.info("\nFailed operations:");
@@ -680,13 +676,12 @@ fn render_batch_text_summary(result: &crate::batch::BatchResult, output: &Output
         if op_result.success {
             continue;
         }
-        // ast-grep-ignore: no-println
-        println!(
+        write_stdout_line(&format!(
             "  {} - {}: {}",
             i + 1,
             op_result.operation.args.join(" "),
             op_result.error.as_deref().unwrap_or("Unknown error")
-        );
+        ))?;
     }
 
     std::process::exit(1);
