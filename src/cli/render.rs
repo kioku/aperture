@@ -13,28 +13,47 @@ use crate::invocation::ExecutionResult;
 use crate::output::write_stdout_line;
 use crate::utils::to_kebab_case;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Write;
-use tabled::Table;
+use tabled::{Table, Tabled};
 
 /// Maximum number of rows to display in table format to prevent memory exhaustion.
 const MAX_TABLE_ROWS: usize = 1000;
 
 // Table structures for tabled crate
-#[derive(tabled::Tabled)]
 struct TableRow {
-    #[tabled(rename = "Key")]
     key: String,
-    #[tabled(rename = "Value")]
     value: String,
 }
 
-#[derive(tabled::Tabled)]
+impl Tabled for TableRow {
+    const LENGTH: usize = 2;
+
+    fn fields(&self) -> Vec<Cow<'_, str>> {
+        vec![Cow::Borrowed(&self.key), Cow::Borrowed(&self.value)]
+    }
+
+    fn headers() -> Vec<Cow<'static, str>> {
+        vec![Cow::Borrowed("Key"), Cow::Borrowed("Value")]
+    }
+}
+
 struct KeyValue {
-    #[tabled(rename = "Key")]
     key: String,
-    #[tabled(rename = "Value")]
     value: String,
+}
+
+impl Tabled for KeyValue {
+    const LENGTH: usize = 2;
+
+    fn fields(&self) -> Vec<Cow<'_, str>> {
+        vec![Cow::Borrowed(&self.key), Cow::Borrowed(&self.value)]
+    }
+
+    fn headers() -> Vec<Cow<'static, str>> {
+        vec![Cow::Borrowed("Key"), Cow::Borrowed("Value")]
+    }
 }
 
 /// Renders an [`ExecutionResult`] to stdout in the given format.
