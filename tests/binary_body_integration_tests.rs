@@ -370,6 +370,42 @@ async fn binary_download_is_exact_and_destinations_fail_closed() {
     server.reset().await;
     Mock::given(method("GET"))
         .and(path("/blob"))
+        .respond_with(ResponseTemplate::new(503).set_body_bytes(b"retry"))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/blob"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(BLOB))
+        .expect(1)
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let retried_output = temp.path().join("retried.bin");
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", &config)
+        .env("APERTURE_TEST_BINARY_TOKEN", token)
+        .args([
+            "api",
+            "--retry",
+            "2",
+            "--retry-delay",
+            "1ms",
+            "--output-file",
+            retried_output.to_str().unwrap(),
+            "binary-test",
+            "blobs",
+            "download-blob",
+        ])
+        .assert()
+        .success();
+    assert_eq!(fs::read(&retried_output).unwrap(), BLOB);
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/blob"))
         .respond_with(ResponseTemplate::new(500).set_body_bytes(BLOB))
         .mount(&server)
         .await;
