@@ -636,6 +636,23 @@ impl SpecValidator {
             || base_type.to_lowercase().ends_with("+json")
     }
 
+    fn is_binary_media_type(content_type: &str, media_type: &openapiv3::MediaType) -> bool {
+        if content_type != constants::CONTENT_TYPE_OCTET_STREAM {
+            return false;
+        }
+        let Some(ReferenceOr::Item(schema)) = media_type.schema.as_ref() else {
+            return false;
+        };
+        let openapiv3::SchemaKind::Type(openapiv3::Type::String(string)) = &schema.schema_kind
+        else {
+            return false;
+        };
+        matches!(
+            string.format,
+            openapiv3::VariantOrUnknownOrEmpty::Item(openapiv3::StringFormat::Binary)
+        )
+    }
+
     /// Validates a request body against Aperture's supported features
     fn validate_request_body(
         path: &str,
@@ -662,10 +679,10 @@ impl SpecValidator {
         let mut has_json = false;
         let mut unsupported_types = Vec::new();
 
-        for content_type in request_body.content.keys() {
+        for (content_type, media_type) in &request_body.content {
             if Self::is_json_content_type(content_type) {
                 has_json = true;
-            } else {
+            } else if !Self::is_binary_media_type(content_type, media_type) {
                 unsupported_types.push(content_type);
             }
         }

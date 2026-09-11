@@ -153,6 +153,24 @@ echo '{"name": "John"}' | aperture api my-api users create --body-file -
 aperture api my-api orders search --status pending --created-after 2024-01-01
 ```
 
+### Binary request and response bodies
+
+Aperture supports single-part `application/octet-stream` bodies declared by OpenAPI as
+`type: string`, `format: binary`. Upload bytes with `--body-file PATH`, or use
+`--body-file -` to read stdin. Inline `--body` remains JSON-only.
+
+Declared binary responses require an explicit destination:
+
+```bash
+aperture api --output-file download.bin my-api blobs download-blob
+aperture api --output-file - my-api blobs download-blob > download.bin
+```
+
+Both destinations preserve bytes exactly and add no newline. `--dry-run` never creates the
+output file. Binary operations cannot use `--cache`; binary responses also cannot use `--jq`,
+normal response formatting, auto-pagination, or batch response capture. Batch `body_file`
+continues to support uploads and reads raw bytes for binary operations.
+
 ### Flag Scoping Model
 
 Execution-oriented flags are scoped to execution commands (`api`, `run`) instead of being global.

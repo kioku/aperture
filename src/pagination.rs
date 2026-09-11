@@ -76,6 +76,9 @@ async fn fetch_page_payload<W: std::io::Write + ?Sized>(
             write_json_line(writer, &request_info)?;
             Ok(None)
         }
+        ExecutionResult::Binary { .. } => Err(Error::validation_error(
+            "Binary responses cannot be auto-paginated",
+        )),
         ExecutionResult::Empty => Ok(None),
     }
 }

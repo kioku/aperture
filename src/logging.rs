@@ -187,6 +187,28 @@ pub fn should_redact_header(header_name: &str) -> bool {
     )
 }
 
+/// Extends standard redaction with custom API-key header names declared by an operation.
+#[must_use]
+pub fn should_redact_operation_header(
+    header_name: &str,
+    spec: &CachedSpec,
+    operation: &crate::cache::models::CachedCommand,
+) -> bool {
+    should_redact_header(header_name)
+        || operation.security_requirements.iter().any(|scheme_name| {
+            spec.security_schemes
+                .get(scheme_name)
+                .is_some_and(|scheme| {
+                    scheme.scheme_type == crate::constants::AUTH_SCHEME_APIKEY
+                        && scheme.location.as_deref() == Some(crate::constants::LOCATION_HEADER)
+                        && scheme
+                            .parameter_name
+                            .as_deref()
+                            .is_some_and(|name| name.eq_ignore_ascii_case(header_name))
+                })
+        })
+}
+
 /// Checks if a query parameter name should be redacted
 #[must_use]
 fn should_redact_query_param(param_name: &str) -> bool {

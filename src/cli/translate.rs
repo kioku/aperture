@@ -11,7 +11,7 @@ use crate::constants;
 use crate::duration::parse_duration;
 use crate::engine::executor::RetryContext;
 use crate::error::Error;
-use crate::invocation::{ExecutionContext, OperationCall, ProxyOverride};
+use crate::invocation::{ExecutionContext, OperationCall, ProxyOverride, RequestBody};
 use crate::response_cache::CacheConfig;
 use crate::utils::to_kebab_case;
 use clap::ArgMatches;
@@ -52,7 +52,7 @@ pub fn matches_to_operation_call(
     }
 
     // Extract request body
-    let body = extract_body(operation.request_body.is_some(), current_matches)?;
+    let body = extract_body(operation.request_body.as_ref(), current_matches)?;
 
     // Extract custom headers from --header/-H flags
     let custom_headers = current_matches
@@ -231,27 +231,53 @@ fn extract_param(
     }
 }
 
-/// Extracts the request body from matches.
-///
-/// Checks `--body-file` before `--body`. When the path is `"-"`, content is
-/// read from stdin; otherwise from the named file. Content is validated as
-/// JSON in both cases, matching the behaviour of `--body`.
-fn extract_body(has_request_body: bool, matches: &ArgMatches) -> Result<Option<String>, Error> {
-    if !has_request_body {
+/// Extracts a JSON or binary request body without changing its wire representation.
+fn extract_body(
+    request_body: Option<&crate::cache::models::CachedRequestBody>,
+    matches: &ArgMatches,
+) -> Result<Option<RequestBody>, Error> {
+    let Some(request_body) = request_body else {
         return Ok(None);
+    };
+
+    let inline_body = matches.try_get_one::<String>("body").ok().flatten();
+    if request_body.is_binary() && inline_body.is_some() {
+        return Err(Error::validation_error(
+            "Binary request bodies require --body-file PATH or --body-file -; --body accepts JSON only",
+        ));
+    }
+    if request_body.is_binary() {
+        return matches
+            .try_get_one::<String>("body-file")
+            .ok()
+            .flatten()
+            .map(|path| read_binary_body_file(path).map(RequestBody::Binary))
+            .transpose();
     }
 
     if let Some(path) = matches.try_get_one::<String>("body-file").ok().flatten() {
-        return read_body_file(path).map(Some);
+        return read_json_body_file(path).map(RequestBody::Json).map(Some);
     }
 
     matches
         .get_one::<String>("body")
-        .map(|body_value| validate_inline_body(body_value))
+        .map(|body_value| validate_inline_body(body_value).map(RequestBody::Json))
         .transpose()
 }
 
-fn read_body_file(path: &str) -> Result<String, Error> {
+fn read_binary_body_file(path: &str) -> Result<Vec<u8>, Error> {
+    if path == "-" {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut bytes)
+            .map_err(|e| Error::io_error(format!("Failed to read body from stdin: {e}")))?;
+        return Ok(bytes);
+    }
+    std::fs::read(path)
+        .map_err(|e| Error::io_error(format!("Failed to read body file '{path}': {e}")))
+}
+
+fn read_json_body_file(path: &str) -> Result<String, Error> {
     let raw = if path == "-" {
         let mut buf = String::new();
         std::io::stdin()

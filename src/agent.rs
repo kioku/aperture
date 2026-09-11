@@ -332,6 +332,9 @@ pub struct RequestBodyInfo {
     pub required: bool,
     /// Content type (e.g., "application/json")
     pub content_type: String,
+    /// Whether `--body-file PATH` / `--body-file -` supplies raw bytes.
+    #[serde(default)]
+    pub binary: bool,
     /// Description of the request body
     pub description: Option<String>,
     /// Example of the request body
@@ -426,6 +429,9 @@ impl PaginationManifestInfo {
 pub struct ResponseSchemaInfo {
     /// Content type (e.g., "application/json")
     pub content_type: String,
+    /// Whether `--output-file PATH` / `--output-file -` is required for exact bytes.
+    #[serde(default)]
+    pub binary: bool,
     /// JSON Schema representation of the response body
     ///
     /// Note: This schema may contain unresolved `$ref` objects for nested references.
@@ -772,6 +778,7 @@ fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> Reque
     RequestBodyInfo {
         required: cached_body.required,
         content_type: cached_body.content_type.clone(),
+        binary: cached_body.is_binary(),
         description: cached_body.description.clone(),
         example: cached_body.example.clone(),
     }
@@ -800,6 +807,7 @@ fn extract_response_schema_from_cached(
 
                 Some(ResponseSchemaInfo {
                     content_type: content_type.clone(),
+                    binary: response.is_binary(),
                     schema,
                     example,
                 })
@@ -909,9 +917,20 @@ fn extract_request_body_info(operation: &Operation) -> Option<RequestBodyInfo> {
         .as_ref()
         .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
 
+    let binary = content_type == constants::CONTENT_TYPE_OCTET_STREAM
+        && media_type.schema.as_ref().is_some_and(|schema| {
+            matches!(
+                schema,
+                ReferenceOr::Item(openapiv3::Schema {
+                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::String(string)),
+                    ..
+                }) if matches!(string.format, openapiv3::VariantOrUnknownOrEmpty::Item(openapiv3::StringFormat::Binary))
+            )
+        });
     Some(RequestBodyInfo {
         required: body.required,
         content_type: content_type.to_string(),
+        binary,
         description: body.description.clone(),
         example,
     })
@@ -1020,8 +1039,17 @@ fn extract_response_schema_from_response(
     let schema_value = extract_schema_value(media_type, spec)?;
     let example = extract_response_example(media_type);
 
+    let binary = content_type == constants::CONTENT_TYPE_OCTET_STREAM
+        && matches!(
+            media_type.schema.as_ref(),
+            Some(ReferenceOr::Item(openapiv3::Schema {
+                schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::String(string)),
+                ..
+            })) if matches!(string.format, openapiv3::VariantOrUnknownOrEmpty::Item(openapiv3::StringFormat::Binary))
+        );
     Some(ResponseSchemaInfo {
         content_type: content_type.to_string(),
+        binary,
         schema: schema_value,
         example,
     })

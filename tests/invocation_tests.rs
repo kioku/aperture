@@ -17,7 +17,9 @@ fn operation_call_preserves_pre_extracted_parameters() {
         path_params,
         query_params,
         header_params,
-        body: Some(r#"{"name":"Alice"}"#.to_string()),
+        body: Some(aperture_cli::invocation::RequestBody::Json(
+            r#"{"name":"Alice"}"#.to_string(),
+        )),
         custom_headers: vec!["X-Custom: value".to_string()],
     };
 
@@ -28,7 +30,12 @@ fn operation_call_preserves_pre_extracted_parameters() {
         call.header_params.get("x-request-id"),
         Some(&"req-1".to_string())
     );
-    assert_eq!(call.body.as_deref(), Some(r#"{"name":"Alice"}"#));
+    assert_eq!(
+        call.body
+            .as_ref()
+            .and_then(aperture_cli::invocation::RequestBody::as_json),
+        Some(r#"{"name":"Alice"}"#)
+    );
     assert_eq!(call.custom_headers, vec!["X-Custom: value".to_string()]);
 }
 

@@ -72,6 +72,14 @@ pub struct ExecutionFlags {
     #[arg(long, help = "Bypass all proxy configuration for this request")]
     pub no_proxy: bool,
 
+    /// Write a declared binary response to a file, or - for exact stdout bytes
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Write a binary response to PATH, or - for exact stdout bytes"
+    )]
+    pub output_file: Option<String>,
+
     /// Output format for response data
     #[arg(
         long,

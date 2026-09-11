@@ -181,6 +181,35 @@ pub struct CachedCommand {
     pub pagination: PaginationInfo,
 }
 
+impl CachedCommand {
+    /// Returns the declared single-part binary response media type, when unambiguous.
+    #[must_use]
+    pub fn binary_response_content_type(&self) -> Option<&str> {
+        let mut responses = self.responses.iter().filter(|response| {
+            response
+                .status_code
+                .parse::<u16>()
+                .is_ok_and(|status| (200..300).contains(&status))
+                && response.content_type.is_some()
+                && response.schema.is_some()
+        });
+        let first = responses.next()?;
+        if !first.is_binary() || responses.any(|response| !response.is_binary()) {
+            return None;
+        }
+        first.content_type.as_deref()
+    }
+
+    /// Returns whether request or response bytes make the text response cache unsafe.
+    #[must_use]
+    pub fn has_binary_io(&self) -> bool {
+        self.request_body
+            .as_ref()
+            .is_some_and(CachedRequestBody::is_binary)
+            || self.binary_response_content_type().is_some()
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedParameter {
     pub name: String,
@@ -204,6 +233,15 @@ pub struct CachedRequestBody {
     pub example: Option<String>,
 }
 
+impl CachedRequestBody {
+    /// Returns whether this body uses the native single-part byte stream contract.
+    #[must_use]
+    pub fn is_binary(&self) -> bool {
+        self.content_type == crate::constants::CONTENT_TYPE_OCTET_STREAM
+            && schema_is_string_binary(&self.schema)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedResponse {
     pub status_code: String,
@@ -213,6 +251,37 @@ pub struct CachedResponse {
     /// Example response value (JSON-serialized)
     #[serde(default)]
     pub example: Option<String>,
+}
+
+impl CachedResponse {
+    /// Returns whether this response uses the native single-part byte stream contract.
+    #[must_use]
+    pub fn is_binary(&self) -> bool {
+        self.content_type.as_deref() == Some(crate::constants::CONTENT_TYPE_OCTET_STREAM)
+            && self.schema.as_deref().is_some_and(schema_is_string_binary)
+    }
+}
+
+fn schema_is_string_binary(schema: &str) -> bool {
+    fn contains_pair(value: &serde_json::Value, key: &str, expected: &str) -> bool {
+        match value {
+            serde_json::Value::Object(object) => {
+                object.get(key).and_then(serde_json::Value::as_str) == Some(expected)
+                    || object
+                        .values()
+                        .any(|value| contains_pair(value, key, expected))
+            }
+            serde_json::Value::Array(values) => values
+                .iter()
+                .any(|value| contains_pair(value, key, expected)),
+            _ => false,
+        }
+    }
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(schema) else {
+        return false;
+    };
+    contains_pair(&value, "type", "string") && contains_pair(&value, "format", "binary")
 }
 
 /// Cached representation of a security scheme with x-aperture-secret mapping

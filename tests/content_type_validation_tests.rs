@@ -206,12 +206,12 @@ paths:
     let result = config_manager.add_spec(&name("content-test"), &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
-    // Load cached spec and verify only JSON endpoints were included
+    // Load cached spec and verify JSON plus modeled octet-stream binary were included
     let cache_dir = _temp_dir.path().join(".cache");
     let cached_spec = load_cached_spec(&cache_dir, "content-test").unwrap();
 
-    // Should have 2 endpoints (standard JSON and the custom+json)
-    assert_eq!(cached_spec.commands.len(), 2);
+    // Standard JSON, custom+json, and single-part octet-stream binary are supported.
+    assert_eq!(cached_spec.commands.len(), 3);
 
     let operation_ids: Vec<&str> = cached_spec
         .commands
@@ -220,11 +220,49 @@ paths:
         .collect();
     assert!(operation_ids.contains(&"postJson"));
     assert!(operation_ids.contains(&"postCustom")); // application/vnd.custom+json is now accepted
+    assert!(operation_ids.contains(&"uploadBinary"));
 
     // Try in strict mode - should fail
     let result_strict =
         config_manager.add_spec(&name("content-test-strict"), &spec_file, false, true);
     assert!(result_strict.is_err(), "Should reject spec in strict mode");
+}
+
+#[test]
+fn test_octet_stream_string_binary_is_supported_in_strict_mode() {
+    let (config_manager, temp_dir) = create_temp_config_manager();
+    let spec_file = temp_dir.path().join("binary.yaml");
+    std::fs::write(
+        &spec_file,
+        r"
+openapi: 3.0.3
+info:
+  title: Binary API
+  version: 1.0.0
+paths:
+  /blob:
+    put:
+      operationId: uploadBlob
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '204':
+          description: accepted
+",
+    )
+    .unwrap();
+
+    config_manager
+        .add_spec(&name("binary-strict"), &spec_file, false, true)
+        .expect("a modeled single-part binary body must pass strict validation");
+    let cached = load_cached_spec(temp_dir.path().join(".cache"), "binary-strict").unwrap();
+    assert_eq!(cached.commands.len(), 1);
+    assert_eq!(cached.commands[0].operation_id, "uploadBlob");
 }
 
 #[test]
