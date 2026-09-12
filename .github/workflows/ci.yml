@@ -171,10 +171,12 @@ jobs:
         uses: cachix/install-nix-action@v31
 
       - name: Check flake
-        run: nix flake check
+        # crates.io throttles concurrent fixed-output fetches; serialize Nix
+        # derivations so cold caches remain reproducible.
+        run: nix flake check --option max-jobs 1
 
       - name: Build default package
-        run: nix build
+        run: nix build --option max-jobs 1
 
   ast-grep:
     name: AST Grep Lint
