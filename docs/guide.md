@@ -544,3 +544,8 @@ aperture config reinit --all
 # Reinitialize specific spec
 aperture config reinit my-api
 ```
+
+A cache-format mismatch after an Aperture upgrade is intentional: older transformed
+spec caches may not contain every response variant needed for safe execution. Run
+`aperture config reinit my-api` (or `--all`) to regenerate them from the stored source
+spec. Aperture rejects the old cache and does not modify it during ordinary API calls.

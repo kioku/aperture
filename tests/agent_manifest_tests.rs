@@ -1201,11 +1201,10 @@ fn test_manifest_cached_status_code_fallback() {
 }
 
 #[test]
-fn test_manifest_response_reference_not_resolved() {
+fn test_manifest_response_reference_is_resolved() {
     use openapiv3::Response;
 
-    // Create OpenAPI spec with a response reference ($ref to #/components/responses/...)
-    // This tests the documented limitation that response references are not resolved
+    // Create OpenAPI spec with a response reference ($ref to #/components/responses/...).
     let mut responses = Responses::default();
 
     // Use a reference to a response in components
@@ -1290,13 +1289,12 @@ fn test_manifest_response_reference_not_resolved() {
     let manifest: serde_json::Value =
         serde_json::from_str(&manifest_json).expect("Failed to parse manifest JSON");
 
-    // Verify response_schema is NOT present because response references are not resolved
-    // This is a documented limitation
     let command = &manifest["commands"]["users"][0];
-    assert!(
-        command.get("response_schema").is_none() || command["response_schema"].is_null(),
-        "response_schema should not be present when response is a $ref (documented limitation)"
+    assert_eq!(
+        command["response_schema"]["content_type"],
+        "application/json"
     );
+    assert_eq!(command["response_schema"]["schema"]["type"], "object");
 }
 
 #[test]

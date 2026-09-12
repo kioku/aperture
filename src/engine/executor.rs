@@ -382,7 +382,8 @@ fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyB
 /// Send HTTP request and retain response bytes until the operation's media type is known.
 async fn send_request(
     request: reqwest::RequestBuilder,
-    binary_response: bool,
+    spec: &CachedSpec,
+    operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<HttpResponseBytes, Error> {
     let start_time = std::time::Instant::now();
@@ -407,7 +408,7 @@ async fn send_request(
         .map_err(|e| Error::response_read_error(e.to_string()))?
         .to_vec();
 
-    if binary_response {
+    if operation.has_binary_response() {
         tracing::debug!(
             status = status.as_u16(),
             duration_ms,
@@ -416,13 +417,14 @@ async fn send_request(
         );
     } else {
         let response_text = String::from_utf8_lossy(&response_bytes);
-        logging::log_response(
+        logging::log_operation_response(
             status.as_u16(),
             duration_ms,
             Some(&response_headers_map),
             Some(&response_text),
             logging::get_max_body_len(),
             secret_ctx,
+            (spec, operation),
         );
     }
 
@@ -478,13 +480,7 @@ async fn send_request_with_retry(
 
     let Some(ctx) = retry_context.filter(|ctx| ctx.is_enabled()) else {
         return send_request_once(
-            client,
-            method,
-            url,
-            headers,
-            body,
-            operation.has_binary_response(),
-            secret_ctx,
+            client, method, url, headers, body, spec, operation, secret_ctx,
         )
         .await;
     };
@@ -502,7 +498,8 @@ async fn send_request_with_retry(
             url,
             headers,
             body,
-            operation.has_binary_response(),
+            spec,
+            operation,
             secret_ctx,
         )
         .await;
@@ -524,6 +521,7 @@ async fn send_request_with_retry(
         body,
         ctx,
         &retry_config,
+        spec,
         operation,
         secret_ctx,
     )
@@ -539,6 +537,7 @@ async fn retry_request_with_backoff(
     body: Option<RequestBody>,
     ctx: &RetryContext,
     retry_config: &crate::resilience::RetryConfig,
+    spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<HttpResponseBytes, Error> {
@@ -553,7 +552,7 @@ async fn retry_request_with_backoff(
         attempt += 1;
 
         let request = build_request(client, method.clone(), url, headers.clone(), body.clone());
-        match send_request(request, operation.has_binary_response(), secret_ctx).await {
+        match send_request(request, spec, operation, secret_ctx).await {
             Ok((status, response_headers, response_text)) => {
                 match handle_retryable_http_response(
                     retry_config,
@@ -772,17 +771,19 @@ fn build_request(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_request_once(
     client: &reqwest::Client,
     method: Method,
     url: &str,
     headers: HeaderMap,
     body: Option<RequestBody>,
-    binary_response: bool,
+    spec: &CachedSpec,
+    operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<HttpResponseBytes, Error> {
     let request = build_request(client, method, url, headers, body);
-    send_request(request, binary_response, secret_ctx).await
+    send_request(request, spec, operation, secret_ctx).await
 }
 
 /// Handle HTTP error responses
@@ -1220,12 +1221,13 @@ async fn finalize_execution_result(
     body: Option<&RequestBody>,
     cache_context: Option<(CacheKey, ResponseCache)>,
     cache_config: Option<&CacheConfig>,
+    secret_ctx: &logging::SecretContext,
 ) -> Result<ExecutionResult, Error> {
     if !status.is_success() {
         let error_body = if operation.has_binary_response() {
             format!("<{} binary response bytes>", response_bytes.len())
         } else {
-            String::from_utf8_lossy(&response_bytes).into_owned()
+            secret_ctx.redact_secrets_in_text(&String::from_utf8_lossy(&response_bytes))
         };
         return Err(handle_http_error(status, error_body, spec, operation));
     }
@@ -1360,6 +1362,7 @@ pub async fn execute(
         prepared.body.as_ref(),
         prepared.cache_context,
         prepared.cache_config,
+        &prepared.secret_ctx,
     )
     .await
 }
@@ -1577,7 +1580,8 @@ fn prepare_runtime_context<'a>(
         rc
     });
     let secret_ctx =
-        logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref());
+        logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref())
+            .with_active_operation_headers(spec, operation, headers);
 
     Ok(PreparedRuntimeContext {
         cache_context,

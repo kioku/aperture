@@ -104,7 +104,8 @@ pub struct SkippedEndpoint {
 /// Version 4: Added `example` field to `CachedResponse` for response schema examples
 /// Version 5: Added `display_group`, `display_name`, `aliases`, `hidden` fields for command mapping
 /// Version 6: Added `pagination` field to `CachedCommand` for auto-pagination support
-pub const CACHE_FORMAT_VERSION: u32 = 6;
+/// Version 7: Preserves all response media and `default` declarations during transformation
+pub const CACHE_FORMAT_VERSION: u32 = 7;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -288,13 +289,8 @@ impl CachedResponse {
     /// Returns whether this declaration can represent a successful response body.
     #[must_use]
     pub(crate) fn may_be_successful_body(&self) -> bool {
-        let status = self.status_code.trim();
-        let may_succeed = status
-            .parse::<u16>()
-            .is_ok_and(|status| (200..300).contains(&status))
-            || status.eq_ignore_ascii_case("2XX")
-            || status.eq_ignore_ascii_case("default");
-        may_succeed && self.content_type.is_some()
+        crate::spec::response_status_may_be_successful(&self.status_code)
+            && self.content_type.is_some()
     }
 
     /// Returns whether this response declares a JSON media type.

@@ -138,6 +138,41 @@ fn test_load_cached_spec_corrupted_data() {
 }
 
 #[test]
+fn prior_v6_collapsed_response_cache_is_rejected() {
+    let temp_dir = TempDir::new().unwrap();
+    let cache_dir = temp_dir.path();
+    let mut prior_cache = create_test_cached_spec();
+    prior_cache.cache_format_version = 6;
+    prior_cache.commands[0].responses = vec![CachedResponse {
+        status_code: "200".to_string(),
+        description: Some("Prior transformer retained only JSON".to_string()),
+        content_type: Some(constants::CONTENT_TYPE_JSON.to_string()),
+        schema: Some(r#"{"type":"object"}"#.to_string()),
+        example: None,
+    }];
+    fs::write(
+        cache_dir.join("prior-v6.bin"),
+        postcard::to_allocvec(&prior_cache).unwrap(),
+    )
+    .unwrap();
+
+    let error = load_cached_spec(cache_dir, "prior-v6").unwrap_err();
+    assert!(error.to_string().contains("found v6"));
+    assert!(error.to_string().contains("expected v7"));
+    let Error::Internal {
+        context: Some(context),
+        ..
+    } = error
+    else {
+        panic!("expected version mismatch context");
+    };
+    assert!(context
+        .suggestion
+        .as_deref()
+        .is_some_and(|suggestion| suggestion.contains("config api reinit")));
+}
+
+#[test]
 fn test_load_cached_spec_version_mismatch() {
     let temp_dir = TempDir::new().unwrap();
     let cache_dir = temp_dir.path();

@@ -303,7 +303,7 @@ impl SpecTransformer {
             .request_body
             .as_ref()
             .and_then(Self::transform_request_body);
-        let responses = Self::collect_operation_responses(spec, &operation.responses.responses);
+        let responses = Self::collect_operation_responses(spec, &operation.responses);
         let security_requirements =
             Self::resolve_security_requirements(operation, global_security_requirements);
         let examples = Self::generate_command_examples(
@@ -360,12 +360,12 @@ impl SpecTransformer {
 
     fn collect_operation_responses(
         spec: &OpenAPI,
-        responses: &indexmap::IndexMap<openapiv3::StatusCode, ReferenceOr<openapiv3::Response>>,
+        responses: &openapiv3::Responses,
     ) -> Vec<CachedResponse> {
-        responses
-            .iter()
-            .flat_map(|(code, response_ref)| {
-                Self::transform_response(spec, code.to_string(), response_ref)
+        crate::spec::project_response_declarations(spec, responses)
+            .into_iter()
+            .flat_map(|(status, response)| {
+                Self::transform_response(spec, status, response.as_ref())
             })
             .collect()
     }
@@ -573,9 +573,9 @@ impl SpecTransformer {
     fn transform_response(
         spec: &OpenAPI,
         status_code: String,
-        response_ref: &ReferenceOr<openapiv3::Response>,
+        response: Option<&openapiv3::Response>,
     ) -> Vec<CachedResponse> {
-        let ReferenceOr::Item(response) = response_ref else {
+        let Some(response) = response else {
             return vec![CachedResponse {
                 status_code,
                 description: None,

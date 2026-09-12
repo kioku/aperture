@@ -787,28 +787,10 @@ fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> Reque
     }
 }
 
-/// Extracts response schema from cached responses
-///
-/// Looks for successful response codes (200, 201, 204) in priority order.
-/// If a response exists but lacks `content_type` or schema, falls through to
-/// check the next status code.
+/// Selects a representative non-binary response without limiting valid statuses.
 fn preferred_text_response<'a>(
     responses: &[&'a crate::cache::models::CachedResponse],
 ) -> Option<&'a crate::cache::models::CachedResponse> {
-    for code in constants::SUCCESS_STATUS_CODES {
-        if let Some(response) = responses
-            .iter()
-            .find(|response| response.status_code == code && response.is_json())
-        {
-            return Some(response);
-        }
-        if let Some(response) = responses
-            .iter()
-            .find(|response| response.status_code == code)
-        {
-            return Some(response);
-        }
-    }
     responses
         .iter()
         .find(|response| response.is_json())
@@ -1046,52 +1028,44 @@ fn convert_openapi_operation_to_info(
     }
 }
 
-/// Extracts response schema from an operation's responses
-///
-/// Looks for successful response codes (200, 201, 204) in priority order
-/// and extracts the schema for the first one found with application/json content.
-fn successful_response_media(operation: &Operation) -> Vec<(&str, &openapiv3::MediaType)> {
-    constants::SUCCESS_STATUS_CODES
-        .iter()
-        .filter_map(|code| {
-            operation
-                .responses
-                .responses
-                .get(&openapiv3::StatusCode::Code(
-                    code.parse().expect("valid status code"),
-                ))
-        })
-        .filter_map(|response| match response {
-            ReferenceOr::Item(response) => Some(response.content.iter()),
-            ReferenceOr::Reference { .. } => None,
-        })
-        .flatten()
-        .map(|(content_type, media_type)| (content_type.as_str(), media_type))
+/// Collects media from every explicit, range, and default response that can succeed.
+fn successful_response_media(
+    operation: &Operation,
+    spec: &OpenAPI,
+) -> Vec<(String, openapiv3::MediaType)> {
+    crate::spec::project_response_declarations(spec, &operation.responses)
+        .into_iter()
+        .filter(|(status, _)| crate::spec::response_status_may_be_successful(status))
+        .filter_map(|(_, response)| response)
+        .flat_map(|response| response.content.into_iter())
         .collect()
 }
 
 fn preferred_response_media<'a>(
-    media: &[(&'a str, &'a openapiv3::MediaType)],
+    media: &'a [(String, openapiv3::MediaType)],
     spec: &OpenAPI,
     has_binary: bool,
 ) -> Option<(&'a str, &'a openapiv3::MediaType)> {
     if has_binary {
-        return media.iter().copied().find(|(content_type, media_type)| {
-            response_media_is_binary(content_type, media_type, spec)
-        });
+        return media
+            .iter()
+            .find(|(content_type, media_type)| {
+                response_media_is_binary(content_type, media_type, spec)
+            })
+            .map(|(content_type, media_type)| (content_type.as_str(), media_type));
     }
     media
         .iter()
-        .copied()
         .find(|(content_type, _)| is_json_media_type(content_type))
-        .or_else(|| media.first().copied())
+        .or_else(|| media.first())
+        .map(|(content_type, media_type)| (content_type.as_str(), media_type))
 }
 
 fn extract_response_schema_from_operation(
     operation: &Operation,
     spec: &OpenAPI,
 ) -> Option<ResponseSchemaInfo> {
-    let media = successful_response_media(operation);
+    let media = successful_response_media(operation, spec);
     let has_binary = media
         .iter()
         .any(|(content_type, media_type)| response_media_is_binary(content_type, media_type, spec));
@@ -1102,18 +1076,7 @@ fn extract_response_schema_from_operation(
     extract_response_schema_from_media(content_type, media_type, spec, has_binary && has_text)
 }
 
-/// Extracts response schema from a single response reference
-///
-/// # Limitations
-///
-/// - **Response references are not resolved**: If `response_ref` is a `$ref` to
-///   `#/components/responses/...`, this function returns `None`. Only inline
-///   response definitions are processed. This is a known limitation that may
-///   be addressed in a future version.
-///
-/// - **Nested schema references**: While top-level schema references within the
-///   response content are resolved, any nested `$ref` within the schema's
-///   properties remain unresolved. See [`ResponseSchemaInfo`] for details.
+/// Classifies one projected response medium using the shared schema rules.
 fn response_media_is_binary(
     content_type: &str,
     media_type: &openapiv3::MediaType,
