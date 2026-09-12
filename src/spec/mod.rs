@@ -14,7 +14,7 @@ pub use transformer::SpecTransformer;
 pub use validator::SpecValidator;
 
 use crate::error::Error;
-use openapiv3::{OpenAPI, Operation, Parameter, PathItem, ReferenceOr};
+use openapiv3::{OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Response, Responses};
 use std::collections::HashSet;
 
 /// A helper type to iterate over all HTTP methods in a `PathItem`
@@ -114,6 +114,100 @@ pub fn resolve_schema_reference(
 ) -> Result<openapiv3::Schema, Error> {
     let mut visited = HashSet::new();
     resolve_schema_reference_with_visited(spec, reference, &mut visited, 0)
+}
+
+/// Resolves a component response reference, including chained local references.
+///
+/// # Errors
+///
+/// Returns an error for invalid, missing, circular, or excessively deep references.
+pub fn resolve_response_reference(spec: &OpenAPI, reference: &str) -> Result<Response, Error> {
+    let mut visited = HashSet::new();
+    resolve_response_reference_with_visited(spec, reference, &mut visited, 0)
+}
+
+/// Projects every response declaration into a status and resolved response.
+///
+/// Keeping `default` in this shared projection ensures transformation and direct
+/// manifest discovery classify the same set of potentially successful bodies.
+pub(crate) fn project_response_declarations(
+    spec: &OpenAPI,
+    responses: &Responses,
+) -> Vec<(String, Option<Response>)> {
+    let mut projected = responses
+        .responses
+        .iter()
+        .map(|(status, response)| {
+            (
+                status.to_string(),
+                resolve_response_declaration(spec, response),
+            )
+        })
+        .collect::<Vec<_>>();
+    if let Some(response) = responses.default.as_ref() {
+        projected.push((
+            "default".to_string(),
+            resolve_response_declaration(spec, response),
+        ));
+    }
+    projected
+}
+
+/// Returns whether a response declaration may apply to an HTTP success status.
+#[must_use]
+pub(crate) fn response_status_may_be_successful(status: &str) -> bool {
+    let status = status.trim();
+    status
+        .parse::<u16>()
+        .is_ok_and(|status| (200..300).contains(&status))
+        || status.eq_ignore_ascii_case("2XX")
+        || status.eq_ignore_ascii_case("default")
+}
+
+fn resolve_response_declaration(
+    spec: &OpenAPI,
+    response: &ReferenceOr<Response>,
+) -> Option<Response> {
+    match response {
+        ReferenceOr::Item(response) => Some(response.clone()),
+        ReferenceOr::Reference { reference } => resolve_response_reference(spec, reference).ok(),
+    }
+}
+
+/// Internal method that resolves response references with circular reference detection
+fn resolve_response_reference_with_visited(
+    spec: &OpenAPI,
+    reference: &str,
+    visited: &mut HashSet<String>,
+    depth: usize,
+) -> Result<Response, Error> {
+    let resolution = prepare_component_reference_resolution(
+        spec,
+        reference,
+        visited,
+        depth,
+        "#/components/responses/",
+        format!(
+            "Invalid response reference format: '{reference}'. Expected format: #/components/responses/{{name}}"
+        ),
+        "Cannot resolve response reference: OpenAPI spec has no components section",
+    )?;
+    let response = resolution
+        .components
+        .responses
+        .get(&resolution.name)
+        .ok_or_else(|| {
+            Error::validation_error(format!(
+                "Response '{}' not found in components",
+                resolution.name
+            ))
+        })?;
+    match response {
+        ReferenceOr::Item(response) => Ok(response.clone()),
+        ReferenceOr::Reference {
+            reference: nested_ref,
+        } => resolve_response_reference_with_visited(spec, nested_ref, visited, depth + 1),
+    }
 }
 
 /// Internal method that resolves schema references with circular reference detection

@@ -20,7 +20,26 @@
       mkAperture =
         pkgs:
         { pname ? "aperture", features ? [ ] }:
-        pkgs.rustPlatform.buildRustPackage rec {
+        let
+          # crates.io rejects Nixpkgs' curl-prefixed default user agent. Keep
+          # the override scoped to registry crates imported from Cargo.lock.
+          fetchRegistryCrate = args: pkgs.fetchurl (
+            args
+            // {
+              curlOptsList = (args.curlOptsList or [ ]) ++ [
+                "--user-agent"
+                "aperture-nix/0.1.9"
+              ];
+            }
+          );
+          importCargoLock = pkgs.rustPlatform.importCargoLock.override {
+            fetchurl = fetchRegistryCrate;
+          };
+          buildRustPackage = pkgs.rustPlatform.buildRustPackage.override {
+            inherit importCargoLock;
+          };
+        in
+        buildRustPackage rec {
           inherit pname;
           version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
 

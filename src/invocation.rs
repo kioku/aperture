@@ -11,6 +11,26 @@ use crate::response_cache::CacheConfig;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// A request body that preserves the operation's declared wire representation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestBody {
+    /// Validated JSON source text.
+    Json(String),
+    /// A single-part binary body carried without text conversion.
+    Binary(Vec<u8>),
+}
+
+impl RequestBody {
+    /// Returns the text body used by JSON-only facilities such as response-cache keys.
+    #[must_use]
+    pub fn as_json(&self) -> Option<&str> {
+        match self {
+            Self::Json(value) => Some(value),
+            Self::Binary(_) => None,
+        }
+    }
+}
+
 /// Describes a single API operation to invoke, fully resolved from user input.
 ///
 /// All parameter values are pre-extracted and categorized by their `OpenAPI`
@@ -30,8 +50,8 @@ pub struct OperationCall {
     /// Header parameters keyed by name (e.g., `{"X-Request-Id": "abc"}`).
     pub header_params: HashMap<String, String>,
 
-    /// Optional JSON request body.
-    pub body: Option<String>,
+    /// Optional request body, retaining JSON text or exact binary bytes.
+    pub body: Option<RequestBody>,
 
     /// Custom headers in raw `"Name: Value"` format, as provided by the user.
     pub custom_headers: Vec<String>,
@@ -91,6 +111,16 @@ pub enum ExecutionResult {
     Success {
         /// Response body text.
         body: String,
+        /// HTTP status code.
+        status: u16,
+        /// Response headers.
+        headers: HashMap<String, String>,
+    },
+
+    /// Successful declared binary response.
+    Binary {
+        /// Exact response bytes.
+        body: Vec<u8>,
         /// HTTP status code.
         status: u16,
         /// Response headers.

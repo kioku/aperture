@@ -16,6 +16,7 @@ use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Write;
+use std::io::Write as _;
 use tabled::{Table, Tabled};
 
 /// Maximum number of rows to display in table format to prevent memory exhaustion.
@@ -66,22 +67,72 @@ pub fn render_result(
     format: &OutputFormat,
     jq_filter: Option<&str>,
 ) -> Result<(), Error> {
+    render_result_with_binary_destination(result, format, jq_filter, None)
+}
+
+/// Renders text normally or writes a binary result to its explicit destination.
+///
+/// # Errors
+///
+/// Returns an error for incompatible binary options, formatting failures, or output I/O failures.
+pub fn render_result_with_binary_destination(
+    result: &ExecutionResult,
+    format: &OutputFormat,
+    jq_filter: Option<&str>,
+    output_file: Option<&str>,
+) -> Result<(), Error> {
     match result {
         ExecutionResult::Success { body, .. } | ExecutionResult::Cached { body } => {
-            if body.is_empty() {
-                return Ok(());
-            }
-            format_and_print(body, format, jq_filter, false)?;
+            render_text_body(body, format, jq_filter)?;
+        }
+        ExecutionResult::Binary { body, .. } => {
+            write_binary_response(body, output_file)?;
         }
         ExecutionResult::DryRun { request_info } => {
-            let output = serde_json::to_string_pretty(request_info).map_err(|e| {
-                Error::serialization_error(format!("Failed to serialize dry run info: {e}"))
-            })?;
-            write_stdout_line(&output)?;
+            render_dry_run(request_info)?;
         }
         ExecutionResult::Empty => {}
     }
     Ok(())
+}
+
+fn render_text_body(
+    body: &str,
+    format: &OutputFormat,
+    jq_filter: Option<&str>,
+) -> Result<(), Error> {
+    if body.is_empty() {
+        return Ok(());
+    }
+    format_and_print(body, format, jq_filter, false).map(|_| ())
+}
+
+fn render_dry_run(request_info: &Value) -> Result<(), Error> {
+    let output = serde_json::to_string_pretty(request_info).map_err(|e| {
+        Error::serialization_error(format!("Failed to serialize dry run info: {e}"))
+    })?;
+    write_stdout_line(&output)
+}
+
+fn write_binary_response(body: &[u8], output_file: Option<&str>) -> Result<(), Error> {
+    let destination = output_file.ok_or_else(|| {
+        Error::validation_error("Binary responses require --output-file PATH or --output-file -")
+    })?;
+    if destination == "-" {
+        let mut stdout = std::io::stdout().lock();
+        return stdout
+            .write_all(body)
+            .and_then(|()| stdout.flush())
+            .map_err(|e| {
+                Error::io_error(format!("Failed to write binary response to stdout: {e}"))
+            });
+    }
+
+    crate::atomic::atomic_write_sync(std::path::Path::new(destination), body).map_err(|e| {
+        Error::io_error(format!(
+            "Failed to write binary response to '{destination}': {e}"
+        ))
+    })
 }
 
 /// Renders an [`ExecutionResult`] to a `String` instead of stdout.
@@ -103,6 +154,9 @@ pub fn render_result_to_string(
             }
             format_and_print(body, format, jq_filter, true)
         }
+        ExecutionResult::Binary { .. } => Err(Error::validation_error(
+            "Binary responses cannot be rendered or captured as text",
+        )),
         ExecutionResult::DryRun { request_info } => {
             let output = serde_json::to_string_pretty(request_info).map_err(|e| {
                 Error::serialization_error(format!("Failed to serialize dry run info: {e}"))

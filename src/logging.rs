@@ -21,8 +21,10 @@ const MIN_SECRET_LENGTH_FOR_BODY_REDACTION: usize = 8;
 /// allowing them to be redacted from logs wherever they appear.
 #[derive(Debug, Default, Clone)]
 pub struct SecretContext {
-    /// Resolved secret values that should be redacted
+    /// Resolved configured secret values that should be redacted.
     secrets: Vec<String>,
+    /// Final active credential values, including per-invocation overrides.
+    active_secrets: Vec<String>,
 }
 
 /// Collects non-empty secret values from spec's security schemes.
@@ -97,13 +99,40 @@ impl SecretContext {
         secrets.sort();
         secrets.dedup();
 
-        Self { secrets }
+        Self {
+            secrets,
+            active_secrets: Vec::new(),
+        }
     }
 
-    /// Checks if a value exactly matches any of the secrets.
+    /// Adds final values from active operation security headers to redaction.
+    #[must_use]
+    pub fn with_active_operation_headers(
+        mut self,
+        spec: &CachedSpec,
+        operation: &crate::cache::models::CachedCommand,
+        headers: &reqwest::header::HeaderMap,
+    ) -> Self {
+        self.active_secrets
+            .extend(headers.iter().filter_map(|(name, value)| {
+                should_redact_operation_header(name.as_str(), spec, operation)
+                    .then(|| value.to_str().ok())
+                    .flatten()
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+            }));
+        self.active_secrets.sort();
+        self.active_secrets.dedup();
+        self
+    }
+
+    /// Checks if a value exactly matches any configured or active secret.
     #[must_use]
     pub fn is_secret(&self, value: &str) -> bool {
-        self.secrets.iter().any(|s| s == value)
+        self.secrets
+            .iter()
+            .chain(&self.active_secrets)
+            .any(|secret| secret == value)
     }
 
     /// Redacts all occurrences of secrets in the given text.
@@ -118,13 +147,16 @@ impl SecretContext {
                 result = result.replace(secret, "[REDACTED]");
             }
         }
+        for secret in &self.active_secrets {
+            result = result.replace(secret, "[REDACTED]");
+        }
         result
     }
 
     /// Returns true if this context has any secrets to redact.
     #[must_use]
     pub const fn has_secrets(&self) -> bool {
-        !self.secrets.is_empty()
+        !self.secrets.is_empty() || !self.active_secrets.is_empty()
     }
 }
 
@@ -185,6 +217,28 @@ pub fn should_redact_header(header_name: &str) -> bool {
             // Platform-specific tokens
             | "private-token"
     )
+}
+
+/// Extends standard redaction with custom API-key header names declared by an operation.
+#[must_use]
+pub fn should_redact_operation_header(
+    header_name: &str,
+    spec: &CachedSpec,
+    operation: &crate::cache::models::CachedCommand,
+) -> bool {
+    should_redact_header(header_name)
+        || operation.security_requirements.iter().any(|scheme_name| {
+            spec.security_schemes
+                .get(scheme_name)
+                .is_some_and(|scheme| {
+                    scheme.scheme_type == crate::constants::AUTH_SCHEME_APIKEY
+                        && scheme.location.as_deref() == Some(crate::constants::LOCATION_HEADER)
+                        && scheme
+                            .parameter_name
+                            .as_deref()
+                            .is_some_and(|name| name.eq_ignore_ascii_case(header_name))
+                })
+        })
 }
 
 /// Checks if a query parameter name should be redacted
@@ -291,6 +345,52 @@ pub fn log_request(
     body: Option<&str>,
     secret_ctx: Option<&SecretContext>,
 ) {
+    log_request_with_operation(method, url, headers, body, secret_ctx, None);
+}
+
+/// Logs a request while redacting active operation-specific security header names.
+pub fn log_operation_request(
+    method: &str,
+    url: &str,
+    headers: Option<&reqwest::header::HeaderMap>,
+    body: Option<&str>,
+    secret_ctx: Option<&SecretContext>,
+    spec: &CachedSpec,
+    operation: &crate::cache::models::CachedCommand,
+) {
+    log_request_with_operation(
+        method,
+        url,
+        headers,
+        body,
+        secret_ctx,
+        Some((spec, operation)),
+    );
+}
+
+fn redact_operation_header_value(
+    header_name: &str,
+    value: &str,
+    secret_ctx: Option<&SecretContext>,
+    operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
+) -> String {
+    if operation_context.is_some_and(|(spec, operation)| {
+        should_redact_operation_header(header_name, spec, operation)
+    }) {
+        "[REDACTED]".to_string()
+    } else {
+        redact_header_value(header_name, value, secret_ctx)
+    }
+}
+
+fn log_request_with_operation(
+    method: &str,
+    url: &str,
+    headers: Option<&reqwest::header::HeaderMap>,
+    body: Option<&str>,
+    secret_ctx: Option<&SecretContext>,
+    operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
+) {
     // Redact sensitive query parameters from URL before logging
     let redacted_url = redact_url_query_params(url);
 
@@ -325,7 +425,8 @@ pub fn log_request(
     for (name, value) in header_map {
         let header_str = name.as_str();
         let raw_value = String::from_utf8_lossy(value.as_bytes()).to_string();
-        let display_value = redact_header_value(header_str, &raw_value, secret_ctx);
+        let display_value =
+            redact_operation_header_value(header_str, &raw_value, secret_ctx, operation_context);
         debug!(
             target: "aperture::executor",
             "  {}: {}",
@@ -385,6 +486,48 @@ pub fn log_response(
     max_body_len: usize,
     secret_ctx: Option<&SecretContext>,
 ) {
+    log_response_with_operation(
+        status,
+        duration_ms,
+        headers,
+        body,
+        max_body_len,
+        secret_ctx,
+        None,
+    );
+}
+
+/// Logs a response while redacting active operation-specific security headers.
+pub fn log_operation_response(
+    status: u16,
+    duration_ms: u128,
+    headers: Option<&reqwest::header::HeaderMap>,
+    body: Option<&str>,
+    max_body_len: usize,
+    secret_ctx: Option<&SecretContext>,
+    operation_context: (&CachedSpec, &crate::cache::models::CachedCommand),
+) {
+    log_response_with_operation(
+        status,
+        duration_ms,
+        headers,
+        body,
+        max_body_len,
+        secret_ctx,
+        Some(operation_context),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn log_response_with_operation(
+    status: u16,
+    duration_ms: u128,
+    headers: Option<&reqwest::header::HeaderMap>,
+    body: Option<&str>,
+    max_body_len: usize,
+    secret_ctx: Option<&SecretContext>,
+    operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
+) {
     // Log at info level: status and duration
     let status_text = http_status_text(status);
     info!(
@@ -408,7 +551,8 @@ pub fn log_response(
     for (name, value) in header_map {
         let header_str = name.as_str();
         let raw_value = String::from_utf8_lossy(value.as_bytes()).to_string();
-        let display_value = redact_header_value(header_str, &raw_value, secret_ctx);
+        let display_value =
+            redact_operation_header_value(header_str, &raw_value, secret_ctx, operation_context);
         debug!(
             target: "aperture::executor",
             "  {}: {}",

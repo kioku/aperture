@@ -636,6 +636,15 @@ impl SpecValidator {
             || base_type.to_lowercase().ends_with("+json")
     }
 
+    fn is_binary_media_type(content_type: &str, media_type: &openapiv3::MediaType) -> bool {
+        let Some(ReferenceOr::Item(schema)) = media_type.schema.as_ref() else {
+            return false;
+        };
+        serde_json::to_string(schema).is_ok_and(|schema| {
+            crate::cache::models::is_supported_binary_media_schema(content_type, &schema)
+        })
+    }
+
     /// Validates a request body against Aperture's supported features
     fn validate_request_body(
         path: &str,
@@ -644,7 +653,7 @@ impl SpecValidator {
         result: &mut ValidationResult,
         strict: bool,
     ) {
-        let (has_json, unsupported_types) = Self::categorize_content_types(request_body);
+        let (has_supported, unsupported_types) = Self::categorize_content_types(request_body);
 
         if unsupported_types.is_empty() {
             return;
@@ -653,24 +662,26 @@ impl SpecValidator {
         if strict {
             Self::add_strict_mode_errors(path, method, &unsupported_types, result);
         } else {
-            Self::add_non_strict_warning(path, method, has_json, &unsupported_types, result);
+            Self::add_non_strict_warning(path, method, has_supported, &unsupported_types, result);
         }
     }
 
-    /// Categorize content types into JSON and unsupported
+    /// Categorize content types into supported and unsupported choices.
     fn categorize_content_types(request_body: &RequestBody) -> (bool, Vec<&String>) {
-        let mut has_json = false;
+        let mut has_supported = false;
         let mut unsupported_types = Vec::new();
 
-        for content_type in request_body.content.keys() {
-            if Self::is_json_content_type(content_type) {
-                has_json = true;
+        for (content_type, media_type) in &request_body.content {
+            if Self::is_json_content_type(content_type)
+                || Self::is_binary_media_type(content_type, media_type)
+            {
+                has_supported = true;
             } else {
                 unsupported_types.push(content_type);
             }
         }
 
-        (has_json, unsupported_types)
+        (has_supported, unsupported_types)
     }
 
     /// Add errors for unsupported content types in strict mode
@@ -682,7 +693,7 @@ impl SpecValidator {
     ) {
         for content_type in unsupported_types {
             let error = Error::validation_error(format!(
-                "Unsupported request body content type '{content_type}' in {method} {path}. Only 'application/json' is supported in v1.0."
+                "Unsupported request body content type '{content_type}' in {method} {path}. Supported bodies are JSON or an explicitly modeled single-part string/binary media type."
             ));
             result.add_error(error);
         }
@@ -692,7 +703,7 @@ impl SpecValidator {
     fn add_non_strict_warning(
         path: &str,
         method: &str,
-        has_json: bool,
+        has_supported: bool,
         unsupported_types: &[&String],
         result: &mut ValidationResult,
     ) {
@@ -704,8 +715,8 @@ impl SpecValidator {
             })
             .collect();
 
-        let reason = if has_json {
-            "endpoint has unsupported content types alongside JSON"
+        let reason = if has_supported {
+            "endpoint has unsupported content types alongside a supported content type"
         } else {
             "endpoint has no supported content types"
         };
@@ -915,7 +926,7 @@ mod tests {
             .contains("multipart/form-data"));
         assert!(warning
             .reason
-            .contains("unsupported content types alongside JSON"));
+            .contains("unsupported content types alongside a supported content type"));
     }
 
     #[test]
@@ -996,7 +1007,7 @@ mod tests {
                 ..
             } => {
                 assert!(msg.contains("multipart/form-data"));
-                assert!(msg.contains("v1.0"));
+                assert!(msg.contains("explicitly modeled single-part string/binary"));
             }
             _ => panic!("Expected Validation error"),
         }

@@ -814,6 +814,46 @@ impl BatchProcessor {
         ))
     }
 
+    fn validate_batch_response_type(spec: &CachedSpec, operation_id: &str) -> Result<(), Error> {
+        let target = spec
+            .commands
+            .iter()
+            .find(|command| command.operation_id == operation_id)
+            .ok_or_else(|| Error::validation_error("Batch operation was not found"))?;
+        if target.has_binary_response() {
+            return Err(Error::validation_error(
+                "Binary response operations are not supported in batch mode; no byte-safe per-operation output destination is available",
+            ));
+        }
+        Ok(())
+    }
+
+    fn build_batch_call(
+        spec: &CachedSpec,
+        operation: &BatchOperation,
+    ) -> Result<(crate::invocation::OperationCall, Vec<String>), Error> {
+        Self::validate_batch_body_file_args(operation)?;
+        let command = generator::generate_command_tree_with_flags(spec, false);
+        let extra_body_file = operation
+            .body_file
+            .as_deref()
+            .map(|path| vec!["--body-file".to_string(), path.to_string()])
+            .unwrap_or_default();
+        let matches = command
+            .try_get_matches_from(
+                std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
+                    .chain(operation.args.clone())
+                    .chain(extra_body_file),
+            )
+            .map_err(|error| {
+                Error::invalid_command(crate::constants::CONTEXT_BATCH, error.to_string())
+            })?;
+        let call = crate::cli::translate::matches_to_operation_call(spec, &matches)?;
+        Self::validate_batch_response_type(spec, &call.operation_id)?;
+        let server_vars = crate::cli::translate::extract_server_var_args(&matches);
+        Ok((call, server_vars))
+    }
+
     /// Executes a single operation from a batch
     #[allow(clippy::too_many_arguments)]
     async fn execute_single_operation(
@@ -827,26 +867,9 @@ impl BatchProcessor {
         suppress_output: bool,
         proxy_override: ProxyOverride,
     ) -> Result<String, Error> {
-        use crate::cli::translate;
         use crate::invocation::ExecutionContext;
 
-        Self::validate_batch_body_file_args(operation)?;
-
-        let command = generator::generate_command_tree_with_flags(spec, false);
-        let extra_body_file: Vec<String> = operation
-            .body_file
-            .as_deref()
-            .map(|p| vec!["--body-file".to_string(), p.to_string()])
-            .unwrap_or_default();
-        let matches = command
-            .try_get_matches_from(
-                std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
-                    .chain(operation.args.clone())
-                    .chain(extra_body_file),
-            )
-            .map_err(|e| Error::invalid_command(crate::constants::CONTEXT_BATCH, e.to_string()))?;
-
-        let call = translate::matches_to_operation_call(spec, &matches)?;
+        let (call, server_var_args) = Self::build_batch_call(spec, operation)?;
         let cache_config = Self::build_batch_cache_config(operation.use_cache)?;
         let retry_context = build_batch_retry_context(operation, global_config)?;
 
@@ -858,7 +881,7 @@ impl BatchProcessor {
             base_url: base_url.map(String::from),
             proxy_override,
             global_config: global_config.cloned(),
-            server_var_args: translate::extract_server_var_args(&matches),
+            server_var_args,
             auto_paginate: false,
         };
 

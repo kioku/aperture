@@ -151,12 +151,12 @@ impl FileSystem for MockFileSystem {
         let files = self.files.lock().unwrap();
         let dirs = self.dirs.lock().unwrap();
         let mut entries = Vec::new();
-        for (p, _) in files.iter() {
+        for p in files.keys() {
             if p.parent() == Some(path) {
                 entries.push(p.clone());
             }
         }
-        for (p, _) in dirs.iter() {
+        for p in dirs.keys() {
             if p.parent() == Some(path) && p != path {
                 entries.push(p.clone());
             }
@@ -707,7 +707,9 @@ paths:
     }) = result
     {
         assert!(msg.contains("Unsupported request body content type 'application/xml'"));
-        assert!(msg.contains("Only 'application/json' is supported"));
+        assert!(msg.contains(
+            "Supported bodies are JSON or an explicitly modeled single-part string/binary"
+        ));
     } else {
         panic!("Unexpected error type: {result:?}");
     }
@@ -748,7 +750,9 @@ paths:
     }) = result
     {
         assert!(msg.contains("Unsupported request body content type 'text/plain'"));
-        assert!(msg.contains("Only 'application/json' is supported"));
+        assert!(msg.contains(
+            "Supported bodies are JSON or an explicitly modeled single-part string/binary"
+        ));
     } else {
         panic!("Unexpected error type: {result:?}");
     }

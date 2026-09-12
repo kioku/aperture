@@ -1,8 +1,10 @@
 mod test_helpers;
 
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
+use aperture_cli::cache::models::{
+    CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, PaginationInfo,
+};
 use aperture_cli::engine::executor::execute;
-use aperture_cli::invocation::{ExecutionContext, ExecutionResult, OperationCall};
+use aperture_cli::invocation::{ExecutionContext, ExecutionResult, OperationCall, RequestBody};
 use aperture_cli::response_cache::CacheConfig;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -67,6 +69,109 @@ fn user_by_id_call(id: &str) -> OperationCall {
         body: None,
         custom_headers: vec![],
     }
+}
+
+fn body_call(body: RequestBody) -> OperationCall {
+    OperationCall {
+        operation_id: "upload".to_string(),
+        path_params: HashMap::new(),
+        query_params: HashMap::new(),
+        header_params: HashMap::new(),
+        body: Some(body),
+        custom_headers: vec![],
+    }
+}
+
+fn body_spec(content_type: &str, schema: &str) -> CachedSpec {
+    let mut spec = test_spec();
+    let command = &mut spec.commands[0];
+    command.name = "upload".to_string();
+    command.operation_id = "upload".to_string();
+    command.method = "POST".to_string();
+    command.path = "/upload".to_string();
+    command.parameters.clear();
+    command.request_body = Some(CachedRequestBody {
+        content_type: content_type.to_string(),
+        schema: schema.to_string(),
+        required: true,
+        description: None,
+        example: None,
+    });
+    spec
+}
+
+#[tokio::test]
+async fn execute_rejects_direct_body_mismatches_before_dry_run_or_cache_work() {
+    let cache_dir = tempdir().unwrap();
+    let ctx = ExecutionContext {
+        dry_run: true,
+        base_url: Some("not a valid URL".to_string()),
+        cache_config: Some(CacheConfig {
+            cache_dir: cache_dir.path().to_path_buf(),
+            default_ttl: Duration::from_mins(1),
+            max_entries: 1,
+            enabled: true,
+            allow_authenticated: false,
+        }),
+        ..ExecutionContext::default()
+    };
+    let binary_spec = body_spec("image/png", r#"{"type":"string","format":"binary"}"#);
+    let error = execute(
+        &binary_spec,
+        body_call(RequestBody::Json("{}".to_string())),
+        ctx.clone(),
+    )
+    .await
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("JSON request text does not match"));
+
+    let json_spec = body_spec("application/json", r#"{"type":"object"}"#);
+    for body in [
+        RequestBody::Binary(vec![0xff]),
+        RequestBody::Json("{invalid".to_string()),
+    ] {
+        assert!(execute(&json_spec, body_call(body), ctx.clone())
+            .await
+            .is_err());
+    }
+    assert!(!cache_dir.path().join("cache_metadata.json").exists());
+}
+
+#[tokio::test]
+async fn execute_rejects_ambiguous_binary_responses_before_client_work() {
+    let mut spec = test_spec();
+    spec.commands[0].responses = vec![
+        CachedResponse {
+            status_code: "200".to_string(),
+            description: None,
+            content_type: Some("application/pdf".to_string()),
+            schema: Some(r#"{"type":"string","format":"binary"}"#.to_string()),
+            example: None,
+        },
+        CachedResponse {
+            status_code: "201".to_string(),
+            description: None,
+            content_type: Some("application/json".to_string()),
+            schema: Some(r#"{"type":"object"}"#.to_string()),
+            example: None,
+        },
+    ];
+    let error = execute(
+        &spec,
+        user_by_id_call("123"),
+        ExecutionContext {
+            dry_run: true,
+            base_url: Some("not a valid URL".to_string()),
+            ..ExecutionContext::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("mixes binary and non-binary successful responses"));
 }
 
 #[tokio::test]

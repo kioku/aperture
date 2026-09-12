@@ -3,7 +3,7 @@ use crate::config::models::{GlobalConfig, ProxyConfig};
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
 use crate::error::Error;
-use crate::invocation::{ExecutionResult, ProxyOverride};
+use crate::invocation::{ExecutionResult, ProxyOverride, RequestBody};
 use crate::logging;
 use crate::resilience::{
     calculate_retry_delay_with_header, is_retryable_status, parse_retry_after_value, RetryConfig,
@@ -23,6 +23,7 @@ use std::str::FromStr;
 use tokio::time::sleep;
 
 const DEFAULT_USER_AGENT: &str = concat!("aperture/", env!("CARGO_PKG_VERSION"));
+type HttpResponseBytes = (reqwest::StatusCode, HashMap<String, String>, Vec<u8>);
 
 #[cfg(feature = "jq")]
 use jaq_core::{Ctx, RcIter};
@@ -378,49 +379,56 @@ fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyB
     })
 }
 
-/// Send HTTP request and get response
+/// Send HTTP request and retain response bytes until the operation's media type is known.
 async fn send_request(
     request: reqwest::RequestBuilder,
+    spec: &CachedSpec,
+    operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
-) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+) -> Result<HttpResponseBytes, Error> {
     let start_time = std::time::Instant::now();
-
     let response = request
         .send()
         .await
         .map_err(|e| Error::network_request_failed(e.to_string()))?;
-
     let status = response.status();
     let duration_ms = start_time.elapsed().as_millis();
-
-    // Copy headers before consuming response
     let mut response_headers_map = reqwest::header::HeaderMap::new();
     for (name, value) in response.headers() {
         response_headers_map.insert(name.clone(), value.clone());
     }
-
-    let response_headers: HashMap<String, String> = response
+    let response_headers = response
         .headers()
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
-
-    let response_text = response
-        .text()
+    let response_bytes = response
+        .bytes()
         .await
-        .map_err(|e| Error::response_read_error(e.to_string()))?;
+        .map_err(|e| Error::response_read_error(e.to_string()))?
+        .to_vec();
 
-    // Log response with secret redaction
-    logging::log_response(
-        status.as_u16(),
-        duration_ms,
-        Some(&response_headers_map),
-        Some(&response_text),
-        logging::get_max_body_len(),
-        secret_ctx,
-    );
+    if operation.has_binary_response() {
+        tracing::debug!(
+            status = status.as_u16(),
+            duration_ms,
+            byte_count = response_bytes.len(),
+            "Received binary response"
+        );
+    } else {
+        let response_text = String::from_utf8_lossy(&response_bytes);
+        logging::log_operation_response(
+            status.as_u16(),
+            duration_ms,
+            Some(&response_headers_map),
+            Some(&response_text),
+            logging::get_max_body_len(),
+            secret_ctx,
+            (spec, operation),
+        );
+    }
 
-    Ok((status, response_headers, response_text))
+    Ok((status, response_headers, response_bytes))
 }
 
 /// Send HTTP request with retry logic
@@ -431,23 +439,50 @@ async fn send_request_with_retry(
     method: Method,
     url: &str,
     headers: HeaderMap,
-    body: Option<String>,
+    body: Option<RequestBody>,
     retry_context: Option<&RetryContext>,
+    spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
-) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+) -> Result<HttpResponseBytes, Error> {
     use crate::resilience::RetryConfig;
 
-    logging::log_request(
-        method.as_str(),
-        url,
-        Some(&headers),
-        body.as_deref(),
-        secret_ctx,
-    );
+    match body.as_ref() {
+        Some(RequestBody::Binary(bytes)) => tracing::debug!(
+            method = %method,
+            operation_id = %operation.operation_id,
+            byte_count = bytes.len(),
+            "Sending binary request body"
+        ),
+        Some(RequestBody::Json(json)) => {
+            logging::log_operation_request(
+                method.as_str(),
+                url,
+                Some(&headers),
+                Some(json),
+                secret_ctx,
+                spec,
+                operation,
+            );
+        }
+        None => {
+            logging::log_operation_request(
+                method.as_str(),
+                url,
+                Some(&headers),
+                None,
+                secret_ctx,
+                spec,
+                operation,
+            );
+        }
+    }
 
     let Some(ctx) = retry_context.filter(|ctx| ctx.is_enabled()) else {
-        return send_request_once(client, method, url, headers, body, secret_ctx).await;
+        return send_request_once(
+            client, method, url, headers, body, spec, operation, secret_ctx,
+        )
+        .await;
     };
 
     if !ctx.is_safe_to_retry() {
@@ -457,7 +492,17 @@ async fn send_request_with_retry(
             "Retries disabled - method is not idempotent and no idempotency key provided. \
              Use --force-retry or provide --idempotency-key"
         );
-        return send_request_once(client, method.clone(), url, headers, body, secret_ctx).await;
+        return send_request_once(
+            client,
+            method.clone(),
+            url,
+            headers,
+            body,
+            spec,
+            operation,
+            secret_ctx,
+        )
+        .await;
     }
 
     let retry_config = RetryConfig {
@@ -476,6 +521,7 @@ async fn send_request_with_retry(
         body,
         ctx,
         &retry_config,
+        spec,
         operation,
         secret_ctx,
     )
@@ -488,24 +534,25 @@ async fn retry_request_with_backoff(
     method: Method,
     url: &str,
     headers: HeaderMap,
-    body: Option<String>,
+    body: Option<RequestBody>,
     ctx: &RetryContext,
     retry_config: &crate::resilience::RetryConfig,
+    spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
-) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+) -> Result<HttpResponseBytes, Error> {
     let max_attempts = ctx.max_attempts;
     let mut attempt: u32 = 0;
     let mut last_error: Option<Error> = None;
     let mut last_status: Option<reqwest::StatusCode> = None;
     let mut last_response_headers: Option<HashMap<String, String>> = None;
-    let mut last_response_text: Option<String> = None;
+    let mut last_response_text: Option<Vec<u8>> = None;
 
     while attempt < max_attempts {
         attempt += 1;
 
         let request = build_request(client, method.clone(), url, headers.clone(), body.clone());
-        match send_request(request, secret_ctx).await {
+        match send_request(request, spec, operation, secret_ctx).await {
             Ok((status, response_headers, response_text)) => {
                 match handle_retryable_http_response(
                     retry_config,
@@ -568,12 +615,12 @@ fn finish_retry_result(
     attempt: u32,
     last_status: Option<reqwest::StatusCode>,
     last_response_headers: Option<HashMap<String, String>>,
-    last_response_text: Option<String>,
+    last_response_text: Option<Vec<u8>>,
     last_error: Option<Error>,
     ctx: &RetryContext,
     method: &Method,
     operation: &CachedCommand,
-) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+) -> Result<HttpResponseBytes, Error> {
     if let (Some(status), Some(headers), Some(text)) =
         (last_status, last_response_headers, last_response_text)
     {
@@ -616,11 +663,11 @@ fn finish_retry_result(
 }
 
 enum RetryableHttpResponse {
-    Return((reqwest::StatusCode, HashMap<String, String>, String)),
+    Return(HttpResponseBytes),
     Retry {
         status: reqwest::StatusCode,
         response_headers: HashMap<String, String>,
-        response_text: String,
+        response_text: Vec<u8>,
     },
 }
 
@@ -638,7 +685,7 @@ async fn handle_retryable_http_response(
     operation: &CachedCommand,
     status: reqwest::StatusCode,
     response_headers: HashMap<String, String>,
-    response_text: String,
+    response_text: Vec<u8>,
 ) -> RetryableHttpResponse {
     if status.is_success() {
         return RetryableHttpResponse::Return((status, response_headers, response_text));
@@ -710,25 +757,33 @@ fn build_request(
     method: Method,
     url: &str,
     headers: HeaderMap,
-    body: Option<String>,
+    body: Option<RequestBody>,
 ) -> reqwest::RequestBuilder {
-    let mut request = client.request(method, url).headers(headers);
-    if let Some(json_body) = body.and_then(|s| serde_json::from_str::<Value>(&s).ok()) {
-        request = request.json(&json_body);
+    let request = client.request(method, url).headers(headers);
+    match body {
+        Some(RequestBody::Json(source)) => {
+            let json = serde_json::from_str::<Value>(&source)
+                .expect("JSON bodies are validated before execution");
+            request.json(&json)
+        }
+        Some(RequestBody::Binary(bytes)) => request.body(bytes),
+        None => request,
     }
-    request
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_request_once(
     client: &reqwest::Client,
     method: Method,
     url: &str,
     headers: HeaderMap,
-    body: Option<String>,
+    body: Option<RequestBody>,
+    spec: &CachedSpec,
+    operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
-) -> Result<(reqwest::StatusCode, HashMap<String, String>, String), Error> {
+) -> Result<HttpResponseBytes, Error> {
     let request = build_request(client, method, url, headers, body);
-    send_request(request, secret_ctx).await
+    send_request(request, spec, operation, secret_ctx).await
 }
 
 /// Handle HTTP error responses
@@ -1105,13 +1160,15 @@ async fn cached_execution_result(
     Ok(None)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_dry_run_result(
     dry_run: bool,
     method: &Method,
     url: &str,
     headers: &HeaderMap,
-    body: Option<&str>,
-    operation_id: &str,
+    body: Option<&RequestBody>,
+    spec: &CachedSpec,
+    operation: &CachedCommand,
     proxy: &ProxyDiagnostics,
 ) -> Option<ExecutionResult> {
     if !dry_run {
@@ -1121,7 +1178,7 @@ fn build_dry_run_result(
     let headers_map: HashMap<String, String> = headers
         .iter()
         .map(|(k, v)| {
-            let value = if logging::should_redact_header(k.as_str()) {
+            let value = if logging::should_redact_operation_header(k.as_str(), spec, operation) {
                 "[REDACTED]".to_string()
             } else {
                 v.to_str().unwrap_or("<binary>").to_string()
@@ -1130,13 +1187,21 @@ fn build_dry_run_result(
         })
         .collect();
 
+    let body_info = match body {
+        Some(RequestBody::Json(source)) => serde_json::Value::String(source.clone()),
+        Some(RequestBody::Binary(bytes)) => serde_json::json!({
+            "binary": true,
+            "byte_count": bytes.len()
+        }),
+        None => serde_json::Value::Null,
+    };
     let request_info = serde_json::json!({
         "dry_run": true,
         "method": method.to_string(),
         "url": url,
         "headers": headers_map,
-        "body": body,
-        "operation_id": operation_id,
+        "body": body_info,
+        "operation_id": operation.operation_id,
         "proxy": proxy.to_json()
     });
 
@@ -1147,20 +1212,35 @@ fn build_dry_run_result(
 async fn finalize_execution_result(
     status: reqwest::StatusCode,
     response_headers: HashMap<String, String>,
-    response_text: String,
+    response_bytes: Vec<u8>,
     spec: &CachedSpec,
     operation: &CachedCommand,
     method: Method,
     url: String,
     headers: &HeaderMap,
-    body: Option<&str>,
+    body: Option<&RequestBody>,
     cache_context: Option<(CacheKey, ResponseCache)>,
     cache_config: Option<&CacheConfig>,
+    secret_ctx: &logging::SecretContext,
 ) -> Result<ExecutionResult, Error> {
     if !status.is_success() {
-        return Err(handle_http_error(status, response_text, spec, operation));
+        let error_body = if operation.has_binary_response() {
+            format!("<{} binary response bytes>", response_bytes.len())
+        } else {
+            secret_ctx.redact_secrets_in_text(&String::from_utf8_lossy(&response_bytes))
+        };
+        return Err(handle_http_error(status, error_body, spec, operation));
     }
 
+    if operation.has_binary_response() {
+        return Ok(ExecutionResult::Binary {
+            body: response_bytes,
+            status: status.as_u16(),
+            headers: response_headers,
+        });
+    }
+
+    let response_text = String::from_utf8_lossy(&response_bytes).into_owned();
     store_in_cache(
         cache_context,
         &response_text,
@@ -1169,7 +1249,7 @@ async fn finalize_execution_result(
         method,
         url,
         headers,
-        body,
+        body.and_then(RequestBody::as_json),
         cache_config,
     )
     .await?;
@@ -1202,8 +1282,9 @@ struct PreExecutionInput<'a> {
     method: &'a Method,
     url: &'a str,
     headers: &'a HeaderMap,
-    body: Option<&'a str>,
-    operation_id: &'a str,
+    body: Option<&'a RequestBody>,
+    spec: &'a CachedSpec,
+    operation: &'a CachedCommand,
     proxy: &'a ProxyDiagnostics,
 }
 
@@ -1220,7 +1301,8 @@ async fn resolve_pre_execution_result(
         input.url,
         input.headers,
         input.body,
-        input.operation_id,
+        input.spec,
+        input.operation,
         input.proxy,
     ))
 }
@@ -1245,8 +1327,9 @@ pub async fn execute(
         method: &prepared.method,
         url: &prepared.url,
         headers: &prepared.headers_clone,
-        body: prepared.body.as_deref(),
-        operation_id: &prepared.operation.operation_id,
+        body: prepared.body.as_ref(),
+        spec,
+        operation: prepared.operation,
         proxy: &prepared.proxy_diagnostics,
     })
     .await?
@@ -1261,6 +1344,7 @@ pub async fn execute(
         prepared.headers,
         prepared.body.clone(),
         prepared.retry_ctx.as_ref(),
+        spec,
         prepared.operation,
         Some(&prepared.secret_ctx),
     )
@@ -1275,9 +1359,10 @@ pub async fn execute(
         prepared.method,
         prepared.url,
         &prepared.headers_clone,
-        prepared.body.as_deref(),
+        prepared.body.as_ref(),
         prepared.cache_context,
         prepared.cache_config,
+        &prepared.secret_ctx,
     )
     .await
 }
@@ -1293,7 +1378,7 @@ struct PreparedExecution<'a> {
     cache_context: Option<(CacheKey, ResponseCache)>,
     retry_ctx: Option<RetryContext>,
     secret_ctx: logging::SecretContext,
-    body: Option<String>,
+    body: Option<RequestBody>,
     cache_config: Option<&'a CacheConfig>,
 }
 
@@ -1305,7 +1390,7 @@ struct PreparedRequest<'a> {
     proxy_diagnostics: ProxyDiagnostics,
     headers: HeaderMap,
     headers_clone: HeaderMap,
-    body: Option<String>,
+    body: Option<RequestBody>,
 }
 
 struct PreparedRuntimeContext<'a> {
@@ -1327,7 +1412,7 @@ fn prepare_execution<'a>(
         &request.method,
         &request.url,
         &request.headers_clone,
-        request.body.as_deref(),
+        request.body.as_ref(),
         ctx,
     )?;
 
@@ -1347,12 +1432,85 @@ fn prepare_execution<'a>(
     })
 }
 
+fn validate_binary_request_body(body: &RequestBody) -> Result<(), Error> {
+    match body {
+        RequestBody::Binary(_) => Ok(()),
+        RequestBody::Json(_) => Err(Error::validation_error(
+            "JSON request text does not match the operation's declared request body",
+        )),
+    }
+}
+
+fn validate_json_request_body(body: &RequestBody) -> Result<(), Error> {
+    let RequestBody::Json(source) = body else {
+        return Err(Error::validation_error(
+            "Binary request bytes do not match the operation's declared request body",
+        ));
+    };
+    serde_json::from_str::<Value>(source)
+        .map(|_| ())
+        .map_err(|error| Error::validation_error(format!("Invalid JSON request body: {error}")))
+}
+
+fn validate_declared_request_body(
+    declared: &crate::cache::models::CachedRequestBody,
+    body: Option<&RequestBody>,
+) -> Result<(), Error> {
+    let Some(body) = body else {
+        return if declared.required {
+            Err(Error::validation_error(
+                "This operation requires a request body",
+            ))
+        } else {
+            Ok(())
+        };
+    };
+    if declared.is_binary() {
+        return validate_binary_request_body(body);
+    }
+    if declared.is_json() {
+        return validate_json_request_body(body);
+    }
+    Err(Error::validation_error(
+        "The operation's declared request body is not supported",
+    ))
+}
+
+fn validate_operation_call_body(
+    operation: &CachedCommand,
+    body: Option<&RequestBody>,
+) -> Result<(), Error> {
+    if operation.has_ambiguous_binary_response() {
+        return Err(Error::validation_error(
+            "Operation mixes binary and non-binary successful responses; execution is blocked before network access",
+        ));
+    }
+    if let Some(declared) = operation.request_body.as_ref() {
+        return validate_declared_request_body(declared, body);
+    }
+    if body.is_some() {
+        return Err(Error::validation_error(
+            "This operation does not declare a request body",
+        ));
+    }
+    Ok(())
+}
+
+fn find_validated_operation<'a>(
+    spec: &'a CachedSpec,
+    call: &crate::invocation::OperationCall,
+) -> Result<&'a CachedCommand, Error> {
+    let operation = find_operation_by_id(spec, &call.operation_id)?;
+    validate_operation_call_body(operation, call.body.as_ref())?;
+    Ok(operation)
+}
+
 fn prepare_request<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
 ) -> Result<PreparedRequest<'a>, Error> {
-    let operation = find_operation_by_id(spec, &call.operation_id)?;
+    let operation = find_validated_operation(spec, &call)?;
     let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
     let base_url =
         resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
@@ -1368,6 +1526,7 @@ fn prepare_request<'a>(
         operation,
         &call.header_params,
         &call.custom_headers,
+        call.body.is_some(),
         &spec.name,
         ctx.global_config.as_ref(),
     )?;
@@ -1394,9 +1553,19 @@ fn prepare_runtime_context<'a>(
     method: &Method,
     url: &str,
     headers: &HeaderMap,
-    body: Option<&str>,
+    body: Option<&RequestBody>,
     ctx: &'a crate::invocation::ExecutionContext,
 ) -> Result<PreparedRuntimeContext<'a>, Error> {
+    if operation.has_binary_io()
+        && ctx
+            .cache_config
+            .as_ref()
+            .is_some_and(|config| config.enabled)
+    {
+        return Err(Error::validation_error(
+            "--cache is not supported for operations with binary request or response bodies",
+        ));
+    }
     let cache_context = prepare_cache_context(
         ctx.cache_config.as_ref(),
         &spec.name,
@@ -1404,14 +1573,15 @@ fn prepare_runtime_context<'a>(
         method,
         url,
         headers,
-        body,
+        body.and_then(RequestBody::as_json),
     )?;
     let retry_ctx = ctx.retry_context.clone().map(|mut rc| {
         rc.method = Some(method.to_string());
         rc
     });
     let secret_ctx =
-        logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref());
+        logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref())
+            .with_active_operation_headers(spec, operation, headers);
 
     Ok(PreparedRuntimeContext {
         cache_context,
@@ -1487,14 +1657,40 @@ fn build_headers_from_params(
     operation: &CachedCommand,
     header_params: &HashMap<String, String>,
     custom_headers: &[String],
+    has_body: bool,
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<HeaderMap, Error> {
     let mut headers = default_request_headers();
+    apply_operation_media_headers(&mut headers, operation, has_body)?;
     apply_header_parameters(&mut headers, header_params)?;
     apply_security_headers(&mut headers, spec, operation, api_name, global_config)?;
     apply_custom_headers(&mut headers, custom_headers)?;
     Ok(headers)
+}
+
+fn apply_operation_media_headers(
+    headers: &mut HeaderMap,
+    operation: &CachedCommand,
+    has_body: bool,
+) -> Result<(), Error> {
+    if let Some(request_body) = operation.request_body.as_ref().filter(|_| has_body) {
+        headers.insert(
+            constants::HEADER_CONTENT_TYPE,
+            HeaderValue::from_str(&request_body.content_type).map_err(|e| {
+                Error::invalid_header_value(constants::HEADER_CONTENT_TYPE, e.to_string())
+            })?,
+        );
+    }
+    if let Some(content_type) = operation.binary_response_content_type() {
+        headers.insert(
+            constants::HEADER_ACCEPT,
+            HeaderValue::from_str(content_type).map_err(|e| {
+                Error::invalid_header_value(constants::HEADER_ACCEPT, e.to_string())
+            })?,
+        );
+    }
+    Ok(())
 }
 
 fn default_request_headers() -> HeaderMap {
@@ -1741,6 +1937,71 @@ fn parse_bracket_index(part: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn operation_with_body(
+        request_body: Option<crate::cache::models::CachedRequestBody>,
+    ) -> CachedCommand {
+        CachedCommand {
+            name: "upload".to_string(),
+            description: None,
+            summary: None,
+            operation_id: "upload".to_string(),
+            method: "POST".to_string(),
+            path: "/upload".to_string(),
+            parameters: vec![],
+            request_body,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec![],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
+            pagination: crate::cache::models::PaginationInfo::default(),
+        }
+    }
+
+    #[test]
+    fn direct_request_body_validation_rejects_mismatches_and_invalid_json() {
+        let binary = operation_with_body(Some(crate::cache::models::CachedRequestBody {
+            content_type: "image/png".to_string(),
+            schema: r#"{"type":"string","format":"binary"}"#.to_string(),
+            required: true,
+            description: None,
+            example: None,
+        }));
+        assert!(
+            validate_operation_call_body(&binary, Some(&RequestBody::Json("{}".to_string())))
+                .is_err()
+        );
+        assert!(
+            validate_operation_call_body(&binary, Some(&RequestBody::Binary(vec![0xff]))).is_ok()
+        );
+
+        let json = operation_with_body(Some(crate::cache::models::CachedRequestBody {
+            content_type: "application/json".to_string(),
+            schema: r#"{"type":"object"}"#.to_string(),
+            required: true,
+            description: None,
+            example: None,
+        }));
+        assert!(
+            validate_operation_call_body(&json, Some(&RequestBody::Binary(vec![0xff]))).is_err()
+        );
+        assert!(validate_operation_call_body(
+            &json,
+            Some(&RequestBody::Json("{invalid".to_string()))
+        )
+        .is_err());
+        assert!(validate_operation_call_body(
+            &json,
+            Some(&RequestBody::Json(r#"{"ok":true}"#.to_string()))
+        )
+        .is_ok());
+    }
 
     #[test]
     fn test_default_request_headers_use_current_package_version() {

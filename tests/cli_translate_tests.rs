@@ -137,6 +137,7 @@ fn base_execution_flags() -> ExecutionFlags {
         idempotency_key: None,
         proxy: None,
         no_proxy: false,
+        output_file: None,
         format: OutputFormat::Json,
         jq: None,
         batch_file: None,
@@ -439,7 +440,12 @@ fn body_file_reads_json_from_file_path() {
     let matches = build_matches_with_body_file(&path);
 
     let call = matches_to_operation_call(&spec, &matches).expect("body-file should resolve");
-    assert_eq!(call.body.as_deref(), Some(r#"{"key":"value"}"#));
+    assert_eq!(
+        call.body
+            .as_ref()
+            .and_then(aperture_cli::invocation::RequestBody::as_json),
+        Some(r#"{"key":"value"}"#)
+    );
 }
 
 #[test]
@@ -540,7 +546,12 @@ fn body_file_accepted_when_body_is_required_in_spec() {
 
     let call = matches_to_operation_call(&spec, &matches)
         .expect("operation call should resolve with --body-file");
-    assert_eq!(call.body.as_deref(), Some(r#"{"event":"created"}"#));
+    assert_eq!(
+        call.body
+            .as_ref()
+            .and_then(aperture_cli::invocation::RequestBody::as_json),
+        Some(r#"{"event":"created"}"#)
+    );
 }
 
 #[test]
@@ -576,7 +587,9 @@ fn body_file_trims_trailing_newline() {
     let call =
         matches_to_operation_call(&spec, &matches).expect("trailing newline should be accepted");
     assert_eq!(
-        call.body.as_deref(),
+        call.body
+            .as_ref()
+            .and_then(aperture_cli::invocation::RequestBody::as_json),
         Some(r#"{"key":"value"}"#),
         "body should have trailing whitespace stripped"
     );

@@ -303,7 +303,7 @@ impl SpecTransformer {
             .request_body
             .as_ref()
             .and_then(Self::transform_request_body);
-        let responses = Self::collect_operation_responses(spec, &operation.responses.responses);
+        let responses = Self::collect_operation_responses(spec, &operation.responses);
         let security_requirements =
             Self::resolve_security_requirements(operation, global_security_requirements);
         let examples = Self::generate_command_examples(
@@ -360,12 +360,12 @@ impl SpecTransformer {
 
     fn collect_operation_responses(
         spec: &OpenAPI,
-        responses: &indexmap::IndexMap<openapiv3::StatusCode, ReferenceOr<openapiv3::Response>>,
+        responses: &openapiv3::Responses,
     ) -> Vec<CachedResponse> {
-        responses
-            .iter()
-            .map(|(code, response_ref)| {
-                Self::transform_response(spec, code.to_string(), response_ref)
+        crate::spec::project_response_declarations(spec, responses)
+            .into_iter()
+            .flat_map(|(status, response)| {
+                Self::transform_response(spec, status, response.as_ref())
             })
             .collect()
     }
@@ -573,52 +573,45 @@ impl SpecTransformer {
     fn transform_response(
         spec: &OpenAPI,
         status_code: String,
-        response_ref: &ReferenceOr<openapiv3::Response>,
-    ) -> CachedResponse {
-        let ReferenceOr::Item(response) = response_ref else {
-            return CachedResponse {
+        response: Option<&openapiv3::Response>,
+    ) -> Vec<CachedResponse> {
+        let Some(response) = response else {
+            return vec![CachedResponse {
                 status_code,
                 description: None,
                 content_type: None,
                 schema: None,
                 example: None,
-            };
+            }];
         };
 
-        // Get description
-        let description = if response.description.is_empty() {
-            None
-        } else {
-            Some(response.description.clone())
-        };
-
-        // Prefer application/json content type, otherwise use first available
-        let preferred_content_type = if response.content.contains_key(constants::CONTENT_TYPE_JSON)
-        {
-            Some(constants::CONTENT_TYPE_JSON)
-        } else {
-            response.content.keys().next().map(String::as_str)
-        };
-
-        let (content_type, schema, example) =
-            preferred_content_type.map_or((None, None, None), |ct| {
-                let media_type = response.content.get(ct);
-                let schema = media_type
-                    .and_then(|mt| mt.schema.as_ref())
-                    .and_then(|schema_ref| Self::resolve_and_serialize_schema(spec, schema_ref));
-                let example = media_type
-                    .and_then(|mt| mt.example.as_ref())
-                    .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
-                (Some(ct.to_string()), schema, example)
-            });
-
-        CachedResponse {
-            status_code,
-            description,
-            content_type,
-            schema,
-            example,
+        let description = (!response.description.is_empty()).then(|| response.description.clone());
+        if response.content.is_empty() {
+            return vec![CachedResponse {
+                status_code,
+                description,
+                content_type: None,
+                schema: None,
+                example: None,
+            }];
         }
+
+        response
+            .content
+            .iter()
+            .map(|(content_type, media_type)| CachedResponse {
+                status_code: status_code.clone(),
+                description: description.clone(),
+                content_type: Some(content_type.clone()),
+                schema: media_type
+                    .schema
+                    .as_ref()
+                    .and_then(|schema_ref| Self::resolve_and_serialize_schema(spec, schema_ref)),
+                example: media_type.example.as_ref().map(|example| {
+                    serde_json::to_string(example).unwrap_or_else(|_| example.to_string())
+                }),
+            })
+            .collect()
     }
 
     /// Resolves a schema reference (if applicable) and serializes to JSON string
@@ -661,11 +654,33 @@ impl SpecTransformer {
     }
 
     fn preferred_request_body_content_type(body: &RequestBody) -> Option<&str> {
-        if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
-            Some(constants::CONTENT_TYPE_JSON)
-        } else {
-            body.content.keys().next().map(String::as_str)
-        }
+        body.content
+            .keys()
+            .find(|content_type| {
+                let normalized = content_type
+                    .split(';')
+                    .next()
+                    .unwrap_or(content_type)
+                    .trim()
+                    .to_ascii_lowercase();
+                normalized == constants::CONTENT_TYPE_JSON || normalized.ends_with("+json")
+            })
+            .map(String::as_str)
+            .or_else(|| {
+                body.content.iter().find_map(|(content_type, media_type)| {
+                    let ReferenceOr::Item(schema) = media_type.schema.as_ref()? else {
+                        return None;
+                    };
+                    serde_json::to_string(schema)
+                        .is_ok_and(|schema| {
+                            crate::cache::models::is_supported_binary_media_schema(
+                                content_type,
+                                &schema,
+                            )
+                        })
+                        .then_some(content_type.as_str())
+                })
+            })
     }
 
     fn request_body_schema(media_type: &openapiv3::MediaType) -> String {

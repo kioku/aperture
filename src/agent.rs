@@ -332,6 +332,9 @@ pub struct RequestBodyInfo {
     pub required: bool,
     /// Content type (e.g., "application/json")
     pub content_type: String,
+    /// Whether `--body-file PATH` / `--body-file -` supplies raw bytes.
+    #[serde(default)]
+    pub binary: bool,
     /// Description of the request body
     pub description: Option<String>,
     /// Example of the request body
@@ -426,6 +429,12 @@ impl PaginationManifestInfo {
 pub struct ResponseSchemaInfo {
     /// Content type (e.g., "application/json")
     pub content_type: String,
+    /// Whether `--output-file PATH` / `--output-file -` is required for exact bytes.
+    #[serde(default)]
+    pub binary: bool,
+    /// Whether successful declarations mix binary and non-binary bodies and cannot execute safely.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ambiguous_binary: bool,
     /// JSON Schema representation of the response body
     ///
     /// Note: This schema may contain unresolved `$ref` objects for nested references.
@@ -720,7 +729,7 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
         .map(convert_cached_request_body_to_info);
 
     // Extract response schema from cached responses
-    let response_schema = extract_response_schema_from_cached(&cached_command.responses);
+    let response_schema = extract_response_schema_from_cached(cached_command);
 
     CommandInfo {
         name: command_name,
@@ -772,38 +781,56 @@ fn convert_cached_request_body_to_info(cached_body: &CachedRequestBody) -> Reque
     RequestBodyInfo {
         required: cached_body.required,
         content_type: cached_body.content_type.clone(),
+        binary: cached_body.is_binary(),
         description: cached_body.description.clone(),
         example: cached_body.example.clone(),
     }
 }
 
-/// Extracts response schema from cached responses
-///
-/// Looks for successful response codes (200, 201, 204) in priority order.
-/// If a response exists but lacks `content_type` or schema, falls through to
-/// check the next status code.
-fn extract_response_schema_from_cached(
-    responses: &[crate::cache::models::CachedResponse],
-) -> Option<ResponseSchemaInfo> {
-    constants::SUCCESS_STATUS_CODES.iter().find_map(|code| {
-        responses
-            .iter()
-            .find(|r| r.status_code == *code)
-            .and_then(|response| {
-                let content_type = response.content_type.as_ref()?;
-                let schema_str = response.schema.as_ref()?;
-                let schema = serde_json::from_str(schema_str).ok()?;
-                let example = response
-                    .example
-                    .as_ref()
-                    .and_then(|ex| serde_json::from_str(ex).ok());
+/// Selects a representative non-binary response without limiting valid statuses.
+fn preferred_text_response<'a>(
+    responses: &[&'a crate::cache::models::CachedResponse],
+) -> Option<&'a crate::cache::models::CachedResponse> {
+    responses
+        .iter()
+        .find(|response| response.is_json())
+        .copied()
+        .or_else(|| responses.first().copied())
+}
 
-                Some(ResponseSchemaInfo {
-                    content_type: content_type.clone(),
-                    schema,
-                    example,
-                })
-            })
+fn cached_successful_responses(
+    command: &CachedCommand,
+) -> Vec<&crate::cache::models::CachedResponse> {
+    command
+        .responses
+        .iter()
+        .filter(|response| response.may_be_successful_body() && response.schema.is_some())
+        .collect()
+}
+
+fn extract_response_schema_from_cached(command: &CachedCommand) -> Option<ResponseSchemaInfo> {
+    let successful = cached_successful_responses(command);
+    let preferred = if command.has_binary_response() {
+        successful
+            .iter()
+            .find(|response| response.is_binary())
+            .copied()
+    } else {
+        preferred_text_response(&successful)
+    }?;
+    let content_type = preferred.content_type.as_ref()?;
+    let schema = serde_json::from_str(preferred.schema.as_ref()?).ok()?;
+    let example = preferred
+        .example
+        .as_ref()
+        .and_then(|example| serde_json::from_str(example).ok());
+
+    Some(ResponseSchemaInfo {
+        content_type: content_type.clone(),
+        binary: command.has_binary_response(),
+        ambiguous_binary: command.has_ambiguous_binary_response(),
+        schema,
+        example,
     })
 }
 
@@ -892,26 +919,54 @@ fn extract_operation_parameters(operation: &Operation, spec: &OpenAPI) -> Vec<Pa
         .collect()
 }
 
+fn is_json_media_type(content_type: &str) -> bool {
+    let normalized = content_type
+        .split(';')
+        .next()
+        .unwrap_or(content_type)
+        .trim()
+        .to_ascii_lowercase();
+    normalized == constants::CONTENT_TYPE_JSON || normalized.ends_with("+json")
+}
+
+fn inline_media_is_binary(content_type: &str, media_type: &openapiv3::MediaType) -> bool {
+    let Some(ReferenceOr::Item(schema)) = media_type.schema.as_ref() else {
+        return false;
+    };
+    serde_json::to_string(schema).is_ok_and(|schema| {
+        crate::cache::models::is_supported_binary_media_schema(content_type, &schema)
+    })
+}
+
+fn preferred_request_body_media(
+    body: &openapiv3::RequestBody,
+) -> Option<(&str, &openapiv3::MediaType)> {
+    body.content
+        .iter()
+        .find(|(content_type, _)| is_json_media_type(content_type))
+        .or_else(|| {
+            body.content
+                .iter()
+                .find(|(content_type, media_type)| inline_media_is_binary(content_type, media_type))
+        })
+        .map(|(content_type, media_type)| (content_type.as_str(), media_type))
+}
+
 fn extract_request_body_info(operation: &Operation) -> Option<RequestBodyInfo> {
     let Some(ReferenceOr::Item(body)) = operation.request_body.as_ref() else {
         return None;
     };
-
-    let content_type = if body.content.contains_key(constants::CONTENT_TYPE_JSON) {
-        constants::CONTENT_TYPE_JSON
-    } else {
-        body.content.keys().next().map(String::as_str)?
-    };
-
-    let media_type = body.content.get(content_type)?;
+    let (content_type, media_type) = preferred_request_body_media(body)?;
     let example = media_type
         .example
         .as_ref()
         .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
 
+    let binary = inline_media_is_binary(content_type, media_type);
     Some(RequestBodyInfo {
         required: body.required,
         content_type: content_type.to_string(),
+        binary,
         description: body.description.clone(),
         example,
     })
@@ -973,66 +1028,81 @@ fn convert_openapi_operation_to_info(
     }
 }
 
-/// Extracts response schema from an operation's responses
-///
-/// Looks for successful response codes (200, 201, 204) in priority order
-/// and extracts the schema for the first one found with application/json content.
+/// Collects media from every explicit, range, and default response that can succeed.
+fn successful_response_media(
+    operation: &Operation,
+    spec: &OpenAPI,
+) -> Vec<(String, openapiv3::MediaType)> {
+    crate::spec::project_response_declarations(spec, &operation.responses)
+        .into_iter()
+        .filter(|(status, _)| crate::spec::response_status_may_be_successful(status))
+        .filter_map(|(_, response)| response)
+        .flat_map(|response| response.content.into_iter())
+        .collect()
+}
+
+fn preferred_response_media<'a>(
+    media: &'a [(String, openapiv3::MediaType)],
+    spec: &OpenAPI,
+    has_binary: bool,
+) -> Option<(&'a str, &'a openapiv3::MediaType)> {
+    if has_binary {
+        return media
+            .iter()
+            .find(|(content_type, media_type)| {
+                response_media_is_binary(content_type, media_type, spec)
+            })
+            .map(|(content_type, media_type)| (content_type.as_str(), media_type));
+    }
+    media
+        .iter()
+        .find(|(content_type, _)| is_json_media_type(content_type))
+        .or_else(|| media.first())
+        .map(|(content_type, media_type)| (content_type.as_str(), media_type))
+}
+
 fn extract_response_schema_from_operation(
     operation: &Operation,
     spec: &OpenAPI,
 ) -> Option<ResponseSchemaInfo> {
-    constants::SUCCESS_STATUS_CODES.iter().find_map(|code| {
-        operation
-            .responses
-            .responses
-            .get(&openapiv3::StatusCode::Code(
-                code.parse().expect("valid status code"),
-            ))
-            .and_then(|response_ref| extract_response_schema_from_response(response_ref, spec))
+    let media = successful_response_media(operation, spec);
+    let has_binary = media
+        .iter()
+        .any(|(content_type, media_type)| response_media_is_binary(content_type, media_type, spec));
+    let has_text = media.iter().any(|(content_type, media_type)| {
+        !response_media_is_binary(content_type, media_type, spec)
+    });
+    let (content_type, media_type) = preferred_response_media(&media, spec, has_binary)?;
+    extract_response_schema_from_media(content_type, media_type, spec, has_binary && has_text)
+}
+
+/// Classifies one projected response medium using the shared schema rules.
+fn response_media_is_binary(
+    content_type: &str,
+    media_type: &openapiv3::MediaType,
+    spec: &OpenAPI,
+) -> bool {
+    extract_schema_value(media_type, spec).is_some_and(|schema| {
+        serde_json::to_string(&schema).is_ok_and(|schema| {
+            crate::cache::models::is_supported_binary_media_schema(content_type, &schema)
+        })
     })
 }
 
-/// Extracts response schema from a single response reference
-///
-/// # Limitations
-///
-/// - **Response references are not resolved**: If `response_ref` is a `$ref` to
-///   `#/components/responses/...`, this function returns `None`. Only inline
-///   response definitions are processed. This is a known limitation that may
-///   be addressed in a future version.
-///
-/// - **Nested schema references**: While top-level schema references within the
-///   response content are resolved, any nested `$ref` within the schema's
-///   properties remain unresolved. See [`ResponseSchemaInfo`] for details.
-fn extract_response_schema_from_response(
-    response_ref: &ReferenceOr<openapiv3::Response>,
+fn extract_response_schema_from_media(
+    content_type: &str,
+    media_type: &openapiv3::MediaType,
     spec: &OpenAPI,
+    ambiguous_binary: bool,
 ) -> Option<ResponseSchemaInfo> {
-    // Note: Response references ($ref to #/components/responses/...) are not
-    // currently resolved. This would require implementing resolve_response_reference()
-    // similar to resolve_schema_reference().
-    let ReferenceOr::Item(response) = response_ref else {
-        return None;
-    };
-
-    let content_type = select_response_content_type(response)?;
-    let media_type = response.content.get(content_type)?;
-    let schema_value = extract_schema_value(media_type, spec)?;
-    let example = extract_response_example(media_type);
-
+    let schema = extract_schema_value(media_type, spec)?;
     Some(ResponseSchemaInfo {
         content_type: content_type.to_string(),
-        schema: schema_value,
-        example,
+        binary: response_media_is_binary(content_type, media_type, spec),
+        ambiguous_binary,
+        schema,
+        example: extract_response_example(media_type),
     })
-}
-
-fn select_response_content_type(response: &openapiv3::Response) -> Option<&str> {
-    response
-        .content
-        .get(constants::CONTENT_TYPE_JSON)
-        .map(|_| constants::CONTENT_TYPE_JSON)
-        .or_else(|| response.content.keys().next().map(String::as_str))
 }
 
 fn extract_schema_value(

@@ -104,7 +104,8 @@ pub struct SkippedEndpoint {
 /// Version 4: Added `example` field to `CachedResponse` for response schema examples
 /// Version 5: Added `display_group`, `display_name`, `aliases`, `hidden` fields for command mapping
 /// Version 6: Added `pagination` field to `CachedCommand` for auto-pagination support
-pub const CACHE_FORMAT_VERSION: u32 = 6;
+/// Version 7: Preserves all response media and `default` declarations during transformation
+pub const CACHE_FORMAT_VERSION: u32 = 7;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -181,6 +182,60 @@ pub struct CachedCommand {
     pub pagination: PaginationInfo,
 }
 
+impl CachedCommand {
+    fn successful_body_responses(&self) -> impl Iterator<Item = &CachedResponse> {
+        self.responses
+            .iter()
+            .filter(|response| response.may_be_successful_body())
+    }
+
+    /// Returns whether any successful response explicitly declares supported binary bytes.
+    #[must_use]
+    pub fn has_binary_response(&self) -> bool {
+        self.successful_body_responses()
+            .any(CachedResponse::is_binary)
+    }
+
+    /// Returns whether successful bodies mix binary and non-binary representations.
+    #[must_use]
+    pub fn has_ambiguous_binary_response(&self) -> bool {
+        self.has_binary_response()
+            && self
+                .successful_body_responses()
+                .any(|response| !response.is_binary())
+    }
+
+    /// Returns the single declared binary response media type when all body variants agree.
+    #[must_use]
+    pub fn binary_response_content_type(&self) -> Option<&str> {
+        if self.has_ambiguous_binary_response() {
+            return None;
+        }
+        let mut binary = self
+            .successful_body_responses()
+            .filter(|response| response.is_binary());
+        let first = binary.next()?.content_type.as_deref()?;
+        let normalized = normalized_content_type(first);
+        binary
+            .all(|response| {
+                response
+                    .content_type
+                    .as_deref()
+                    .is_some_and(|content_type| normalized_content_type(content_type) == normalized)
+            })
+            .then_some(first)
+    }
+
+    /// Returns whether request or response bytes make the text response cache unsafe.
+    #[must_use]
+    pub fn has_binary_io(&self) -> bool {
+        self.request_body
+            .as_ref()
+            .is_some_and(CachedRequestBody::is_binary)
+            || self.has_binary_response()
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedParameter {
     pub name: String,
@@ -204,6 +259,21 @@ pub struct CachedRequestBody {
     pub example: Option<String>,
 }
 
+impl CachedRequestBody {
+    /// Returns whether this body uses the native single-part byte stream contract.
+    #[must_use]
+    pub fn is_binary(&self) -> bool {
+        is_supported_binary_media_schema(&self.content_type, &self.schema)
+    }
+
+    /// Returns whether this body uses a JSON media type.
+    #[must_use]
+    pub fn is_json(&self) -> bool {
+        let content_type = normalized_content_type(&self.content_type);
+        content_type == crate::constants::CONTENT_TYPE_JSON || content_type.ends_with("+json")
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedResponse {
     pub status_code: String,
@@ -213,6 +283,81 @@ pub struct CachedResponse {
     /// Example response value (JSON-serialized)
     #[serde(default)]
     pub example: Option<String>,
+}
+
+impl CachedResponse {
+    /// Returns whether this declaration can represent a successful response body.
+    #[must_use]
+    pub(crate) fn may_be_successful_body(&self) -> bool {
+        crate::spec::response_status_may_be_successful(&self.status_code)
+            && self.content_type.is_some()
+    }
+
+    /// Returns whether this response declares a JSON media type.
+    #[must_use]
+    pub fn is_json(&self) -> bool {
+        self.content_type.as_deref().is_some_and(|content_type| {
+            let content_type = normalized_content_type(content_type);
+            content_type == crate::constants::CONTENT_TYPE_JSON || content_type.ends_with("+json")
+        })
+    }
+
+    /// Returns whether this response uses the native single-part byte stream contract.
+    #[must_use]
+    pub fn is_binary(&self) -> bool {
+        self.content_type.as_deref().is_some_and(|content_type| {
+            self.schema
+                .as_deref()
+                .is_some_and(|schema| is_supported_binary_media_schema(content_type, schema))
+        })
+    }
+}
+
+fn normalized_content_type(content_type: &str) -> String {
+    content_type
+        .split(';')
+        .next()
+        .unwrap_or(content_type)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// Returns whether a media type can use Aperture's raw single-part byte path.
+#[must_use]
+pub(crate) fn is_supported_binary_media_type(content_type: &str) -> bool {
+    let media_type = normalized_content_type(content_type);
+    !media_type.is_empty()
+        && media_type.contains('/')
+        && media_type != crate::constants::CONTENT_TYPE_JSON
+        && !media_type.ends_with("+json")
+        && !media_type.starts_with("text/")
+        && !media_type.starts_with("multipart/")
+        && media_type != "application/x-www-form-urlencoded"
+        && !matches!(
+            media_type.as_str(),
+            "application/xml"
+                | "application/graphql"
+                | "application/x-ndjson"
+                | "application/ndjson"
+                | "application/yaml"
+                | "application/x-yaml"
+                | "application/javascript"
+        )
+        && !media_type.ends_with("+xml")
+}
+
+/// Classifies a serialized root schema and media type using the cached-model contract.
+#[must_use]
+pub(crate) fn is_supported_binary_media_schema(content_type: &str, schema: &str) -> bool {
+    is_supported_binary_media_type(content_type) && schema_is_string_binary(schema)
+}
+
+fn schema_is_string_binary(schema: &str) -> bool {
+    let Ok(serde_json::Value::Object(schema)) = serde_json::from_str(schema) else {
+        return false;
+    };
+    schema.get("type").and_then(serde_json::Value::as_str) == Some("string")
+        && schema.get("format").and_then(serde_json::Value::as_str) == Some("binary")
 }
 
 /// Cached representation of a security scheme with x-aperture-secret mapping
@@ -254,4 +399,94 @@ pub struct ServerVariable {
     pub enum_values: Vec<String>,
     /// Description of the server variable from `OpenAPI` spec
     pub description: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BINARY_SCHEMA: &str = r#"{"type":"string","format":"binary"}"#;
+
+    fn response(status: &str, content_type: &str, schema: &str) -> CachedResponse {
+        CachedResponse {
+            status_code: status.to_string(),
+            description: None,
+            content_type: Some(content_type.to_string()),
+            schema: Some(schema.to_string()),
+            example: None,
+        }
+    }
+
+    #[test]
+    fn binary_schema_must_be_string_binary_at_root() {
+        assert!(schema_is_string_binary(BINARY_SCHEMA));
+        assert!(!schema_is_string_binary(
+            r#"{"type":"object","properties":{"payload":{"type":"string","format":"binary"}}}"#
+        ));
+        assert!(!schema_is_string_binary(
+            r#"{"type":"object","typeHint":"string","formatHint":"binary"}"#
+        ));
+        assert!(!schema_is_string_binary(
+            r#"{"type":"string","properties":{"payload":{"format":"binary"}}}"#
+        ));
+    }
+
+    #[test]
+    fn modeled_png_and_pdf_are_supported_binary_media() {
+        for content_type in ["image/png", "Application/PDF; version=1.7"] {
+            assert!(is_supported_binary_media_type(content_type));
+            assert!(response("200", content_type, BINARY_SCHEMA).is_binary());
+        }
+        for content_type in [
+            "application/json",
+            "application/problem+json",
+            "multipart/form-data",
+            "application/x-www-form-urlencoded",
+            "application/xml",
+            "image/svg+xml",
+            "text/plain",
+        ] {
+            assert!(!is_supported_binary_media_type(content_type));
+        }
+    }
+
+    #[test]
+    fn mixed_successful_binary_and_json_response_is_ambiguous() {
+        let operation = CachedCommand {
+            name: "download".to_string(),
+            description: None,
+            summary: None,
+            operation_id: "download".to_string(),
+            method: "GET".to_string(),
+            path: "/download".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![
+                response("200", "image/png", BINARY_SCHEMA),
+                response("201", "application/pdf", BINARY_SCHEMA),
+                CachedResponse {
+                    status_code: "202".to_string(),
+                    description: None,
+                    content_type: Some("application/json".to_string()),
+                    schema: None,
+                    example: None,
+                },
+            ],
+            security_requirements: vec![],
+            tags: vec![],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
+            pagination: PaginationInfo::default(),
+        };
+
+        assert!(operation.has_binary_response());
+        assert!(operation.has_ambiguous_binary_response());
+        assert!(operation.has_binary_io());
+        assert_eq!(operation.binary_response_content_type(), None);
+    }
 }

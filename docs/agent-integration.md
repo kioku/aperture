@@ -104,12 +104,23 @@ When command mappings are configured, the manifest groups commands by their **ef
 
 *Note: Additional metadata fields such as `deprecated`, `external_docs_url`, `original_tags` on commands, and `description`, `x-aperture-secret` on security schemes may also be present.*
 
+### Binary body capabilities
+
+For a supported single-part OpenAPI `string`/`binary` body (including octet-stream, image, and PDF media),
+`request_body.binary` or `response_schema.binary` is `true` in the manifest. Agents must use
+`--body-file PATH` (or `--body-file -` for stdin) for binary requests. A binary response requires
+`--output-file PATH` or `--output-file -`; stdout mode emits only exact response bytes.
+
+Do not combine binary operations with response caching. Do not combine binary responses with
+JQ, text formatting, auto-pagination, or batch capture. The batch `body_file` field is supported
+for binary uploads, while binary-response batch operations fail before sending.
+
 ### Response Schema Limitations
 
-The `response_schema` field provides schema information for successful responses (200/201/204), but has limitations:
+The `response_schema` field considers potentially successful numeric statuses, the `2XX` range, and `default` responses, but has limitations:
 
 - **Schema `$ref` references are resolved**: Top-level references like `$ref: '#/components/schemas/User'` are expanded inline.
-- **Response references are NOT resolved**: If a response is defined as `$ref: '#/components/responses/UserResponse'`, the schema will not be extracted.
+- **Local response references are resolved**: References like `$ref: '#/components/responses/UserResponse'`, including local reference chains, participate in schema extraction.
 - **Nested references remain as-is**: References within object properties are not recursively resolved.
 
 **Usage patterns:**

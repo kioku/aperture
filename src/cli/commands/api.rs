@@ -214,6 +214,7 @@ const LANDING_INCOMPATIBLE_GLOBAL_FLAGS: &[&str] = &[
     "--proxy",
     "--no-proxy",
     "--format",
+    "--output-file",
     "--jq",
     "--batch-file",
     "--batch-concurrency",
@@ -265,11 +266,77 @@ async fn execute_api_runtime(
     let mut ctx = crate::cli::translate::cli_to_execution_context(execution, global_config)?;
     ctx.server_var_args = crate::cli::translate::extract_server_var_args(matches);
 
+    let operation = spec
+        .commands
+        .iter()
+        .find(|operation| operation.operation_id == call.operation_id)
+        .ok_or_else(|| Error::operation_not_found(call.operation_id.clone()))?;
+    validate_binary_execution_options(
+        operation,
+        execution,
+        jq_filter,
+        &output_format,
+        ctx.auto_paginate,
+    )?;
+
     if ctx.auto_paginate {
         return execute_paginated_api_runtime(spec, call, ctx, cli, jq_filter, output_format).await;
     }
 
-    execute_standard_api_runtime(spec, call, ctx, output_format, jq_filter).await
+    execute_standard_api_runtime(
+        spec,
+        call,
+        ctx,
+        output_format,
+        jq_filter,
+        execution.output_file.as_deref(),
+    )
+    .await
+}
+
+fn validate_binary_execution_options(
+    operation: &crate::cache::models::CachedCommand,
+    execution: &ExecutionFlags,
+    jq_filter: Option<&str>,
+    output_format: &crate::cli::OutputFormat,
+    auto_paginate: bool,
+) -> Result<(), Error> {
+    if operation.has_ambiguous_binary_response() {
+        return Err(Error::validation_error(
+            "Operation mixes binary and non-binary successful responses; execution is blocked before network access",
+        ));
+    }
+    let binary_response = operation.has_binary_response();
+    if !binary_response {
+        return if execution.output_file.is_some() {
+            Err(Error::validation_error(
+                "--output-file is only supported for declared binary responses",
+            ))
+        } else {
+            Ok(())
+        };
+    }
+    if execution.output_file.is_none() {
+        return Err(Error::validation_error(
+            "Binary responses require --output-file PATH or --output-file -",
+        ));
+    }
+    if jq_filter.is_some() {
+        return Err(Error::validation_error(
+            "--jq cannot be used with a binary response; use --output-file instead",
+        ));
+    }
+    if !matches!(output_format, crate::cli::OutputFormat::Json) {
+        return Err(Error::validation_error(
+            "--format cannot be used with a binary response; bytes are written exactly",
+        ));
+    }
+    if auto_paginate {
+        return Err(Error::validation_error(
+            "--auto-paginate cannot be used with a binary response",
+        ));
+    }
+    Ok(())
 }
 
 async fn execute_paginated_api_runtime(
@@ -311,12 +378,18 @@ async fn execute_standard_api_runtime(
     ctx: crate::invocation::ExecutionContext,
     output_format: crate::cli::OutputFormat,
     jq_filter: Option<&str>,
+    output_file: Option<&str>,
 ) -> Result<(), Error> {
     let result = executor::execute(spec, call, ctx)
         .await
         .map_err(enrich_network_error)?;
 
-    crate::cli::render::render_result(&result, &output_format, jq_filter)?;
+    crate::cli::render::render_result_with_binary_destination(
+        &result,
+        &output_format,
+        jq_filter,
+        output_file,
+    )?;
     Ok(())
 }
 
@@ -365,6 +438,7 @@ const RESERVED_EXECUTION_FLAGS: &[(&str, bool)] = &[
     ("--proxy", true),
     ("--no-proxy", false),
     ("--format", true),
+    ("--output-file", true),
     ("--jq", true),
     ("--batch-file", true),
     ("--batch-concurrency", true),
