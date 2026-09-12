@@ -151,12 +151,12 @@ impl FileSystem for MockFileSystem {
         let files = self.files.lock().unwrap();
         let dirs = self.dirs.lock().unwrap();
         let mut entries = Vec::new();
-        for (p, _) in files.iter() {
+        for p in files.keys() {
             if p.parent() == Some(path) {
                 entries.push(p.clone());
             }
         }
-        for (p, _) in dirs.iter() {
+        for p in dirs.keys() {
             if p.parent() == Some(path) && p != path {
                 entries.push(p.clone());
             }

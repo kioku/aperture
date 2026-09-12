@@ -900,7 +900,10 @@ paths:
     // Parse the dry-run JSON output to check headers
     let dry_run_info: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     let headers = &dry_run_info["headers"];
-    assert!(headers["idempotency-key"].as_str().unwrap() == "my-unique-key-123");
+    assert_eq!(
+        headers["idempotency-key"].as_str().unwrap(),
+        "my-unique-key-123"
+    );
 }
 
 #[test]

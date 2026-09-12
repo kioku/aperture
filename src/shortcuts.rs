@@ -290,7 +290,7 @@ impl ShortcutResolver {
         Self::resolve_single_candidate(candidates)
     }
 
-    fn has_high_confidence_candidate(candidates: &[ResolvedShortcut]) -> bool {
+    const fn has_high_confidence_candidate(candidates: &[ResolvedShortcut]) -> bool {
         candidates[0].confidence >= 85
             && (candidates.len() == 1 || candidates[0].confidence > candidates[1].confidence + 10)
     }
