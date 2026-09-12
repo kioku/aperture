@@ -117,10 +117,10 @@ for binary uploads, while binary-response batch operations fail before sending.
 
 ### Response Schema Limitations
 
-The `response_schema` field provides schema information for successful responses (200/201/204), but has limitations:
+The `response_schema` field considers potentially successful numeric statuses, the `2XX` range, and `default` responses, but has limitations:
 
 - **Schema `$ref` references are resolved**: Top-level references like `$ref: '#/components/schemas/User'` are expanded inline.
-- **Response references are NOT resolved**: If a response is defined as `$ref: '#/components/responses/UserResponse'`, the schema will not be extracted.
+- **Local response references are resolved**: References like `$ref: '#/components/responses/UserResponse'`, including local reference chains, participate in schema extraction.
 - **Nested references remain as-is**: References within object properties are not recursively resolved.
 
 **Usage patterns:**
