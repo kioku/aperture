@@ -1857,7 +1857,7 @@ impl<F: FileSystem> ConfigManager<F> {
 
             if warning
                 .reason
-                .contains("unsupported content types alongside JSON")
+                .contains("unsupported content types alongside a supported content type")
             {
                 categorized.mixed_content.push(warning);
             }
@@ -1977,7 +1977,7 @@ impl<F: FileSystem> ConfigManager<F> {
         ));
         for warning in mixed_content_warnings {
             lines.push(format!(
-                "{}  - {} {} supports JSON but not: {}",
+                "{}  - {} {} supports at least one compatible body but not: {}",
                 indent,
                 warning.endpoint.method,
                 warning.endpoint.path,

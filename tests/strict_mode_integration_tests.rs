@@ -92,8 +92,8 @@ fn test_strict_mode_rejects_spec_with_multipart() {
                 "Error should mention multipart/form-data"
             );
             assert!(
-                msg.contains("v1.0"),
-                "Error should mention version limitation"
+                msg.contains("explicitly modeled single-part string/binary"),
+                "Error should describe the supported body formats"
             );
         }
         _ => panic!("Expected Validation error"),
@@ -190,8 +190,10 @@ fn test_cli_strict_mode_rejection() {
         "Should show error about unsupported content type"
     );
     assert!(
-        stderr.contains("Only 'application/json' is supported in v1.0"),
-        "Should mention version limitation"
+        stderr.contains(
+            "Supported bodies are JSON or an explicitly modeled single-part string/binary"
+        ),
+        "Should describe the supported body formats"
     );
 
     // Verify spec was NOT added

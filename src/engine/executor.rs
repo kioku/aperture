@@ -439,6 +439,7 @@ async fn send_request_with_retry(
     headers: HeaderMap,
     body: Option<RequestBody>,
     retry_context: Option<&RetryContext>,
+    spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<HttpResponseBytes, Error> {
@@ -452,10 +453,26 @@ async fn send_request_with_retry(
             "Sending binary request body"
         ),
         Some(RequestBody::Json(json)) => {
-            logging::log_request(method.as_str(), url, Some(&headers), Some(json), secret_ctx);
+            logging::log_operation_request(
+                method.as_str(),
+                url,
+                Some(&headers),
+                Some(json),
+                secret_ctx,
+                spec,
+                operation,
+            );
         }
         None => {
-            logging::log_request(method.as_str(), url, Some(&headers), None, secret_ctx);
+            logging::log_operation_request(
+                method.as_str(),
+                url,
+                Some(&headers),
+                None,
+                secret_ctx,
+                spec,
+                operation,
+            );
         }
     }
 
@@ -466,7 +483,7 @@ async fn send_request_with_retry(
             url,
             headers,
             body,
-            operation.binary_response_content_type().is_some(),
+            operation.has_binary_response(),
             secret_ctx,
         )
         .await;
@@ -485,7 +502,7 @@ async fn send_request_with_retry(
             url,
             headers,
             body,
-            operation.binary_response_content_type().is_some(),
+            operation.has_binary_response(),
             secret_ctx,
         )
         .await;
@@ -536,13 +553,7 @@ async fn retry_request_with_backoff(
         attempt += 1;
 
         let request = build_request(client, method.clone(), url, headers.clone(), body.clone());
-        match send_request(
-            request,
-            operation.binary_response_content_type().is_some(),
-            secret_ctx,
-        )
-        .await
-        {
+        match send_request(request, operation.has_binary_response(), secret_ctx).await {
             Ok((status, response_headers, response_text)) => {
                 match handle_retryable_http_response(
                     retry_config,
@@ -1211,7 +1222,7 @@ async fn finalize_execution_result(
     cache_config: Option<&CacheConfig>,
 ) -> Result<ExecutionResult, Error> {
     if !status.is_success() {
-        let error_body = if operation.binary_response_content_type().is_some() {
+        let error_body = if operation.has_binary_response() {
             format!("<{} binary response bytes>", response_bytes.len())
         } else {
             String::from_utf8_lossy(&response_bytes).into_owned()
@@ -1219,7 +1230,7 @@ async fn finalize_execution_result(
         return Err(handle_http_error(status, error_body, spec, operation));
     }
 
-    if operation.binary_response_content_type().is_some() {
+    if operation.has_binary_response() {
         return Ok(ExecutionResult::Binary {
             body: response_bytes,
             status: status.as_u16(),
@@ -1331,6 +1342,7 @@ pub async fn execute(
         prepared.headers,
         prepared.body.clone(),
         prepared.retry_ctx.as_ref(),
+        spec,
         prepared.operation,
         Some(&prepared.secret_ctx),
     )
@@ -1417,12 +1429,85 @@ fn prepare_execution<'a>(
     })
 }
 
+fn validate_binary_request_body(body: &RequestBody) -> Result<(), Error> {
+    match body {
+        RequestBody::Binary(_) => Ok(()),
+        RequestBody::Json(_) => Err(Error::validation_error(
+            "JSON request text does not match the operation's declared request body",
+        )),
+    }
+}
+
+fn validate_json_request_body(body: &RequestBody) -> Result<(), Error> {
+    let RequestBody::Json(source) = body else {
+        return Err(Error::validation_error(
+            "Binary request bytes do not match the operation's declared request body",
+        ));
+    };
+    serde_json::from_str::<Value>(source)
+        .map(|_| ())
+        .map_err(|error| Error::validation_error(format!("Invalid JSON request body: {error}")))
+}
+
+fn validate_declared_request_body(
+    declared: &crate::cache::models::CachedRequestBody,
+    body: Option<&RequestBody>,
+) -> Result<(), Error> {
+    let Some(body) = body else {
+        return if declared.required {
+            Err(Error::validation_error(
+                "This operation requires a request body",
+            ))
+        } else {
+            Ok(())
+        };
+    };
+    if declared.is_binary() {
+        return validate_binary_request_body(body);
+    }
+    if declared.is_json() {
+        return validate_json_request_body(body);
+    }
+    Err(Error::validation_error(
+        "The operation's declared request body is not supported",
+    ))
+}
+
+fn validate_operation_call_body(
+    operation: &CachedCommand,
+    body: Option<&RequestBody>,
+) -> Result<(), Error> {
+    if operation.has_ambiguous_binary_response() {
+        return Err(Error::validation_error(
+            "Operation mixes binary and non-binary successful responses; execution is blocked before network access",
+        ));
+    }
+    if let Some(declared) = operation.request_body.as_ref() {
+        return validate_declared_request_body(declared, body);
+    }
+    if body.is_some() {
+        return Err(Error::validation_error(
+            "This operation does not declare a request body",
+        ));
+    }
+    Ok(())
+}
+
+fn find_validated_operation<'a>(
+    spec: &'a CachedSpec,
+    call: &crate::invocation::OperationCall,
+) -> Result<&'a CachedCommand, Error> {
+    let operation = find_operation_by_id(spec, &call.operation_id)?;
+    validate_operation_call_body(operation, call.body.as_ref())?;
+    Ok(operation)
+}
+
 fn prepare_request<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
 ) -> Result<PreparedRequest<'a>, Error> {
-    let operation = find_operation_by_id(spec, &call.operation_id)?;
+    let operation = find_validated_operation(spec, &call)?;
     let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
     let base_url =
         resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
@@ -1848,6 +1933,71 @@ fn parse_bracket_index(part: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn operation_with_body(
+        request_body: Option<crate::cache::models::CachedRequestBody>,
+    ) -> CachedCommand {
+        CachedCommand {
+            name: "upload".to_string(),
+            description: None,
+            summary: None,
+            operation_id: "upload".to_string(),
+            method: "POST".to_string(),
+            path: "/upload".to_string(),
+            parameters: vec![],
+            request_body,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec![],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
+            pagination: crate::cache::models::PaginationInfo::default(),
+        }
+    }
+
+    #[test]
+    fn direct_request_body_validation_rejects_mismatches_and_invalid_json() {
+        let binary = operation_with_body(Some(crate::cache::models::CachedRequestBody {
+            content_type: "image/png".to_string(),
+            schema: r#"{"type":"string","format":"binary"}"#.to_string(),
+            required: true,
+            description: None,
+            example: None,
+        }));
+        assert!(
+            validate_operation_call_body(&binary, Some(&RequestBody::Json("{}".to_string())))
+                .is_err()
+        );
+        assert!(
+            validate_operation_call_body(&binary, Some(&RequestBody::Binary(vec![0xff]))).is_ok()
+        );
+
+        let json = operation_with_body(Some(crate::cache::models::CachedRequestBody {
+            content_type: "application/json".to_string(),
+            schema: r#"{"type":"object"}"#.to_string(),
+            required: true,
+            description: None,
+            example: None,
+        }));
+        assert!(
+            validate_operation_call_body(&json, Some(&RequestBody::Binary(vec![0xff]))).is_err()
+        );
+        assert!(validate_operation_call_body(
+            &json,
+            Some(&RequestBody::Json("{invalid".to_string()))
+        )
+        .is_err());
+        assert!(validate_operation_call_body(
+            &json,
+            Some(&RequestBody::Json(r#"{"ok":true}"#.to_string()))
+        )
+        .is_ok());
+    }
 
     #[test]
     fn test_default_request_headers_use_current_package_version() {

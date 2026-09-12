@@ -820,7 +820,7 @@ impl BatchProcessor {
             .iter()
             .find(|command| command.operation_id == operation_id)
             .ok_or_else(|| Error::validation_error("Batch operation was not found"))?;
-        if target.binary_response_content_type().is_some() {
+        if target.has_binary_response() {
             return Err(Error::validation_error(
                 "Binary response operations are not supported in batch mode; no byte-safe per-operation output destination is available",
             ));

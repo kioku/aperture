@@ -225,7 +225,7 @@ Aperture's v1.0 implementation will support a well-defined subset of the OpenAPI
 | `components`                 | **Supported**           | Referencing schemas, parameters, etc., via `$ref` is supported.                                                           |
 | `parameters` (`in`)          | **Supported**           | `path`, `query`, and `header` are supported.                                                                              |
 | `parameters` (`style`)       | **Unsupported**         | Default styles are assumed. Complex serialization is not supported.                                                       |
-| `requestBody`                | **Partially Supported** | JSON media types and single-part `application/octet-stream` bodies modeled as `string`/`binary` are supported. Other content types (e.g., `multipart/form-data`, `application/xml`) are skipped with warnings in non-strict mode. |
+| `requestBody`                | **Partially Supported** | JSON media types and explicitly modeled single-part `string`/`binary` media (including octet-stream, image, and PDF) are supported. Multipart, form, XML, and text bodies are skipped with warnings in non-strict mode. |
 | `responses`                  | **Supported**           | Used to validate successful response bodies.                                                                              |
 | `securitySchemes`            | **Partially Supported** | See §6 for the detailed security model. `apiKey` and `http` (bearer, basic, and custom schemes) are supported. `oauth2` and `openIdConnect` are skipped with warnings in non-strict mode. |
 

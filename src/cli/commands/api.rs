@@ -301,7 +301,12 @@ fn validate_binary_execution_options(
     output_format: &crate::cli::OutputFormat,
     auto_paginate: bool,
 ) -> Result<(), Error> {
-    let binary_response = operation.binary_response_content_type().is_some();
+    if operation.has_ambiguous_binary_response() {
+        return Err(Error::validation_error(
+            "Operation mixes binary and non-binary successful responses; execution is blocked before network access",
+        ));
+    }
+    let binary_response = operation.has_binary_response();
     if !binary_response {
         return if execution.output_file.is_some() {
             Err(Error::validation_error(

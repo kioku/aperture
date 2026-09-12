@@ -707,7 +707,9 @@ paths:
     }) = result
     {
         assert!(msg.contains("Unsupported request body content type 'application/xml'"));
-        assert!(msg.contains("Only 'application/json' is supported"));
+        assert!(msg.contains(
+            "Supported bodies are JSON or an explicitly modeled single-part string/binary"
+        ));
     } else {
         panic!("Unexpected error type: {result:?}");
     }
@@ -748,7 +750,9 @@ paths:
     }) = result
     {
         assert!(msg.contains("Unsupported request body content type 'text/plain'"));
-        assert!(msg.contains("Only 'application/json' is supported"));
+        assert!(msg.contains(
+            "Supported bodies are JSON or an explicitly modeled single-part string/binary"
+        ));
     } else {
         panic!("Unexpected error type: {result:?}");
     }

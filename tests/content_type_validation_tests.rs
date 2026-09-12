@@ -206,12 +206,12 @@ paths:
     let result = config_manager.add_spec(&name("content-test"), &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
-    // Load cached spec and verify JSON plus modeled octet-stream binary were included
+    // Load cached spec and verify JSON plus modeled single-part binary media were included.
     let cache_dir = _temp_dir.path().join(".cache");
     let cached_spec = load_cached_spec(&cache_dir, "content-test").unwrap();
 
-    // Standard JSON, custom+json, and single-part octet-stream binary are supported.
-    assert_eq!(cached_spec.commands.len(), 3);
+    // Standard JSON, custom+json, and explicitly modeled binary media are supported.
+    assert_eq!(cached_spec.commands.len(), 5);
 
     let operation_ids: Vec<&str> = cached_spec
         .commands
@@ -221,6 +221,8 @@ paths:
     assert!(operation_ids.contains(&"postJson"));
     assert!(operation_ids.contains(&"postCustom")); // application/vnd.custom+json is now accepted
     assert!(operation_ids.contains(&"uploadBinary"));
+    assert!(operation_ids.contains(&"uploadImage"));
+    assert!(operation_ids.contains(&"uploadPdf"));
 
     // Try in strict mode - should fail
     let result_strict =
@@ -263,6 +265,129 @@ paths:
     let cached = load_cached_spec(temp_dir.path().join(".cache"), "binary-strict").unwrap();
     assert_eq!(cached.commands.len(), 1);
     assert_eq!(cached.commands[0].operation_id, "uploadBlob");
+}
+
+#[test]
+fn test_nested_or_disconnected_binary_schema_tokens_are_not_body_markers() {
+    let (config_manager, temp_dir) = create_temp_config_manager();
+    let spec_file = temp_dir.path().join("nested-binary.yaml");
+    std::fs::write(
+        &spec_file,
+        r"
+openapi: 3.0.3
+info: {title: Nested binary, version: 1.0.0}
+paths:
+  /nested:
+    put:
+      operationId: nestedBinary
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: object
+              properties:
+                payload: {type: string, format: binary}
+      responses: {'204': {description: accepted}}
+  /disconnected:
+    put:
+      operationId: disconnectedBinary
+      requestBody:
+        content:
+          application/pdf:
+            schema:
+              type: string
+              properties:
+                payload: {format: binary}
+      responses: {'204': {description: accepted}}
+",
+    )
+    .unwrap();
+
+    config_manager
+        .add_spec(&name("nested-binary"), &spec_file, false, false)
+        .unwrap();
+    let cached = load_cached_spec(temp_dir.path().join(".cache"), "nested-binary").unwrap();
+    assert!(cached.commands.is_empty());
+    assert!(config_manager
+        .add_spec(&name("nested-binary-strict"), &spec_file, false, true)
+        .is_err());
+}
+
+#[test]
+fn test_modeled_png_pdf_and_binary_fallback_are_supported() {
+    let (config_manager, temp_dir) = create_temp_config_manager();
+    let spec_file = temp_dir.path().join("binary-media.yaml");
+    std::fs::write(
+        &spec_file,
+        r"
+openapi: 3.0.3
+info:
+  title: Binary media API
+  version: 1.0.0
+paths:
+  /png:
+    put:
+      operationId: uploadPng
+      requestBody:
+        content:
+          image/png:
+            schema: {type: string, format: binary}
+      responses: {'204': {description: accepted}}
+  /pdf:
+    put:
+      operationId: uploadPdf
+      requestBody:
+        content:
+          application/pdf; version=1.7:
+            schema: {type: string, format: binary}
+      responses: {'204': {description: accepted}}
+  /fallback:
+    put:
+      operationId: uploadFallback
+      requestBody:
+        content:
+          application/xml:
+            schema: {type: object}
+          image/png:
+            schema: {type: string, format: binary}
+      responses: {'204': {description: accepted}}
+  /json-first:
+    put:
+      operationId: uploadJson
+      requestBody:
+        content:
+          image/png:
+            schema: {type: string, format: binary}
+          application/json:
+            schema: {type: object}
+      responses: {'204': {description: accepted}}
+",
+    )
+    .unwrap();
+
+    config_manager
+        .add_spec(&name("binary-media"), &spec_file, false, false)
+        .expect("supported binary choices must remain admitted in non-strict mode");
+    let cached = load_cached_spec(temp_dir.path().join(".cache"), "binary-media").unwrap();
+    assert_eq!(cached.commands.len(), 4);
+
+    let body_for = |operation_id: &str| {
+        cached
+            .commands
+            .iter()
+            .find(|command| command.operation_id == operation_id)
+            .and_then(|command| command.request_body.as_ref())
+            .expect("operation should have a selected request body")
+    };
+    assert_eq!(body_for("uploadPng").content_type, "image/png");
+    assert!(body_for("uploadPng").is_binary());
+    assert_eq!(
+        body_for("uploadPdf").content_type,
+        "application/pdf; version=1.7"
+    );
+    assert!(body_for("uploadPdf").is_binary());
+    assert_eq!(body_for("uploadFallback").content_type, "image/png");
+    assert_eq!(body_for("uploadJson").content_type, "application/json");
 }
 
 #[test]
@@ -532,7 +657,7 @@ paths:
 
     // Check for specific warning messages
     assert!(
-        stderr.contains("Warning: Skipping 4 endpoints with unsupported content types (0 of 4 endpoints will be available)"),
+        stderr.contains("Warning: Skipping 3 endpoints with unsupported content types (1 of 4 endpoints will be available)"),
         "Should show correct count of skipped endpoints with available count. Actual stderr: {stderr}"
     );
     assert!(
@@ -540,8 +665,8 @@ paths:
         "Should show specific message for multipart/form-data"
     );
     assert!(
-        stderr.contains("image uploads are not supported"),
-        "Should show specific message for image types"
+        !stderr.contains("image uploads are not supported"),
+        "Explicitly modeled image bytes should be supported"
     );
     assert!(
         stderr.contains("XML content is not supported"),
@@ -627,13 +752,13 @@ paths:
     let result = config_manager.add_spec(&name("image-test"), &spec_file, false, false);
     assert!(result.is_ok(), "Should accept spec in non-strict mode");
 
-    // All image endpoints should be skipped
+    // Raster image string/binary bodies are supported; SVG/XML remains unsupported.
     let cache_dir = _temp_dir.path().join(".cache");
     let cached_spec = load_cached_spec(&cache_dir, "image-test").unwrap();
     assert_eq!(
         cached_spec.commands.len(),
-        0,
-        "All image endpoints should be skipped"
+        3,
+        "Modeled raster image bodies should be available"
     );
 }
 
@@ -934,10 +1059,10 @@ paths:
 
     // Check for mixed content warnings - updated to match new format
     assert!(stderr.contains("Endpoints with partial content type support:"));
-    assert!(stderr.contains("POST /upload supports JSON but not:"));
+    assert!(stderr.contains("POST /upload supports at least one compatible body but not:"));
     assert!(stderr.contains("multipart/form-data"));
     assert!(stderr.contains("application/xml"));
-    assert!(stderr.contains("PUT /data supports JSON but not: text/plain"));
+    assert!(stderr.contains("PUT /data supports at least one compatible body but not: text/plain"));
 
     // Verify the correct endpoints were included in cache
     let cache_dir = _temp_dir.path().join(".cache");

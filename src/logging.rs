@@ -313,6 +313,52 @@ pub fn log_request(
     body: Option<&str>,
     secret_ctx: Option<&SecretContext>,
 ) {
+    log_request_with_operation(method, url, headers, body, secret_ctx, None);
+}
+
+/// Logs a request while redacting active operation-specific security header names.
+pub fn log_operation_request(
+    method: &str,
+    url: &str,
+    headers: Option<&reqwest::header::HeaderMap>,
+    body: Option<&str>,
+    secret_ctx: Option<&SecretContext>,
+    spec: &CachedSpec,
+    operation: &crate::cache::models::CachedCommand,
+) {
+    log_request_with_operation(
+        method,
+        url,
+        headers,
+        body,
+        secret_ctx,
+        Some((spec, operation)),
+    );
+}
+
+fn redact_request_header_value(
+    header_name: &str,
+    value: &str,
+    secret_ctx: Option<&SecretContext>,
+    operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
+) -> String {
+    if operation_context.is_some_and(|(spec, operation)| {
+        should_redact_operation_header(header_name, spec, operation)
+    }) {
+        "[REDACTED]".to_string()
+    } else {
+        redact_header_value(header_name, value, secret_ctx)
+    }
+}
+
+fn log_request_with_operation(
+    method: &str,
+    url: &str,
+    headers: Option<&reqwest::header::HeaderMap>,
+    body: Option<&str>,
+    secret_ctx: Option<&SecretContext>,
+    operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
+) {
     // Redact sensitive query parameters from URL before logging
     let redacted_url = redact_url_query_params(url);
 
@@ -347,7 +393,8 @@ pub fn log_request(
     for (name, value) in header_map {
         let header_str = name.as_str();
         let raw_value = String::from_utf8_lossy(value.as_bytes()).to_string();
-        let display_value = redact_header_value(header_str, &raw_value, secret_ctx);
+        let display_value =
+            redact_request_header_value(header_str, &raw_value, secret_ctx, operation_context);
         debug!(
             target: "aperture::executor",
             "  {}: {}",

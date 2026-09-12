@@ -106,7 +106,7 @@ When command mappings are configured, the manifest groups commands by their **ef
 
 ### Binary body capabilities
 
-For a supported single-part OpenAPI `application/octet-stream` `string`/`binary` body,
+For a supported single-part OpenAPI `string`/`binary` body (including octet-stream, image, and PDF media),
 `request_body.binary` or `response_schema.binary` is `true` in the manifest. Agents must use
 `--body-file PATH` (or `--body-file -` for stdin) for binary requests. A binary response requires
 `--output-file PATH` or `--output-file -`; stdout mode emits only exact response bytes.

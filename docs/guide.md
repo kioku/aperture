@@ -155,8 +155,7 @@ aperture api my-api orders search --status pending --created-after 2024-01-01
 
 ### Binary request and response bodies
 
-Aperture supports single-part `application/octet-stream` bodies declared by OpenAPI as
-`type: string`, `format: binary`. Upload bytes with `--body-file PATH`, or use
+Aperture supports explicitly modeled single-part binary media (including `application/octet-stream`, image, and PDF) declared by OpenAPI as `type: string`, `format: binary`. Multipart, form, XML, JSON, and text media are not inferred as raw bytes. Upload bytes with `--body-file PATH`, or use
 `--body-file -` to read stdin. Inline `--body` remains JSON-only.
 
 Declared binary responses require an explicit destination:

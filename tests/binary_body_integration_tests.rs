@@ -57,6 +57,65 @@ paths:
       responses:
         '204':
           description: accepted
+  /png:
+    put:
+      tags: [media]
+      operationId: uploadPng
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '204':
+          description: accepted
+  /pdf:
+    get:
+      tags: [media]
+      operationId: downloadPdf
+      responses:
+        '200':
+          description: PDF payload
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+  /mixed:
+    get:
+      tags: [media]
+      operationId: downloadMixed
+      responses:
+        '200':
+          description: Binary payload
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '201':
+          description: JSON payload
+          content:
+            application/json:
+              schema:
+                type: object
+  /mixed-media:
+    get:
+      tags: [media]
+      operationId: downloadMixedMedia
+      responses:
+        '200':
+          description: Mixed media payload
+          content:
+            application/json:
+              schema:
+                type: object
+            application/pdf:
+              schema:
+                type: string
+                format: binary
   /json:
     post:
       tags: [json]
@@ -247,6 +306,117 @@ async fn binary_manifest_upload_file_stdin_retry_and_json_regression() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn png_upload_pdf_download_and_mixed_response_fail_closed() {
+    let server = MockServer::start().await;
+    let (temp, config) = setup(&server);
+    let payload = temp.path().join("payload.bin");
+    fs::write(&payload, BLOB).unwrap();
+
+    let manifest = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", &config)
+        .args(["api", "binary-test", "--describe-json"])
+        .output()
+        .unwrap();
+    assert!(manifest.status.success());
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest.stdout).unwrap();
+    let mixed = manifest["commands"]["media"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|command| command["operation_id"] == "downloadMixed")
+        .unwrap();
+    assert_eq!(mixed["response_schema"]["binary"], true);
+    assert_eq!(mixed["response_schema"]["ambiguous_binary"], true);
+    let mixed_media = manifest["commands"]["media"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|command| command["operation_id"] == "downloadMixedMedia")
+        .unwrap();
+    assert_eq!(mixed_media["response_schema"]["binary"], true);
+    assert_eq!(mixed_media["response_schema"]["ambiguous_binary"], true);
+
+    Mock::given(method("PUT"))
+        .and(path("/png"))
+        .and(header("content-type", "image/png"))
+        .and(body_bytes(BLOB))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", &config)
+        .args([
+            "api",
+            "binary-test",
+            "media",
+            "upload-png",
+            "--body-file",
+            payload.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    Mock::given(method("GET"))
+        .and(path("/pdf"))
+        .and(header("accept", "application/pdf"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(BLOB))
+        .expect(1)
+        .mount(&server)
+        .await;
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", &config)
+        .args([
+            "api",
+            "--output-file",
+            "-",
+            "binary-test",
+            "media",
+            "download-pdf",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::eq(BLOB));
+
+    let before = server.received_requests().await.unwrap().len();
+    for extra_args in [
+        vec!["--output-file", "-"],
+        vec!["--output-file", "-", "--jq", "."],
+        vec!["--cache"],
+    ] {
+        let mut args = vec!["api"];
+        args.extend(extra_args);
+        args.extend(["binary-test", "media", "download-mixed"]);
+        aperture_cmd()
+            .env("APERTURE_CONFIG_DIR", &config)
+            .args(args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "mixes binary and non-binary successful responses",
+            ));
+    }
+    for operation in ["download-mixed", "download-mixed-media"] {
+        aperture_cmd()
+            .env("APERTURE_CONFIG_DIR", &config)
+            .args([
+                "api",
+                "--output-file",
+                "-",
+                "binary-test",
+                "media",
+                operation,
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains(
+                "mixes binary and non-binary successful responses",
+            ));
+    }
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn binary_download_is_exact_and_destinations_fail_closed() {
     let server = MockServer::start().await;
     let (temp, config) = setup(&server);
@@ -294,6 +464,33 @@ async fn binary_download_is_exact_and_destinations_fail_closed() {
         .assert()
         .success()
         .stdout(predicate::eq(BLOB));
+
+    let override_value = "synthetic-override-value";
+    Mock::given(method("GET"))
+        .and(path("/blob"))
+        .and(header("x-private-credential", override_value))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(BLOB))
+        .expect(1)
+        .mount(&server)
+        .await;
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", &config)
+        .env("APERTURE_TEST_BINARY_TOKEN", token)
+        .args([
+            "-v",
+            "api",
+            "--output-file",
+            "-",
+            "binary-test",
+            "blobs",
+            "download-blob",
+            "--header",
+            &format!("X-Private-Credential: {override_value}"),
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("x-private-credential: [REDACTED]"))
+        .stderr(predicate::str::contains(override_value).not());
 
     aperture_cmd()
         .env("APERTURE_CONFIG_DIR", &config)
@@ -363,7 +560,7 @@ async fn binary_download_is_exact_and_destinations_fail_closed() {
     assert!(!dry_output.exists());
     assert_eq!(
         server.received_requests().await.unwrap().len(),
-        2,
+        3,
         "invalid combinations and dry-run must not send requests"
     );
 
@@ -498,6 +695,26 @@ async fn binary_cache_and_response_batch_are_rejected_before_network() {
         .assert()
         .failure()
         .stdout(predicate::str::contains("0/1 operations successful"))
+        .stdout(predicate::str::contains(
+            "Binary response operations are not supported in batch mode",
+        ));
+    assert!(server.received_requests().await.unwrap().is_empty());
+
+    fs::write(
+        &batch,
+        "operations:\n  - id: mixed\n    args: [media, download-mixed]\n",
+    )
+    .unwrap();
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", &config)
+        .args([
+            "api",
+            "--batch-file",
+            batch.to_str().unwrap(),
+            "binary-test",
+        ])
+        .assert()
+        .failure()
         .stdout(predicate::str::contains(
             "Binary response operations are not supported in batch mode",
         ));
