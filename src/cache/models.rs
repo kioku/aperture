@@ -294,7 +294,7 @@ impl CachedResponse {
             .is_ok_and(|status| (200..300).contains(&status))
             || status.eq_ignore_ascii_case("2XX")
             || status.eq_ignore_ascii_case("default");
-        may_succeed && self.content_type.is_some() && self.schema.is_some()
+        may_succeed && self.content_type.is_some()
     }
 
     /// Returns whether this response declares a JSON media type.
@@ -467,7 +467,14 @@ mod tests {
             request_body: None,
             responses: vec![
                 response("200", "image/png", BINARY_SCHEMA),
-                response("201", "application/json", r#"{"type":"object"}"#),
+                response("201", "application/pdf", BINARY_SCHEMA),
+                CachedResponse {
+                    status_code: "202".to_string(),
+                    description: None,
+                    content_type: Some("application/json".to_string()),
+                    schema: None,
+                    example: None,
+                },
             ],
             security_requirements: vec![],
             tags: vec![],

@@ -816,12 +816,18 @@ fn preferred_text_response<'a>(
         .or_else(|| responses.first().copied())
 }
 
-fn extract_response_schema_from_cached(command: &CachedCommand) -> Option<ResponseSchemaInfo> {
-    let successful: Vec<_> = command
+fn cached_successful_responses(
+    command: &CachedCommand,
+) -> Vec<&crate::cache::models::CachedResponse> {
+    command
         .responses
         .iter()
-        .filter(|response| response.may_be_successful_body())
-        .collect();
+        .filter(|response| response.may_be_successful_body() && response.schema.is_some())
+        .collect()
+}
+
+fn extract_response_schema_from_cached(command: &CachedCommand) -> Option<ResponseSchemaInfo> {
+    let successful = cached_successful_responses(command);
     let preferred = if command.has_binary_response() {
         successful
             .iter()
