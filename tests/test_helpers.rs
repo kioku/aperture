@@ -7,7 +7,7 @@ use aperture_cli::constants;
 
 /// Initialize the rustls crypto provider before any tests run.
 /// This runs once per test binary when `test_helpers` is included.
-#[ctor::ctor]
+#[ctor::ctor(unsafe)]
 fn init_crypto_provider() {
     #[cfg(not(windows))]
     let _ = rustls::crypto::ring::default_provider().install_default();

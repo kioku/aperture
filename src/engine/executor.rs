@@ -26,7 +26,7 @@ const DEFAULT_USER_AGENT: &str = concat!("aperture/", env!("CARGO_PKG_VERSION"))
 type HttpResponseBytes = (reqwest::StatusCode, HashMap<String, String>, Vec<u8>);
 
 #[cfg(feature = "jq")]
-use jaq_core::{Ctx, RcIter};
+use jaq_core::{data, unwrap_valr, Ctx, Vars};
 #[cfg(feature = "jq")]
 use jaq_json::Val;
 
@@ -1762,7 +1762,7 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
 
 #[cfg(feature = "jq")]
 fn apply_jq_filter_value(json_value: Value, filter: &str) -> Result<String, Error> {
-    // Use jaq v2.x (pure Rust implementation)
+    // Use jaq v3.x (pure Rust implementation)
     use jaq_core::load::{Arena, File, Loader};
     use jaq_core::Compiler;
 
@@ -1771,8 +1771,14 @@ fn apply_jq_filter_value(json_value: Value, filter: &str) -> Result<String, Erro
         path: (),
     };
 
-    let defs: Vec<_> = jaq_std::defs().chain(jaq_json::defs()).collect();
-    let funs: Vec<_> = jaq_std::funs().chain(jaq_json::funs()).collect();
+    let defs: Vec<_> = jaq_core::defs()
+        .chain(jaq_std::defs())
+        .chain(jaq_json::defs())
+        .collect();
+    let funs: Vec<_> = jaq_core::funs::<data::JustLut<Val>>()
+        .chain(jaq_std::funs())
+        .chain(jaq_json::funs())
+        .collect();
 
     let loader = Loader::new(defs);
     let arena = Arena::default();
@@ -1786,10 +1792,10 @@ fn apply_jq_filter_value(json_value: Value, filter: &str) -> Result<String, Erro
         .compile(modules)
         .map_err(|errs| Error::jq_filter_error(filter, format!("Compilation error: {errs:?}")))?;
 
-    let jaq_value = Val::from(json_value);
-    let inputs = RcIter::new(core::iter::empty());
-    let ctx = Ctx::new([], &inputs);
-    let output = filter_fn.run((ctx, jaq_value));
+    let jaq_value: Val = serde_json::from_value(json_value)
+        .map_err(|e| Error::serialization_error(format!("Failed to convert filter input: {e}")))?;
+    let ctx = Ctx::<data::JustLut<Val>>::new(&filter_fn.lut, Vars::new([]));
+    let output = filter_fn.id.run((ctx, jaq_value)).map(unwrap_valr);
     let results: Result<Vec<Val>, _> = output.collect();
 
     format_jaq_results(results, filter)
@@ -1803,12 +1809,20 @@ fn format_jaq_results<E: std::fmt::Display>(
     match results {
         Ok(vals) if vals.is_empty() => Ok(constants::NULL_VALUE.to_string()),
         Ok(vals) if vals.len() == 1 => {
-            let json_val = serde_json::Value::from(vals[0].clone());
+            let json_val: Value = serde_json::from_str(&vals[0].to_string()).map_err(|e| {
+                Error::serialization_error(format!("Failed to convert result: {e}"))
+            })?;
             serde_json::to_string_pretty(&json_val)
                 .map_err(|e| Error::serialization_error(format!("Failed to serialize result: {e}")))
         }
         Ok(vals) => {
-            let json_vals: Vec<Value> = vals.into_iter().map(serde_json::Value::from).collect();
+            let json_vals: Vec<Value> = vals
+                .into_iter()
+                .map(|val| serde_json::from_str(&val.to_string()))
+                .collect::<Result<_, _>>()
+                .map_err(|e| {
+                    Error::serialization_error(format!("Failed to convert results: {e}"))
+                })?;
             let array = Value::Array(json_vals);
             serde_json::to_string_pretty(&array).map_err(|e| {
                 Error::serialization_error(format!("Failed to serialize results: {e}"))
@@ -2045,6 +2059,26 @@ mod tests {
         let result = apply_jq_filter(json, ".user.name").unwrap();
         let parsed: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed, serde_json::json!("Bob"));
+    }
+
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_preserves_json_values() {
+        let json = r#"{"large":18446744073709551615,"negative":-9223372036854775808,"float":1.25,"text":"line\n雪","bool":true,"null":null,"nested":[{"key":"value"}]}"#;
+        let result = apply_jq_filter(json, ".").unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&result).unwrap(),
+            serde_json::from_str::<Value>(json).unwrap()
+        );
+    }
+
+    #[cfg(feature = "jq")]
+    #[test]
+    fn test_apply_jq_filter_empty_and_runtime_error() {
+        assert_eq!(apply_jq_filter("null", "empty").unwrap(), "null");
+        let err = apply_jq_filter("null", r#"error("failed")"#).unwrap_err();
+        assert!(err.to_string().contains("Filter execution error"));
+        assert!(err.to_string().contains("failed"));
     }
 
     #[cfg(feature = "jq")]
