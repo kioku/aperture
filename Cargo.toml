@@ -38,9 +38,9 @@ ahash = { version = "0.8.12", optional = true }
 anyhow = "1.0.103"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.6.0", features = ["derive"] }
-jaq-core = { version = "2.2.1", optional = true }
-jaq-json = { version = "1.1.3", features = ["serde_json"], optional = true }
-jaq-std = { version = "2.1.2", optional = true }
+jaq-core = { version = "3.1.1", optional = true }
+jaq-json = { version = "2.0.3", features = ["serde"], optional = true }
+jaq-std = { version = "3.0.3", optional = true }
 oas3 = { version = "0.22", features = ["yaml-spec"], optional = true }
 openapiv3 = "2.2.0"
 regex = "1"
@@ -49,7 +49,7 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
 shellexpand = "3.1.1"
-tabled = { version = "0.20.0", default-features = false, features = ["std"] }
+tabled = { version = "0.21.0", default-features = false, features = ["std"] }
 thiserror = "2.0.18"
 tokio = { version = "1.51.1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
 dirs = "6.0.0"
@@ -74,10 +74,10 @@ libc = "0.2"
 # ring: pure Rust/ASM — no bundled C library, eliminates aws-lc-sys on non-Windows builds.
 # aws_lc_rs: retained on Windows; ring requires NASM at build time on MSVC targets.
 [target.'cfg(not(windows))'.dependencies]
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
 [target.'cfg(windows)'.dependencies]
-rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
+rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
 
 [features]
 default = []
@@ -87,14 +87,14 @@ integration = []
 
 [dev-dependencies]
 assert_cmd = "2.2.0"
-ctor = "0.6.3"
+ctor = "1.0.9"
 wiremock = "0.6.5"
 aperture-cli = { path = "." }
 predicates = "3.1.4"
 tempfile = "3.27.0"
 serde_json = "1.0.149"
 tokio = { version = "1.51.1", features = ["rt", "macros", "test-util"] }
-mockall = "0.14"
+mockall = "0.15"
 once_cell = "1.21.4"
 
 [profile.release]
@@ -123,8 +123,12 @@ codegen-units = 1
 panic = "abort"
 
 [lints.clippy]
-pedantic = "warn"
-nursery = "warn"
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Structured errors deliberately carry context; optional features change Value's size.
+result_large_err = "allow"
+# Keep explicit emptiness assertions without requiring element types to implement PartialEq.
+assert_is_empty = "allow"
 
 # cargo-binstall configuration for pre-built binary downloads
 [package.metadata.binstall]

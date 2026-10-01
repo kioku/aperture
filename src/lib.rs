@@ -30,7 +30,7 @@ pub mod utils;
 // unit-test binary so those clients don't hit reqwest's no-provider panic.
 #[cfg(test)]
 mod test_crypto_init {
-    #[ctor::ctor]
+    #[ctor::ctor(unsafe)]
     fn init() {
         #[cfg(not(windows))]
         let _ = rustls::crypto::ring::default_provider().install_default();
