@@ -312,15 +312,19 @@ fn sensitive_operation_query(
 ) -> bool {
     should_redact_query_param(name)
         || operation_context.is_some_and(|(spec, operation)| {
-            operation.security_requirements.iter().any(|scheme_name| {
-                spec.security_schemes
-                    .get(scheme_name)
-                    .is_some_and(|scheme| {
-                        scheme.scheme_type == crate::constants::AUTH_SCHEME_APIKEY
-                            && scheme.location.as_deref() == Some("query")
-                            && scheme.parameter_name.as_deref() == Some(name)
-                    })
-            })
+            operation
+                .security_requirements
+                .iter()
+                .flatten()
+                .any(|scheme_name| {
+                    spec.security_schemes
+                        .get(scheme_name)
+                        .is_some_and(|scheme| {
+                            scheme.scheme_type == crate::constants::AUTH_SCHEME_APIKEY
+                                && scheme.location.as_deref() == Some("query")
+                                && scheme.parameter_name.as_deref() == Some(name)
+                        })
+                })
         })
 }
 
@@ -698,14 +702,18 @@ mod tests {
         let spec: CachedSpec = serde_json::from_value(serde_json::json!({
             "cache_format_version": crate::cache::models::CACHE_FORMAT_VERSION,
             "name": "test", "version": "1", "base_url": "https://example.com", "servers": [],
-            "security_schemes": { "tenant": { "name": "tenant", "scheme_type": "apiKey", "location": "query", "parameter_name": "tenant-secret" } },
-            "commands": [{ "name": "items", "operation_id": "items", "method": "GET", "path": "/items", "parameters": [], "responses": [], "security_requirements": ["tenant"], "tags": [], "deprecated": false, "examples": [], "aliases": [], "hidden": false }]
+            "security_schemes": {
+                "tenant": { "name": "tenant", "scheme_type": "apiKey", "location": "query", "parameter_name": "tenant-secret" },
+                "secondary": { "name": "secondary", "scheme_type": "apiKey", "location": "query", "parameter_name": "secondary-secret" }
+            },
+            "commands": [{ "name": "items", "operation_id": "items", "method": "GET", "path": "/items", "parameters": [], "responses": [], "security_requirements": [[], ["tenant", "secondary"]], "tags": [], "deprecated": false, "examples": [], "aliases": [], "hidden": false }]
         })).unwrap();
         let redacted = redact_operation_url(
-            "https://example.com/?tenant%2Dsecret=secret&extra=public",
+            "https://example.com/?tenant%2Dsecret=secret&secondary-secret=other-credential&extra=public",
             Some((&spec, &spec.commands[0])),
         );
         assert!(!redacted.contains("=secret"));
+        assert!(!redacted.contains("other-credential"));
         assert!(redacted.contains("extra=public"));
     }
 

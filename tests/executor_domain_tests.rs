@@ -371,17 +371,64 @@ async fn repeated_posts_are_never_cached() {
     assert!(!dir.path().join("cache").exists());
 }
 
-#[tokio::test]
-async fn active_security_schemes_disable_caching_for_all_credential_locations() {
+/// Keep declared credential locations in the fixture even when injection is unsupported.
+fn tenant_security_spec(location: &str) -> CachedSpec {
     use aperture_cli::cache::models::CachedSecurityScheme;
+    let mut spec = test_spec();
+    spec.commands[0].security_requirements = vec![vec!["tenant".into()]];
+    spec.security_schemes.insert(
+        "tenant".into(),
+        CachedSecurityScheme {
+            name: "tenant".into(),
+            scheme_type: "apiKey".into(),
+            scheme: None,
+            location: Some(location.into()),
+            parameter_name: Some("X-Tenant-Secret".into()),
+            description: None,
+            bearer_format: None,
+            aperture_secret: None,
+        },
+    );
+    spec
+}
+
+#[tokio::test]
+async fn unsupported_security_locations_fail_before_network_or_cache() {
+    let server = MockServer::start().await;
+    let dir = tempdir().unwrap();
+    let ctx = ExecutionContext {
+        base_url: Some(server.uri()),
+        cache_config: Some(CacheConfig {
+            cache_dir: dir.path().join("cache"),
+            allow_authenticated: true,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    for location in ["query", "cookie"] {
+        let spec = tenant_security_spec(location);
+        for account in ["alice", "bob"] {
+            let mut call = user_by_id_call("123");
+            // Manual credentials must not turn unsupported declared injection into success.
+            call.query_params
+                .insert("X-Tenant-Secret".into(), account.into());
+            call.custom_headers
+                .push(format!("Cookie: X-Tenant-Secret={account}"));
+            let error = execute(&spec, call, ctx.clone()).await.unwrap_err();
+            assert!(error.to_string().contains("apiKey outside headers"));
+        }
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(!dir.path().join("cache").exists());
+}
+
+#[tokio::test]
+async fn anonymous_alternative_with_query_or_cookie_security_bypasses_cache() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("set-cookie", "session=secret")
-                .set_body_string("account response"),
-        )
-        .expect(6)
+        // No Set-Cookie response: only declared security can explain the cache bypass.
+        .respond_with(ResponseTemplate::new(200).set_body_string("public response"))
+        .expect(4)
         .mount(&server)
         .await;
     let dir = tempdir().unwrap();
@@ -394,41 +441,23 @@ async fn active_security_schemes_disable_caching_for_all_credential_locations() 
         }),
         ..Default::default()
     };
-    for location in ["header", "query", "cookie"] {
-        let mut spec = test_spec();
-        spec.commands[0].security_requirements = vec!["tenant".into()];
-        spec.security_schemes.insert(
-            "tenant".into(),
-            CachedSecurityScheme {
-                name: "tenant".into(),
-                scheme_type: "apiKey".into(),
-                scheme: None,
-                location: Some(location.into()),
-                parameter_name: Some("X-Tenant-Secret".into()),
-                description: None,
-                bearer_format: None,
-                aperture_secret: None,
-            },
-        );
-        for account in ["alice", "bob"] {
-            let mut call = user_by_id_call("123");
-            match location {
-                "header" => call
-                    .custom_headers
-                    .push(format!("X-Tenant-Secret: {account}")),
-                "query" => {
-                    call.query_params
-                        .insert("X-Tenant-Secret".into(), account.into());
-                }
-                _ => call
-                    .custom_headers
-                    .push(format!("Cookie: X-Tenant-Secret={account}")),
-            }
+    for location in ["query", "cookie"] {
+        let mut spec = tenant_security_spec(location);
+        // Anonymous access is genuinely satisfiable; unsupported injection is never selected.
+        spec.commands[0].security_requirements.insert(0, vec![]);
+        for _ in 0..2 {
             assert!(matches!(
-                execute(&spec, call, ctx.clone()).await.unwrap(),
+                execute(&spec, user_by_id_call("123"), ctx.clone())
+                    .await
+                    .unwrap(),
                 ExecutionResult::Success { .. }
             ));
         }
+    }
+    for request in server.received_requests().await.unwrap() {
+        assert!(!request.headers.contains_key("X-Tenant-Secret"));
+        assert!(!request.headers.contains_key("Cookie"));
+        assert!(request.url.query().is_none());
     }
     assert!(!dir.path().join("cache").exists());
 }
@@ -437,22 +466,17 @@ async fn active_security_schemes_disable_caching_for_all_credential_locations() 
 async fn custom_api_key_from_secret_mapping_never_reaches_cache_disk() {
     use aperture_cli::cache::models::{CachedApertureSecret, CachedSecurityScheme};
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(wiremock::matchers::header(
-            "X-Tenant-Secret",
-            "synthetic-tenant-secret",
-        ))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("set-cookie", "session=synthetic-session")
-                .set_body_string("ok"),
-        )
-        .expect(2)
-        .mount(&server)
-        .await;
+    for account in ["synthetic-tenant-alice", "synthetic-tenant-bob"] {
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::header("X-Tenant-Secret", account))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .expect(2)
+            .mount(&server)
+            .await;
+    }
     let dir = tempdir().unwrap();
     let mut spec = test_spec();
-    spec.commands[0].security_requirements = vec!["tenant".into()];
+    spec.commands[0].security_requirements = vec![vec!["tenant".into()]];
     spec.security_schemes.insert(
         "tenant".into(),
         CachedSecurityScheme {
@@ -469,10 +493,6 @@ async fn custom_api_key_from_secret_mapping_never_reaches_cache_disk() {
             }),
         },
     );
-    std::env::set_var(
-        "APERTURE_CACHE_TEST_TENANT_SECRET",
-        "synthetic-tenant-secret",
-    );
     let ctx = ExecutionContext {
         base_url: Some(server.uri()),
         cache_config: Some(CacheConfig {
@@ -481,10 +501,16 @@ async fn custom_api_key_from_secret_mapping_never_reaches_cache_disk() {
         }),
         ..Default::default()
     };
-    for _ in 0..2 {
-        execute(&spec, user_by_id_call("123"), ctx.clone())
-            .await
-            .unwrap();
+    for account in ["synthetic-tenant-alice", "synthetic-tenant-bob"] {
+        std::env::set_var("APERTURE_CACHE_TEST_TENANT_SECRET", account);
+        for _ in 0..2 {
+            assert!(matches!(
+                execute(&spec, user_by_id_call("123"), ctx.clone())
+                    .await
+                    .unwrap(),
+                ExecutionResult::Success { .. }
+            ));
+        }
     }
     std::env::remove_var("APERTURE_CACHE_TEST_TENANT_SECRET");
     assert!(!dir.path().join("cache").exists());
