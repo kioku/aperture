@@ -5,6 +5,7 @@
 
 use crate::constants;
 
+mod normalization;
 pub mod parser;
 pub mod transformer;
 pub mod validator;

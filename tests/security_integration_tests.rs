@@ -107,7 +107,7 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
                     "GET",
                     "/users/{id}",
                     vec![cached_parameter!("id", "path", true)],
-                    vec!["bearerAuth".to_string()]
+                    vec![vec!["bearerAuth".to_string()]]
                 );
                 cmd.description = Some("Get user by ID".to_string());
                 cmd
@@ -119,7 +119,7 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
                     "GET",
                     "/data",
                     vec![],
-                    vec!["apiKeyAuth".to_string()]
+                    vec![vec!["apiKeyAuth".to_string()]]
                 );
                 cmd.description = Some("Get data".to_string());
                 cmd

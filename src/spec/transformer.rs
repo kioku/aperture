@@ -194,13 +194,13 @@ impl SpecTransformer {
             .unwrap_or_default()
     }
 
-    fn extract_global_security_requirements(spec: &OpenAPI) -> Vec<String> {
+    fn extract_global_security_requirements(spec: &OpenAPI) -> Vec<Vec<String>> {
         spec.security
             .iter()
             .flat_map(|security_group| {
                 security_group
                     .iter()
-                    .flat_map(|security_req| security_req.keys().cloned())
+                    .map(|security_req| security_req.keys().cloned().collect())
             })
             .collect()
     }
@@ -246,7 +246,7 @@ impl SpecTransformer {
         path: &str,
         path_item: &ReferenceOr<openapiv3::PathItem>,
         skip_endpoints: &[(String, String)],
-        global_security_requirements: &[String],
+        global_security_requirements: &[Vec<String>],
         commands: &mut Vec<CachedCommand>,
     ) -> Result<(), Error> {
         let ReferenceOr::Item(item) = path_item else {
@@ -285,7 +285,7 @@ impl SpecTransformer {
         method: &str,
         path: &str,
         operation: &Operation,
-        global_security_requirements: &[String],
+        global_security_requirements: &[Vec<String>],
     ) -> Result<CachedCommand, Error> {
         let operation_id = operation
             .operation_id
@@ -372,14 +372,14 @@ impl SpecTransformer {
 
     fn resolve_security_requirements(
         operation: &Operation,
-        global_security_requirements: &[String],
-    ) -> Vec<String> {
+        global_security_requirements: &[Vec<String>],
+    ) -> Vec<Vec<String>> {
         operation.security.as_ref().map_or_else(
             || global_security_requirements.to_vec(),
             |security_reqs| {
                 security_reqs
                     .iter()
-                    .flat_map(|security_req| security_req.keys().cloned())
+                    .map(|security_req| security_req.keys().cloned().collect())
                     .collect()
             },
         )
@@ -1235,6 +1235,47 @@ fn update_offset_pagination_params(
 #[allow(clippy::field_reassign_with_default)]
 #[allow(clippy::too_many_lines)]
 mod tests {
+    #[test]
+    fn security_groups_preserve_inheritance_and_overrides() {
+        let spec: openapiv3::OpenAPI = serde_json::from_value(serde_json::json!({
+            "openapi":"3.0.3","info":{"title":"Security","version":"1"},
+            "security":[{"tokenA":[]},{"tokenB":[],"key":[]}],
+            "paths":{}
+        }))
+        .unwrap();
+        let global = super::SpecTransformer::extract_global_security_requirements(&spec);
+        assert_eq!(global.len(), 2);
+        assert_eq!(global[0], vec!["tokenA"]);
+        let mut combined = global[1].clone();
+        combined.sort();
+        assert_eq!(combined, vec!["key", "tokenB"]);
+        let inherited = openapiv3::Operation::default();
+        assert_eq!(
+            super::SpecTransformer::resolve_security_requirements(&inherited, &global),
+            global
+        );
+        for requirements in [
+            serde_json::json!([]),
+            serde_json::json!([{}]),
+            serde_json::json!([{"other":[]}]),
+        ] {
+            let operation: openapiv3::Operation =
+                serde_json::from_value(serde_json::json!({"responses":{},"security":requirements}))
+                    .unwrap();
+            let expected: Vec<Vec<String>> = operation
+                .security
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|group| group.keys().cloned().collect())
+                .collect();
+            assert_eq!(
+                super::SpecTransformer::resolve_security_requirements(&operation, &global),
+                expected
+            );
+        }
+    }
+
     use super::*;
     use openapiv3::{
         Components, Info, OpenAPI, Operation, Parameter, ParameterData, ParameterSchemaOrContent,

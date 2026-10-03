@@ -301,11 +301,11 @@ components:
         name: SENTRY_AUTH_TOKEN
 ```
 
-This configuration instructs Aperture to use the value of the `SENTRY_AUTH_TOKEN` environment variable for any operation secured by `sentryAuthToken`. If the extension is missing or the environment variable is unset, Aperture will fail with a `Config.SecretNotFound` error.
+This configuration instructs Aperture to use `SENTRY_AUTH_TOKEN` for an operation secured by `sentryAuthToken`. Configured secret mappings take precedence over the extension. Security requirement objects are alternatives (OR); schemes within an object are required together (AND). Aperture selects the first complete group with available credentials and applies only that group. An empty object permits anonymous access. Operation-level requirements replace global requirements, including an explicitly empty array. If no group is satisfiable, execution fails before sending the request. Invalid configuration or header values propagate rather than selecting another group.
 
 **Supported Authentication Types:**
 
-1. **API Key** (`type: apiKey`): Supports header, query, or cookie placement
+1. **API Key** (`type: apiKey`): Supports header placement. Query and cookie placement fail explicitly; automatic credential injection in those locations is not supported.
 2. **HTTP Bearer** (`type: http`, `scheme: bearer`): Standard Bearer token authentication
 3. **HTTP Basic** (`type: http`, `scheme: basic`): Basic authentication with base64 encoding
 4. **Custom HTTP Schemes** (`type: http`, `scheme: <custom>`): Any scheme not explicitly rejected (e.g., Token, DSN, ApiKey)

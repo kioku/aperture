@@ -874,6 +874,7 @@ fn handle_http_error(
     let security_schemes: Vec<String> = operation
         .security_requirements
         .iter()
+        .flatten()
         .filter_map(|scheme_name| {
             spec.security_schemes
                 .get(scheme_name)
@@ -1841,13 +1842,115 @@ fn apply_security_headers(
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<(), Error> {
-    for security_scheme_name in &operation.security_requirements {
-        let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) else {
-            continue;
+    if operation.security_requirements.is_empty() {
+        return Ok(());
+    }
+    let mut unavailable = None;
+    for group in &operation.security_requirements {
+        if let Some(error) = security_group_unavailable(group, spec, api_name, global_config)? {
+            unavailable.get_or_insert(error);
+        } else {
+            let mut selected = headers.clone();
+            for name in group {
+                let scheme = &spec.security_schemes[name];
+                add_authentication_header(&mut selected, scheme, api_name, global_config)?;
+            }
+            *headers = selected;
+            return Ok(());
+        }
+    }
+    Err(unavailable
+        .unwrap_or_else(|| Error::validation_error("No satisfiable security alternative")))
+}
+
+/// Check only credential availability. Invalid values and other errors propagate;
+/// only absent environment variables make an alternative unavailable.
+fn security_group_unavailable(
+    group: &[String],
+    spec: &CachedSpec,
+    api_name: &str,
+    global_config: Option<&GlobalConfig>,
+) -> Result<Option<Error>, Error> {
+    validate_security_group(group, spec)?;
+    for name in group {
+        let scheme = &spec.security_schemes[name];
+        let env_name = authentication_env_name(scheme, api_name, global_config);
+        let Some(env_name) = env_name else {
+            return Ok(Some(Error::validation_error(format!(
+                "No credential configured for security scheme '{name}'"
+            ))));
         };
-        add_authentication_header(headers, security_scheme, api_name, global_config)?;
+        match std::env::var(env_name) {
+            Ok(_) => {}
+            Err(std::env::VarError::NotPresent) => {
+                return Ok(Some(Error::secret_not_set(name, env_name)))
+            }
+            // VarError's Display includes the raw non-Unicode value, which is
+            // a credential here. Report the configuration error without it.
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(Error::validation_error(format!(
+                    "Credential for security scheme '{name}' is not valid unicode"
+                )))
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Reject groups we cannot apply completely before checking credentials. Two
+/// schemes targeting the same header cannot both be satisfied by overwriting it.
+fn validate_security_group(group: &[String], spec: &CachedSpec) -> Result<(), Error> {
+    let mut destinations = std::collections::HashSet::new();
+    for name in group {
+        let scheme = spec
+            .security_schemes
+            .get(name)
+            .ok_or_else(|| Error::validation_error(format!("Unknown security scheme '{name}'")))?;
+        let destination = security_header_destination(scheme)?;
+        if !destinations.insert(destination) {
+            return Err(Error::validation_error(
+                "Security group contains conflicting authentication headers",
+            ));
+        }
     }
     Ok(())
+}
+
+fn security_header_destination(scheme: &CachedSecurityScheme) -> Result<HeaderName, Error> {
+    match scheme.scheme_type.as_str() {
+        constants::AUTH_SCHEME_APIKEY => {
+            if scheme.location.as_deref() != Some("header") {
+                return Err(Error::unsupported_security_scheme("apiKey outside headers"));
+            }
+            let name = scheme.parameter_name.as_deref().ok_or_else(|| {
+                Error::validation_error("API key security scheme has no header name")
+            })?;
+            HeaderName::from_str(name)
+                .map_err(|error| Error::invalid_header_name(name, error.to_string()))
+        }
+        "http" => {
+            if scheme.scheme.as_deref().is_none_or(str::is_empty) {
+                return Err(Error::validation_error(
+                    "HTTP security scheme has no authentication scheme",
+                ));
+            }
+            Ok(HeaderName::from_static("authorization"))
+        }
+        other => Err(Error::unsupported_security_scheme(other)),
+    }
+}
+
+/// Configured secrets take precedence over specification extensions.
+fn authentication_env_name<'a>(
+    scheme: &'a CachedSecurityScheme,
+    api_name: &str,
+    config: Option<&'a GlobalConfig>,
+) -> Option<&'a String> {
+    config
+        .and_then(|config| config.api_configs.get(api_name))
+        .and_then(|config| config.secrets.get(&scheme.name))
+        .map(|secret| &secret.name)
+        .or_else(|| scheme.aperture_secret.as_ref().map(|secret| &secret.name))
 }
 
 fn apply_custom_headers(headers: &mut HeaderMap, custom_headers: &[String]) -> Result<(), Error> {
@@ -2068,6 +2171,135 @@ fn parse_bracket_index(part: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    fn security_test_spec() -> CachedSpec {
+        let document = serde_json::json!({
+            "openapi":"3.0.3", "info":{"title":"Security", "version":"1"},
+            "paths":{"/test":{"get":{"operationId":"test", "security":[{"available":[]},{"missing":[]}], "responses":{}}}},
+            "components":{"securitySchemes":{
+                "available":{"type":"apiKey","in":"header","name":"X-Available","x-aperture-secret":{"source":"env","name":"PATH"}},
+                "second":{"type":"apiKey","in":"header","name":"X-Second","x-aperture-secret":{"source":"env","name":"PATH"}},
+                "missing":{"type":"apiKey","in":"header","name":"X-Missing","x-aperture-secret":{"source":"env","name":"APERTURE_SECURITY_TEST_UNSET_221"}}
+            }}
+        });
+        let openapi = serde_json::from_value(document).unwrap();
+        crate::spec::SpecTransformer::new()
+            .transform("security", &openapi)
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn security_non_unicode_credentials_do_not_leak_in_errors() {
+        use std::os::unix::ffi::OsStringExt;
+        let env_name = "APERTURE_SECURITY_NON_UNICODE_C2";
+        let mut spec = security_test_spec();
+        spec.security_schemes
+            .get_mut("available")
+            .unwrap()
+            .aperture_secret
+            .as_mut()
+            .unwrap()
+            .name = env_name.into();
+        std::env::set_var(
+            env_name,
+            std::ffi::OsString::from_vec(b"synthetic-secret-\xff".to_vec()),
+        );
+        let result = apply_security_headers(
+            &mut HeaderMap::new(),
+            &spec,
+            &spec.commands[0],
+            "security",
+            None,
+        );
+        std::env::remove_var(env_name);
+        let error = result.unwrap_err().to_string();
+        assert!(
+            !error.contains("synthetic-secret"),
+            "credential leaked: {error}"
+        );
+        assert!(error.contains("unicode"));
+    }
+
+    #[test]
+    fn security_selects_one_alternative_without_other_credentials() {
+        let spec = security_test_spec();
+        let mut operation = spec.commands[0].clone();
+        let mut headers = HeaderMap::new();
+        apply_security_headers(&mut headers, &spec, &operation, "security", None).unwrap();
+        assert!(headers.contains_key("X-Available"));
+        assert!(!headers.contains_key("X-Missing"));
+        operation.security_requirements.reverse();
+        headers.clear();
+        apply_security_headers(&mut headers, &spec, &operation, "security", None).unwrap();
+        assert!(headers.contains_key("X-Available"));
+    }
+
+    #[test]
+    fn security_combined_group_is_atomic_and_empty_group_is_optional() {
+        let spec = security_test_spec();
+        let mut operation = spec.commands[0].clone();
+        operation.security_requirements = vec![vec!["available".into(), "missing".into()]];
+        let mut headers = HeaderMap::new();
+        assert!(apply_security_headers(&mut headers, &spec, &operation, "security", None).is_err());
+        assert!(headers.is_empty());
+        operation.security_requirements.push(vec![]);
+        apply_security_headers(&mut headers, &spec, &operation, "security", None).unwrap();
+        assert!(headers.is_empty());
+        operation.security_requirements = vec![vec!["available".into(), "second".into()]];
+        apply_security_headers(&mut headers, &spec, &operation, "security", None).unwrap();
+        assert!(headers.contains_key("X-Available"));
+        assert!(headers.contains_key("X-Second"));
+    }
+
+    #[test]
+    fn security_rejects_unapplied_or_conflicting_credentials() {
+        for location in ["query", "cookie"] {
+            let mut spec = security_test_spec();
+            spec.security_schemes.get_mut("available").unwrap().location = Some(location.into());
+            let mut headers = HeaderMap::new();
+            assert!(apply_security_headers(
+                &mut headers,
+                &spec,
+                &spec.commands[0],
+                "security",
+                None
+            )
+            .is_err());
+            assert!(headers.is_empty());
+        }
+        let mut spec = security_test_spec();
+        spec.security_schemes
+            .get_mut("second")
+            .unwrap()
+            .parameter_name = Some("x-available".into());
+        let mut operation = spec.commands[0].clone();
+        operation.security_requirements = vec![vec!["available".into(), "second".into()]];
+        assert!(
+            apply_security_headers(&mut HeaderMap::new(), &spec, &operation, "security", None)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn security_does_not_hide_invalid_header_or_unknown_scheme() {
+        let mut spec = security_test_spec();
+        let mut operation = spec.commands[0].clone();
+        operation.security_requirements.push(vec![]);
+        spec.security_schemes
+            .get_mut("available")
+            .unwrap()
+            .parameter_name = Some("invalid\nheader".into());
+        assert!(
+            apply_security_headers(&mut HeaderMap::new(), &spec, &operation, "security", None)
+                .is_err()
+        );
+        operation.security_requirements = vec![vec!["unknown".into()], vec![]];
+        assert!(
+            apply_security_headers(&mut HeaderMap::new(), &spec, &operation, "security", None)
+                .is_err()
+        );
+    }
+
     use super::*;
 
     #[test]

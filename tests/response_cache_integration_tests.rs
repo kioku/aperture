@@ -438,7 +438,7 @@ fn create_authenticated_test_spec() -> CachedSpec {
             parameters: vec![],
             request_body: None,
             responses: vec![],
-            security_requirements: vec!["bearerAuth".to_string()],
+            security_requirements: vec![vec!["bearerAuth".to_string()]],
             tags: vec!["secure".to_string()],
             deprecated: false,
             external_docs_url: None,
