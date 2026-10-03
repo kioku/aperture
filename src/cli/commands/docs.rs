@@ -266,12 +266,8 @@ fn execute_help_command_text(
         (Some(api), Some(tag), Some(op)) => {
             render_command_help(manager, api, tag, op, enhanced, output)
         }
-        (Some(_), _, _) => {
-            print_invalid_docs_usage();
-        }
-        _ => {
-            print_invalid_help_arguments();
-        }
+        (Some(_), _, _) => Err(invalid_docs_usage()),
+        _ => Err(Error::validation_error("Invalid help command arguments")),
     }
 }
 
@@ -285,12 +281,8 @@ fn execute_help_command_json(
         (None, None, None) => render_interactive_menu_json(manager),
         (Some(api), None, None) => render_api_reference_index_json(manager, api),
         (Some(api), Some(tag), Some(op)) => render_command_help_json(manager, api, tag, op),
-        (Some(_), _, _) => {
-            print_invalid_docs_usage();
-        }
-        _ => {
-            print_invalid_help_arguments();
-        }
+        (Some(_), _, _) => Err(invalid_docs_usage()),
+        _ => Err(Error::validation_error("Invalid help command arguments")),
     }
 }
 
@@ -529,24 +521,8 @@ fn serialize_examples(api: &str, command: &CachedCommand) -> Vec<CommandExampleJ
         .collect()
 }
 
-fn print_invalid_docs_usage() -> ! {
-    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-    // ast-grep-ignore: no-println
-    eprintln!("Invalid docs command. Usage:");
-    // ast-grep-ignore: no-println
-    eprintln!("  aperture docs                        # Interactive menu");
-    // ast-grep-ignore: no-println
-    eprintln!("  aperture docs <api>                  # API reference index");
-    // ast-grep-ignore: no-println
-    eprintln!("  aperture docs <api> <tag> <operation> # Command help");
-    std::process::exit(1);
-}
-
-fn print_invalid_help_arguments() -> ! {
-    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-    // ast-grep-ignore: no-println
-    eprintln!("Invalid help command arguments");
-    std::process::exit(1);
+fn invalid_docs_usage() -> Error {
+    Error::validation_error("Invalid docs command. Usage:\n  aperture docs\n  aperture docs <api>\n  aperture docs <api> <tag> <operation>")
 }
 
 /// Execute overview command
@@ -560,7 +536,7 @@ pub fn execute_overview_command(
 ) -> Result<(), Error> {
     if !all {
         let Some(api) = api_name else {
-            print_overview_usage();
+            return Err(Error::validation_error("Must specify API name or use --all flag\nUsage: aperture overview <api> | aperture overview --all"));
         };
         return match format {
             DiscoveryFormat::Text => render_single_api_overview(manager, api, output),
@@ -785,19 +761,6 @@ fn summarize_methods(spec_commands: &[crate::cache::models::CachedCommand]) -> V
         .into_iter()
         .map(|entry| format!("{}: {}", entry.method, entry.count))
         .collect()
-}
-
-fn print_overview_usage() -> ! {
-    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-    // ast-grep-ignore: no-println
-    eprintln!("Error: Must specify API name or use --all flag");
-    // ast-grep-ignore: no-println
-    eprintln!("Usage:");
-    // ast-grep-ignore: no-println
-    eprintln!("  aperture overview <api>");
-    // ast-grep-ignore: no-println
-    eprintln!("  aperture overview --all");
-    std::process::exit(1);
 }
 
 /// Load all cached specs from the manager

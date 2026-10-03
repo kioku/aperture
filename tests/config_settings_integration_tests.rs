@@ -338,3 +338,40 @@ fn configured_json_errors_and_explicit_override() {
     assert!(!output.status.success());
     assert!(serde_json::from_slice::<serde_json::Value>(&output.stderr).is_err());
 }
+
+#[test]
+fn configured_json_errors_cover_command_usage_errors() {
+    let temp_dir = TempDir::new().unwrap();
+    std::fs::write(
+        temp_dir.path().join("config.toml"),
+        "[agent_defaults]\njson_errors = true\n",
+    )
+    .unwrap();
+    for args in [
+        vec!["run"],
+        vec!["overview"],
+        vec!["config", "reinit"],
+        vec!["config", "cache", "clear"],
+        vec!["docs", "missing", "users"],
+        vec!["overview", "--unknown"],
+        vec!["api", "missing", "--batch-concurrency", "0"],
+        vec!["api", "missing", "--timeout-secs", "0"],
+    ] {
+        let output = aperture_cmd()
+            .env("APERTURE_CONFIG_DIR", temp_dir.path())
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?}");
+        serde_json::from_slice::<serde_json::Value>(&output.stderr)
+            .unwrap_or_else(|error| panic!("{args:?}: {error}: {:?}", output.stderr));
+        let output = aperture_cmd()
+            .env("APERTURE_CONFIG_DIR", temp_dir.path())
+            .arg("--json-errors=false")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(serde_json::from_slice::<serde_json::Value>(&output.stderr).is_err());
+    }
+}

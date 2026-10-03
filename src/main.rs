@@ -14,7 +14,7 @@ async fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     #[cfg(windows)]
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    let matches = Cli::command().get_matches();
+    let matches = parse_cli_matches();
     let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     aperture_cli::cli::tracing_init::init_tracing(cli.verbosity);
     let json_errors = cli.json_errors;
@@ -44,6 +44,50 @@ async fn main() {
         aperture_cli::cli::errors::print_error_with_json(&e, json_errors);
         std::process::exit(1);
     }
+}
+
+fn parse_cli_matches() -> clap::ArgMatches {
+    let args: Vec<_> = std::env::args_os().collect();
+    Cli::command()
+        .try_get_matches_from(&args)
+        .unwrap_or_else(|error| {
+            if error.use_stderr() && parse_failure_uses_json_errors(&args) {
+                aperture_cli::cli::errors::print_error_with_json(
+                    &Error::invalid_command("cli", error.to_string()),
+                    true,
+                );
+                std::process::exit(2);
+            }
+            error.exit()
+        })
+}
+
+/// Clap can fail before configuration-backed command handling starts. Preserve
+/// native help/version output, but apply error defaults to actual parse failures.
+fn parse_failure_uses_json_errors(args: &[std::ffi::OsString]) -> bool {
+    // Reuse Clap's grammar rather than mistaking option values or trailing API
+    // arguments for global flags. Only successfully parsed overrides apply.
+    let partial = Cli::command()
+        .ignore_errors(true)
+        .try_get_matches_from(args)
+        .ok();
+    let explicit = partial
+        .as_ref()
+        .filter(|matches| {
+            matches.value_source("json_errors") == Some(clap::parser::ValueSource::CommandLine)
+        })
+        .and_then(|matches| matches.get_one::<bool>("json_errors").copied());
+    explicit.unwrap_or_else(configured_json_errors)
+}
+
+fn configured_json_errors() -> bool {
+    let manager = std::env::var(constants::ENV_APERTURE_CONFIG_DIR).map_or_else(
+        |_| ConfigManager::new().ok(),
+        |dir| Some(ConfigManager::with_fs(OsFileSystem, PathBuf::from(dir))),
+    );
+    manager
+        .and_then(|manager| manager.load_global_config().ok())
+        .is_some_and(|config| config.agent_defaults.json_errors)
 }
 
 fn run_list_commands(

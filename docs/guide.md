@@ -558,9 +558,11 @@ spec. Aperture rejects the old cache and does not modify it during ordinary API 
 ### Execution defaults
 
 `default_timeout_secs` applies to SDK contexts carrying global configuration and
-CLI requests, including batch operations. `--timeout-secs N` overrides it.
-`agent_defaults.json_errors` applies before CLI command handling, including
+CLI requests, including batch operations. `--timeout-secs N` overrides it and
+accepts 1 through 31,536,000 seconds, matching the configuration setting's range.
+`agent_defaults.json_errors` applies to command-usage, argument-parsing, and
 missing-API errors. `--json-errors` forces JSON; `--json-errors=false` forces text.
+Help and version output retain their normal text format.
 Query/header boolean arguments accept `--enabled true` or `--enabled false`.
 A bare `--enabled` means true; an omitted optional parameter is not sent.
 
@@ -568,7 +570,8 @@ A bare `--enabled` means true; an omitted optional parameter is not sent.
 
 Batch execution borrows one immutable specification and polls at most
 `--batch-concurrency` operation futures. It builds a clap tree for only the
-selected operation. Zero concurrency is rejected by CLI parsing and SDK execution.
+selected operation. Zero concurrency and values exceeding Tokio's supported
+semaphore limit are rejected by CLI parsing and SDK execution.
 The input operations and returned results still require memory proportional to
 batch length; queued operations no longer each own a full specification/tree.
 
