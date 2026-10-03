@@ -334,7 +334,7 @@ fn test_mixed_required_and_optional_booleans() {
 }
 
 #[test]
-fn test_optional_boolean_defaults_to_false_when_absent() {
+fn test_optional_boolean_is_omitted_when_absent() {
     let spec = create_spec_with_mixed_boolean_params();
     let cmd = generate_command_tree_with_flags(&spec, false);
 
@@ -353,10 +353,8 @@ fn test_optional_boolean_defaults_to_false_when_absent() {
         "Required flag should be true"
     );
     assert!(
-        !*operation_matches
-            .get_one::<bool>("optional-flag")
-            .unwrap_or(&false),
-        "Optional flag should default to false when not provided"
+        operation_matches.get_one::<bool>("optional-flag").is_none(),
+        "Optional flag should be omitted when not provided"
     );
 }
 
@@ -567,5 +565,74 @@ async fn explicit_false_is_serialized_for_query_and_header() {
         )
         .await;
         assert!(result.is_ok(), "{result:?}");
+    }
+}
+
+#[test]
+fn boolean_values_reject_malformed_duplicate_and_unknown_arguments() {
+    for (location, positional) in [
+        ("query", false),
+        ("header", false),
+        ("query", true),
+        ("header", true),
+    ] {
+        let mut spec = create_spec_with_required_boolean_query_param();
+        spec.commands[0].parameters[0].location = location.to_string();
+        let command = generate_command_tree_with_flags(&spec, positional);
+        for value in ["", " ", "none", "0", "1", "TRUE", "maybe"] {
+            assert!(
+                command
+                    .clone()
+                    .try_get_matches_from([
+                        "aperture",
+                        "users",
+                        "list-users",
+                        "--include-inactive",
+                        value,
+                    ])
+                    .is_err(),
+                "{location}, positional={positional}, value={value}"
+            );
+        }
+        assert!(command
+            .clone()
+            .try_get_matches_from([
+                "aperture",
+                "users",
+                "list-users",
+                "--include-inactive",
+                "false",
+                "--include-inactive",
+                "true",
+            ])
+            .is_err());
+        assert!(command
+            .clone()
+            .try_get_matches_from([
+                "aperture",
+                "users",
+                "list-users",
+                "--include-inactive",
+                "false",
+                "--unknown",
+            ])
+            .is_err());
+        let matches = command
+            .try_get_matches_from([
+                "aperture",
+                "users",
+                "list-users",
+                "--include-inactive",
+                "false",
+            ])
+            .unwrap();
+        let call =
+            aperture_cli::cli::translate::matches_to_operation_call(&spec, &matches).unwrap();
+        let params = if location == "query" {
+            call.query_params
+        } else {
+            call.header_params
+        };
+        assert_eq!(params.get("includeInactive").unwrap(), "false");
     }
 }

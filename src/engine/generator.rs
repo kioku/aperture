@@ -103,18 +103,24 @@ pub(crate) fn generate_batch_command_tree(
     spec: &CachedSpec,
     args: &[String],
 ) -> Result<Command, crate::error::Error> {
+    // Parse the two command positions with the same global argument grammar as
+    // execution. Flag values must never participate in operation selection.
+    let (group, remaining) = parse_batch_subcommand(
+        std::iter::once(std::ffi::OsString::from(constants::CLI_ROOT_COMMAND))
+            .chain(args.iter().map(std::ffi::OsString::from)),
+    )?;
+    let (operation, _) =
+        parse_batch_subcommand(std::iter::once(std::ffi::OsString::from(&group)).chain(remaining))?;
     let selected = spec
         .commands
         .iter()
         .find(|command| {
-            args.windows(2).any(|pair| {
-                to_kebab_case(&effective_group_name(command)) == pair[0]
-                    && (effective_subcommand_name(command) == pair[1]
-                        || command
-                            .aliases
-                            .iter()
-                            .any(|alias| to_kebab_case(alias) == pair[1]))
-            })
+            to_kebab_case(&effective_group_name(command)) == group
+                && (effective_subcommand_name(command) == operation
+                    || command
+                        .aliases
+                        .iter()
+                        .any(|alias| to_kebab_case(alias) == operation))
         })
         .ok_or_else(|| crate::error::Error::validation_error("Batch operation was not found"))?;
     Ok(generate_tree_for_commands(
@@ -125,46 +131,39 @@ pub(crate) fn generate_batch_command_tree(
     ))
 }
 
+/// Parse one command level, leaving operation arguments untouched for execution.
+fn parse_batch_subcommand(
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<(String, Vec<std::ffi::OsString>), crate::error::Error> {
+    let matches = with_global_args(Command::new(constants::CLI_ROOT_COMMAND))
+        .allow_external_subcommands(true)
+        .try_get_matches_from(args)
+        .map_err(|error| crate::error::Error::validation_error(error.to_string()))?;
+    let (name, remaining) = matches
+        .subcommand()
+        .ok_or_else(|| crate::error::Error::validation_error("Batch command was not found"))?;
+    Ok((
+        name.to_string(),
+        remaining
+            .get_many::<std::ffi::OsString>("")
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect(),
+    ))
+}
+
 fn generate_tree_for_commands<'a>(
     spec: &CachedSpec,
     api_name: &str,
     use_positional_args: bool,
     commands: impl Iterator<Item = &'a CachedCommand>,
 ) -> Command {
-    let mut root_command = Command::new(constants::CLI_ROOT_COMMAND)
-        .version(to_static_str(spec.version.clone()))
-        .about(format!("CLI for {} API", spec.name))
-        // Add global flags that should be available to all operations
-        // These are hidden from subcommand help to reduce noise - they're documented in `aperture --help`
-        .arg(
-            Arg::new("jq")
-                .long("jq")
-                .global(true)
-                .hide(true)
-                .help("Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')")
-                .value_name("FILTER")
-                .action(ArgAction::Set),
-        )
-        .arg(
-            Arg::new("format")
-                .long("format")
-                .global(true)
-                .hide(true)
-                .help("Output format for response data")
-                .value_name("FORMAT")
-                .value_parser(["json", "yaml", "table"])
-                .default_value("json")
-                .action(ArgAction::Set),
-        )
-        .arg(
-            Arg::new("server-var")
-                .long("server-var")
-                .global(true)
-                .hide(true)
-                .help("Set server template variable (e.g., --server-var region=us --server-var env=prod)")
-                .value_name("KEY=VALUE")
-                .action(ArgAction::Append),
-        );
+    let mut root_command = with_global_args(
+        Command::new(constants::CLI_ROOT_COMMAND)
+            .version(to_static_str(spec.version.clone()))
+            .about(format!("CLI for {} API", spec.name)),
+    );
 
     // Group commands by their effective group name (display_group override or tag)
     let mut command_groups: HashMap<String, Vec<&CachedCommand>> = HashMap::new();
@@ -242,6 +241,42 @@ fn generate_tree_for_commands<'a>(
     }
 
     root_command
+}
+
+/// Keep operation selection and execution on the same global-flag grammar.
+fn with_global_args(command: Command) -> Command {
+    command
+        // Add global flags that should be available to all operations
+        // These are hidden from subcommand help to reduce noise - they're documented in `aperture --help`
+        .arg(
+            Arg::new("jq")
+                .long("jq")
+                .global(true)
+                .hide(true)
+                .help("Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')")
+                .value_name("FILTER")
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("format")
+                .long("format")
+                .global(true)
+                .hide(true)
+                .help("Output format for response data")
+                .value_name("FORMAT")
+                .value_parser(["json", "yaml", "table"])
+                .default_value("json")
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("server-var")
+                .long("server-var")
+                .global(true)
+                .hide(true)
+                .help("Set server template variable (e.g., --server-var region=us --server-var env=prod)")
+                .value_name("KEY=VALUE")
+                .action(ArgAction::Append),
+        )
 }
 
 /// Attaches `--body` and `--body-file` args to a command that accepts a request body.

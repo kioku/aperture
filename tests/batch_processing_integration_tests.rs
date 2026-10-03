@@ -968,3 +968,62 @@ async fn large_spec_fixed_concurrency_memory_benchmark() {
         .unwrap();
     assert_eq!(result.success_count, count);
 }
+
+#[tokio::test]
+async fn batch_selection_does_not_treat_global_values_as_commands() {
+    let mut spec = create_test_spec();
+    let mut decoy = spec.commands[0].clone();
+    decoy.name = "json".to_string();
+    decoy.tags = vec!["json".to_string()];
+    decoy.operation_id = "users".to_string();
+    spec.commands.insert(0, decoy);
+    let processor = BatchProcessor::new(BatchConfig {
+        show_progress: false,
+        suppress_output: true,
+        ..Default::default()
+    });
+    let result = processor
+        .execute_batch(
+            &spec,
+            BatchFile {
+                metadata: None,
+                operations: vec![BatchOperation {
+                    args: ["--format", "json", "users", "get-user-by-id", "--id", "123"]
+                        .map(str::to_string)
+                        .to_vec(),
+                    ..Default::default()
+                }],
+            },
+            None,
+            None,
+            true,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.failure_count, 0, "{:?}", result.results);
+}
+
+#[tokio::test]
+async fn extreme_concurrency_is_rejected_without_panicking() {
+    let processor = BatchProcessor::new(BatchConfig {
+        max_concurrency: usize::MAX,
+        ..Default::default()
+    });
+    let result = processor
+        .execute_batch(
+            &create_test_spec(),
+            BatchFile {
+                metadata: None,
+                operations: vec![],
+            },
+            None,
+            None,
+            true,
+            &OutputFormat::Json,
+            None,
+        )
+        .await;
+    assert!(result.is_err());
+}

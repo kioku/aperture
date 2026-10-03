@@ -136,7 +136,7 @@ fn create_test_spec_with_examples_param() -> CachedSpec {
 }
 
 #[test]
-fn test_boolean_parameters_use_settrue_action() {
+fn test_boolean_parameters_accept_bare_true_shorthand() {
     let spec = create_test_spec_with_boolean_params();
     let cmd = generate_command_tree_with_flags(&spec, false);
 

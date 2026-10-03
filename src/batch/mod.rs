@@ -190,7 +190,11 @@ impl BatchProcessor {
             )))
         });
 
-        let semaphore = Arc::new(Semaphore::new(config.max_concurrency));
+        // Construction remains infallible for SDK compatibility; execution reports
+        // invalid limits before polling work instead of panicking in Tokio.
+        let semaphore = Arc::new(Semaphore::new(
+            config.max_concurrency.min(Semaphore::MAX_PERMITS),
+        ));
 
         Self {
             config,
@@ -261,6 +265,11 @@ impl BatchProcessor {
         if self.config.max_concurrency == 0 {
             return Err(Error::validation_error(
                 "Batch concurrency must be greater than zero",
+            ));
+        }
+        if self.config.max_concurrency > Semaphore::MAX_PERMITS {
+            return Err(Error::validation_error(
+                "Batch concurrency exceeds the supported maximum",
             ));
         }
         if graph::has_dependencies(&batch_file.operations) {

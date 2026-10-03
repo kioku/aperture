@@ -116,7 +116,8 @@ pub struct ExecutionFlags {
     pub batch_concurrency: usize,
 
     /// Request timeout in seconds (overrides configured default).
-    #[arg(long, global = true, value_name = "SECONDS")]
+    #[arg(long, global = true, value_name = "SECONDS",
+        value_parser = clap::value_parser!(u64).range(1..=crate::config::settings::MAX_TIMEOUT_SECS))]
     pub timeout_secs: Option<u64>,
 
     /// Rate limit for batch operations (requests per second)
@@ -1094,6 +1095,9 @@ fn parse_batch_concurrency(value: &str) -> Result<usize, String> {
         .map_err(|_| "Expected a positive integer".to_string())?;
     if concurrency == 0 {
         return Err("Batch concurrency must be greater than zero".to_string());
+    }
+    if concurrency > tokio::sync::Semaphore::MAX_PERMITS {
+        return Err("Batch concurrency exceeds the supported maximum".to_string());
     }
     Ok(concurrency)
 }
