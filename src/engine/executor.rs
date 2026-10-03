@@ -151,13 +151,25 @@ fn transport_key(
         "{:?}",
         ctx.global_config.as_ref().map(|config| &config.proxy)
     ));
+    if let Some(password_env) = ctx
+        .global_config
+        .as_ref()
+        .and_then(|config| non_empty(config.proxy.password_env.as_deref()))
+    {
+        // Password rotation must not reuse a client holding old proxy credentials.
+        digest.update(format!("{:?}", std::env::var(password_env).ok()));
+    }
     for names in [
         ["HTTP_PROXY", "http_proxy"],
         ["HTTPS_PROXY", "https_proxy"],
         ["ALL_PROXY", "all_proxy"],
         ["NO_PROXY", "no_proxy"],
     ] {
-        digest.update(format!("{:?}", first_env_value(&names)));
+        // reqwest's environment precedence can differ from diagnostics. Include
+        // both spellings so a change to either cannot reuse a stale route.
+        for name in names {
+            digest.update(format!("{:?}", std::env::var(name).ok()));
+        }
     }
     format!("{:x}", digest.finalize())
 }
@@ -874,10 +886,15 @@ fn handle_http_error(
     )
 }
 
-fn request_has_credentials(headers: &HeaderMap, url: &str) -> bool {
+fn request_requires_cache_bypass(headers: &HeaderMap, url: &str) -> bool {
+    // The cache's single-value header map cannot represent repeated fields.
+    // Skip these requests rather than discard a value from the request identity.
     if headers
         .iter()
         .any(|(name, _)| is_auth_header(name.as_str()))
+        || headers
+            .keys()
+            .any(|name| headers.get_all(name).iter().count() > 1)
     {
         return true;
     }
@@ -905,7 +922,7 @@ fn prepare_cache_context(
     }
 
     // Authenticated caching is disabled even for the legacy opt-in flag.
-    if request_has_credentials(headers, url) {
+    if request_requires_cache_bypass(headers, url) {
         return Ok(None);
     }
 
@@ -2047,20 +2064,45 @@ mod tests {
 
     #[test]
     fn url_userinfo_and_cookies_disable_cache() {
-        assert!(request_has_credentials(
+        assert!(request_requires_cache_bypass(
             &HeaderMap::new(),
             "https://alice:secret@example.com/items"
         ));
         let mut headers = HeaderMap::new();
         headers.insert("cookie", "session=secret".parse().unwrap());
-        assert!(request_has_credentials(
+        assert!(request_requires_cache_bypass(
             &headers,
             "https://example.com/items"
         ));
-        assert!(!request_has_credentials(
+        assert!(!request_requires_cache_bypass(
             &HeaderMap::new(),
             "https://example.com/items"
         ));
+        let mut duplicates = HeaderMap::new();
+        duplicates.append("x-tenant-secret", "alice".parse().unwrap());
+        duplicates.append("x-tenant-secret", "bob".parse().unwrap());
+        assert!(request_requires_cache_bypass(
+            &duplicates,
+            "https://example.com/items"
+        ));
+    }
+
+    #[test]
+    fn transport_keys_distinguish_rotated_proxy_passwords() {
+        let password_env = "APERTURE_REVIEW_PROXY_PASSWORD";
+        let mut config = GlobalConfig::default();
+        config.proxy.password_env = Some(format!(" {password_env} "));
+        let ctx = crate::invocation::ExecutionContext {
+            global_config: Some(config),
+            ..Default::default()
+        };
+        std::env::set_var(password_env, "first");
+        let first = transport_key(&ctx, &ProxyDiagnostics::default());
+        std::env::set_var(password_env, "second");
+        let second = transport_key(&ctx, &ProxyDiagnostics::default());
+        std::env::remove_var(password_env);
+        assert_ne!(first, second);
+        assert!(!second.contains("second"));
     }
 
     #[test]

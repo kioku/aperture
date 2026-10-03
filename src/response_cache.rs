@@ -91,25 +91,22 @@ impl CacheKey {
     ) -> Result<Self, Error> {
         let mut hasher = Sha256::new();
 
-        // Include method, URL, and relevant headers in hash
-        hasher.update(method.as_bytes());
-        hasher.update(url.as_bytes());
+        // Length framing prevents ambiguous component boundaries. Include credential
+        // headers in the digest so low-level SDK callers cannot mix accounts.
+        hash_component(&mut hasher, method);
+        hash_component(&mut hasher, url);
 
-        // Sort headers for consistent hashing (exclude auth headers)
-        let mut sorted_headers: Vec<_> = headers
-            .iter()
-            .filter(|(key, _)| !is_auth_header(key))
-            .collect();
+        let mut sorted_headers: Vec<_> = headers.iter().collect();
         sorted_headers.sort_by_key(|(key, _)| *key);
 
         for (key, value) in sorted_headers {
-            hasher.update(key.as_bytes());
-            hasher.update(value.as_bytes());
+            hash_component(&mut hasher, key);
+            hash_component(&mut hasher, value);
         }
 
         // Include body hash if present
         if let Some(body_content) = body {
-            hasher.update(body_content.as_bytes());
+            hash_component(&mut hasher, body_content);
         }
 
         let hash = hasher.finalize();
@@ -125,21 +122,34 @@ impl CacheKey {
     /// Generate the cache file name for this key
     #[must_use]
     pub fn to_filename(&self) -> String {
-        let hash_prefix = if self.request_hash.len() >= 16 {
-            &self.request_hash[..16]
-        } else {
-            &self.request_hash
-        };
+        let hash_prefix: String = self.request_hash.chars().take(16).collect();
 
         format!(
             "{}_{}_{}_{}{}",
-            self.api_name,
-            self.operation_id,
-            hash_prefix,
+            filename_component(&self.api_name),
+            filename_component(&self.operation_id),
+            filename_component(&hash_prefix),
             constants::CACHE_SUFFIX,
             constants::FILE_EXT_JSON
         )
     }
+}
+
+fn filename_component(value: &str) -> String {
+    value.bytes().fold(String::new(), |mut output, byte| {
+        if byte.is_ascii_alphanumeric() || byte == b'-' {
+            output.push(char::from(byte));
+        } else {
+            use std::fmt::Write;
+            let _ = write!(output, "%{byte:02x}");
+        }
+        output
+    })
+}
+
+fn hash_component(hasher: &mut Sha256, value: &str) {
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value.as_bytes());
 }
 
 /// Response cache manager
@@ -190,7 +200,7 @@ impl ResponseCache {
         request_info: CachedRequestInfo,
         ttl: Option<Duration>,
     ) -> Result<(), Error> {
-        if !self.config.enabled {
+        if !self.can_store(&request_info, headers) {
             return Ok(());
         }
 
@@ -222,13 +232,34 @@ impl ResponseCache {
         Ok(())
     }
 
+    fn can_store(&self, request: &CachedRequestInfo, headers: &HashMap<String, String>) -> bool {
+        self.config.enabled
+            && matches!(request.method.as_str(), "GET" | "HEAD")
+            && !headers
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case("set-cookie"))
+    }
+
     fn build_cached_response(
         body: &str,
         status_code: u16,
         headers: &HashMap<String, String>,
-        request_info: CachedRequestInfo,
+        mut request_info: CachedRequestInfo,
         ttl: Duration,
     ) -> Result<CachedResponse, Error> {
+        // Custom credential names cannot be identified without an OpenAPI operation.
+        // Request metadata is diagnostic only; retain no header values or URL secrets.
+        request_info.headers.clear();
+        request_info.url = reqwest::Url::parse(&request_info.url).map_or_else(
+            |_| String::new(),
+            |mut url| {
+                let _ = url.set_username("");
+                let _ = url.set_password(None);
+                url.set_query(None);
+                url.set_fragment(None);
+                url.to_string()
+            },
+        );
         Ok(CachedResponse {
             body: body.to_string(),
             status_code,
@@ -310,7 +341,7 @@ impl ResponseCache {
     pub async fn clear_api_cache(&self, api_name: &str) -> Result<usize, Error> {
         let _lock = self.acquire_lock().await?;
         self.clear_matching_entries(|filename| {
-            filename.starts_with(&format!("{api_name}_"))
+            filename.starts_with(&format!("{}_", filename_component(api_name)))
                 && filename.ends_with(constants::CACHE_FILE_SUFFIX)
         })
         .await
@@ -404,7 +435,9 @@ impl ResponseCache {
 
     fn is_stats_entry(filename: &str, api_name: Option<&str>) -> bool {
         filename.ends_with(constants::CACHE_FILE_SUFFIX)
-            && api_name.is_none_or(|target| filename.starts_with(&format!("{target}_")))
+            && api_name.is_none_or(|target| {
+                filename.starts_with(&format!("{}_", filename_component(target)))
+            })
     }
 
     async fn inspect_stats_entry(entry: &tokio::fs::DirEntry) -> Result<Option<bool>, Error> {
@@ -455,7 +488,7 @@ impl ResponseCache {
     }
 
     fn is_cache_entry_for_api(filename: &str, api_name: &str) -> bool {
-        filename.starts_with(&format!("{api_name}_"))
+        filename.starts_with(&format!("{}_", filename_component(api_name)))
             && filename.ends_with(constants::CACHE_FILE_SUFFIX)
     }
 
@@ -632,6 +665,145 @@ mod tests {
     }
 
     #[test]
+    fn adversarial_cache_keys_are_framed_and_path_safe() {
+        for value in [
+            "",
+            " ",
+            "none",
+            "../outside",
+            "/tmp/escape",
+            "界界界界界界",
+            "a%b",
+        ] {
+            let key = CacheKey {
+                api_name: value.into(),
+                operation_id: value.into(),
+                request_hash: value.repeat(4),
+            };
+            assert_eq!(
+                std::path::Path::new(&key.to_filename())
+                    .components()
+                    .count(),
+                1
+            );
+        }
+        let first = CacheKey::from_request(
+            "api",
+            "op",
+            "GET",
+            "https://example.com",
+            &HashMap::from([("ab".into(), "c".into())]),
+            None,
+        )
+        .unwrap();
+        let second = CacheKey::from_request(
+            "api",
+            "op",
+            "GET",
+            "https://example.com",
+            &HashMap::from([("a".into(), "bc".into())]),
+            None,
+        )
+        .unwrap();
+        assert_ne!(first.request_hash, second.request_hash);
+        let alice = CacheKey::from_request(
+            "api",
+            "op",
+            "GET",
+            "https://example.com",
+            &HashMap::from([("Authorization".into(), "alice".into())]),
+            None,
+        )
+        .unwrap();
+        let bob = CacheKey::from_request(
+            "api",
+            "op",
+            "GET",
+            "https://example.com",
+            &HashMap::from([("Authorization".into(), "bob".into())]),
+            None,
+        )
+        .unwrap();
+        assert_ne!(alice.request_hash, bob.request_hash);
+        let left = CacheKey {
+            api_name: "a_b".into(),
+            operation_id: "c".into(),
+            request_hash: "same".into(),
+        };
+        let right = CacheKey {
+            api_name: "a".into(),
+            operation_id: "b_c".into(),
+            request_hash: "same".into(),
+        };
+        assert_ne!(left.to_filename(), right.to_filename());
+    }
+
+    #[tokio::test]
+    async fn low_level_cache_scrubs_custom_credentials_and_skips_cookies() {
+        let (config, dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+        let info = CachedRequestInfo {
+            method: "GET".into(),
+            url: "https://alice:secret@example.com/items?custom=secret#secret".into(),
+            headers: HashMap::from([("X-Tenant-Secret".into(), "secret".into())]),
+            body_hash: None,
+        };
+        let key =
+            CacheKey::from_request("api", "op", "GET", &info.url, &info.headers, None).unwrap();
+        cache
+            .store(&key, "ok", 200, &HashMap::new(), info.clone(), None)
+            .await
+            .unwrap();
+        let persisted = std::fs::read_to_string(dir.path().join(key.to_filename())).unwrap();
+        assert!(!persisted.contains("secret"));
+        let cookie_key =
+            CacheKey::from_request("api", "cookie", "GET", &info.url, &info.headers, None).unwrap();
+        cache
+            .store(
+                &cookie_key,
+                "ok",
+                200,
+                &HashMap::from([("Set-Cookie".into(), "session=secret".into())]),
+                info,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(cache.get(&cookie_key).await.unwrap().is_none());
+        for method in ["POST", "", " ", "none", "get", "INVALID"] {
+            let request = CachedRequestInfo {
+                method: method.into(),
+                url: "not a URL secret".into(),
+                headers: HashMap::new(),
+                body_hash: None,
+            };
+            let key =
+                CacheKey::from_request("api", method, method, &request.url, &request.headers, None)
+                    .unwrap();
+            cache
+                .store(&key, "ok", 200, &HashMap::new(), request, None)
+                .await
+                .unwrap();
+            assert!(cache.get(&key).await.unwrap().is_none());
+        }
+        let malformed = CachedRequestInfo {
+            method: "HEAD".into(),
+            url: "not a URL secret".into(),
+            headers: HashMap::new(),
+            body_hash: None,
+        };
+        let result = ResponseCache::build_cached_response(
+            "",
+            200,
+            &HashMap::new(),
+            malformed,
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        assert!(result.request_info.url.is_empty());
+    }
+
+    #[test]
     fn test_cache_key_generation() {
         let mut headers = HashMap::new();
         headers.insert(
@@ -641,7 +813,7 @@ mod tests {
         headers.insert(
             constants::HEADER_AUTHORIZATION_LC.to_string(),
             "Bearer secret".to_string(),
-        ); // Should be excluded
+        ); // Included only in the identity digest
 
         let key = CacheKey::from_request(
             "test_api",
@@ -658,7 +830,7 @@ mod tests {
         assert!(!key.request_hash.is_empty());
 
         let filename = key.to_filename();
-        assert!(filename.starts_with("test_api_getUser_"));
+        assert!(filename.starts_with("test%5fapi_getUser_"));
         assert!(filename.ends_with(constants::CACHE_FILE_SUFFIX));
     }
 

@@ -222,7 +222,7 @@ aperture api my-api --cache users list
 
 When caching is enabled (`--cache`), Aperture skips caching for operations with active security requirements (including custom header, query, and cookie API keys), and for requests carrying known authentication headers or cookies. This conservative policy also applies when SDK callers set the legacy `CacheConfig.allow_authenticated` flag: authenticated caching is disabled. No account-specific cached response is reused.
 
-Existing cache files are not rewritten. If you used authenticated caching with an earlier version, clear the affected response cache with `aperture config cache clear <name>` to remove previously persisted credentials or session cookies.
+Existing cache files are not rewritten. If you used authenticated caching with an earlier version, run `aperture config cache clear --all` to remove previously persisted credentials or session cookies. This clears all response caches; API-specific clearing uses the new escaped filename prefix and may not match older files for names containing underscores or dots.
 
 ### Authentication Header Scrubbing
 
@@ -232,7 +232,11 @@ As an additional defense-in-depth measure, authentication headers are scrubbed f
 - `Cookie` and response `Set-Cookie`
 - `X-API-Key` / `X-API-Token` / `API-Key`
 
-This ensures that even if cache files are accessed by other processes or backed up, no credentials are exposed.
+Executor requests with repeated header fields bypass caching because the cache key input cannot represent multiple values for one header. New cache entries omit all request-header metadata and strip URL userinfo, query strings, and fragments. The low-level SDK cache API has no OpenAPI security context: its request keys include every supplied header in a length-framed SHA-256 digest to separate credential identities. Callers must supply the complete request when generating keys and must not put secrets in response bodies or unrecognized response headers. Both executor and low-level cache storage skip responses with `Set-Cookie` and unsafe request methods.
+
+Enabled request logging redacts URL userinfo and sensitive query parameters, including percent-encoded parameter names and custom query API keys declared by the operation. Disabled logging still avoids URL, header, and body redaction work.
+
+Cache filenames escape caller-supplied components, including path separators and Unicode. The new key encoding intentionally invalidates previous request-key matches; existing files remain on disk until cleared or expired.
 
 ### Context Name Validation
 
