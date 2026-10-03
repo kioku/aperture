@@ -11,6 +11,58 @@ use serde_json;
 use std::collections::HashMap;
 use std::fmt::Write;
 
+const fn path_style(style: &openapiv3::PathStyle) -> &'static str {
+    match style {
+        openapiv3::PathStyle::Simple => "simple",
+        openapiv3::PathStyle::Label => "label",
+        openapiv3::PathStyle::Matrix => "matrix",
+    }
+}
+
+const fn query_style(style: &openapiv3::QueryStyle) -> &'static str {
+    match style {
+        openapiv3::QueryStyle::Form => "form",
+        openapiv3::QueryStyle::SpaceDelimited => "spaceDelimited",
+        openapiv3::QueryStyle::PipeDelimited => "pipeDelimited",
+        openapiv3::QueryStyle::DeepObject => "deepObject",
+    }
+}
+
+fn parameter_serialization(param: &Parameter) -> crate::cache::models::ParameterSerialization {
+    let style = match param {
+        Parameter::Path { style, .. } => path_style(style),
+        Parameter::Query { style, .. } => query_style(style),
+        Parameter::Header { .. } => "simple",
+        Parameter::Cookie { .. } => "form",
+    };
+    crate::cache::models::ParameterSerialization {
+        style: Some(style.to_string()),
+        explode: param.parameter_data_ref().explode,
+        allow_reserved: matches!(
+            param,
+            Parameter::Query {
+                allow_reserved: true,
+                ..
+            }
+        ),
+        unsupported_schema: unsupported_parameter_schema(&param.parameter_data_ref().format),
+        content_based: matches!(
+            param.parameter_data_ref().format,
+            openapiv3::ParameterSchemaOrContent::Content(_)
+        ),
+    }
+}
+
+const fn unsupported_parameter_schema(format: &openapiv3::ParameterSchemaOrContent) -> bool {
+    match format {
+        openapiv3::ParameterSchemaOrContent::Schema(ReferenceOr::Reference { .. }) => true,
+        openapiv3::ParameterSchemaOrContent::Schema(ReferenceOr::Item(schema)) => {
+            !matches!(schema.schema_kind, openapiv3::SchemaKind::Type(_))
+        }
+        openapiv3::ParameterSchemaOrContent::Content(_) => false,
+    }
+}
+
 /// Type alias for schema type information extracted from a schema kind
 /// Returns: (`schema_type`, `format`, `default_value`, `enum_values`)
 type SchemaTypeInfo = (String, Option<String>, Option<String>, Vec<String>);
@@ -414,6 +466,7 @@ impl SpecTransformer {
             .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
 
         CachedParameter {
+            serialization: parameter_serialization(param),
             name: param_data.name.clone(),
             location: location_str.to_string(),
             required: param_data.required,

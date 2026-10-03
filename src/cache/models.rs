@@ -105,7 +105,8 @@ pub struct SkippedEndpoint {
 /// Version 5: Added `display_group`, `display_name`, `aliases`, `hidden` fields for command mapping
 /// Version 6: Added `pagination` field to `CachedCommand` for auto-pagination support
 /// Version 7: Preserves all response media and `default` declarations during transformation
-pub const CACHE_FORMAT_VERSION: u32 = 7;
+/// Version 8: Retains parameter serialization metadata (postcard layout change)
+pub const CACHE_FORMAT_VERSION: u32 = 8;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -236,8 +237,26 @@ impl CachedCommand {
     }
 }
 
+/// `OpenAPI` wire representation, separate from the parameter's input schema.
+/// Missing metadata uses the `OpenAPI` location defaults for legacy JSON fixtures.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ParameterSerialization {
+    pub style: Option<String>,
+    pub explode: Option<bool>,
+    #[serde(default)]
+    pub allow_reserved: bool,
+    /// Content-based parameters require a media-specific serializer, not style expansion.
+    #[serde(default)]
+    pub content_based: bool,
+    /// References/compositions do not provide a supported unambiguous input shape.
+    #[serde(default)]
+    pub unsupported_schema: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedParameter {
+    #[serde(default)]
+    pub serialization: ParameterSerialization,
     pub name: String,
     pub location: String,
     pub required: bool,

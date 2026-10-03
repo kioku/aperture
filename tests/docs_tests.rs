@@ -5,7 +5,7 @@
 
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, CommandExample,
-    PaginationInfo,
+    PaginationInfo, ParameterSerialization,
 };
 use aperture_cli::discovery_style::DiscoveryStyle;
 use aperture_cli::docs::{DocumentationGenerator, HelpFormatter};
@@ -31,6 +31,7 @@ fn create_test_spec() -> CachedSpec {
                 description: Some("Retrieve detailed information about a specific user by their unique identifier.".to_string()),
                 parameters: vec![
                     CachedParameter {
+                        serialization: ParameterSerialization::default(),
                         name: "id".to_string(),
                         location: "path".to_string(),
                         required: true,
@@ -190,6 +191,7 @@ fn test_generate_command_help_with_request_body() {
 fn test_request_body_example_includes_all_required_flags() {
     let mut spec = create_test_spec();
     spec.commands[1].parameters.push(CachedParameter {
+        serialization: ParameterSerialization::default(),
         name: "traceId".to_string(),
         location: "header".to_string(),
         required: true,

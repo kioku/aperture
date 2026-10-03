@@ -1,5 +1,6 @@
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedResponse, CachedSpec, PaginationInfo,
+    ParameterSerialization,
 };
 use aperture_cli::constants;
 use aperture_cli::engine::loader::load_cached_spec;
@@ -21,6 +22,7 @@ fn create_test_cached_spec() -> CachedSpec {
             method: "GET".to_string(),
             path: "/users".to_string(),
             parameters: vec![CachedParameter {
+                serialization: ParameterSerialization::default(),
                 name: "limit".to_string(),
                 location: "query".to_string(),
                 required: false,
@@ -158,7 +160,10 @@ fn prior_v6_collapsed_response_cache_is_rejected() {
 
     let error = load_cached_spec(cache_dir, "prior-v6").unwrap_err();
     assert!(error.to_string().contains("found v6"));
-    assert!(error.to_string().contains("expected v7"));
+    assert!(error.to_string().contains(&format!(
+        "expected v{}",
+        aperture_cli::cache::models::CACHE_FORMAT_VERSION
+    )));
     let Error::Internal {
         context: Some(context),
         ..

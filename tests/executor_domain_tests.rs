@@ -2,6 +2,7 @@ mod test_helpers;
 
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, PaginationInfo,
+    ParameterSerialization,
 };
 use aperture_cli::engine::executor::execute;
 use aperture_cli::invocation::{ExecutionContext, ExecutionResult, OperationCall, RequestBody};
@@ -25,6 +26,7 @@ fn test_spec() -> CachedSpec {
             method: "GET".to_string(),
             path: "/users/{id}".to_string(),
             parameters: vec![CachedParameter {
+                serialization: ParameterSerialization::default(),
                 name: "id".to_string(),
                 location: "path".to_string(),
                 required: true,

@@ -1,5 +1,6 @@
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, PaginationInfo,
+    ParameterSerialization,
 };
 use aperture_cli::cli::translate::{
     cli_to_execution_context, extract_server_var_args, has_show_examples_flag,
@@ -19,6 +20,7 @@ fn cached_parameter(
     required: bool,
 ) -> CachedParameter {
     CachedParameter {
+        serialization: ParameterSerialization::default(),
         name: name.to_string(),
         location: location.to_string(),
         required,

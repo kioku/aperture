@@ -1,6 +1,8 @@
 mod test_helpers;
 
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
+use aperture_cli::cache::models::{
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+};
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
 use aperture_cli::engine::executor::execute_request;
@@ -11,6 +13,50 @@ use std::time::Duration;
 use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+fn comprehensive_test_parameters() -> Vec<CachedParameter> {
+    vec![
+        CachedParameter {
+            serialization: ParameterSerialization::default(),
+            name: "id".to_string(),
+            location: "path".to_string(),
+            required: true,
+            description: Some("User ID".to_string()),
+            schema: Some(r#"{"type": "string"}"#.to_string()),
+            schema_type: Some("string".to_string()),
+            format: None,
+            default_value: None,
+            enum_values: vec![],
+            example: None,
+        },
+        CachedParameter {
+            serialization: ParameterSerialization::default(),
+            name: "include_profile".to_string(),
+            location: "query".to_string(),
+            required: false,
+            description: Some("Include profile information".to_string()),
+            schema: Some(r#"{"type": "boolean"}"#.to_string()),
+            schema_type: Some("boolean".to_string()),
+            format: None,
+            default_value: None,
+            enum_values: vec![],
+            example: None,
+        },
+        CachedParameter {
+            serialization: ParameterSerialization::default(),
+            name: "x-request-id".to_string(),
+            location: "header".to_string(),
+            required: false,
+            description: Some("Request ID for tracking".to_string()),
+            schema: Some(r#"{"type": "string"}"#.to_string()),
+            schema_type: Some("string".to_string()),
+            format: None,
+            default_value: None,
+            enum_values: vec![],
+            example: None,
+        },
+    ]
+}
 
 fn create_comprehensive_test_spec() -> CachedSpec {
     CachedSpec {
@@ -25,44 +71,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 operation_id: "getUserById".to_string(),
                 method: "GET".to_string(),
                 path: "/users/{id}".to_string(),
-                parameters: vec![
-                    CachedParameter {
-                        name: "id".to_string(),
-                        location: "path".to_string(),
-                        required: true,
-                        description: Some("User ID".to_string()),
-                        schema: Some(r#"{"type": "string"}"#.to_string()),
-                        schema_type: Some("string".to_string()),
-                        format: None,
-                        default_value: None,
-                        enum_values: vec![],
-                        example: None,
-                    },
-                    CachedParameter {
-                        name: "include_profile".to_string(),
-                        location: "query".to_string(),
-                        required: false,
-                        description: Some("Include profile information".to_string()),
-                        schema: Some(r#"{"type": "boolean"}"#.to_string()),
-                        schema_type: Some("boolean".to_string()),
-                        format: None,
-                        default_value: None,
-                        enum_values: vec![],
-                        example: None,
-                    },
-                    CachedParameter {
-                        name: "x-request-id".to_string(),
-                        location: "header".to_string(),
-                        required: false,
-                        description: Some("Request ID for tracking".to_string()),
-                        schema: Some(r#"{"type": "string"}"#.to_string()),
-                        schema_type: Some("string".to_string()),
-                        format: None,
-                        default_value: None,
-                        enum_values: vec![],
-                        example: None,
-                    },
-                ],
+                parameters: comprehensive_test_parameters(),
                 request_body: None,
                 responses: vec![],
                 security_requirements: vec![],

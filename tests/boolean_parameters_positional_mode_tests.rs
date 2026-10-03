@@ -13,7 +13,8 @@ mod test_helpers;
 /// 4. Mixed boolean and non-boolean parameters work together
 /// 5. URL substitution works correctly with boolean flags in positional mode
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+    CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
@@ -40,6 +41,7 @@ fn create_spec_with_mixed_path_params() -> CachedSpec {
             path: "/items/{id}/{active}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -52,6 +54,7 @@ fn create_spec_with_mixed_path_params() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "active".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -100,6 +103,7 @@ fn create_spec_with_boolean_query_param() -> CachedSpec {
             path: "/users/{id}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -112,6 +116,7 @@ fn create_spec_with_boolean_query_param() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "verbose".to_string(),
                     location: "query".to_string(),
                     required: false,
@@ -405,6 +410,7 @@ fn test_multiple_boolean_path_params_in_positional_mode() {
             path: "/resources/{id}/{active}/{verified}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -417,6 +423,7 @@ fn test_multiple_boolean_path_params_in_positional_mode() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "active".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -429,6 +436,7 @@ fn test_multiple_boolean_path_params_in_positional_mode() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "verified".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -514,6 +522,7 @@ async fn test_mixed_boolean_flags_url_substitution_positional_mode() {
             path: "/resources/{id}/{active}/{verified}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -526,6 +535,7 @@ async fn test_mixed_boolean_flags_url_substitution_positional_mode() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "active".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -538,6 +548,7 @@ async fn test_mixed_boolean_flags_url_substitution_positional_mode() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "verified".to_string(),
                     location: "path".to_string(),
                     required: true,

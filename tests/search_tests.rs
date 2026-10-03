@@ -2,7 +2,8 @@
 #![allow(clippy::needless_collect)]
 
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+    CACHE_FORMAT_VERSION,
 };
 use aperture_cli::search::{format_search_results, CommandSearcher};
 use std::collections::{BTreeMap, HashMap};
@@ -24,6 +25,7 @@ fn create_test_spec(name: &str) -> CachedSpec {
                 tags: vec!["users".to_string()],
                 name: "users".to_string(),
                 parameters: vec![CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
