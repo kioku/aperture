@@ -33,8 +33,9 @@ fn make_spec_with_pagination(base_url: &str, pagination: PaginationInfo) -> Cach
     }
 }
 
-const fn base_ctx() -> ExecutionContext {
+fn base_ctx() -> ExecutionContext {
     ExecutionContext {
+        http_clients: aperture_cli::engine::executor::HttpClientPool::default(),
         dry_run: false,
         idempotency_key: None,
         cache_config: None,
@@ -291,12 +292,24 @@ async fn test_link_header_pagination_collects_all_pages() {
         },
     );
 
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = base_ctx();
+    ctx.cache_config = Some(aperture_cli::response_cache::CacheConfig {
+        cache_dir: dir.path().to_path_buf(),
+        ..Default::default()
+    });
     let mut buf: Vec<u8> = Vec::new();
-    let count = execute_paginated(&spec, base_call(HashMap::new()), base_ctx(), &mut buf)
+    let count = execute_paginated(&spec, base_call(HashMap::new()), ctx.clone(), &mut buf)
         .await
         .expect("should succeed");
 
     assert_eq!(count, 3, "should collect 3 items across 2 pages");
+    let mut cached = Vec::new();
+    let cached_count = execute_paginated(&spec, base_call(HashMap::new()), ctx, &mut cached)
+        .await
+        .unwrap();
+    assert_eq!(cached_count, count);
+    assert_eq!(cached, buf);
     let items = parse_ndjson(&buf);
     assert_eq!(items[0]["id"], 1);
     assert_eq!(items[2]["id"], 3);

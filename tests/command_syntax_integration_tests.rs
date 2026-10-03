@@ -391,7 +391,7 @@ async fn test_post_request_with_body_and_caching() {
             "content": "This is a test post",
             "created_at": "2023-01-01T00:00:00Z"
         })))
-        .expect(1)
+        .expect(2)
         .mount(&mock_server)
         .await;
 
@@ -425,7 +425,7 @@ async fn test_post_request_with_body_and_caching() {
     .await;
     assert!(result1.is_ok());
 
-    // Second identical request should use cache
+    // Second identical request must execute the mutation again
     let result2 = execute_request(
         &spec,
         &matches,
@@ -442,11 +442,11 @@ async fn test_post_request_with_body_and_caching() {
     .await;
     assert!(result2.is_ok());
 
-    // Verify cache was used
+    // Unsafe methods must not populate the cache
     let cache = ResponseCache::new(cache_config).unwrap();
     let stats = cache.get_stats(Some("comprehensive-api")).await.unwrap();
-    assert_eq!(stats.total_entries, 1);
-    assert_eq!(stats.valid_entries, 1);
+    assert_eq!(stats.total_entries, 0);
+    assert_eq!(stats.valid_entries, 0);
 }
 
 #[tokio::test]

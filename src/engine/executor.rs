@@ -133,6 +133,45 @@ impl ProxyDiagnostics {
     }
 }
 
+/// Context-owned HTTP clients, shared across cloned contexts and batch operations.
+///
+/// Resolved proxy settings form the key so configuration changes cannot reuse
+/// a client with a different route. No process-global client is retained.
+#[derive(Debug, Clone, Default)]
+pub struct HttpClientPool(std::sync::Arc<std::sync::Mutex<HashMap<String, reqwest::Client>>>);
+
+fn transport_key(
+    ctx: &crate::invocation::ExecutionContext,
+    diagnostics: &ProxyDiagnostics,
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(diagnostics.to_json().to_string());
+    digest.update(format!("{:?}", ctx.proxy_override));
+    digest.update(format!(
+        "{:?}",
+        ctx.global_config.as_ref().map(|config| &config.proxy)
+    ));
+    for names in [
+        ["HTTP_PROXY", "http_proxy"],
+        ["HTTPS_PROXY", "https_proxy"],
+        ["ALL_PROXY", "all_proxy"],
+        ["NO_PROXY", "no_proxy"],
+    ] {
+        digest.update(format!("{:?}", first_env_value(&names)));
+    }
+    format!("{:x}", digest.finalize())
+}
+
+fn ensure_tls_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_some() {
+        return;
+    }
+    #[cfg(not(windows))]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    #[cfg(windows)]
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 struct ProxyBuildResult {
     client: reqwest::Client,
     diagnostics: ProxyDiagnostics,
@@ -361,7 +400,20 @@ fn log_proxy_diagnostics(diagnostics: &ProxyDiagnostics) {
 
 /// Build HTTP client with default timeout and resolved proxy behavior.
 fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyBuildResult, Error> {
+    ensure_tls_provider();
     let (builder, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
+    let key = transport_key(ctx, &diagnostics);
+    let mut clients = ctx
+        .http_clients
+        .0
+        .lock()
+        .map_err(|_| Error::invalid_config("HTTP client pool lock poisoned"))?;
+    if let Some(client) = clients.get(&key) {
+        return Ok(ProxyBuildResult {
+            client: client.clone(),
+            diagnostics,
+        });
+    }
     let client = builder
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -372,6 +424,8 @@ fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyB
             )
         })?;
 
+    clients.insert(key, client.clone());
+    drop(clients);
     log_proxy_diagnostics(&diagnostics);
     Ok(ProxyBuildResult {
         client,
@@ -820,6 +874,18 @@ fn handle_http_error(
     )
 }
 
+fn request_has_credentials(headers: &HeaderMap, url: &str) -> bool {
+    if headers
+        .iter()
+        .any(|(name, _)| is_auth_header(name.as_str()))
+    {
+        return true;
+    }
+    reqwest::Url::parse(url)
+        .ok()
+        .is_some_and(|parsed| !parsed.username().is_empty() || parsed.password().is_some())
+}
+
 /// Prepare cache context if caching is enabled
 fn prepare_cache_context(
     cache_config: Option<&CacheConfig>,
@@ -834,13 +900,12 @@ fn prepare_cache_context(
         return Ok(None);
     };
 
-    if !cache_cfg.enabled {
+    if !cache_cfg.enabled || !matches!(*method, Method::GET | Method::HEAD) {
         return Ok(None);
     }
 
-    // Skip caching for authenticated requests unless explicitly allowed
-    let has_auth_headers = headers.iter().any(|(k, _)| is_auth_header(k.as_str()));
-    if has_auth_headers && !cache_cfg.allow_authenticated {
+    // Authenticated caching is disabled even for the legacy opt-in flag.
+    if request_has_credentials(headers, url) {
         return Ok(None);
     }
 
@@ -889,6 +954,13 @@ async fn store_in_cache(
     let Some((cache_key, response_cache)) = cache_context else {
         return Ok(());
     };
+    // Replaying a session-creating response without its cookie changes semantics.
+    if response_headers
+        .keys()
+        .any(|name| name.eq_ignore_ascii_case("set-cookie"))
+    {
+        return Ok(());
+    }
 
     // Convert headers to HashMap and scrub auth headers before caching
     let raw_headers: HashMap<String, String> = headers
@@ -1154,6 +1226,8 @@ async fn cached_execution_result(
     if let Some(cached_response) = check_cache(cache_context).await? {
         return Ok(Some(ExecutionResult::Cached {
             body: cached_response.body,
+            status: cached_response.status_code,
+            headers: cached_response.headers,
         }));
     }
 
@@ -1291,11 +1365,7 @@ struct PreExecutionInput<'a> {
 async fn resolve_pre_execution_result(
     input: PreExecutionInput<'_>,
 ) -> Result<Option<ExecutionResult>, Error> {
-    if let Some(result) = cached_execution_result(input.cache_context).await? {
-        return Ok(Some(result));
-    }
-
-    Ok(build_dry_run_result(
+    let dry_run = build_dry_run_result(
         input.dry_run,
         input.method,
         input.url,
@@ -1304,7 +1374,11 @@ async fn resolve_pre_execution_result(
         input.spec,
         input.operation,
         input.proxy,
-    ))
+    );
+    if dry_run.is_some() {
+        return Ok(dry_run);
+    }
+    cached_execution_result(input.cache_context).await
 }
 
 /// Executes an API operation using CLI-agnostic domain types.
@@ -1338,7 +1412,10 @@ pub async fn execute(
     }
 
     let (status, response_headers, response_text) = send_request_with_retry(
-        &prepared.client,
+        prepared
+            .client
+            .as_ref()
+            .ok_or_else(|| Error::invalid_config("Missing HTTP client"))?,
         prepared.method.clone(),
         &prepared.url,
         prepared.headers,
@@ -1371,7 +1448,7 @@ struct PreparedExecution<'a> {
     operation: &'a CachedCommand,
     method: Method,
     url: String,
-    client: reqwest::Client,
+    client: Option<reqwest::Client>,
     proxy_diagnostics: ProxyDiagnostics,
     headers: HeaderMap,
     headers_clone: HeaderMap,
@@ -1386,7 +1463,7 @@ struct PreparedRequest<'a> {
     operation: &'a CachedCommand,
     method: Method,
     url: String,
-    client: reqwest::Client,
+    client: Option<reqwest::Client>,
     proxy_diagnostics: ProxyDiagnostics,
     headers: HeaderMap,
     headers_clone: HeaderMap,
@@ -1505,6 +1582,17 @@ fn find_validated_operation<'a>(
     Ok(operation)
 }
 
+fn prepare_transport(
+    ctx: &crate::invocation::ExecutionContext,
+) -> Result<(Option<reqwest::Client>, ProxyDiagnostics), Error> {
+    if ctx.dry_run {
+        let (_, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
+        return Ok((None, diagnostics));
+    }
+    let result = build_http_client(ctx)?;
+    Ok((Some(result.client), result.diagnostics))
+}
+
 fn prepare_request<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
@@ -1520,7 +1608,7 @@ fn prepare_request<'a>(
         &call.path_params,
         &call.query_params,
     )?;
-    let proxy_build_result = build_http_client(ctx)?;
+    let (client, proxy_diagnostics) = prepare_transport(ctx)?;
     let mut headers = build_headers_from_params(
         spec,
         operation,
@@ -1539,8 +1627,8 @@ fn prepare_request<'a>(
         operation,
         method,
         url,
-        client: proxy_build_result.client,
-        proxy_diagnostics: proxy_build_result.diagnostics,
+        client,
+        proxy_diagnostics,
         headers,
         headers_clone,
         body: call.body,
@@ -1567,7 +1655,11 @@ fn prepare_runtime_context<'a>(
         ));
     }
     let cache_context = prepare_cache_context(
-        ctx.cache_config.as_ref(),
+        if ctx.dry_run || !operation.security_requirements.is_empty() {
+            None
+        } else {
+            ctx.cache_config.as_ref()
+        },
         &spec.name,
         &operation.operation_id,
         method,
@@ -1952,6 +2044,39 @@ fn parse_bracket_index(part: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn url_userinfo_and_cookies_disable_cache() {
+        assert!(request_has_credentials(
+            &HeaderMap::new(),
+            "https://alice:secret@example.com/items"
+        ));
+        let mut headers = HeaderMap::new();
+        headers.insert("cookie", "session=secret".parse().unwrap());
+        assert!(request_has_credentials(
+            &headers,
+            "https://example.com/items"
+        ));
+        assert!(!request_has_credentials(
+            &HeaderMap::new(),
+            "https://example.com/items"
+        ));
+    }
+
+    #[test]
+    fn transport_keys_distinguish_redacted_proxy_credentials() {
+        let mut ctx = crate::invocation::ExecutionContext {
+            proxy_override: ProxyOverride::Use("http://alice:secret@localhost:8080".into()),
+            ..Default::default()
+        };
+        let (_, first_diagnostics) = configure_proxy(reqwest::Client::builder(), &ctx).unwrap();
+        let first_key = transport_key(&ctx, &first_diagnostics);
+        ctx.proxy_override = ProxyOverride::Use("http://bob:other@localhost:8080".into());
+        let (_, second_diagnostics) = configure_proxy(reqwest::Client::builder(), &ctx).unwrap();
+        assert_eq!(first_diagnostics, second_diagnostics);
+        assert_ne!(first_key, transport_key(&ctx, &second_diagnostics));
+        assert!(!first_key.contains("secret"));
+    }
 
     fn operation_with_body(
         request_body: Option<crate::cache::models::CachedRequestBody>,

@@ -193,6 +193,12 @@ Converts `ExecutionResult` back into formatted CLI output (JSON, YAML, table). T
 - **SDK Path**: The domain types form a stable contract for future library/SDK usage.
 - **Separation of Concerns**: Parsing, execution, and rendering are independent.
 
+SDK execution initializes a platform TLS provider when building a real HTTP client if none is installed; it honors an already installed provider. Dry runs build no client and initialize no provider.
+
+`ExecutionContext.http_clients` is a context-owned connection pool. Clone a context to reuse connections across calls. Pagination clones its context; batch processors share a pool across their operations. Transport settings, including proxy credentials, are hashed into the reuse key so differently configured calls cannot reuse the wrong client.
+
+Construct SDK contexts with `..ExecutionContext::default()` or provide `http_clients: Default::default()` in full struct literals. Cached results now expose `status` and `headers`; callers matching `Cached` can use `..` when they only need its body.
+
 ### 4.5. Command Mapping
 
 As of v0.1.8, Aperture supports config-based command mapping that customizes the CLI command tree without modifying the OpenAPI spec.

@@ -64,13 +64,10 @@ async fn fetch_page_payload<W: std::io::Write + ?Sized>(
     let result = executor::execute(spec, call, ctx).await?;
 
     match result {
-        ExecutionResult::Success { body, headers, .. } => Ok(Some(PagePayload {
+        ExecutionResult::Success { body, headers, .. }
+        | ExecutionResult::Cached { body, headers, .. } => Ok(Some(PagePayload {
             body,
             response_headers: headers,
-        })),
-        ExecutionResult::Cached { body } => Ok(Some(PagePayload {
-            body,
-            response_headers: HashMap::new(),
         })),
         ExecutionResult::DryRun { request_info } => {
             write_json_line(writer, &request_info)?;

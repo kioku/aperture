@@ -17,8 +17,8 @@ pub struct CacheConfig {
     pub max_entries: usize,
     /// Whether caching is enabled globally
     pub enabled: bool,
-    /// Whether to cache responses from authenticated requests.
-    /// Default is `false` for security: auth headers could leak to disk.
+    /// Reserved for compatibility. Authenticated response caching is disabled
+    /// regardless of this value to prevent credential persistence and account mixing.
     pub allow_authenticated: bool,
 }
 
@@ -232,7 +232,7 @@ impl ResponseCache {
         Ok(CachedResponse {
             body: body.to_string(),
             status_code,
-            headers: headers.clone(),
+            headers: scrub_auth_headers(headers),
             cached_at: Self::current_unix_timestamp()?,
             ttl_seconds: ttl.as_secs(),
             request_info,
@@ -562,7 +562,9 @@ pub struct CacheStats {
 /// Check if a header is an authentication header that should be excluded from caching
 #[must_use]
 pub fn is_auth_header(header_name: &str) -> bool {
-    constants::is_auth_header(header_name)
+    header_name.eq_ignore_ascii_case("cookie")
+        || header_name.eq_ignore_ascii_case("set-cookie")
+        || constants::is_auth_header(header_name)
         || header_name
             .to_lowercase()
             .starts_with(constants::HEADER_PREFIX_X_AUTH)
@@ -601,6 +603,32 @@ mod tests {
             allow_authenticated: false,
         };
         (config, temp_dir)
+    }
+
+    #[test]
+    fn cached_response_never_persists_session_headers() {
+        let headers = HashMap::from([
+            ("Set-Cookie".into(), "session=secret".into()),
+            ("Link".into(), "</next>".into()),
+        ]);
+        let info = CachedRequestInfo {
+            method: "GET".into(),
+            url: "https://example.com".into(),
+            headers: HashMap::new(),
+            body_hash: None,
+        };
+        let response = ResponseCache::build_cached_response(
+            "ok",
+            201,
+            &headers,
+            info,
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(!json.contains("secret"));
+        assert_eq!(response.headers["Link"], "</next>");
+        assert_eq!(response.status_code, 201);
     }
 
     #[test]

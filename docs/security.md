@@ -220,15 +220,17 @@ Responses from authenticated requests are **not cached**. This prevents authoriz
 aperture api my-api --cache users list
 ```
 
-When caching is enabled (`--cache`) and the request includes authentication headers, Aperture skips caching entirely and makes a fresh request every time. This is a deliberate security default.
+When caching is enabled (`--cache`), Aperture skips caching for operations with active security requirements (including custom header, query, and cookie API keys), and for requests carrying known authentication headers or cookies. This conservative policy also applies when SDK callers set the legacy `CacheConfig.allow_authenticated` flag: authenticated caching is disabled. No account-specific cached response is reused.
+
+Existing cache files are not rewritten. If you used authenticated caching with an earlier version, clear the affected response cache with `aperture config cache clear <name>` to remove previously persisted credentials or session cookies.
 
 ### Authentication Header Scrubbing
 
 As an additional defense-in-depth measure, authentication headers are scrubbed from any request metadata that does get stored in the cache. The following headers are automatically removed:
 
 - `Authorization` / `Proxy-Authorization`
+- `Cookie` and response `Set-Cookie`
 - `X-API-Key` / `X-API-Token` / `API-Key`
-- `Cookie` (may contain session tokens)
 
 This ensures that even if cache files are accessed by other processes or backed up, no credentials are exposed.
 
