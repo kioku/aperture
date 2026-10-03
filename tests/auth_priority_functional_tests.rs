@@ -101,7 +101,7 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
             }],
             request_body: None,
             responses: vec![],
-            security_requirements: vec!["bearerAuth".to_string(), "apiKeyAuth".to_string()],
+            security_requirements: vec![vec!["bearerAuth".to_string(), "apiKeyAuth".to_string()]],
             tags: vec!["users".to_string()],
             deprecated: false,
             external_docs_url: None,

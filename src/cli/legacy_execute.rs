@@ -45,6 +45,7 @@ pub async fn execute_request(
 
     // Build ExecutionContext from the individual parameters
     let ctx = ExecutionContext {
+        http_clients: crate::engine::executor::HttpClientPool::default(),
         dry_run,
         idempotency_key: idempotency_key.map(String::from),
         cache_config: cache_config.cloned(),

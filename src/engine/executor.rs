@@ -133,32 +133,62 @@ impl ProxyDiagnostics {
     }
 }
 
-#[derive(Clone)]
+/// Context-owned HTTP clients, shared across cloned contexts and batch operations.
+///
+/// Resolved proxy settings, effective timeout and redirect policy form the key
+/// so configuration changes cannot reuse a client with different transport rules.
+/// No process-global client is retained.
+#[derive(Debug, Clone, Default)]
+pub struct HttpClientPool(std::sync::Arc<std::sync::Mutex<HashMap<String, reqwest::Client>>>);
+
+fn transport_key(
+    ctx: &crate::invocation::ExecutionContext,
+    diagnostics: &ProxyDiagnostics,
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(diagnostics.to_json().to_string());
+    digest.update(effective_timeout_secs(ctx).to_be_bytes());
+    digest.update(format!("{:?}", ctx.proxy_override));
+    digest.update(format!(
+        "{:?}",
+        ctx.global_config.as_ref().map(|config| &config.proxy)
+    ));
+    if let Some(password_env) = ctx
+        .global_config
+        .as_ref()
+        .and_then(|config| non_empty(config.proxy.password_env.as_deref()))
+    {
+        // Password rotation must not reuse a client holding old proxy credentials.
+        digest.update(format!("{:?}", std::env::var(password_env).ok()));
+    }
+    for names in [
+        ["HTTP_PROXY", "http_proxy"],
+        ["HTTPS_PROXY", "https_proxy"],
+        ["ALL_PROXY", "all_proxy"],
+        ["NO_PROXY", "no_proxy"],
+    ] {
+        // reqwest's environment precedence can differ from diagnostics. Include
+        // both spellings so a change to either cannot reuse a stale route.
+        for name in names {
+            digest.update(format!("{:?}", std::env::var(name).ok()));
+        }
+    }
+    format!("{:x}", digest.finalize())
+}
+
+fn ensure_tls_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_some() {
+        return;
+    }
+    #[cfg(not(windows))]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    #[cfg(windows)]
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 struct ProxyBuildResult {
     client: reqwest::Client,
     diagnostics: ProxyDiagnostics,
-}
-
-/// One traversal uses an immutable execution context and shares its connection
-/// pool. URL validation still runs for every page before headers are attached.
-#[derive(Default)]
-pub(crate) struct ExecutionSession {
-    client: Option<ProxyBuildResult>,
-}
-
-impl ExecutionSession {
-    fn client(
-        &mut self,
-        ctx: &crate::invocation::ExecutionContext,
-        pagination: bool,
-    ) -> Result<ProxyBuildResult, Error> {
-        if let Some(client) = &self.client {
-            return Ok(client.clone());
-        }
-        let client = build_http_client(ctx, pagination)?;
-        self.client = Some(client.clone());
-        Ok(client)
-    }
 }
 
 fn configure_proxy(
@@ -382,21 +412,41 @@ fn log_proxy_diagnostics(diagnostics: &ProxyDiagnostics) {
     );
 }
 
-/// Build HTTP client with default timeout and resolved proxy behavior.
+/// CLI translation applies explicit timeout overrides to `global_config` first.
+fn effective_timeout_secs(ctx: &crate::invocation::ExecutionContext) -> u64 {
+    ctx.global_config
+        .as_ref()
+        .map_or(30, |config| config.default_timeout_secs)
+}
+
+/// Build HTTP client with effective timeout and resolved proxy behavior.
 fn build_http_client(
     ctx: &crate::invocation::ExecutionContext,
     pagination: bool,
 ) -> Result<ProxyBuildResult, Error> {
+    ensure_tls_provider();
     let (builder, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
-    // Redirects bypass next-link validation and obscure the base for relative
-    // links. Pagination requires explicit validated links instead.
+    let key = format!("{}:{pagination}", transport_key(ctx, &diagnostics));
+    let mut clients = ctx
+        .http_clients
+        .0
+        .lock()
+        .map_err(|_| Error::invalid_config("HTTP client pool lock poisoned"))?;
+    if let Some(client) = clients.get(&key) {
+        return Ok(ProxyBuildResult {
+            client: client.clone(),
+            diagnostics,
+        });
+    }
+
+    // Pagination follows only explicitly validated links, never redirects.
     let builder = if pagination {
         builder.redirect(reqwest::redirect::Policy::none())
     } else {
         builder
     };
     let client = builder
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(effective_timeout_secs(ctx)))
         .build()
         .map_err(|_| {
             Error::request_failed(
@@ -405,6 +455,8 @@ fn build_http_client(
             )
         })?;
 
+    clients.insert(key, client.clone());
+    drop(clients);
     log_proxy_diagnostics(&diagnostics);
     Ok(ProxyBuildResult {
         client,
@@ -444,7 +496,11 @@ async fn send_request(
     secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<HttpResponseBytes, Error> {
     let start_time = std::time::Instant::now();
-    let response = request.send().await.map_err(Error::Network)?;
+    // Remove only the URL: native error classification and typed causes survive.
+    let response = request
+        .send()
+        .await
+        .map_err(|error| Error::Network(error.without_url()))?;
     let status = response.status();
     let duration_ms = start_time.elapsed().as_millis();
     let mut response_headers_map = reqwest::header::HeaderMap::new();
@@ -452,7 +508,11 @@ async fn send_request(
         response_headers_map.insert(name.clone(), value.clone());
     }
     let response_headers = collect_response_headers(response.headers())?;
-    let response_bytes = response.bytes().await.map_err(Error::Network)?.to_vec();
+    let response_bytes = response
+        .bytes()
+        .await
+        .map_err(|error| Error::Network(error.without_url()))?
+        .to_vec();
 
     if operation.has_binary_response() {
         tracing::debug!(
@@ -883,6 +943,7 @@ fn handle_http_error(
     let security_schemes: Vec<String> = operation
         .security_requirements
         .iter()
+        .flatten()
         .filter_map(|scheme_name| {
             spec.security_schemes
                 .get(scheme_name)
@@ -904,6 +965,22 @@ fn handle_http_error(
     )
 }
 
+fn request_requires_cache_bypass(headers: &HeaderMap, url: &str) -> bool {
+    // The cache's single-value header map cannot represent repeated fields.
+    // Skip these requests rather than discard a value from the request identity.
+    if headers
+        .iter()
+        .any(|(name, _)| is_auth_header(name.as_str()))
+        || headers
+            .keys()
+            .any(|name| headers.get_all(name).iter().count() > 1)
+    {
+        return true;
+    }
+    reqwest::Url::parse(url)
+        .is_ok_and(|parsed| !parsed.username().is_empty() || parsed.password().is_some())
+}
+
 /// Prepare cache context if caching is enabled
 fn prepare_cache_context(
     cache_config: Option<&CacheConfig>,
@@ -918,13 +995,12 @@ fn prepare_cache_context(
         return Ok(None);
     };
 
-    if !cache_cfg.enabled {
+    if !cache_cfg.enabled || !matches!(*method, Method::GET | Method::HEAD) {
         return Ok(None);
     }
 
-    // Skip caching for authenticated requests unless explicitly allowed
-    let has_auth_headers = headers.iter().any(|(k, _)| is_auth_header(k.as_str()));
-    if has_auth_headers && !cache_cfg.allow_authenticated {
+    // Authenticated caching is disabled even for the legacy opt-in flag.
+    if request_requires_cache_bypass(headers, url) {
         return Ok(None);
     }
 
@@ -973,6 +1049,13 @@ async fn store_in_cache(
     let Some((cache_key, response_cache)) = cache_context else {
         return Ok(());
     };
+    // Replaying a session-creating response without its cookie changes semantics.
+    if response_headers
+        .keys()
+        .any(|name| name.eq_ignore_ascii_case("set-cookie"))
+    {
+        return Ok(());
+    }
 
     // Convert headers to HashMap and scrub auth headers before caching
     let raw_headers: HashMap<String, String> = headers
@@ -1242,6 +1325,8 @@ async fn cached_execution_result(
     if let Some(cached_response) = check_cache(cache_context).await? {
         return Ok(Some(ExecutionResult::Cached {
             body: cached_response.body,
+            status: cached_response.status_code,
+            headers: cached_response.headers,
         }));
     }
 
@@ -1379,11 +1464,7 @@ struct PreExecutionInput<'a> {
 async fn resolve_pre_execution_result(
     input: PreExecutionInput<'_>,
 ) -> Result<Option<ExecutionResult>, Error> {
-    if let Some(result) = cached_execution_result(input.cache_context).await? {
-        return Ok(Some(result));
-    }
-
-    Ok(build_dry_run_result(
+    let dry_run = build_dry_run_result(
         input.dry_run,
         input.method,
         input.url,
@@ -1392,7 +1473,11 @@ async fn resolve_pre_execution_result(
         input.spec,
         input.operation,
         input.proxy,
-    ))
+    );
+    if dry_run.is_some() {
+        return Ok(dry_run);
+    }
+    cached_execution_result(input.cache_context).await
 }
 
 /// Executes an API operation using CLI-agnostic domain types.
@@ -1406,19 +1491,7 @@ pub async fn execute(
     call: crate::invocation::OperationCall,
     ctx: crate::invocation::ExecutionContext,
 ) -> Result<crate::invocation::ExecutionResult, Error> {
-    execute_in_session(spec, call, ctx, &mut ExecutionSession::default()).await
-}
-
-/// Internal pagination entry point. The context must remain unchanged across
-/// calls in a session, so proxy and redirect policy cannot become stale.
-#[allow(clippy::too_many_lines)]
-pub(crate) async fn execute_in_session(
-    spec: &CachedSpec,
-    call: crate::invocation::OperationCall,
-    ctx: crate::invocation::ExecutionContext,
-    session: &mut ExecutionSession,
-) -> Result<crate::invocation::ExecutionResult, Error> {
-    let prepared = prepare_execution(spec, call, &ctx, session)?;
+    let prepared = prepare_execution(spec, call, &ctx)?;
 
     if let Some(result) = resolve_pre_execution_result(PreExecutionInput {
         cache_context: prepared.cache_context.as_ref(),
@@ -1437,7 +1510,10 @@ pub(crate) async fn execute_in_session(
     }
 
     let (status, response_headers, response_text) = send_request_with_retry(
-        &prepared.client,
+        prepared
+            .client
+            .as_ref()
+            .ok_or_else(|| Error::invalid_config("Missing HTTP client"))?,
         prepared.method.clone(),
         &prepared.url,
         prepared.headers,
@@ -1470,7 +1546,7 @@ struct PreparedExecution<'a> {
     operation: &'a CachedCommand,
     method: Method,
     url: String,
-    client: reqwest::Client,
+    client: Option<reqwest::Client>,
     proxy_diagnostics: ProxyDiagnostics,
     headers: HeaderMap,
     headers_clone: HeaderMap,
@@ -1485,7 +1561,7 @@ struct PreparedRequest<'a> {
     operation: &'a CachedCommand,
     method: Method,
     url: String,
-    client: reqwest::Client,
+    client: Option<reqwest::Client>,
     proxy_diagnostics: ProxyDiagnostics,
     headers: HeaderMap,
     headers_clone: HeaderMap,
@@ -1503,18 +1579,10 @@ fn prepare_execution<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
-    session: &mut ExecutionSession,
 ) -> Result<PreparedExecution<'a>, Error> {
-    let request = prepare_request(spec, call, ctx, session)?;
-    let runtime = prepare_runtime_context(
-        spec,
-        request.operation,
-        &request.method,
-        &request.url,
-        &request.headers_clone,
-        request.body.as_ref(),
-        ctx,
-    )?;
+    let strict_pagination = ctx.auto_paginate || call.pagination_url.is_some();
+    let request = prepare_request(spec, call, ctx)?;
+    let runtime = prepare_runtime_context(spec, &request, ctx, strict_pagination)?;
 
     Ok(PreparedExecution {
         operation: request.operation,
@@ -1605,16 +1673,27 @@ fn find_validated_operation<'a>(
     Ok(operation)
 }
 
+fn prepare_transport(
+    ctx: &crate::invocation::ExecutionContext,
+    pagination: bool,
+) -> Result<(Option<reqwest::Client>, ProxyDiagnostics), Error> {
+    if ctx.dry_run {
+        let (_, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
+        return Ok((None, diagnostics));
+    }
+    let result = build_http_client(ctx, pagination)?;
+    Ok((Some(result.client), result.diagnostics))
+}
+
 fn prepare_request<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
-    session: &mut ExecutionSession,
 ) -> Result<PreparedRequest<'a>, Error> {
     let operation = find_validated_operation(spec, &call)?;
     let url = pagination_request_url(spec, &call, ctx)?.to_string();
-    let proxy_build_result =
-        session.client(ctx, ctx.auto_paginate || call.pagination_url.is_some())?;
+    let pagination = ctx.auto_paginate || call.pagination_url.is_some();
+    let (client, proxy_diagnostics) = prepare_transport(ctx, pagination)?;
     let mut headers = build_headers_from_params(
         spec,
         operation,
@@ -1633,8 +1712,8 @@ fn prepare_request<'a>(
         operation,
         method,
         url,
-        client: proxy_build_result.client,
-        proxy_diagnostics: proxy_build_result.diagnostics,
+        client,
+        proxy_diagnostics,
         headers,
         headers_clone,
         body: call.body,
@@ -1643,13 +1722,15 @@ fn prepare_request<'a>(
 
 fn prepare_runtime_context<'a>(
     spec: &'a CachedSpec,
-    operation: &'a CachedCommand,
-    method: &Method,
-    url: &str,
-    headers: &HeaderMap,
-    body: Option<&RequestBody>,
+    request: &PreparedRequest<'a>,
     ctx: &'a crate::invocation::ExecutionContext,
+    strict_pagination: bool,
 ) -> Result<PreparedRuntimeContext<'a>, Error> {
+    let operation = request.operation;
+    let method = &request.method;
+    let url = &request.url;
+    let headers = &request.headers_clone;
+    let body = request.body.as_ref();
     if operation.has_binary_io()
         && ctx
             .cache_config
@@ -1660,10 +1741,20 @@ fn prepare_runtime_context<'a>(
             "--cache is not supported for operations with binary request or response bodies",
         ));
     }
+    // Strict pagination cannot read bodies/Link headers from ordinary requests
+    // that may have followed a redirect under the original URL. Partition both
+    // policies, intentionally missing legacy executor keys with no policy tag.
     let cache_context = prepare_cache_context(
-        ctx.cache_config.as_ref(),
+        if ctx.dry_run || !operation.security_requirements.is_empty() {
+            None
+        } else {
+            ctx.cache_config.as_ref()
+        },
         &spec.name,
-        &operation.operation_id,
+        &format!(
+            "{}:redirects={}",
+            operation.operation_id, !strict_pagination
+        ),
         method,
         url,
         headers,
@@ -1849,13 +1940,115 @@ fn apply_security_headers(
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<(), Error> {
-    for security_scheme_name in &operation.security_requirements {
-        let Some(security_scheme) = spec.security_schemes.get(security_scheme_name) else {
-            continue;
+    if operation.security_requirements.is_empty() {
+        return Ok(());
+    }
+    let mut unavailable = None;
+    for group in &operation.security_requirements {
+        if let Some(error) = security_group_unavailable(group, spec, api_name, global_config)? {
+            unavailable.get_or_insert(error);
+        } else {
+            let mut selected = headers.clone();
+            for name in group {
+                let scheme = &spec.security_schemes[name];
+                add_authentication_header(&mut selected, scheme, api_name, global_config)?;
+            }
+            *headers = selected;
+            return Ok(());
+        }
+    }
+    Err(unavailable
+        .unwrap_or_else(|| Error::validation_error("No satisfiable security alternative")))
+}
+
+/// Check only credential availability. Invalid values and other errors propagate;
+/// only absent environment variables make an alternative unavailable.
+fn security_group_unavailable(
+    group: &[String],
+    spec: &CachedSpec,
+    api_name: &str,
+    global_config: Option<&GlobalConfig>,
+) -> Result<Option<Error>, Error> {
+    validate_security_group(group, spec)?;
+    for name in group {
+        let scheme = &spec.security_schemes[name];
+        let env_name = authentication_env_name(scheme, api_name, global_config);
+        let Some(env_name) = env_name else {
+            return Ok(Some(Error::validation_error(format!(
+                "No credential configured for security scheme '{name}'"
+            ))));
         };
-        add_authentication_header(headers, security_scheme, api_name, global_config)?;
+        match std::env::var(env_name) {
+            Ok(_) => {}
+            Err(std::env::VarError::NotPresent) => {
+                return Ok(Some(Error::secret_not_set(name, env_name)))
+            }
+            // VarError's Display includes the raw non-Unicode value, which is
+            // a credential here. Report the configuration error without it.
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(Error::validation_error(format!(
+                    "Credential for security scheme '{name}' is not valid unicode"
+                )))
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Reject groups we cannot apply completely before checking credentials. Two
+/// schemes targeting the same header cannot both be satisfied by overwriting it.
+fn validate_security_group(group: &[String], spec: &CachedSpec) -> Result<(), Error> {
+    let mut destinations = std::collections::HashSet::new();
+    for name in group {
+        let scheme = spec
+            .security_schemes
+            .get(name)
+            .ok_or_else(|| Error::validation_error(format!("Unknown security scheme '{name}'")))?;
+        let destination = security_header_destination(scheme)?;
+        if !destinations.insert(destination) {
+            return Err(Error::validation_error(
+                "Security group contains conflicting authentication headers",
+            ));
+        }
     }
     Ok(())
+}
+
+fn security_header_destination(scheme: &CachedSecurityScheme) -> Result<HeaderName, Error> {
+    match scheme.scheme_type.as_str() {
+        constants::AUTH_SCHEME_APIKEY => {
+            if scheme.location.as_deref() != Some("header") {
+                return Err(Error::unsupported_security_scheme("apiKey outside headers"));
+            }
+            let name = scheme.parameter_name.as_deref().ok_or_else(|| {
+                Error::validation_error("API key security scheme has no header name")
+            })?;
+            HeaderName::from_str(name)
+                .map_err(|error| Error::invalid_header_name(name, error.to_string()))
+        }
+        "http" => {
+            if scheme.scheme.as_deref().is_none_or(str::is_empty) {
+                return Err(Error::validation_error(
+                    "HTTP security scheme has no authentication scheme",
+                ));
+            }
+            Ok(HeaderName::from_static("authorization"))
+        }
+        other => Err(Error::unsupported_security_scheme(other)),
+    }
+}
+
+/// Configured secrets take precedence over specification extensions.
+fn authentication_env_name<'a>(
+    scheme: &'a CachedSecurityScheme,
+    api_name: &str,
+    config: Option<&'a GlobalConfig>,
+) -> Option<&'a String> {
+    config
+        .and_then(|config| config.api_configs.get(api_name))
+        .and_then(|config| config.secrets.get(&scheme.name))
+        .map(|secret| &secret.name)
+        .or_else(|| scheme.aperture_secret.as_ref().map(|secret| &secret.name))
 }
 
 fn apply_custom_headers(headers: &mut HeaderMap, custom_headers: &[String]) -> Result<(), Error> {
@@ -2076,7 +2269,194 @@ fn parse_bracket_index(part: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    fn security_test_spec() -> CachedSpec {
+        let document = serde_json::json!({
+            "openapi":"3.0.3", "info":{"title":"Security", "version":"1"},
+            "paths":{"/test":{"get":{"operationId":"test", "security":[{"available":[]},{"missing":[]}], "responses":{}}}},
+            "components":{"securitySchemes":{
+                "available":{"type":"apiKey","in":"header","name":"X-Available","x-aperture-secret":{"source":"env","name":"PATH"}},
+                "second":{"type":"apiKey","in":"header","name":"X-Second","x-aperture-secret":{"source":"env","name":"PATH"}},
+                "missing":{"type":"apiKey","in":"header","name":"X-Missing","x-aperture-secret":{"source":"env","name":"APERTURE_SECURITY_TEST_UNSET_221"}}
+            }}
+        });
+        let openapi = serde_json::from_value(document).unwrap();
+        crate::spec::SpecTransformer::new()
+            .transform("security", &openapi)
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn security_non_unicode_credentials_do_not_leak_in_errors() {
+        use std::os::unix::ffi::OsStringExt;
+        let env_name = "APERTURE_SECURITY_NON_UNICODE_C2";
+        let mut spec = security_test_spec();
+        spec.security_schemes
+            .get_mut("available")
+            .unwrap()
+            .aperture_secret
+            .as_mut()
+            .unwrap()
+            .name = env_name.into();
+        std::env::set_var(
+            env_name,
+            std::ffi::OsString::from_vec(b"synthetic-secret-\xff".to_vec()),
+        );
+        let result = apply_security_headers(
+            &mut HeaderMap::new(),
+            &spec,
+            &spec.commands[0],
+            "security",
+            None,
+        );
+        std::env::remove_var(env_name);
+        let error = result.unwrap_err().to_string();
+        assert!(
+            !error.contains("synthetic-secret"),
+            "credential leaked: {error}"
+        );
+        assert!(error.contains("unicode"));
+    }
+
+    #[test]
+    fn security_selects_one_alternative_without_other_credentials() {
+        let spec = security_test_spec();
+        let mut operation = spec.commands[0].clone();
+        let mut headers = HeaderMap::new();
+        apply_security_headers(&mut headers, &spec, &operation, "security", None).unwrap();
+        assert!(headers.contains_key("X-Available"));
+        assert!(!headers.contains_key("X-Missing"));
+        operation.security_requirements.reverse();
+        headers.clear();
+        apply_security_headers(&mut headers, &spec, &operation, "security", None).unwrap();
+        assert!(headers.contains_key("X-Available"));
+    }
+
+    #[test]
+    fn security_combined_group_is_atomic_and_empty_group_is_optional() {
+        let spec = security_test_spec();
+        let mut operation = spec.commands[0].clone();
+        operation.security_requirements = vec![vec!["available".into(), "missing".into()]];
+        let mut headers = HeaderMap::new();
+        assert!(apply_security_headers(&mut headers, &spec, &operation, "security", None).is_err());
+        assert!(headers.is_empty());
+        operation.security_requirements.push(vec![]);
+        apply_security_headers(&mut headers, &spec, &operation, "security", None).unwrap();
+        assert!(headers.is_empty());
+        operation.security_requirements = vec![vec!["available".into(), "second".into()]];
+        apply_security_headers(&mut headers, &spec, &operation, "security", None).unwrap();
+        assert!(headers.contains_key("X-Available"));
+        assert!(headers.contains_key("X-Second"));
+    }
+
+    #[test]
+    fn security_rejects_unapplied_or_conflicting_credentials() {
+        for location in ["query", "cookie"] {
+            let mut spec = security_test_spec();
+            spec.security_schemes.get_mut("available").unwrap().location = Some(location.into());
+            let mut headers = HeaderMap::new();
+            assert!(apply_security_headers(
+                &mut headers,
+                &spec,
+                &spec.commands[0],
+                "security",
+                None
+            )
+            .is_err());
+            assert!(headers.is_empty());
+        }
+        let mut spec = security_test_spec();
+        spec.security_schemes
+            .get_mut("second")
+            .unwrap()
+            .parameter_name = Some("x-available".into());
+        let mut operation = spec.commands[0].clone();
+        operation.security_requirements = vec![vec!["available".into(), "second".into()]];
+        assert!(
+            apply_security_headers(&mut HeaderMap::new(), &spec, &operation, "security", None)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn security_does_not_hide_invalid_header_or_unknown_scheme() {
+        let mut spec = security_test_spec();
+        let mut operation = spec.commands[0].clone();
+        operation.security_requirements.push(vec![]);
+        spec.security_schemes
+            .get_mut("available")
+            .unwrap()
+            .parameter_name = Some("invalid\nheader".into());
+        assert!(
+            apply_security_headers(&mut HeaderMap::new(), &spec, &operation, "security", None)
+                .is_err()
+        );
+        operation.security_requirements = vec![vec!["unknown".into()], vec![]];
+        assert!(
+            apply_security_headers(&mut HeaderMap::new(), &spec, &operation, "security", None)
+                .is_err()
+        );
+    }
+
     use super::*;
+
+    #[test]
+    fn url_userinfo_and_cookies_disable_cache() {
+        assert!(request_requires_cache_bypass(
+            &HeaderMap::new(),
+            "https://alice:secret@example.com/items"
+        ));
+        let mut headers = HeaderMap::new();
+        headers.insert("cookie", "session=secret".parse().unwrap());
+        assert!(request_requires_cache_bypass(
+            &headers,
+            "https://example.com/items"
+        ));
+        assert!(!request_requires_cache_bypass(
+            &HeaderMap::new(),
+            "https://example.com/items"
+        ));
+        let mut duplicates = HeaderMap::new();
+        duplicates.append("x-tenant-secret", "alice".parse().unwrap());
+        duplicates.append("x-tenant-secret", "bob".parse().unwrap());
+        assert!(request_requires_cache_bypass(
+            &duplicates,
+            "https://example.com/items"
+        ));
+    }
+
+    #[test]
+    fn transport_keys_distinguish_rotated_proxy_passwords() {
+        let password_env = "APERTURE_REVIEW_PROXY_PASSWORD";
+        let mut config = GlobalConfig::default();
+        config.proxy.password_env = Some(format!(" {password_env} "));
+        let ctx = crate::invocation::ExecutionContext {
+            global_config: Some(config),
+            ..Default::default()
+        };
+        std::env::set_var(password_env, "first");
+        let first = transport_key(&ctx, &ProxyDiagnostics::default());
+        std::env::set_var(password_env, "second");
+        let second = transport_key(&ctx, &ProxyDiagnostics::default());
+        std::env::remove_var(password_env);
+        assert_ne!(first, second);
+        assert!(!second.contains("second"));
+    }
+
+    #[test]
+    fn transport_keys_distinguish_redacted_proxy_credentials() {
+        let mut ctx = crate::invocation::ExecutionContext {
+            proxy_override: ProxyOverride::Use("http://alice:secret@localhost:8080".into()),
+            ..Default::default()
+        };
+        let (_, first_diagnostics) = configure_proxy(reqwest::Client::builder(), &ctx).unwrap();
+        let first_key = transport_key(&ctx, &first_diagnostics);
+        ctx.proxy_override = ProxyOverride::Use("http://bob:other@localhost:8080".into());
+        let (_, second_diagnostics) = configure_proxy(reqwest::Client::builder(), &ctx).unwrap();
+        assert_eq!(first_diagnostics, second_diagnostics);
+        assert_ne!(first_key, transport_key(&ctx, &second_diagnostics));
+        assert!(!first_key.contains("secret"));
+    }
 
     fn operation_with_body(
         request_body: Option<crate::cache::models::CachedRequestBody>,

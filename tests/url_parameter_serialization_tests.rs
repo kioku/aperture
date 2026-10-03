@@ -309,23 +309,19 @@ fn metadata_survives_json_and_binary_roundtrips_with_legacy_json_defaults() {
     json.as_object_mut().unwrap().remove("serialization");
     let legacy: CachedParameter = serde_json::from_value(json).unwrap();
     assert_eq!(legacy.serialization, ParameterSerialization::default());
-    assert_eq!(aperture_cli::cache::models::CACHE_FORMAT_VERSION, 8);
+    assert_eq!(aperture_cli::cache::models::CACHE_FORMAT_VERSION, 9);
 }
 
 #[tokio::test]
-async fn referenced_and_composed_shapes_are_rejected_instead_of_assumed_scalar() {
+async fn ambiguous_composed_shapes_are_rejected_instead_of_assumed_scalar() {
     let server = MockServer::start().await;
-    for schema in [
-        json!({"$ref":"#/components/schemas/Array"}),
-        json!({"oneOf":[{"type":"string"},{"type":"array"}]}),
-        json!({}),
-    ] {
+    for schema in [json!({"oneOf":[{"type":"string"},{"type":"array"}]})] {
         let definition = json!({"name":"id","in":"path","required":true,"schema":schema});
         let cached = spec(&server.uri(), &definition);
         let error = execute(&cached, call("path", "data"), ExecutionContext::default())
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("unsupported"), "{error}");
+        assert!(error.to_string().contains("unambiguous"), "{error}");
     }
     assert!(server.received_requests().await.unwrap().is_empty());
 }
@@ -352,13 +348,7 @@ async fn compound_items_and_properties_respect_declared_primitive_types() {
     array["schema"]["items"] = json!({"type":"integer"});
     let mut object = parameter("path", "label", true, "object");
     object["schema"]["properties"] = json!({"active":{"type":"boolean"}});
-    let mut referenced_item = array.clone();
-    referenced_item["schema"]["items"] = json!({"$ref":"#/components/schemas/Integer"});
-    for (definition, raw) in [
-        (array, r#"["wrong"]"#),
-        (object, r#"{"active":"wrong"}"#),
-        (referenced_item, "[1]"),
-    ] {
+    for (definition, raw) in [(array, r#"["wrong"]"#), (object, r#"{"active":"wrong"}"#)] {
         let cached = spec(&server.uri(), &definition);
         let error = execute(&cached, call("path", raw), ExecutionContext::default())
             .await
@@ -376,7 +366,7 @@ fn old_binary_cache_metadata_is_invalidated_before_loading_changed_layout() {
     let fs = aperture_cli::fs::OsFileSystem;
     let manager = CacheMetadataManager::new(&fs);
     let mut metadata = GlobalCacheMetadata {
-        cache_format_version: 7,
+        cache_format_version: 8,
         specs: HashMap::from([(
             "serialization".into(),
             SpecMetadata {
@@ -450,4 +440,105 @@ async fn adversarial_compound_input_sweep_has_explicit_empty_and_duplicate_behav
             .is_err()
     );
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+fn referenced_spec(
+    schema: &Value,
+    components: &Value,
+) -> Result<CachedSpec, aperture_cli::error::Error> {
+    let api = serde_json::from_value(json!({
+        "openapi":"3.0.3", "info":{"title":"refs","version":"1"},
+        "servers":[{"url":"http://127.0.0.1:9"}],
+        "paths":{"/items/{id}":{"get":{"operationId":"getItems",
+            "parameters":[{"name":"id","in":"path","required":true,"schema":schema}],
+            "responses":{"200":{"description":"ok"}}}}},
+        "components":{"schemas":components}
+    }))
+    .unwrap();
+    SpecTransformer::new().transform("refs", &api)
+}
+
+#[tokio::test]
+async fn local_schema_refs_and_opaque_scalars_preserve_serialization() {
+    let payload = json!({"$ref":"literal payload", "type":false});
+    let components = json!({
+        "Text":{"type":"string", "example":payload, "default":payload},
+        "Alias":{"$ref":"#/components/schemas/Text"},
+        "List":{"type":"array", "items":{"$ref":"#/components/schemas/Text"}},
+        "Map":{"type":"object", "properties":{"key":{"$ref":"#/components/schemas/Text"}}}
+    });
+    let cases = [
+        (
+            json!({"$ref":"#/components/schemas/Alias"}),
+            "a/b?雪",
+            "a%2Fb%3F%E9%9B%AA",
+        ),
+        (
+            json!({"$ref":"#/components/schemas/List"}),
+            r#"["a/b","c"]"#,
+            "a%2Fb,c",
+        ),
+        (
+            json!({"$ref":"#/components/schemas/Map"}),
+            r#"{"key":"a/b"}"#,
+            "key,a%2Fb",
+        ),
+        (json!({}), "a/b?雪", "a%2Fb%3F%E9%9B%AA"),
+        (json!({"description":"opaque"}), "a/b", "a%2Fb"),
+        (
+            json!({"allOf":[{"type":"string"},{"description":"opaque"}]}),
+            "a/b",
+            "a%2Fb",
+        ),
+        (
+            json!({"anyOf":[{"type":"string"},{"type":"string","minLength":1}]}),
+            "a/b",
+            "a%2Fb",
+        ),
+    ];
+    for (schema, raw, suffix) in cases {
+        let cached = referenced_spec(&schema, &components).unwrap();
+        let result = execute(
+            &cached,
+            call("path", raw),
+            ExecutionContext {
+                dry_run: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let aperture_cli::invocation::ExecutionResult::DryRun { request_info } = result else {
+            panic!("expected dry run")
+        };
+        assert!(
+            request_info["url"].as_str().unwrap().ends_with(suffix),
+            "{request_info}"
+        );
+    }
+    let cached =
+        referenced_spec(&json!({"$ref":"#/components/schemas/Text"}), &components).unwrap();
+    let schema: Value =
+        serde_json::from_str(cached.commands[0].parameters[0].schema.as_ref().unwrap()).unwrap();
+    assert_eq!(schema["example"], payload);
+    assert_eq!(schema["default"], payload);
+}
+
+#[test]
+fn missing_cyclic_external_and_nested_refs_fail_safely() {
+    let components = json!({
+        "A":{"$ref":"#/components/schemas/B"}, "B":{"$ref":"#/components/schemas/A"},
+        "List":{"type":"array","items":{"$ref":"#/components/schemas/List"}}
+    });
+    for reference in [
+        "#/components/schemas/Missing",
+        "#/components/schemas/A",
+        "#/components/schemas/List",
+        "https://example.test/schema",
+    ] {
+        assert!(
+            referenced_spec(&json!({"$ref":reference}), &components).is_err(),
+            "{reference}"
+        );
+    }
 }

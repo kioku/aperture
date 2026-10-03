@@ -62,18 +62,14 @@ async fn fetch_page_payload<W: std::io::Write + ?Sized>(
     call: OperationCall,
     ctx: ExecutionContext,
     writer: &mut W,
-    session: &mut executor::ExecutionSession,
 ) -> Result<Option<PagePayload>, Error> {
-    let result = executor::execute_in_session(spec, call, ctx, session).await?;
+    let result = executor::execute(spec, call, ctx).await?;
 
     match result {
-        ExecutionResult::Success { body, headers, .. } => Ok(Some(PagePayload {
+        ExecutionResult::Success { body, headers, .. }
+        | ExecutionResult::Cached { body, headers, .. } => Ok(Some(PagePayload {
             body,
             response_headers: headers,
-        })),
-        ExecutionResult::Cached { body } => Ok(Some(PagePayload {
-            body,
-            response_headers: HashMap::new(),
         })),
         ExecutionResult::DryRun { request_info } => {
             write_json_line(writer, &request_info)?;
@@ -148,12 +144,11 @@ async fn process_paginated_page<W: std::io::Write + ?Sized>(
     ctx: ExecutionContext,
     writer: &mut W,
     state: &PaginationState,
-    session: &mut executor::ExecutionSession,
 ) -> Result<Option<(usize, bool)>, Error> {
     let Some(PagePayload {
         body,
         response_headers,
-    }) = fetch_page_payload(spec, call.clone(), ctx.clone(), writer, session).await?
+    }) = fetch_page_payload(spec, call.clone(), ctx.clone(), writer).await?
     else {
         return Ok(None);
     };
@@ -207,7 +202,6 @@ pub async fn execute_paginated(
 
     ctx.auto_paginate = true;
     let state = resolve_pagination_state(operation, &call);
-    let mut session = executor::ExecutionSession::default();
 
     let mut total_items: u64 = 0;
 
@@ -215,8 +209,7 @@ pub async fn execute_paginated(
     for page_num in 0..MAX_PAGES {
         record_page(spec, &call, &ctx, &mut visited)?;
         let Some((page_len, has_next)) =
-            process_paginated_page(spec, &mut call, ctx.clone(), writer, &state, &mut session)
-                .await?
+            process_paginated_page(spec, &mut call, ctx.clone(), writer, &state).await?
         else {
             break;
         };

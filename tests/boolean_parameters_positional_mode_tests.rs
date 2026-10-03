@@ -315,7 +315,9 @@ fn test_boolean_query_param_remains_flag_in_positional_mode() {
     let (_, operation_matches) = sub_matches.subcommand().unwrap();
 
     assert!(
-        operation_matches.get_flag("verbose"),
+        *operation_matches
+            .get_one::<bool>("verbose")
+            .unwrap_or(&false),
         "Boolean query parameter should be set"
     );
 }

@@ -193,6 +193,12 @@ Converts `ExecutionResult` back into formatted CLI output (JSON, YAML, table). T
 - **SDK Path**: The domain types form a stable contract for future library/SDK usage.
 - **Separation of Concerns**: Parsing, execution, and rendering are independent.
 
+SDK execution initializes a platform TLS provider when building a real HTTP client if none is installed; it honors an already installed provider. Dry runs build no client and initialize no provider.
+
+`ExecutionContext.http_clients` is a context-owned connection pool. Clone a context to reuse connections across calls. Pagination clones its context; batch processors share a pool across their operations. Transport settings, including proxy credentials, are hashed into the reuse key so differently configured calls cannot reuse the wrong client.
+
+Construct SDK contexts with `..ExecutionContext::default()` or provide `http_clients: Default::default()` in full struct literals. Cached results now expose `status` and `headers`; callers matching `Cached` can use `..` when they only need its body.
+
 ### 4.5. Command Mapping
 
 As of v0.1.8, Aperture supports config-based command mapping that customizes the CLI command tree without modifying the OpenAPI spec.
@@ -295,11 +301,11 @@ components:
         name: SENTRY_AUTH_TOKEN
 ```
 
-This configuration instructs Aperture to use the value of the `SENTRY_AUTH_TOKEN` environment variable for any operation secured by `sentryAuthToken`. If the extension is missing or the environment variable is unset, Aperture will fail with a `Config.SecretNotFound` error.
+This configuration instructs Aperture to use `SENTRY_AUTH_TOKEN` for an operation secured by `sentryAuthToken`. Configured secret mappings take precedence over the extension. Security requirement objects are alternatives (OR); schemes within an object are required together (AND). Aperture selects the first complete group with available credentials and applies only that group. An empty object permits anonymous access. Operation-level requirements replace global requirements, including an explicitly empty array. If no group is satisfiable, execution fails before sending the request. Invalid configuration or header values propagate rather than selecting another group.
 
 **Supported Authentication Types:**
 
-1. **API Key** (`type: apiKey`): Supports header, query, or cookie placement
+1. **API Key** (`type: apiKey`): Supports header placement. Query and cookie placement fail explicitly; automatic credential injection in those locations is not supported.
 2. **HTTP Bearer** (`type: http`, `scheme: bearer`): Standard Bearer token authentication
 3. **HTTP Basic** (`type: http`, `scheme: basic`): Basic authentication with base64 encoding
 4. **Custom HTTP Schemes** (`type: http`, `scheme: <custom>`): Any scheme not explicitly rejected (e.g., Token, DSN, ApiKey)

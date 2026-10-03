@@ -267,6 +267,8 @@ aperture api my-api --cache --cache-ttl 600 users list
 aperture api my-api --no-cache users list
 ```
 
+Response caching applies only to GET and HEAD. Unsafe methods such as POST always execute; there is no unsafe-method caching opt-in. Cached results retain status and response headers for pagination, but responses that set session cookies are not cached. Dry runs always return a request plan and never read or create the response cache.
+
 ### Cache Management
 
 ```bash
@@ -356,6 +358,11 @@ aperture config reinit my-api
 **Canonical role:** primary intent-first discovery. Use search when you know what you want to do but not where the command is.
 
 Search matches operation names, descriptions, display names, and aliases from command mappings.
+Ordinary queries use case-insensitive keyword/fuzzy matching. Operation-name
+matching ignores punctuation and tolerates a single edit or adjacent transposition
+for queries of four or more characters. Exact names rank ahead of typo matches.
+Use `regex:<pattern>` for explicit regex search (case-sensitive unless the pattern
+uses `(?i)`); invalid patterns produce an error. Ties sort by API and command path.
 
 ```bash
 # Search by keyword
@@ -525,6 +532,13 @@ lists, and reject malformed or ambiguous next targets rather than silently
 reporting completion. Multiple Link header fields are treated as one list.
 One traversal reuses its HTTP connection pool.
 
+Pagination uses shared, context-scoped HTTP clients keyed by transport settings
+and redirect policy. Strict pagination rejects all redirects, including
+same-origin redirects. Its response-cache identity is separate from ordinary
+requests that follow redirects, so a warmed ordinary client or cached redirect
+cannot bypass pagination boundaries. Direct cached pagination responses retain
+Link headers and continue to avoid network requests on repeated traversals.
+
 Repeated page URLs/cursors and the 1,000-page safety cap return an incomplete
 traversal error when more data remains. Already emitted NDJSON is partial output.
 A closed output pipe stops pagination without fetching another page.
@@ -542,12 +556,15 @@ JSON array/object of non-null primitive values, for example
 `--id '["blue","black"]'` or `--id '{"a":"blue","b":"black"}'`.
 Arrays/objects retain their declared wire representation rather than sending
 the JSON source text. Primitive number, integer, and boolean inputs must match
-the declared type; inline item/property primitive types are checked too.
+the declared type; item/property primitive types are checked too. Local
+`#/components/schemas/` references are resolved, including array items and object
+properties. Empty/description-only schemas retain opaque string input; string-only
+compositions also use scalar encoding. These codecs select a wire shape, not full
+JSON Schema validation. Examples/defaults are preserved as payload data.
 Object keys are sorted for deterministic URLs. Duplicate JSON object keys keep
 the last value, as in the JSON decoder; duplicate array values are preserved.
 Unknown object properties are accepted unless their primitive type is declared.
 Empty collections are omitted.
-This is serialization/type checking, not complete JSON Schema validation.
 
 Query parameters use structured URL pairs with encoded keys and values.
 `form` defaults to `explode=true`: arrays produce repeated keys and objects
@@ -556,15 +573,16 @@ produce separate property keys. Unexploded form uses comma-separated values;
 `deepObject` supports flat objects with explicit `explode=true`.
 
 Unsupported representations return validation errors before a request is sent:
-content-based parameters; untyped, referenced, or composed parameter schemas;
-referenced/composed item/property schemas; null or nested compound values;
+content-based parameters; missing/cyclic/external schema references; ambiguous
+compound compositions and composed item/property schemas; null or nested compound values;
 `allowReserved=true`; exploded delimited query arrays; ambiguous delimiter data
 inside unexploded/delimited query values; and bracket-containing deep-object
 property names. Use exploded form when query data contains its delimiter.
 Dot-only path segments (including label expansion that produces `.` or `..`)
 are rejected because URL parsers would normalize them and change the path.
 
-Cached specifications retain these declarations in cache format version 8.
+Cached specifications retain these declarations in parsed-spec cache format version 9.
+This replaces layout 8 (grouped security) and is separate from response-cache keys.
 Older binary caches must be regenerated; JSON fixtures without serialization
 metadata retain the OpenAPI location defaults.
 
@@ -576,6 +594,8 @@ and terminal HTTP failures are not transport retries. Exhaustion reports the
 last attempt rather than an earlier HTTP response. Non-idempotent SDK requests
 require a non-empty idempotency key actually present in the request headers or
 explicit force-retry; an eligibility flag alone does not authorize a retry.
+Transport error messages omit request URLs to avoid exposing URL credentials;
+SDK and CLI JSON errors retain their network classification.
 
 ## Troubleshooting
 
@@ -618,3 +638,39 @@ A cache-format mismatch after an Aperture upgrade is intentional: older transfor
 spec caches may not contain every response variant needed for safe execution. Run
 `aperture config reinit my-api` (or `--all`) to regenerate them from the stored source
 spec. Aperture rejects the old cache and does not modify it during ordinary API calls.
+
+### Execution defaults
+
+`default_timeout_secs` applies to SDK contexts carrying global configuration and
+CLI requests, including batch operations. `--timeout-secs N` overrides it and
+accepts 1 through 31,536,000 seconds, matching the configuration setting's range.
+`agent_defaults.json_errors` applies to command-usage, argument-parsing, and
+missing-API errors. `--json-errors` forces JSON; `--json-errors=false` forces text.
+Help and version output retain their normal text format.
+Query/header boolean arguments accept `--enabled true` or `--enabled false`.
+A bare `--enabled` means true; an omitted optional parameter is not sent.
+
+### Batch allocation benchmark
+
+Batch execution borrows one immutable specification and polls at most
+`--batch-concurrency` operation futures. It builds a clap tree for only the
+selected operation. Zero concurrency and values exceeding Tokio's supported
+semaphore limit are rejected by CLI parsing and SDK execution.
+The input operations and returned results still require memory proportional to
+batch length; queued operations no longer each own a full specification/tree.
+
+A local Linux debug-build dry-run benchmark on 2026-10-03 used a 1,000-operation
+specification and concurrency 1 (the ignored
+`large_spec_fixed_concurrency_memory_benchmark` test, with
+`CLI_BATCH_BENCH_OPS` selecting the batch length):
+
+| Batch operations | Peak RSS (KiB) | Wall time (s) |
+| ---: | ---: | ---: |
+| 1 | 11,336 | 0.16 |
+| 25 | 11,948 | 2.21 |
+| 100 | 12,304 | 8.38 |
+| 1,000 | 16,888 | 97.77 |
+
+These measurements include retained results, use synthetic operations, and ran
+while compilation was active. They demonstrate allocation scaling within this
+setup; timings are not release-build or cross-platform performance guarantees.

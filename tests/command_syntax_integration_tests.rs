@@ -400,7 +400,7 @@ async fn test_post_request_with_body_and_caching() {
             "content": "This is a test post",
             "created_at": "2023-01-01T00:00:00Z"
         })))
-        .expect(1)
+        .expect(2)
         .mount(&mock_server)
         .await;
 
@@ -434,7 +434,7 @@ async fn test_post_request_with_body_and_caching() {
     .await;
     assert!(result1.is_ok());
 
-    // Second identical request should use cache
+    // Second identical request must execute the mutation again
     let result2 = execute_request(
         &spec,
         &matches,
@@ -451,11 +451,11 @@ async fn test_post_request_with_body_and_caching() {
     .await;
     assert!(result2.is_ok());
 
-    // Verify cache was used
+    // Unsafe methods must not populate the cache
     let cache = ResponseCache::new(cache_config).unwrap();
     let stats = cache.get_stats(Some("comprehensive-api")).await.unwrap();
-    assert_eq!(stats.total_entries, 1);
-    assert_eq!(stats.valid_entries, 1);
+    assert_eq!(stats.total_entries, 0);
+    assert_eq!(stats.valid_entries, 0);
 }
 
 #[tokio::test]
@@ -512,7 +512,9 @@ async fn test_dry_run_with_flag_based_syntax() {
 async fn test_cache_with_custom_ttl() {
     let mock_server = MockServer::start().await;
     let (mut cache_config, _temp_dir) = create_test_cache_config();
-    cache_config.default_ttl = Duration::from_millis(800); // Short TTL for fast testing
+    // Cache entries persist TTLs in whole seconds; a subsecond TTL becomes zero
+    // and can expire before the first assertion under coverage instrumentation.
+    cache_config.default_ttl = Duration::from_secs(5);
     let spec = create_comprehensive_test_spec();
 
     // Configure mock to be called twice (initial + after expiration)
@@ -555,8 +557,8 @@ async fn test_cache_with_custom_ttl() {
     assert_eq!(stats.total_entries, 1);
     assert_eq!(stats.valid_entries, 1);
 
-    // Wait for TTL to expire (800ms TTL + buffer)
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // Wait for the persisted TTL to expire, with a one-second buffer.
+    tokio::time::sleep(Duration::from_secs(6)).await;
 
     // Second request should hit API again due to expiration
     let result2 = execute_request(

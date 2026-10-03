@@ -33,8 +33,9 @@ fn make_spec_with_pagination(base_url: &str, pagination: PaginationInfo) -> Cach
     }
 }
 
-const fn base_ctx() -> ExecutionContext {
+fn base_ctx() -> ExecutionContext {
     ExecutionContext {
+        http_clients: aperture_cli::engine::executor::HttpClientPool::default(),
         dry_run: false,
         idempotency_key: None,
         cache_config: None,
@@ -292,12 +293,24 @@ async fn test_link_header_pagination_collects_all_pages() {
         },
     );
 
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = base_ctx();
+    ctx.cache_config = Some(aperture_cli::response_cache::CacheConfig {
+        cache_dir: dir.path().to_path_buf(),
+        ..Default::default()
+    });
     let mut buf: Vec<u8> = Vec::new();
-    let count = execute_paginated(&spec, base_call(HashMap::new()), base_ctx(), &mut buf)
+    let count = execute_paginated(&spec, base_call(HashMap::new()), ctx.clone(), &mut buf)
         .await
         .expect("should succeed");
 
     assert_eq!(count, 3, "should collect 3 items across 2 pages");
+    let mut cached = Vec::new();
+    let cached_count = execute_paginated(&spec, base_call(HashMap::new()), ctx, &mut cached)
+        .await
+        .unwrap();
+    assert_eq!(cached_count, count);
+    assert_eq!(cached, buf);
     let items = parse_ndjson(&buf);
     assert_eq!(items[0]["id"], 1);
     assert_eq!(items[2]["id"], 3);
@@ -805,4 +818,144 @@ async fn malformed_link_encoding_is_not_silent_completion() {
     .unwrap_err();
     assert!(error.to_string().contains("encoding"), "{error}");
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+/// A warmed auto-follow client must never serve either strict entry point.
+#[tokio::test]
+async fn warmed_normal_client_cannot_forward_pagination_api_key_on_redirect() {
+    use aperture_cli::engine::executor::execute;
+    let server = MockServer::start().await;
+    let other = MockServer::start().await;
+    Mock::given(path("/warm"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+        .mount(&server)
+        .await;
+    for target in [
+        format!("{}/stolen", other.uri()),
+        format!("{}/next", server.uri()),
+    ] {
+        server.reset().await;
+        Mock::given(path("/warm"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(path("/items"))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", target))
+            .mount(&server)
+            .await;
+        let mut cached =
+            make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::LinkHeader));
+        let ctx = ExecutionContext {
+            auto_paginate: false,
+            proxy_override: aperture_cli::invocation::ProxyOverride::Disable,
+            ..Default::default()
+        };
+        cached.commands[0].path = "/warm".into();
+        execute(&cached, base_call(HashMap::new()), ctx.clone())
+            .await
+            .unwrap();
+        cached.commands[0].path = "/items".into();
+        let mut call = base_call(HashMap::new());
+        call.custom_headers
+            .push("X-Api-Key: synthetic-warmed-key".into());
+        assert!(
+            execute_paginated(&cached, call.clone(), ctx.clone(), &mut Vec::new())
+                .await
+                .is_err()
+        );
+        call.pagination_url =
+            Some(reqwest::Url::parse(&format!("{}/items", server.uri())).unwrap());
+        assert!(execute(&cached, call, ctx).await.is_err());
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[1].headers.contains_key("x-api-key"));
+        assert!(requests[2].headers.contains_key("x-api-key"));
+        assert!(other.received_requests().await.unwrap().is_empty());
+    }
+}
+
+/// Normal redirect responses cannot be read through the strict cache partition.
+/// Direct strict responses still cache their Link headers and subsequent pages.
+#[tokio::test]
+async fn warmed_redirect_cache_cannot_bypass_strict_pagination_boundary() {
+    use aperture_cli::engine::executor::execute;
+    use aperture_cli::invocation::ExecutionResult;
+    let server = MockServer::start().await;
+    let other = MockServer::start().await;
+    Mock::given(path("/items"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("{}/landing", other.uri())),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(path("/landing"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([1])))
+        .mount(&other)
+        .await;
+    let cached =
+        make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::LinkHeader));
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ExecutionContext {
+        auto_paginate: false,
+        proxy_override: aperture_cli::invocation::ProxyOverride::Disable,
+        cache_config: Some(aperture_cli::response_cache::CacheConfig {
+            enabled: true,
+            cache_dir: dir.path().into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert!(matches!(
+        execute(&cached, base_call(HashMap::new()), ctx.clone())
+            .await
+            .unwrap(),
+        ExecutionResult::Success { .. }
+    ));
+    assert!(matches!(
+        execute(&cached, base_call(HashMap::new()), ctx.clone())
+            .await
+            .unwrap(),
+        ExecutionResult::Cached { .. }
+    ));
+    assert!(execute_paginated(
+        &cached,
+        base_call(HashMap::new()),
+        ctx.clone(),
+        &mut Vec::new()
+    )
+    .await
+    .is_err());
+    let mut override_call = base_call(HashMap::new());
+    override_call.pagination_url =
+        Some(reqwest::Url::parse(&format!("{}/items", server.uri())).unwrap());
+    assert!(execute(&cached, override_call, ctx.clone()).await.is_err());
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
+    assert_eq!(other.received_requests().await.unwrap().len(), 1);
+    server.reset().await;
+    Mock::given(path("/items"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("link", "</page2>; rel=next")
+                .set_body_json(serde_json::json!([1])),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(path("/page2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([2])))
+        .expect(1)
+        .mount(&server)
+        .await;
+    for _ in 0..2 {
+        let mut output = Vec::new();
+        assert_eq!(
+            execute_paginated(&cached, base_call(HashMap::new()), ctx.clone(), &mut output)
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(String::from_utf8(output).unwrap(), "1\n2\n");
+    }
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }

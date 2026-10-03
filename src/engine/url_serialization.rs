@@ -97,7 +97,7 @@ fn parse_value(parameter: &CachedParameter, raw: &str) -> Result<ParameterValue,
     if parameter.serialization.unsupported_schema {
         return Err(invalid(
             parameter,
-            "untyped, referenced, or composed parameter schemas are unsupported",
+            "parameter schema does not provide a supported unambiguous serialization shape",
         ));
     }
     if parameter.serialization.content_based {
