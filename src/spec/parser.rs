@@ -1,119 +1,23 @@
-use crate::constants;
 use crate::error::Error;
 use openapiv3::OpenAPI;
-use regex::Regex;
-
-/// Preprocesses `OpenAPI` content to fix common compatibility issues
-///
-/// This function handles:
-/// - Converting numeric boolean values (0/1) to proper booleans (false/true)
-/// - Works with both YAML and JSON formats
-/// - Preserves multi-digit numbers (e.g., 10, 18, 100)
-fn preprocess_for_compatibility(content: &str) -> String {
-    // Properties that should be boolean in OpenAPI 3.0 but sometimes use 0/1
-    // Note: exclusiveMinimum/Maximum are boolean in 3.0 but numeric in 3.1
-    const BOOLEAN_PROPERTIES: &[&str] = &[
-        constants::FIELD_DEPRECATED,
-        constants::FIELD_REQUIRED,
-        constants::FIELD_READ_ONLY,
-        constants::FIELD_WRITE_ONLY,
-        constants::FIELD_NULLABLE,
-        constants::FIELD_UNIQUE_ITEMS,
-        constants::FIELD_ALLOW_EMPTY_VALUE,
-        constants::FIELD_EXPLODE,
-        constants::FIELD_ALLOW_RESERVED,
-        constants::FIELD_EXCLUSIVE_MINIMUM,
-        constants::FIELD_EXCLUSIVE_MAXIMUM,
-    ];
-
-    // Detect format to optimize processing
-    let is_json = content.trim_start().starts_with('{');
-    let mut result = content.to_string();
-
-    // Apply appropriate replacements based on format
-    if is_json {
-        return fix_json_boolean_values(result, BOOLEAN_PROPERTIES);
-    }
-
-    // Process as YAML
-    result = fix_yaml_boolean_values(result, BOOLEAN_PROPERTIES);
-
-    // JSON might be embedded in YAML comments or examples, so also check JSON patterns
-    if result.contains('"') {
-        result = fix_json_boolean_values(result, BOOLEAN_PROPERTIES);
-    }
-
-    result
-}
-
-/// Fix boolean values in YAML format
-fn fix_yaml_boolean_values(mut content: String, properties: &[&str]) -> String {
-    for property in properties {
-        let pattern_0 = Regex::new(&format!(r"\b{property}: 0\b"))
-            .expect("Regex pattern is hardcoded and valid");
-        let pattern_1 = Regex::new(&format!(r"\b{property}: 1\b"))
-            .expect("Regex pattern is hardcoded and valid");
-
-        content = pattern_0
-            .replace_all(&content, &format!("{property}: false"))
-            .to_string();
-        content = pattern_1
-            .replace_all(&content, &format!("{property}: true"))
-            .to_string();
-    }
-    content
-}
-
-/// Fix boolean values in JSON format
-fn fix_json_boolean_values(mut content: String, properties: &[&str]) -> String {
-    for property in properties {
-        let pattern_0 =
-            Regex::new(&format!(r#""{property}"\s*:\s*0\b"#)).expect("regex pattern is valid");
-        let pattern_1 =
-            Regex::new(&format!(r#""{property}"\s*:\s*1\b"#)).expect("regex pattern is valid");
-
-        content = pattern_0
-            .replace_all(&content, &format!(r#""{property}":false"#))
-            .to_string();
-        content = pattern_1
-            .replace_all(&content, &format!(r#""{property}":true"#))
-            .to_string();
-    }
-    content
-}
-
-/// Fixes common indentation issues in components section for malformed specs
-/// This is only applied to `OpenAPI` 3.1 specs where we've seen such issues
-fn fix_component_indentation(content: &str) -> String {
-    let mut result = content.to_string();
-
-    // Some 3.1 specs (like OpenProject) have component subsections at 2 spaces instead of 4
-    // Only fix these specific sections when they appear at the wrong indentation level
-    let component_sections = [
-        constants::COMPONENT_SCHEMAS,
-        constants::COMPONENT_RESPONSES,
-        constants::COMPONENT_EXAMPLES,
-        constants::COMPONENT_PARAMETERS,
-        constants::COMPONENT_REQUEST_BODIES,
-        constants::COMPONENT_HEADERS,
-        constants::COMPONENT_SECURITY_SCHEMES,
-        constants::COMPONENT_LINKS,
-        constants::COMPONENT_CALLBACKS,
-    ];
-
-    for section in &component_sections {
-        // Only replace if it's at 2-space indentation (wrong for components subsections)
-        result = result.replace(&format!("\n  {section}:"), &format!("\n    {section}:"));
-    }
-
-    result
+/// Parse once into a structural value and normalize only recognized boolean fields.
+/// Payloads under examples, defaults and extensions are never traversed.
+fn preprocess_for_compatibility(content: &str) -> Result<serde_json::Value, Error> {
+    let mut value: serde_json::Value = if content.trim_start().starts_with('{') {
+        serde_json::from_str(content)
+            .map_err(|error| Error::serialization_error(error.to_string()))?
+    } else {
+        serde_yaml::from_str(content)?
+    };
+    super::normalization::normalize_document(&mut value);
+    Ok(value)
 }
 
 /// Parses `OpenAPI` content, supporting both 3.0.x (directly) and 3.1.x (via oas3 fallback).
 ///
-/// This function first attempts to parse the content as `OpenAPI` 3.0.x using the `openapiv3` crate.
-/// If that fails, it falls back to parsing as `OpenAPI` 3.1.x using the `oas3` crate, then attempts
-/// to convert the result to `OpenAPI` 3.0.x format.
+/// Content is parsed structurally, then recognized numeric boolean fields are normalized.
+/// `OpenAPI` 3.0 documents deserialize directly; 3.1 documents use the optional `oas3`
+/// compatibility conversion before deserializing into the 3.0 model.
 ///
 /// # Arguments
 ///
@@ -139,19 +43,16 @@ fn fix_component_indentation(content: &str) -> String {
 /// - JSON Schema 2020-12 features may not be preserved
 pub fn parse_openapi(content: &str) -> Result<OpenAPI, Error> {
     // Always preprocess for compatibility issues.
-    let mut preprocessed = preprocess_for_compatibility(content);
+    let preprocessed = preprocess_for_compatibility(content)?;
 
-    let is_openapi_31 = looks_like_openapi_31(content);
-    if is_openapi_31 {
-        // For OpenAPI 3.1 specs, also fix potential indentation issues
-        // (some 3.1 specs like OpenProject have malformed indentation).
-        preprocessed = fix_component_indentation(&preprocessed);
-    }
-
+    let is_openapi_31 = preprocessed
+        .get("openapi")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|version| version.starts_with("3.1"));
     #[cfg(feature = "openapi31")]
     {
         let parsed_openapi_31 = if is_openapi_31 {
-            parse_with_oas3_direct_with_original(&preprocessed, content).ok()
+            parse_with_oas3_direct_with_original(&preprocessed.to_string(), content).ok()
         } else {
             None
         };
@@ -163,61 +64,21 @@ pub fn parse_openapi(content: &str) -> Result<OpenAPI, Error> {
 
     #[cfg(not(feature = "openapi31"))]
     if is_openapi_31 {
-        return parse_with_oas3_direct_with_original(&preprocessed, content);
+        return parse_with_oas3_direct_with_original(&preprocessed.to_string(), content);
     }
 
-    // Try parsing as OpenAPI 3.0.x (most common case).
-    // Detect format based on content structure.
-    let trimmed = content.trim();
-    if trimmed.starts_with('{') {
-        parse_json_with_fallback(&preprocessed)
-    } else {
-        parse_yaml_with_fallback(&preprocessed)
-    }
+    serde_json::from_value(preprocessed).map_err(|error| openapi_decode_error(&error, content))
 }
 
-fn looks_like_openapi_31(content: &str) -> bool {
-    content.contains("openapi: 3.1")
-        || content.contains("openapi: \"3.1")
-        || content.contains("openapi: '3.1")
-        || content.contains(r#""openapi":"3.1"#)
-        || content.contains(r#""openapi": "3.1"#)
-}
-
-/// Parse JSON content with YAML fallback
-fn parse_json_with_fallback(content: &str) -> Result<OpenAPI, Error> {
-    // Try JSON first since content looks like JSON
-    match serde_json::from_str::<OpenAPI>(content) {
-        Ok(spec) => Ok(spec),
-        Err(json_err) => {
-            // Try YAML as fallback
-            if let Ok(spec) = serde_yaml::from_str::<OpenAPI>(content) {
-                return Ok(spec);
-            }
-
-            // Return JSON error since content looked like JSON
-            Err(Error::serialization_error(format!(
-                "Failed to parse OpenAPI spec as JSON: {json_err}"
-            )))
-        }
+/// Preserve the public YAML error category without another pass on successful parses.
+fn openapi_decode_error(error: &serde_json::Error, original: &str) -> Error {
+    if original.trim_start().starts_with('{') {
+        return Error::serialization_error(format!("Failed to parse OpenAPI spec: {error}"));
     }
-}
-
-/// Parse YAML content with JSON fallback
-fn parse_yaml_with_fallback(content: &str) -> Result<OpenAPI, Error> {
-    // Try YAML first since content looks like YAML
-    match serde_yaml::from_str::<OpenAPI>(content) {
-        Ok(spec) => Ok(spec),
-        Err(yaml_err) => {
-            // Try JSON as fallback
-            if let Ok(spec) = serde_json::from_str::<OpenAPI>(content) {
-                return Ok(spec);
-            }
-
-            // Return YAML error since content looked like YAML
-            Err(Error::Yaml(yaml_err))
-        }
+    if let Err(yaml_error) = serde_yaml::from_str::<OpenAPI>(original) {
+        return Error::Yaml(yaml_error);
     }
+    Error::serialization_error(format!("Failed to parse OpenAPI spec: {error}"))
 }
 
 /// Direct parsing with oas3 for known 3.1 specs with original content for security scheme extraction
@@ -341,6 +202,7 @@ fn parse_with_oas3_direct_with_original(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write;
 
     #[test]
     fn test_parse_openapi_30() {
@@ -435,76 +297,106 @@ paths: {}
     }
 
     #[test]
-    fn test_preprocess_boolean_values() {
-        // Test that 0/1 are converted to false/true
-        let input = r"
-deprecated: 0
-required: 1
-readOnly: 0
-writeOnly: 1
-";
-        let result = preprocess_for_compatibility(input);
-        assert!(result.contains("deprecated: false"));
-        assert!(result.contains("required: true"));
-        assert!(result.contains("readOnly: false"));
-        assert!(result.contains("writeOnly: true"));
+    fn structural_normalization_preserves_payloads_json_and_yaml() {
+        let payload = serde_json::json!({"marker":"audit-example", "deprecated":0, "required":1,
+            "nested":{"nullable":1}, "text":"required: 1"});
+        let document = serde_json::json!({
+            "openapi":"3.0.0", "info":{"title":"Test", "version":"1"},
+            "paths": {"/test":{"get":{"deprecated":1,"parameters":[{
+                "name":"q","in":"query","required":0,"schema":{"type":"integer", "nullable":1,
+                    "default":payload, "example":payload,"x-arbitrary":payload}
+            }], "responses":{"200":{"description":"ok", "content":{"application/json":{
+                "example":payload,"examples":{"sample":{"value":payload}},
+                "schema":{"type":"object","properties":{"deprecated":{"type":"integer","readOnly":1}}}
+            }}}}}}}, "x-payload":payload
+        });
+        for input in [
+            serde_json::to_string(&document).unwrap(),
+            serde_yaml::to_string(&document).unwrap(),
+        ] {
+            let normalized: serde_json::Value = preprocess_for_compatibility(&input).unwrap();
+            assert_eq!(normalized["x-payload"], payload);
+            let operation = &normalized["paths"]["/test"]["get"];
+            assert_eq!(operation["deprecated"], true);
+            assert_eq!(operation["parameters"][0]["required"], false);
+            let schema = &operation["parameters"][0]["schema"];
+            for key in ["example", "default", "x-arbitrary"] {
+                assert_eq!(schema[key], payload);
+            }
+            assert_eq!(schema["nullable"], true);
+            let media = &operation["responses"]["200"]["content"]["application/json"];
+            assert_eq!(media["example"], payload);
+            assert_eq!(media["examples"]["sample"]["value"], payload);
+            let parsed = parse_openapi(&input).unwrap();
+            let serialized = serde_json::to_value(parsed).unwrap();
+            assert_eq!(
+                serialized["paths"]["/test"]["get"]["responses"]["200"]["content"]
+                    ["application/json"]["example"],
+                payload
+            );
+        }
     }
 
     #[test]
-    fn test_preprocess_exclusive_min_max() {
-        // Test that exclusiveMinimum/Maximum 0/1 are converted but other numbers are preserved
-        let input = r"
-exclusiveMinimum: 0
-exclusiveMaximum: 1
-exclusiveMinimum: 10
-exclusiveMaximum: 18
-exclusiveMinimum: 100
-";
-        let result = preprocess_for_compatibility(input);
-        assert!(result.contains("exclusiveMinimum: false"));
-        assert!(result.contains("exclusiveMaximum: true"));
-        assert!(result.contains("exclusiveMinimum: 10"));
-        assert!(result.contains("exclusiveMaximum: 18"));
-        assert!(result.contains("exclusiveMinimum: 100"));
+    fn exclusive_bounds_are_version_specific() {
+        for (version, expected) in [
+            ("3.0.3", serde_json::json!(true)),
+            ("3.1.0", serde_json::json!(1)),
+        ] {
+            let input = serde_json::json!({"openapi":version,"components":{"schemas":{"Bound":{
+                "exclusiveMinimum":1,"exclusiveMaximum":18,"required":["name"]
+            }}}});
+            let value: serde_json::Value =
+                preprocess_for_compatibility(&input.to_string()).unwrap();
+            let schema = &value["components"]["schemas"]["Bound"];
+            assert_eq!(schema["exclusiveMinimum"], expected);
+            assert_eq!(schema["exclusiveMaximum"], 18);
+            assert_eq!(schema["required"], serde_json::json!(["name"]));
+        }
     }
-
+    /// Reproducible local overhead comparison against typed deserialization only.
+    /// Set `APERTURE_PARSE_MEASUREMENT` to the report path and run with `--ignored`.
     #[test]
-    fn test_preprocess_json_format() {
-        // Test that JSON format boolean values are converted
-        let input = r#"{"deprecated":0,"required":1,"exclusiveMinimum":0,"exclusiveMaximum":1,"otherValue":10}"#;
-        let result = preprocess_for_compatibility(input);
-        assert!(result.contains(r#""deprecated":false"#));
-        assert!(result.contains(r#""required":true"#));
-        assert!(result.contains(r#""exclusiveMinimum":false"#));
-        assert!(result.contains(r#""exclusiveMaximum":true"#));
-        assert!(result.contains(r#""otherValue":10"#)); // Should not be changed
-    }
-
-    #[test]
-    fn test_preprocess_preserves_multi_digit_numbers() {
-        // Test that numbers like 10, 18, 100 are not corrupted
-        let input = r"
-paths:
-  /test:
-    get:
-      parameters:
-        - name: test
-          in: query
-          schema:
-            type: integer
-            minimum: 10
-            maximum: 100
-            exclusiveMinimum: 18
-";
-        let result = preprocess_for_compatibility(input);
-        // These should remain unchanged
-        assert!(result.contains("minimum: 10"));
-        assert!(result.contains("maximum: 100"));
-        assert!(result.contains("exclusiveMinimum: 18"));
-        // Should not contain corrupted values
-        assert!(!result.contains("true0"));
-        assert!(!result.contains("true8"));
-        assert!(!result.contains("true00"));
-        assert!(!result.contains("false0"));
+    #[ignore = "local parsing overhead measurement"]
+    fn measure_structural_parsing_overhead() {
+        let mut paths = serde_json::Map::new();
+        for index in 0..500 {
+            paths.insert(
+                format!("/items/{index}"),
+                serde_json::json!({"get":{
+                    "responses":{"200":{"description":"ok","content":{"application/json":{
+                        "schema":{"type":"object","properties":{"id":{"type":"integer"}}},
+                        "example":{"deprecated":0,"required":1,"nested":{"nullable":1}}
+                    }}}}
+                }}),
+            );
+        }
+        let document = serde_json::json!({"openapi":"3.0.3","info":{"title":"Benchmark","version":"1"},"paths":paths});
+        let json = document.to_string();
+        let yaml = serde_yaml::to_string(&document).unwrap();
+        let mut report = String::new();
+        for (format, input) in [("JSON", json), ("YAML", yaml)] {
+            let start = std::time::Instant::now();
+            for _ in 0..20 {
+                let spec: OpenAPI = if format == "JSON" {
+                    serde_json::from_str(&input).unwrap()
+                } else {
+                    serde_yaml::from_str(&input).unwrap()
+                };
+                std::hint::black_box(spec);
+            }
+            let direct = start.elapsed();
+            let start = std::time::Instant::now();
+            for _ in 0..20 {
+                std::hint::black_box(parse_openapi(&input).unwrap());
+            }
+            let normalized = start.elapsed();
+            writeln!(report, "{format}: {} bytes, 500 operations, 20 parses; direct={direct:?}, structural={normalized:?}", input.len()).unwrap();
+        }
+        std::fs::write(
+            std::env::var("APERTURE_PARSE_MEASUREMENT").expect("report path required"),
+            report,
+        )
+        .unwrap();
     }
 }

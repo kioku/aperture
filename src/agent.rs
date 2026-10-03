@@ -268,7 +268,7 @@ pub struct CommandInfo {
     pub request_body: Option<RequestBodyInfo>,
     /// Security requirements for this operation
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub security_requirements: Vec<String>,
+    pub security_requirements: Vec<Vec<String>>,
     /// Tags associated with this operation (kebab-case)
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
@@ -975,13 +975,15 @@ fn extract_request_body_info(operation: &Operation) -> Option<RequestBodyInfo> {
 fn extract_security_requirements(
     operation: &Operation,
     global_security: Option<&[openapiv3::SecurityRequirement]>,
-) -> Vec<String> {
+) -> Vec<Vec<String>> {
     operation
         .security
         .as_deref()
         .or(global_security)
         .map_or_else(Vec::new, |reqs| {
-            reqs.iter().flat_map(|req| req.keys().cloned()).collect()
+            reqs.iter()
+                .map(|req| req.keys().cloned().collect())
+                .collect()
         })
 }
 
@@ -1445,7 +1447,7 @@ mod tests {
                 }],
                 request_body: None,
                 responses: vec![],
-                security_requirements: vec!["bearerAuth".to_string()],
+                security_requirements: vec![vec!["bearerAuth".to_string()]],
                 tags: vec!["users".to_string()],
                 deprecated: false,
                 external_docs_url: None,

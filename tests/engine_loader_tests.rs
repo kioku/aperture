@@ -158,7 +158,7 @@ fn prior_v6_collapsed_response_cache_is_rejected() {
 
     let error = load_cached_spec(cache_dir, "prior-v6").unwrap_err();
     assert!(error.to_string().contains("found v6"));
-    assert!(error.to_string().contains("expected v7"));
+    assert!(error.to_string().contains("expected v8"));
     let Error::Internal {
         context: Some(context),
         ..

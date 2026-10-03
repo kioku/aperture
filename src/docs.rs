@@ -464,9 +464,14 @@ impl DocumentationGenerator {
     ) {
         if !command.security_requirements.is_empty() {
             writeln!(help, "## {}\n", style.heading("Authentication")).ok();
-            help.push_str("This operation requires authentication. Available schemes:\n\n");
-            for scheme_name in &command.security_requirements {
-                writeln!(help, "- {scheme_name}").ok();
+            help.push_str("This operation requires authentication. Alternatives (schemes within each alternative are required together):\n\n");
+            for group in &command.security_requirements {
+                let names = if group.is_empty() {
+                    "anonymous".to_string()
+                } else {
+                    group.join(" + ")
+                };
+                writeln!(help, "- {names}").ok();
             }
             help.push('\n');
         }

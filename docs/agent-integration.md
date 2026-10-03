@@ -49,7 +49,7 @@ aperture api my-api --describe-json
           }
         ],
         "request_body": null,
-        "security_requirements": ["bearerAuth"],
+        "security_requirements": [["bearerAuth"]],
         "tags": ["users"],
         "response_schema": {
           "content_type": "application/json",
@@ -689,3 +689,25 @@ Aperture is optimized for agent invocation patterns:
 | Spec loading | O(1) | Pre-parsed binary cache |
 
 For high-frequency usage, the binary cache strategy ensures consistent latency regardless of spec complexity—the OpenAPI spec is parsed once during `config add`, not on every invocation.
+
+### Security requirement groups and SDK compatibility
+
+`security_requirements` is an array of alternatives. Each inner array contains
+scheme names required together (AND); outer entries are alternatives (OR). For
+example, `[["tokenA"], ["tokenB", "apiKey"]]` accepts tokenA or both tokenB and
+apiKey. An empty inner array permits anonymous access. An empty outer array means
+no authentication requirement. Operation-level security replaces global security,
+including an explicitly empty array. OAuth scopes are not enforced.
+
+SDK consumers must update the field type from `string[]` to `string[][]`. Parsed
+spec cache format 8 invalidates earlier flattened representations; rebuild stale
+caches from their original specs. Execution selects the first alternative whose
+credentials are configured and available, and applies only that group's headers.
+Malformed configuration or header values still fail rather than silently choosing
+another alternative.
+
+Numeric 0/1 compatibility conversion follows recognized OpenAPI boolean fields.
+Examples, defaults, enum values, and extension payloads remain data, even when they
+contain keys such as `required` or `deprecated`. OpenAPI 3.1 numeric exclusive bounds
+remain numeric. Malformed YAML indentation is no longer repaired with text rewrites;
+fix the source specification's structure instead.

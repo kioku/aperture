@@ -135,7 +135,7 @@ struct OperationDetailsJson {
     parameters: Vec<ParameterJson>,
     request_body: Option<RequestBodyJson>,
     responses: Vec<ResponseJson>,
-    security_requirements: Vec<String>,
+    security_requirements: Vec<Vec<String>>,
     examples: Vec<CommandExampleJson>,
 }
 

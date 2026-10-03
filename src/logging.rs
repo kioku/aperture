@@ -227,18 +227,22 @@ pub fn should_redact_operation_header(
     operation: &crate::cache::models::CachedCommand,
 ) -> bool {
     should_redact_header(header_name)
-        || operation.security_requirements.iter().any(|scheme_name| {
-            spec.security_schemes
-                .get(scheme_name)
-                .is_some_and(|scheme| {
-                    scheme.scheme_type == crate::constants::AUTH_SCHEME_APIKEY
-                        && scheme.location.as_deref() == Some(crate::constants::LOCATION_HEADER)
-                        && scheme
-                            .parameter_name
-                            .as_deref()
-                            .is_some_and(|name| name.eq_ignore_ascii_case(header_name))
-                })
-        })
+        || operation
+            .security_requirements
+            .iter()
+            .flatten()
+            .any(|scheme_name| {
+                spec.security_schemes
+                    .get(scheme_name)
+                    .is_some_and(|scheme| {
+                        scheme.scheme_type == crate::constants::AUTH_SCHEME_APIKEY
+                            && scheme.location.as_deref() == Some(crate::constants::LOCATION_HEADER)
+                            && scheme
+                                .parameter_name
+                                .as_deref()
+                                .is_some_and(|name| name.eq_ignore_ascii_case(header_name))
+                    })
+            })
 }
 
 /// Checks if a query parameter name should be redacted
