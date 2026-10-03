@@ -899,8 +899,7 @@ fn request_requires_cache_bypass(headers: &HeaderMap, url: &str) -> bool {
         return true;
     }
     reqwest::Url::parse(url)
-        .ok()
-        .is_some_and(|parsed| !parsed.username().is_empty() || parsed.password().is_some())
+        .is_ok_and(|parsed| !parsed.username().is_empty() || parsed.password().is_some())
 }
 
 /// Prepare cache context if caching is enabled
