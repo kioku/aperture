@@ -554,3 +554,36 @@ A cache-format mismatch after an Aperture upgrade is intentional: older transfor
 spec caches may not contain every response variant needed for safe execution. Run
 `aperture config reinit my-api` (or `--all`) to regenerate them from the stored source
 spec. Aperture rejects the old cache and does not modify it during ordinary API calls.
+
+### Execution defaults
+
+`default_timeout_secs` applies to SDK contexts carrying global configuration and
+CLI requests, including batch operations. `--timeout-secs N` overrides it.
+`agent_defaults.json_errors` applies before CLI command handling, including
+missing-API errors. `--json-errors` forces JSON; `--json-errors=false` forces text.
+Query/header boolean arguments accept `--enabled true` or `--enabled false`.
+A bare `--enabled` means true; an omitted optional parameter is not sent.
+
+### Batch allocation benchmark
+
+Batch execution borrows one immutable specification and polls at most
+`--batch-concurrency` operation futures. It builds a clap tree for only the
+selected operation. Zero concurrency is rejected by CLI parsing and SDK execution.
+The input operations and returned results still require memory proportional to
+batch length; queued operations no longer each own a full specification/tree.
+
+A local Linux debug-build dry-run benchmark on 2026-10-03 used a 1,000-operation
+specification and concurrency 1 (the ignored
+`large_spec_fixed_concurrency_memory_benchmark` test, with
+`CLI_BATCH_BENCH_OPS` selecting the batch length):
+
+| Batch operations | Peak RSS (KiB) | Wall time (s) |
+| ---: | ---: | ---: |
+| 1 | 11,336 | 0.16 |
+| 25 | 11,948 | 2.21 |
+| 100 | 12,304 | 8.38 |
+| 1,000 | 16,888 | 97.77 |
+
+These measurements include retained results, use synthetic operations, and ran
+while compilation was active. They demonstrate allocation scaling within this
+setup; timings are not release-build or cross-platform performance guarantees.

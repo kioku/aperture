@@ -110,6 +110,7 @@ dependencies = [
  "dirs",
  "fastrand",
  "fs2",
+ "futures-util",
  "fuzzy-matcher",
  "governor",
  "httpdate",

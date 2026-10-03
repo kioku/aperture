@@ -308,3 +308,33 @@ fn test_settings_persistence() {
         .unwrap();
     assert_eq!(json_errors["value"], "true");
 }
+
+#[test]
+fn configured_json_errors_and_explicit_override() {
+    let temp_dir = TempDir::new().unwrap();
+    std::fs::write(
+        temp_dir.path().join("config.toml"),
+        "[agent_defaults]\njson_errors = true\n",
+    )
+    .unwrap();
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["api", "missing-api", "users", "get-user"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    serde_json::from_slice::<serde_json::Value>(&output.stderr).unwrap();
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args([
+            "--json-errors=false",
+            "api",
+            "missing-api",
+            "users",
+            "get-user",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(serde_json::from_slice::<serde_json::Value>(&output.stderr).is_err());
+}

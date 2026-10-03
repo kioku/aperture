@@ -94,6 +94,43 @@ pub fn generate_command_tree_for_api_with_flags(
     api_name: &str,
     use_positional_args: bool,
 ) -> Command {
+    generate_tree_for_commands(spec, api_name, use_positional_args, spec.commands.iter())
+}
+
+/// Build only the selected operation's clap tree for batch parsing.
+/// This avoids allocating every operation in a large immutable specification.
+pub(crate) fn generate_batch_command_tree(
+    spec: &CachedSpec,
+    args: &[String],
+) -> Result<Command, crate::error::Error> {
+    let selected = spec
+        .commands
+        .iter()
+        .find(|command| {
+            args.windows(2).any(|pair| {
+                to_kebab_case(&effective_group_name(command)) == pair[0]
+                    && (effective_subcommand_name(command) == pair[1]
+                        || command
+                            .aliases
+                            .iter()
+                            .any(|alias| to_kebab_case(alias) == pair[1]))
+            })
+        })
+        .ok_or_else(|| crate::error::Error::validation_error("Batch operation was not found"))?;
+    Ok(generate_tree_for_commands(
+        spec,
+        "<api>",
+        false,
+        std::iter::once(selected),
+    ))
+}
+
+fn generate_tree_for_commands<'a>(
+    spec: &CachedSpec,
+    api_name: &str,
+    use_positional_args: bool,
+    commands: impl Iterator<Item = &'a CachedCommand>,
+) -> Command {
     let mut root_command = Command::new(constants::CLI_ROOT_COMMAND)
         .version(to_static_str(spec.version.clone()))
         .about(format!("CLI for {} API", spec.name))
@@ -132,7 +169,7 @@ pub fn generate_command_tree_for_api_with_flags(
     // Group commands by their effective group name (display_group override or tag)
     let mut command_groups: HashMap<String, Vec<&CachedCommand>> = HashMap::new();
 
-    for command in &spec.commands {
+    for command in commands {
         let group_name = effective_group_name(command);
         command_groups.entry(group_name).or_default().push(command);
     }
@@ -271,19 +308,9 @@ fn effective_subcommand_name(command: &CachedCommand) -> String {
 ///
 /// # Boolean Parameter Handling
 ///
-/// Boolean parameters use `ArgAction::SetTrue`, treating them as flags:
-///
-/// **Path Parameters:**
-/// - Always optional regardless of `OpenAPI` `required` field
-/// - Flag presence = true (substitutes "true" in path), absence = false (substitutes "false")
-/// - Example: `/items/{active}` with `--active` → `/items/true`, without → `/items/false`
-///
-/// **Query/Header Parameters:**
-/// - **Optional booleans** (`required: false`): Flag presence = true, absence = false
-/// - **Required booleans** (`required: true`): Flag MUST be provided, presence = true
-/// - Example: `--verbose` (optional) omitted means `verbose=false`
-///
-/// This differs from non-boolean parameters which require explicit values (e.g., `--id 123`).
+/// Query/header booleans accept explicit true/false values. A bare flag remains
+/// shorthand for true; omission is distinct from false. Path flags retain their
+/// existing default-false behavior.
 fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool) -> Arg {
     let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
 
@@ -339,7 +366,10 @@ fn create_scoped_parameter_arg(param: &CachedParameter, is_boolean: bool) -> Arg
             .long(long_name)
             .help(help)
             .required(param.required)
-            .action(ArgAction::SetTrue)
+            .action(ArgAction::Set)
+            .value_parser(clap::value_parser!(bool))
+            .num_args(0..=1)
+            .default_missing_value("true")
     } else {
         let value_name = to_static_str(param.name.to_uppercase());
         Arg::new(param_name_static)
@@ -360,7 +390,10 @@ fn create_generic_parameter_arg(param: &CachedParameter, is_boolean: bool) -> Ar
             .long(long_name)
             .help(format!("{} parameter", param.name))
             .required(param.required)
-            .action(ArgAction::SetTrue)
+            .action(ArgAction::Set)
+            .value_parser(clap::value_parser!(bool))
+            .num_args(0..=1)
+            .default_missing_value("true")
     } else {
         let value_name = to_static_str(param.name.to_uppercase());
         Arg::new(param_name_static)

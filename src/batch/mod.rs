@@ -9,6 +9,7 @@ use crate::engine::executor::RetryContext;
 use crate::engine::generator;
 use crate::error::Error;
 use crate::invocation::ProxyOverride;
+use futures_util::{stream, StreamExt};
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroU32;
@@ -257,6 +258,11 @@ impl BatchProcessor {
         output_format: &crate::cli::OutputFormat,
         jq_filter: Option<&str>,
     ) -> Result<BatchResult, Error> {
+        if self.config.max_concurrency == 0 {
+            return Err(Error::validation_error(
+                "Batch concurrency must be greater than zero",
+            ));
+        }
         if graph::has_dependencies(&batch_file.operations) {
             self.execute_dependent_batch(
                 spec,
@@ -567,17 +573,38 @@ impl BatchProcessor {
         let total_operations = batch_file.operations.len();
         Self::log_batch_start(self.config.show_progress, total_operations);
 
-        let handles = self.spawn_batch_operation_handles(
-            spec,
-            batch_file.operations,
-            global_config,
-            base_url,
-            dry_run,
-            output_format,
-            jq_filter,
-            &proxy_override,
-        );
-        let results = Self::collect_batch_operation_results(handles).await?;
+        // Futures borrow one immutable spec. Poll at most N operations and refill
+        // as any operation finishes, then restore the input order for callers.
+        // Queued operations own no cloned spec, clap tree, or spawned task.
+        let proxy_override = &proxy_override;
+        let mut indexed_results = stream::iter(batch_file.operations.into_iter().enumerate())
+            .map(|(index, operation)| async move {
+                let result = Self::execute_batch_operation_task(
+                    spec,
+                    operation,
+                    global_config,
+                    base_url,
+                    dry_run,
+                    output_format,
+                    jq_filter,
+                    &self.semaphore,
+                    self.rate_limiter.as_ref(),
+                    self.config.show_progress,
+                    self.config.suppress_output,
+                    index,
+                    proxy_override.clone(),
+                )
+                .await;
+                (index, result)
+            })
+            .buffer_unordered(self.config.max_concurrency)
+            .collect::<Vec<_>>()
+            .await;
+        indexed_results.sort_by_key(|(index, _)| *index);
+        let results: Vec<_> = indexed_results
+            .into_iter()
+            .map(|(_, result)| result)
+            .collect();
 
         let total_duration = start_time.elapsed();
         let success_count = results.iter().filter(|r| r.success).count();
@@ -623,63 +650,16 @@ impl BatchProcessor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn spawn_batch_operation_handles(
-        &self,
+    async fn execute_batch_operation_task(
         spec: &CachedSpec,
-        operations: Vec<BatchOperation>,
+        operation: BatchOperation,
         global_config: Option<&GlobalConfig>,
         base_url: Option<&str>,
         dry_run: bool,
         output_format: &crate::cli::OutputFormat,
         jq_filter: Option<&str>,
-        proxy_override: &ProxyOverride,
-    ) -> Vec<tokio::task::JoinHandle<BatchOperationResult>> {
-        let mut handles = Vec::new();
-        for (index, operation) in operations.into_iter().enumerate() {
-            let spec = spec.clone();
-            let global_config = global_config.cloned();
-            let base_url = base_url.map(String::from);
-            let output_format = output_format.clone();
-            let jq_filter = jq_filter.map(String::from);
-            let semaphore = Arc::clone(&self.semaphore);
-            let rate_limiter = self.rate_limiter.clone();
-            let show_progress = self.config.show_progress;
-            let suppress_output = self.config.suppress_output;
-            let proxy_override = proxy_override.clone();
-
-            handles.push(tokio::spawn(async move {
-                Self::execute_batch_operation_task(
-                    spec,
-                    operation,
-                    global_config,
-                    base_url,
-                    dry_run,
-                    output_format,
-                    jq_filter,
-                    semaphore,
-                    rate_limiter,
-                    show_progress,
-                    suppress_output,
-                    index,
-                    proxy_override,
-                )
-                .await
-            }));
-        }
-        handles
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn execute_batch_operation_task(
-        spec: CachedSpec,
-        operation: BatchOperation,
-        global_config: Option<GlobalConfig>,
-        base_url: Option<String>,
-        dry_run: bool,
-        output_format: crate::cli::OutputFormat,
-        jq_filter: Option<String>,
-        semaphore: Arc<Semaphore>,
-        rate_limiter: Option<Arc<DefaultDirectRateLimiter>>,
+        semaphore: &Semaphore,
+        rate_limiter: Option<&Arc<DefaultDirectRateLimiter>>,
         show_progress: bool,
         suppress_output: bool,
         index: usize,
@@ -696,13 +676,13 @@ impl BatchProcessor {
 
         let operation_start = std::time::Instant::now();
         let result = Self::execute_single_operation(
-            &spec,
+            spec,
             &operation,
-            global_config.as_ref(),
-            base_url.as_deref(),
+            global_config,
+            base_url,
             dry_run,
-            &output_format,
-            jq_filter.as_deref(),
+            output_format,
+            jq_filter,
             suppress_output,
             proxy_override,
         )
@@ -733,19 +713,6 @@ impl BatchProcessor {
             response,
             duration,
         }
-    }
-
-    async fn collect_batch_operation_results(
-        handles: Vec<tokio::task::JoinHandle<BatchOperationResult>>,
-    ) -> Result<Vec<BatchOperationResult>, Error> {
-        let mut results = Vec::with_capacity(handles.len());
-        for handle in handles {
-            let result = handle
-                .await
-                .map_err(|e| Error::invalid_config(format!("Task failed: {e}")))?;
-            results.push(result);
-        }
-        Ok(results)
     }
 
     fn validate_batch_body_file_args(operation: &BatchOperation) -> Result<(), Error> {
@@ -833,7 +800,7 @@ impl BatchProcessor {
         operation: &BatchOperation,
     ) -> Result<(crate::invocation::OperationCall, Vec<String>), Error> {
         Self::validate_batch_body_file_args(operation)?;
-        let command = generator::generate_command_tree_with_flags(spec, false);
+        let command = generator::generate_batch_command_tree(spec, &operation.args)?;
         let extra_body_file = operation
             .body_file
             .as_deref()

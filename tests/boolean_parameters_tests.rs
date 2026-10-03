@@ -154,28 +154,30 @@ fn test_boolean_parameters_use_settrue_action() {
 
     // Boolean flags should be present when specified
     assert!(
-        operation_matches.get_flag("enabled"),
+        *operation_matches
+            .get_one::<bool>("enabled")
+            .unwrap_or(&false),
         "Boolean flag should be true when present"
     );
     assert!(
-        !operation_matches.get_flag("verbose"),
+        !*operation_matches
+            .get_one::<bool>("verbose")
+            .unwrap_or(&false),
         "Boolean flag should be false when not present"
     );
 }
 
 #[test]
-fn test_boolean_parameters_reject_value() {
+fn test_boolean_parameters_accept_value() {
     let spec = create_test_spec_with_boolean_params();
     let cmd = generate_command_tree_with_flags(&spec, false);
 
-    // Try to provide a value to a boolean flag (should fail)
+    // Explicit true is accepted alongside the bare-flag shorthand.
     let result =
         cmd.try_get_matches_from(vec!["api", "tests", "test-operation", "--enabled", "true"]);
 
-    // This should either fail or treat "true" as the next positional argument
-    // In clap with SetTrue action, this would typically fail
     assert!(
-        result.is_err() || result.is_ok(),
+        result.is_ok(),
         "Boolean flags should handle values appropriately"
     );
 }
@@ -209,11 +211,15 @@ fn test_examples_parameter_no_conflict_with_show_examples_flag() {
 
     // Both flags should be present
     assert!(
-        operation_matches.get_flag("examples"),
+        *operation_matches
+            .get_one::<bool>("examples")
+            .unwrap_or(&false),
         "'examples' API parameter should be true"
     );
     assert!(
-        operation_matches.get_flag("show-examples"),
+        *operation_matches
+            .get_one::<bool>("show-examples")
+            .unwrap_or(&false),
         "'show-examples' builtin flag should be true"
     );
 }
@@ -267,11 +273,15 @@ fn test_mixed_boolean_and_non_boolean_parameters() {
 
     // Check boolean flags
     assert!(
-        operation_matches.get_flag("enabled"),
+        *operation_matches
+            .get_one::<bool>("enabled")
+            .unwrap_or(&false),
         "Boolean flag 'enabled' should be true"
     );
     assert!(
-        operation_matches.get_flag("verbose"),
+        *operation_matches
+            .get_one::<bool>("verbose")
+            .unwrap_or(&false),
         "Boolean flag 'verbose' should be true"
     );
 
@@ -301,7 +311,9 @@ fn test_show_examples_flag_exists() {
     let (_, operation_matches) = sub_matches.subcommand().unwrap();
 
     assert!(
-        operation_matches.get_flag("show-examples"),
+        *operation_matches
+            .get_one::<bool>("show-examples")
+            .unwrap_or(&false),
         "--show-examples flag should be set"
     );
 }

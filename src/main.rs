@@ -5,7 +5,7 @@ use aperture_cli::constants;
 use aperture_cli::error::Error;
 use aperture_cli::fs::OsFileSystem;
 use aperture_cli::output::Output;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -14,10 +14,10 @@ async fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     #[cfg(windows)]
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     aperture_cli::cli::tracing_init::init_tracing(cli.verbosity);
     let json_errors = cli.json_errors;
-    let output = Output::new(cli.quiet, cli.json_errors);
 
     let manager = std::env::var(constants::ENV_APERTURE_CONFIG_DIR).map_or_else(
         |_| match ConfigManager::new() {
@@ -29,6 +29,16 @@ async fn main() {
         },
         |config_dir| ConfigManager::with_fs(OsFileSystem, PathBuf::from(config_dir)),
     );
+
+    let config = manager.load_global_config().unwrap_or_else(|error| {
+        aperture_cli::cli::errors::print_error_with_json(&error, json_errors);
+        std::process::exit(1);
+    });
+    if matches.value_source("json_errors") != Some(clap::parser::ValueSource::CommandLine) {
+        cli.json_errors = config.agent_defaults.json_errors;
+    }
+    let json_errors = cli.json_errors;
+    let output = Output::new(cli.quiet, json_errors);
 
     if let Err(e) = run_command(cli, &manager, &output).await {
         aperture_cli::cli::errors::print_error_with_json(&e, json_errors);

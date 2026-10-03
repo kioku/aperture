@@ -442,6 +442,7 @@ const RESERVED_EXECUTION_FLAGS: &[(&str, bool)] = &[
     ("--jq", true),
     ("--batch-file", true),
     ("--batch-concurrency", true),
+    ("--timeout-secs", true),
     ("--batch-rate-limit", true),
     ("--cache", false),
     ("--no-cache", false),
@@ -665,6 +666,8 @@ pub async fn execute_batch_operations(
     cli: &Cli,
     execution: &ExecutionFlags,
 ) -> Result<(), Error> {
+    let global_config =
+        crate::cli::translate::resolve_execution_defaults(execution, global_config.cloned());
     let batch_file =
         BatchProcessor::parse_batch_file(std::path::Path::new(batch_file_path)).await?;
     let batch_config = BatchConfig {
@@ -680,7 +683,7 @@ pub async fn execute_batch_operations(
         .execute_batch(
             spec,
             batch_file,
-            global_config,
+            global_config.as_ref(),
             None,
             execution.dry_run,
             &execution.format,
