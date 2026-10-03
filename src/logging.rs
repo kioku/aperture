@@ -290,6 +290,46 @@ fn should_redact_query_param(param_name: &str) -> bool {
 /// Returns the URL with sensitive parameter values replaced with `[REDACTED]`.
 #[must_use]
 pub fn redact_url_query_params(url: &str) -> String {
+    redact_operation_url(url, None)
+}
+
+fn redact_url_userinfo(url: &str) -> String {
+    let Some(start) = url.find("://").map(|offset| offset + 3) else {
+        return url.to_string();
+    };
+    let end = url[start..]
+        .find(['/', '?', '#'])
+        .map_or(url.len(), |offset| start + offset);
+    let Some(at) = url[start..end].rfind('@').map(|offset| start + offset) else {
+        return url.to_string();
+    };
+    format!("{}[REDACTED]{}", &url[..start], &url[at..])
+}
+
+fn sensitive_operation_query(
+    name: &str,
+    operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
+) -> bool {
+    should_redact_query_param(name)
+        || operation_context.is_some_and(|(spec, operation)| {
+            operation.security_requirements.iter().any(|scheme_name| {
+                spec.security_schemes
+                    .get(scheme_name)
+                    .is_some_and(|scheme| {
+                        scheme.scheme_type == crate::constants::AUTH_SCHEME_APIKEY
+                            && scheme.location.as_deref() == Some("query")
+                            && scheme.parameter_name.as_deref() == Some(name)
+                    })
+            })
+        })
+}
+
+fn redact_operation_url(
+    url: &str,
+    operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
+) -> String {
+    let sanitized = redact_url_userinfo(url);
+    let url = sanitized.as_str();
     // Find the query string start
     let Some(query_start) = url.find('?') else {
         return url.to_string();
@@ -317,7 +357,8 @@ pub fn redact_url_query_params(url: &str) -> String {
                 || param.to_string(),
                 |eq_pos| {
                     let name = &param[..eq_pos];
-                    if should_redact_query_param(name) {
+                    let decoded_name = urlencoding::decode(name).unwrap_or_else(|_| name.into());
+                    if sensitive_operation_query(&decoded_name, operation_context) {
                         format!("{name}=[REDACTED]")
                     } else {
                         param.to_string()
@@ -396,7 +437,15 @@ fn log_request_with_operation(
     operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
 ) {
     // Redact sensitive query parameters from URL before logging
-    let redacted_url = redact_url_query_params(url);
+    let redacted_url = if tracing::enabled!(target: "aperture::executor", tracing::Level::INFO) {
+        let redacted = redact_operation_url(url, operation_context);
+        match secret_ctx {
+            Some(ctx) => ctx.redact_secrets_in_text(&redacted),
+            None => redacted,
+        }
+    } else {
+        String::new()
+    };
 
     // Log at info level: method, URL, and duration (duration added by caller)
     info!(
@@ -407,18 +456,10 @@ fn log_request_with_operation(
     );
 
     // Log headers at debug level
-    let Some(header_map) = headers else {
-        if let Some(body_content) = body {
-            let redacted_body = secret_ctx.map_or_else(
-                || body_content.to_string(),
-                |ctx| ctx.redact_secrets_in_text(body_content),
-            );
-            trace!(
-                target: "aperture::executor",
-                "Request body: {}",
-                redacted_body
-            );
-        }
+    let Some(header_map) =
+        headers.filter(|_| tracing::enabled!(target: "aperture::executor", tracing::Level::DEBUG))
+    else {
+        log_request_body(body, secret_ctx);
         return;
     };
 
@@ -439,18 +480,21 @@ fn log_request_with_operation(
         );
     }
 
-    // Log body at trace level
-    if let Some(body_content) = body {
-        let redacted_body = secret_ctx.map_or_else(
-            || body_content.to_string(),
-            |ctx| ctx.redact_secrets_in_text(body_content),
-        );
-        trace!(
-            target: "aperture::executor",
-            "Request body: {}",
-            redacted_body
-        );
+    log_request_body(body, secret_ctx);
+}
+
+fn log_request_body(body: Option<&str>, secret_ctx: Option<&SecretContext>) {
+    if !tracing::enabled!(target: "aperture::executor", tracing::Level::TRACE) {
+        return;
     }
+    let Some(body_content) = body else {
+        return;
+    };
+    let redacted_body = secret_ctx.map_or_else(
+        || body_content.to_string(),
+        |ctx| ctx.redact_secrets_in_text(body_content),
+    );
+    trace!(target: "aperture::executor", "Request body: {}", redacted_body);
 }
 
 /// Redacts a header value based on static rules and dynamic secret context.
@@ -543,7 +587,9 @@ fn log_response_with_operation(
     );
 
     // Log headers at debug level
-    let Some(header_map) = headers else {
+    let Some(header_map) =
+        headers.filter(|_| tracing::enabled!(target: "aperture::executor", tracing::Level::DEBUG))
+    else {
         log_response_body(body, max_body_len, secret_ctx);
         return;
     };
@@ -580,6 +626,9 @@ fn truncate_string(s: &str, max_chars: usize) -> &str {
 
 /// Helper function to log response body with truncation
 fn log_response_body(body: Option<&str>, max_body_len: usize, secret_ctx: Option<&SecretContext>) {
+    if !tracing::enabled!(target: "aperture::executor", tracing::Level::TRACE) {
+        return;
+    }
     let Some(body_content) = body else {
         return;
     };
@@ -621,6 +670,44 @@ pub fn get_max_body_len() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adversarial_url_redaction_handles_userinfo_encoded_and_duplicate_names() {
+        for url in [
+            "https://alice:secret@example.com/items",
+            "https://example.com/items?%74oken=secret&token=other&extra=public",
+            "https://example.com/items?TOKEN=secret&token=other",
+        ] {
+            let redacted = redact_url_query_params(url);
+            assert!(!redacted.contains("secret"));
+            assert!(!redacted.contains("other"));
+        }
+        for url in [
+            "",
+            " ",
+            "none",
+            "https://example.com/?%ZZ=public",
+            "https://example.com/?extra=public&extra=none",
+        ] {
+            assert_eq!(redact_url_query_params(url), url);
+        }
+    }
+
+    #[test]
+    fn custom_security_query_names_are_redacted() {
+        let spec: CachedSpec = serde_json::from_value(serde_json::json!({
+            "cache_format_version": crate::cache::models::CACHE_FORMAT_VERSION,
+            "name": "test", "version": "1", "base_url": "https://example.com", "servers": [],
+            "security_schemes": { "tenant": { "name": "tenant", "scheme_type": "apiKey", "location": "query", "parameter_name": "tenant-secret" } },
+            "commands": [{ "name": "items", "operation_id": "items", "method": "GET", "path": "/items", "parameters": [], "responses": [], "security_requirements": ["tenant"], "tags": [], "deprecated": false, "examples": [], "aliases": [], "hidden": false }]
+        })).unwrap();
+        let redacted = redact_operation_url(
+            "https://example.com/?tenant%2Dsecret=secret&extra=public",
+            Some((&spec, &spec.commands[0])),
+        );
+        assert!(!redacted.contains("=secret"));
+        assert!(redacted.contains("extra=public"));
+    }
 
     #[test]
     fn test_should_redact_header_authorization() {
