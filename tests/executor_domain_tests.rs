@@ -332,7 +332,12 @@ fn accept_before_deadline(listener: &std::net::TcpListener) -> std::net::TcpStre
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         match listener.accept() {
-            Ok((stream, _)) => return stream,
+            Ok((stream, _)) => {
+                // macOS inherits the listener's nonblocking flag. Only accept
+                // is polled; request reads must wait under their own deadline.
+                stream.set_nonblocking(false).unwrap();
+                return stream;
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 assert!(
                     std::time::Instant::now() < deadline,
@@ -901,4 +906,24 @@ async fn session_creating_responses_are_not_cached() {
         ));
     }
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn accepted_retry_socket_waits_for_request_bytes() {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let writer = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        client.write_all(b"request").unwrap();
+    });
+    let mut accepted = accept_before_deadline(&listener);
+    accepted
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut bytes = [0; 7];
+    accepted.read_exact(&mut bytes).unwrap();
+    assert_eq!(&bytes, b"request");
+    writer.join().unwrap();
 }
