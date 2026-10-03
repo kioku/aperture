@@ -229,7 +229,7 @@ fn test_regex_search() {
     specs.insert("test-api".to_string(), create_test_spec("test-api"));
 
     // Regex pattern to find all "get" operations
-    let results = searcher.search(&specs, r"get\w+", None).unwrap();
+    let results = searcher.search(&specs, r"regex:get\w+", None).unwrap();
 
     assert_eq!(results.len(), 2); // getUser and getIssue
     assert!(results
@@ -459,4 +459,71 @@ fn test_search_suggestions_include_display_names() {
         suggestion.contains("accounts") && suggestion.contains("fetch"),
         "Suggestion should use display group and name, got: {suggestions:?}"
     );
+}
+
+#[test]
+fn ordinary_names_match_case_punctuation_and_typos() {
+    let specs = BTreeMap::from([("test-api".to_string(), create_test_spec("test-api"))]);
+    for query in ["get-user", "getuser", "GETUSER", "getusre"] {
+        let results = CommandSearcher::new().search(&specs, query, None).unwrap();
+        assert_eq!(results[0].command.operation_id, "getUser", "{query}");
+    }
+    assert!(CommandSearcher::new()
+        .search(&specs, "regex:[", None)
+        .is_err());
+}
+
+#[test]
+fn incidental_alias_matches_cannot_outrank_exact_names() {
+    let mut spec = create_test_spec("test-api");
+    spec.commands[2].aliases = (0..30).map(|i| format!("get-user-alias-{i}")).collect();
+    let specs = BTreeMap::from([("test-api".to_string(), spec)]);
+    let results = CommandSearcher::new()
+        .search(&specs, "get-user", None)
+        .unwrap();
+    assert_eq!(results[0].command.operation_id, "getUser");
+}
+
+#[test]
+fn search_adversarial_inputs_and_order_are_deterministic() {
+    let mut spec = create_test_spec("test-api");
+    spec.commands[0].operation_id = "getCafé".to_string();
+    let specs = BTreeMap::from([("test-api".to_string(), spec.clone())]);
+    let searcher = CommandSearcher::new();
+    for query in [
+        "",
+        " ",
+        "none",
+        "[]",
+        "✨",
+        "GETCAFÉ",
+        "get.café",
+        "regex:",
+        "regex:(?i)café",
+        "regex:^get",
+        "regex:a{999999999999999999999}",
+    ] {
+        let expected = searcher.search(&specs, query, None);
+        spec.commands.reverse();
+        let reversed = BTreeMap::from([("test-api".to_string(), spec.clone())]);
+        let actual = searcher.search(&reversed, query, None);
+        match (expected, actual) {
+            (Ok(a), Ok(b)) => assert_eq!(
+                a.iter()
+                    .map(|r| (&r.command.operation_id, r.score))
+                    .collect::<Vec<_>>(),
+                b.iter()
+                    .map(|r| (&r.command.operation_id, r.score))
+                    .collect::<Vec<_>>(),
+                "{query}"
+            ),
+            (Err(_), Err(_)) => {}
+            _ => panic!("inconsistent result for {query}"),
+        }
+    }
+    assert!(searcher
+        .search(&specs, "get", Some("unknown"))
+        .unwrap()
+        .is_empty());
+    assert!(searcher.search(&specs, "regex:[", None).is_err());
 }

@@ -142,6 +142,7 @@ fn base_execution_flags() -> ExecutionFlags {
         jq: None,
         batch_file: None,
         batch_concurrency: 5,
+        timeout_secs: None,
         batch_rate_limit: None,
         cache: false,
         no_cache: false,
