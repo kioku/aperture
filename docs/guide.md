@@ -562,3 +562,39 @@ sending a request.
 Repeated page URLs/cursors and the 1,000-page safety cap return an incomplete
 traversal error when more data remains. Already emitted NDJSON is partial output.
 A closed output pipe stops pagination without fetching another page.
+
+### OpenAPI URL parameter serialization
+
+Path parameters use their declared `simple`, `label`, or `matrix` style and
+`explode` setting. The defaults are `simple` and `explode=false`. Each data
+component is percent-encoded before style punctuation is inserted, so commas,
+semicolons, equals signs, slashes, question marks, hashes, percent signs, spaces,
+and Unicode remain data. Label expansion also encodes data dots when exploding.
+
+The CLI accepts scalar strings directly. For array/object parameters, pass a
+JSON array/object of non-null primitive values, for example
+`--id '["blue","black"]'` or `--id '{"a":"blue","b":"black"}'`.
+Arrays/objects retain their declared wire representation rather than sending
+the JSON source text. Primitive number, integer, and boolean inputs must match
+the declared type; inline item/property primitive types are checked too.
+Object keys are sorted for deterministic URLs. Empty collections are omitted.
+This is serialization/type checking, not complete JSON Schema validation.
+
+Query parameters use structured URL pairs with encoded keys and values.
+`form` defaults to `explode=true`: arrays produce repeated keys and objects
+produce separate property keys. Unexploded form uses comma-separated values;
+`spaceDelimited` and `pipeDelimited` support arrays with `explode=false`.
+`deepObject` supports flat objects with explicit `explode=true`.
+
+Unsupported representations return validation errors before a request is sent:
+content-based parameters; untyped, referenced, or composed parameter schemas;
+referenced/composed item/property schemas; null or nested compound values;
+`allowReserved=true`; exploded delimited query arrays; ambiguous delimiter data
+inside unexploded/delimited query values; and bracket-containing deep-object
+property names. Use exploded form when query data contains its delimiter.
+Dot-only path segments (including label expansion that produces `.` or `..`)
+are rejected because URL parsers would normalize them and change the path.
+
+Cached specifications retain these declarations in cache format version 8.
+Older binary caches must be regenerated; JSON fixtures without serialization
+metadata retain the OpenAPI location defaults.

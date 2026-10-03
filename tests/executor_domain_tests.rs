@@ -428,3 +428,30 @@ async fn executor_rejects_cross_origin_pagination_override_before_dry_run() {
     let error = execute(&test_spec(), call, context).await.unwrap_err();
     assert!(error.to_string().contains("same-origin"));
 }
+
+#[tokio::test]
+async fn declared_matrix_path_serializes_array_items() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+        .mount(&server)
+        .await;
+    let mut spec = test_spec();
+    spec.base_url = Some(server.uri());
+    spec.servers = vec![server.uri()];
+    spec.commands[0].parameters[0].schema_type = Some("array".into());
+    spec.commands[0].parameters[0].serialization.style = Some("matrix".into());
+    spec.commands[0].parameters[0].serialization.explode = Some(true);
+    execute(
+        &spec,
+        user_by_id_call(r#"["a/b", "c;=?#% 雪"]"#),
+        ExecutionContext::default(),
+    )
+    .await
+    .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        requests[0].url.path(),
+        "/users/;id=a%2Fb;id=c%3B%3D%3F%23%25%20%E9%9B%AA"
+    );
+}

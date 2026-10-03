@@ -1601,33 +1601,15 @@ fn build_url_from_params(
     path_template: &str,
     path_params: &HashMap<String, String>,
     query_params: &HashMap<String, String>,
+    parameters: &[crate::cache::models::CachedParameter],
 ) -> Result<String, Error> {
-    let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
-
-    // Substitute path parameters: replace {param} with values from the map
-    let mut start = 0;
-    while let Some(open) = url[start..].find('{') {
-        let open_pos = start + open;
-        let Some(close) = url[open_pos..].find('}') else {
-            break;
-        };
-        let close_pos = open_pos + close;
-        let param_name = url[open_pos + 1..close_pos].to_string();
-
-        let value = path_params
-            .get(&param_name)
-            .ok_or_else(|| Error::missing_path_parameter(&param_name))?;
-
-        let encoded = urlencoding::encode(value);
-        url.replace_range(open_pos..=close_pos, &encoded);
-        start = open_pos + encoded.len();
-    }
-
+    let template = format!("{}{}", base_url.trim_end_matches('/'), path_template);
+    let url = super::url_serialization::expand_path_template(&template, path_params, parameters)?;
+    super::url_serialization::validate_path_segments(&url)?;
     let mut url = reqwest::Url::parse(&url)
         .map_err(|e| Error::validation_error(format!("Invalid request URL: {e}")))?;
     if !query_params.is_empty() {
-        let mut pairs: Vec<_> = query_params.iter().collect();
-        pairs.sort_by_key(|(key, _)| *key);
+        let pairs = super::url_serialization::query_parameters(parameters, query_params)?;
         url.query_pairs_mut().extend_pairs(pairs);
     }
     Ok(url.to_string())
@@ -1647,6 +1629,7 @@ pub(crate) fn pagination_request_url(
         &operation.path,
         &call.path_params,
         &call.query_params,
+        &operation.parameters,
     )?;
     validate_pagination_url(&url, call.pagination_url.as_ref())
 }
@@ -2063,6 +2046,7 @@ mod tests {
             "/items",
             &std::collections::HashMap::new(),
             &query,
+            &[],
         )
         .expect("url build should succeed");
 
