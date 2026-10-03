@@ -267,6 +267,8 @@ aperture api my-api --cache --cache-ttl 600 users list
 aperture api my-api --no-cache users list
 ```
 
+Response caching applies only to GET and HEAD. Unsafe methods such as POST always execute; there is no unsafe-method caching opt-in. Cached results retain status and response headers for pagination, but responses that set session cookies are not cached. Dry runs always return a request plan and never read or create the response cache.
+
 ### Cache Management
 
 ```bash

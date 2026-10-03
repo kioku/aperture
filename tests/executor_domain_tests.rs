@@ -289,11 +289,235 @@ async fn execute_returns_cached_result_on_repeat_call() {
         .expect("second request should succeed");
 
     match second {
-        ExecutionResult::Cached { body } => {
+        ExecutionResult::Cached { body, .. } => {
             let parsed: serde_json::Value =
                 serde_json::from_str(&body).expect("cached body should be valid JSON");
             assert_eq!(parsed["cached"], true);
         }
         _ => panic!("Expected Cached result on second call"),
     }
+}
+
+#[tokio::test]
+async fn cached_dry_run_does_not_read_or_create_cache() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(203)
+                .insert_header("link", "</next>; rel=\"next\"")
+                .set_body_string("cached"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let dir = tempdir().unwrap();
+    let mut ctx = ExecutionContext {
+        base_url: Some(server.uri()),
+        cache_config: Some(CacheConfig {
+            cache_dir: dir.path().join("cache"),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let spec = test_spec();
+    execute(&spec, user_by_id_call("123"), ctx.clone())
+        .await
+        .unwrap();
+    let cached = execute(&spec, user_by_id_call("123"), ctx.clone())
+        .await
+        .unwrap();
+    assert!(
+        matches!(cached, ExecutionResult::Cached { status: 203, headers, .. } if headers.contains_key("link"))
+    );
+    ctx.dry_run = true;
+    assert!(matches!(
+        execute(&spec, user_by_id_call("123"), ctx.clone())
+            .await
+            .unwrap(),
+        ExecutionResult::DryRun { .. }
+    ));
+    ctx.cache_config.as_mut().unwrap().cache_dir = dir.path().join("absent");
+    execute(&spec, user_by_id_call("123"), ctx).await.unwrap();
+    assert!(!dir.path().join("absent").exists());
+}
+
+#[tokio::test]
+async fn repeated_posts_are_never_cached() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let dir = tempdir().unwrap();
+    let ctx = ExecutionContext {
+        base_url: Some(server.uri()),
+        cache_config: Some(CacheConfig {
+            cache_dir: dir.path().join("cache"),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut spec = test_spec();
+    spec.commands[0].method = "POST".into();
+    for _ in 0..2 {
+        assert!(matches!(
+            execute(&spec, user_by_id_call("123"), ctx.clone())
+                .await
+                .unwrap(),
+            ExecutionResult::Success { .. }
+        ));
+    }
+    assert!(!dir.path().join("cache").exists());
+}
+
+#[tokio::test]
+async fn active_security_schemes_disable_caching_for_all_credential_locations() {
+    use aperture_cli::cache::models::CachedSecurityScheme;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("set-cookie", "session=secret")
+                .set_body_string("account response"),
+        )
+        .expect(6)
+        .mount(&server)
+        .await;
+    let dir = tempdir().unwrap();
+    let ctx = ExecutionContext {
+        base_url: Some(server.uri()),
+        cache_config: Some(CacheConfig {
+            cache_dir: dir.path().join("cache"),
+            allow_authenticated: true,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    for location in ["header", "query", "cookie"] {
+        let mut spec = test_spec();
+        spec.commands[0].security_requirements = vec!["tenant".into()];
+        spec.security_schemes.insert(
+            "tenant".into(),
+            CachedSecurityScheme {
+                name: "tenant".into(),
+                scheme_type: "apiKey".into(),
+                scheme: None,
+                location: Some(location.into()),
+                parameter_name: Some("X-Tenant-Secret".into()),
+                description: None,
+                bearer_format: None,
+                aperture_secret: None,
+            },
+        );
+        for account in ["alice", "bob"] {
+            let mut call = user_by_id_call("123");
+            match location {
+                "header" => call
+                    .custom_headers
+                    .push(format!("X-Tenant-Secret: {account}")),
+                "query" => {
+                    call.query_params
+                        .insert("X-Tenant-Secret".into(), account.into());
+                }
+                _ => call
+                    .custom_headers
+                    .push(format!("Cookie: X-Tenant-Secret={account}")),
+            }
+            assert!(matches!(
+                execute(&spec, call, ctx.clone()).await.unwrap(),
+                ExecutionResult::Success { .. }
+            ));
+        }
+    }
+    assert!(!dir.path().join("cache").exists());
+}
+
+#[tokio::test]
+async fn custom_api_key_from_secret_mapping_never_reaches_cache_disk() {
+    use aperture_cli::cache::models::{CachedApertureSecret, CachedSecurityScheme};
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::header(
+            "X-Tenant-Secret",
+            "synthetic-tenant-secret",
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("set-cookie", "session=synthetic-session")
+                .set_body_string("ok"),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let dir = tempdir().unwrap();
+    let mut spec = test_spec();
+    spec.commands[0].security_requirements = vec!["tenant".into()];
+    spec.security_schemes.insert(
+        "tenant".into(),
+        CachedSecurityScheme {
+            name: "tenant".into(),
+            scheme_type: "apiKey".into(),
+            scheme: None,
+            location: Some("header".into()),
+            parameter_name: Some("X-Tenant-Secret".into()),
+            description: None,
+            bearer_format: None,
+            aperture_secret: Some(CachedApertureSecret {
+                source: "env".into(),
+                name: "APERTURE_CACHE_TEST_TENANT_SECRET".into(),
+            }),
+        },
+    );
+    std::env::set_var(
+        "APERTURE_CACHE_TEST_TENANT_SECRET",
+        "synthetic-tenant-secret",
+    );
+    let ctx = ExecutionContext {
+        base_url: Some(server.uri()),
+        cache_config: Some(CacheConfig {
+            cache_dir: dir.path().join("cache"),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    for _ in 0..2 {
+        execute(&spec, user_by_id_call("123"), ctx.clone())
+            .await
+            .unwrap();
+    }
+    std::env::remove_var("APERTURE_CACHE_TEST_TENANT_SECRET");
+    assert!(!dir.path().join("cache").exists());
+}
+
+#[tokio::test]
+async fn session_creating_responses_are_not_cached() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("set-cookie", "session=synthetic-secret")
+                .set_body_string("ok"),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let dir = tempdir().unwrap();
+    let ctx = ExecutionContext {
+        base_url: Some(server.uri()),
+        cache_config: Some(CacheConfig {
+            cache_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    for _ in 0..2 {
+        assert!(matches!(
+            execute(&test_spec(), user_by_id_call("123"), ctx.clone())
+                .await
+                .unwrap(),
+            ExecutionResult::Success { .. }
+        ));
+    }
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }

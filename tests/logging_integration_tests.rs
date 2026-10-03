@@ -100,3 +100,26 @@ fn test_cli_verbose_flag_parsing() {
     assert_eq!(verbosity_v, 1);
     assert_eq!(verbosity_vv, 2);
 }
+
+/// Isolated local benchmark; timings are evidence, not a flaky performance assertion.
+#[test]
+#[ignore = "manual logging benchmark"]
+fn benchmark_response_logging_disabled_and_enabled() {
+    use aperture_cli::logging::log_response;
+    let body = "界".repeat(16 * 1024 * 1024 / 3);
+    let disabled = tracing::subscriber::NoSubscriber::default();
+    let enabled = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(std::io::sink)
+        .finish();
+    let measure = || {
+        let start = std::time::Instant::now();
+        for _ in 0..20 {
+            log_response(200, 1, None, Some(&body), 4096, None);
+        }
+        start.elapsed() / 20
+    };
+    let disabled_time = tracing::subscriber::with_default(disabled, measure);
+    let enabled_time = tracing::subscriber::with_default(enabled, measure);
+    eprintln!("16 MiB Unicode body: disabled={disabled_time:?}/call enabled={enabled_time:?}/call (20 calls each)");
+}

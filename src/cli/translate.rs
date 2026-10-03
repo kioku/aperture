@@ -369,6 +369,7 @@ pub fn cli_to_execution_context(
     let proxy_override = proxy_override_from_execution_flags(execution);
 
     Ok(ExecutionContext {
+        http_clients: crate::engine::executor::HttpClientPool::default(),
         dry_run: execution.dry_run,
         idempotency_key: execution.idempotency_key.clone(),
         cache_config,

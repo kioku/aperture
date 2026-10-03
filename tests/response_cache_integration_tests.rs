@@ -541,7 +541,7 @@ async fn test_authenticated_requests_not_cached_by_default() {
 }
 
 #[tokio::test]
-async fn test_auth_headers_scrubbed_when_caching_opted_in() {
+async fn test_authenticated_caching_opt_in_is_disabled() {
     // Set up auth token in environment
     std::env::set_var("TEST_AUTH_TOKEN_OPTIN", "another-secret-token-67890");
 
@@ -552,7 +552,7 @@ async fn test_auth_headers_scrubbed_when_caching_opted_in() {
         default_ttl: Duration::from_mins(5),
         max_entries: 100,
         enabled: true,
-        allow_authenticated: true, // Opt-in: allow caching but headers must be scrubbed
+        allow_authenticated: true, // Legacy opt-in cannot enable authenticated caching
     };
 
     let mut spec = create_authenticated_test_spec();
@@ -564,14 +564,14 @@ async fn test_auth_headers_scrubbed_when_caching_opted_in() {
         });
     }
 
-    // Mock expects to be called ONCE (second request served from cache)
+    // Both authenticated calls must reach the server
     Mock::given(method("GET"))
         .and(path("/secure/data"))
         .and(header("Authorization", "Bearer another-secret-token-67890"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "data": "cached-response"
         })))
-        .expect(1)
+        .expect(2)
         .mount(&mock_server)
         .await;
 
@@ -580,7 +580,7 @@ async fn test_auth_headers_scrubbed_when_caching_opted_in() {
 
     let matches = command.get_matches_from(vec!["api", "secure-data", "get-secure-data"]);
 
-    // First request - should be cached
+    // First request - must not be cached
     let result1 = execute_request(
         &spec,
         &matches,
@@ -597,7 +597,7 @@ async fn test_auth_headers_scrubbed_when_caching_opted_in() {
     .await;
     assert!(result1.is_ok());
 
-    // Second request - should be served from cache
+    // Second request - must execute again
     let result2 = execute_request(
         &spec,
         &matches,
@@ -621,25 +621,9 @@ async fn test_auth_headers_scrubbed_when_caching_opted_in() {
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
         .collect();
 
-    assert_eq!(
-        cache_files.len(),
-        1,
-        "Expected exactly one cache file when allow_authenticated=true"
-    );
-
-    // Read the cache file and verify no auth headers are present
-    let cache_content = std::fs::read_to_string(cache_files[0].path()).unwrap();
-
-    // The cache file must NOT contain the secret token
     assert!(
-        !cache_content.contains("another-secret-token-67890"),
-        "Cache file must not contain the auth token! Content: {cache_content}"
-    );
-
-    // The cache file must NOT contain Authorization header
-    assert!(
-        !cache_content.contains("Authorization"),
-        "Cache file must not contain Authorization header! Content: {cache_content}"
+        cache_files.is_empty(),
+        "authenticated caching must remain disabled"
     );
 
     // Cleanup
