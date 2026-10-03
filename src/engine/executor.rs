@@ -133,9 +133,32 @@ impl ProxyDiagnostics {
     }
 }
 
+#[derive(Clone)]
 struct ProxyBuildResult {
     client: reqwest::Client,
     diagnostics: ProxyDiagnostics,
+}
+
+/// One traversal uses an immutable execution context and shares its connection
+/// pool. URL validation still runs for every page before headers are attached.
+#[derive(Default)]
+pub(crate) struct ExecutionSession {
+    client: Option<ProxyBuildResult>,
+}
+
+impl ExecutionSession {
+    fn client(
+        &mut self,
+        ctx: &crate::invocation::ExecutionContext,
+        pagination: bool,
+    ) -> Result<ProxyBuildResult, Error> {
+        if let Some(client) = &self.client {
+            return Ok(client.clone());
+        }
+        let client = build_http_client(ctx, pagination)?;
+        self.client = Some(client.clone());
+        Ok(client)
+    }
 }
 
 fn configure_proxy(
@@ -360,8 +383,18 @@ fn log_proxy_diagnostics(diagnostics: &ProxyDiagnostics) {
 }
 
 /// Build HTTP client with default timeout and resolved proxy behavior.
-fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyBuildResult, Error> {
+fn build_http_client(
+    ctx: &crate::invocation::ExecutionContext,
+    pagination: bool,
+) -> Result<ProxyBuildResult, Error> {
     let (builder, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
+    // Redirects bypass next-link validation and obscure the base for relative
+    // links. Pagination requires explicit validated links instead.
+    let builder = if pagination {
+        builder.redirect(reqwest::redirect::Policy::none())
+    } else {
+        builder
+    };
     let client = builder
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -379,6 +412,30 @@ fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyB
     })
 }
 
+/// Preserve the complete Link list and reject undecodable header data rather
+/// than mistaking it for a missing next page.
+fn collect_response_headers(headers: &HeaderMap) -> Result<HashMap<String, String>, Error> {
+    let mut response_headers: HashMap<String, String> = headers
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    // Multiple Link fields form one list. Dropping fields could hide an
+    // ambiguous next target or silently report the traversal as complete.
+    let links = headers
+        .get_all(reqwest::header::LINK)
+        .iter()
+        .map(|value| {
+            value
+                .to_str()
+                .map_err(|_| Error::validation_error("Invalid pagination Link header encoding"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if !links.is_empty() {
+        response_headers.insert(constants::HEADER_LINK.to_string(), links.join(", "));
+    }
+    Ok(response_headers)
+}
+
 /// Send HTTP request and retain response bytes until the operation's media type is known.
 async fn send_request(
     request: reqwest::RequestBuilder,
@@ -394,11 +451,7 @@ async fn send_request(
     for (name, value) in response.headers() {
         response_headers_map.insert(name.clone(), value.clone());
     }
-    let response_headers = response
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-        .collect();
+    let response_headers = collect_response_headers(response.headers())?;
     let response_bytes = response.bytes().await.map_err(Error::Network)?.to_vec();
 
     if operation.has_binary_response() {
@@ -565,6 +618,7 @@ async fn retry_request_with_backoff(
                         response_headers,
                         response_text,
                     } => {
+                        last_error = None;
                         last_status = Some(status);
                         last_response_headers = Some(response_headers);
                         last_response_text = Some(response_text);
@@ -583,6 +637,11 @@ async fn retry_request_with_backoff(
             {
                 RetryableNetworkError::Return(error) => return Err(error),
                 RetryableNetworkError::Retry(error) => {
+                    // Exhaustion must describe the last attempt, not a stale
+                    // HTTP response from before the transport failure.
+                    last_status = None;
+                    last_response_headers = None;
+                    last_response_text = None;
                     last_error = Some(error);
                 }
             },
@@ -714,6 +773,35 @@ async fn handle_retryable_http_response(
     }
 }
 
+fn transport_stage(error: &reqwest::Error) -> bool {
+    error.is_connect()
+        || error.is_timeout()
+        || error.is_body()
+        || (error.is_request() && !error.is_builder() && !error.is_redirect())
+}
+
+/// `Response::bytes` wraps body transport failures in a Decode error. Inspect
+/// typed sources, not messages; unrelated decoding failures remain terminal.
+fn is_retryable_network_error(error: &Error) -> bool {
+    let Error::Network(network) = error else {
+        return false;
+    };
+    if transport_stage(network) {
+        return true;
+    }
+    let mut source = std::error::Error::source(network);
+    while let Some(error) = source {
+        if error
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(transport_stage)
+        {
+            return true;
+        }
+        source = error.source();
+    }
+    false
+}
+
 async fn handle_retryable_network_error(
     retry_config: &RetryConfig,
     attempt: u32,
@@ -723,10 +811,9 @@ async fn handle_retryable_network_error(
     error: Error,
 ) -> RetryableNetworkError {
     // Only transport-stage failures are eligible. Builder, redirect, status,
-    // and decoding errors are terminal. The caller separately enforces the
+    // and unrelated decoding errors are terminal. The caller separately enforces the
     // idempotent-method/idempotency-key/force policy before entering this loop.
-    if !matches!(&error, Error::Network(e) if e.is_connect() || e.is_timeout() || e.is_body() || (e.is_request() && !e.is_builder() && !e.is_redirect()))
-    {
+    if !is_retryable_network_error(&error) {
         return RetryableNetworkError::Return(error);
     }
 
@@ -1136,12 +1223,16 @@ fn add_idempotency_key(
     headers: &mut HeaderMap,
     idempotency_key: Option<&String>,
 ) -> Result<(), Error> {
-    if let Some(key) = idempotency_key {
-        headers.insert(
-            HeaderName::from_static("idempotency-key"),
-            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
-        );
+    let Some(key) = idempotency_key else {
+        return Ok(());
+    };
+    if key.trim().is_empty() {
+        return Err(Error::invalid_idempotency_key());
     }
+    headers.insert(
+        HeaderName::from_static("idempotency-key"),
+        HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
+    );
     Ok(())
 }
 
@@ -1310,13 +1401,24 @@ async fn resolve_pre_execution_result(
 ///
 /// Returns errors for authentication failures, network issues, invalid
 /// parameters, and response validation problems.
-#[allow(clippy::too_many_lines)]
 pub async fn execute(
     spec: &CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: crate::invocation::ExecutionContext,
 ) -> Result<crate::invocation::ExecutionResult, Error> {
-    let prepared = prepare_execution(spec, call, &ctx)?;
+    execute_in_session(spec, call, ctx, &mut ExecutionSession::default()).await
+}
+
+/// Internal pagination entry point. The context must remain unchanged across
+/// calls in a session, so proxy and redirect policy cannot become stale.
+#[allow(clippy::too_many_lines)]
+pub(crate) async fn execute_in_session(
+    spec: &CachedSpec,
+    call: crate::invocation::OperationCall,
+    ctx: crate::invocation::ExecutionContext,
+    session: &mut ExecutionSession,
+) -> Result<crate::invocation::ExecutionResult, Error> {
+    let prepared = prepare_execution(spec, call, &ctx, session)?;
 
     if let Some(result) = resolve_pre_execution_result(PreExecutionInput {
         cache_context: prepared.cache_context.as_ref(),
@@ -1401,8 +1503,9 @@ fn prepare_execution<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
+    session: &mut ExecutionSession,
 ) -> Result<PreparedExecution<'a>, Error> {
-    let request = prepare_request(spec, call, ctx)?;
+    let request = prepare_request(spec, call, ctx, session)?;
     let runtime = prepare_runtime_context(
         spec,
         request.operation,
@@ -1506,10 +1609,12 @@ fn prepare_request<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
+    session: &mut ExecutionSession,
 ) -> Result<PreparedRequest<'a>, Error> {
     let operation = find_validated_operation(spec, &call)?;
     let url = pagination_request_url(spec, &call, ctx)?.to_string();
-    let proxy_build_result = build_http_client(ctx)?;
+    let proxy_build_result =
+        session.client(ctx, ctx.auto_paginate || call.pagination_url.is_some())?;
     let mut headers = build_headers_from_params(
         spec,
         operation,
@@ -1566,6 +1671,11 @@ fn prepare_runtime_context<'a>(
     )?;
     let retry_ctx = ctx.retry_context.clone().map(|mut rc| {
         rc.method = Some(method.to_string());
+        // SDK context fields can disagree; only a key actually sent on the
+        // request authorizes retries of non-idempotent methods.
+        rc.has_idempotency_key = headers
+            .get("idempotency-key")
+            .is_some_and(|value| !value.as_bytes().iter().all(u8::is_ascii_whitespace));
         rc
     });
     let secret_ctx =
@@ -1644,6 +1754,15 @@ fn validate_pagination_url(
     let Some(target) = target else {
         return Ok(original);
     };
+    validate_pagination_target(&original, target)?;
+    Ok(target.clone())
+}
+
+/// Validate before attaching any operation authentication or custom headers.
+pub(crate) fn validate_pagination_target(
+    original: &reqwest::Url,
+    target: &reqwest::Url,
+) -> Result<(), Error> {
     if target.origin() != original.origin()
         || !target.username().is_empty()
         || target.password().is_some()
@@ -1653,7 +1772,7 @@ fn validate_pagination_url(
             "Pagination next URL must be same-origin and contain no credentials or fragment",
         ));
     }
-    Ok(target.clone())
+    Ok(())
 }
 
 /// Builds HTTP headers from pre-extracted header parameter maps.

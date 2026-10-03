@@ -398,3 +398,56 @@ fn old_binary_cache_metadata_is_invalidated_before_loading_changed_layout() {
         .check_spec_version(directory.path(), "serialization")
         .unwrap());
 }
+
+#[tokio::test]
+async fn adversarial_compound_input_sweep_has_explicit_empty_and_duplicate_behavior() {
+    for (kind, raw, expected) in [
+        ("string", "", vec![("id", "")]),
+        ("string", "  ", vec![("id", "  ")]),
+        ("array", "[]", vec![]),
+        ("object", "{}", vec![]),
+        (
+            "array",
+            r#"["same","same"]"#,
+            vec![("id", "same"), ("id", "same")],
+        ),
+        (
+            "object",
+            r#"{"unknown":"value"}"#,
+            vec![("unknown", "value")],
+        ),
+        // serde_json's object decoder keeps the last duplicate property.
+        ("object", r#"{"a":"first","a":"last"}"#, vec![("a", "last")]),
+    ] {
+        let url = observed_url(&parameter("query", "form", true, kind), "query", raw).await;
+        let pairs: Vec<_> = url
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        let expected: Vec<_> = expected
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        assert_eq!(pairs, expected, "{kind}: {raw}");
+    }
+    let server = MockServer::start().await;
+    for kind in ["array", "object", "boolean", "integer"] {
+        for raw in ["", "  ", "none", "invalid", "[", "null", "true false"] {
+            let cached = spec(&server.uri(), &parameter("query", "form", true, kind));
+            assert!(
+                execute(&cached, call("query", raw), ExecutionContext::default())
+                    .await
+                    .is_err(),
+                "{kind}: {raw}"
+            );
+        }
+    }
+    let mut cached = spec(&server.uri(), &parameter("query", "form", true, "string"));
+    cached.commands[0].parameters[0].serialization.style = Some("unknown".into());
+    assert!(
+        execute(&cached, call("query", "value"), ExecutionContext::default())
+            .await
+            .is_err()
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

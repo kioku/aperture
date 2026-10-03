@@ -557,7 +557,13 @@ URLs, including relative links resolved against the current page. Next links
 must retain the original scheme, host, and effective port, and must not contain
 URL credentials or fragments. Operation authentication and headers are retained
 only for those same-origin requests; cross-origin links return an error before
-sending a request.
+sending a request. Pagination rejects HTTP redirects (including same-origin
+redirects); the server must provide a validated next link instead. This keeps
+relative-link resolution and custom authentication headers within this policy.
+Link lists preserve commas in URLs and quoted attributes, support relation-token
+lists, and reject malformed or ambiguous next targets rather than silently
+reporting completion. Multiple Link header fields are treated as one list.
+One traversal reuses its HTTP connection pool.
 
 Repeated page URLs/cursors and the 1,000-page safety cap return an incomplete
 traversal error when more data remains. Already emitted NDJSON is partial output.
@@ -577,7 +583,10 @@ JSON array/object of non-null primitive values, for example
 Arrays/objects retain their declared wire representation rather than sending
 the JSON source text. Primitive number, integer, and boolean inputs must match
 the declared type; inline item/property primitive types are checked too.
-Object keys are sorted for deterministic URLs. Empty collections are omitted.
+Object keys are sorted for deterministic URLs. Duplicate JSON object keys keep
+the last value, as in the JSON decoder; duplicate array values are preserved.
+Unknown object properties are accepted unless their primitive type is declared.
+Empty collections are omitted.
 This is serialization/type checking, not complete JSON Schema validation.
 
 Query parameters use structured URL pairs with encoded keys and values.
@@ -598,3 +607,10 @@ are rejected because URL parsers would normalize them and change the path.
 Cached specifications retain these declarations in cache format version 8.
 Older binary caches must be regenerated; JSON fixtures without serialization
 metadata retain the OpenAPI location defaults.
+
+Transport retries include truncated response-body reads even when the HTTP
+client wraps them as decoding errors. Unrelated decoding, builder, redirect,
+and terminal HTTP failures are not transport retries. Exhaustion reports the
+last attempt rather than an earlier HTTP response. Non-idempotent SDK requests
+require a non-empty idempotency key actually present in the request headers or
+explicit force-retry; an eligibility flag alone does not authorize a retry.

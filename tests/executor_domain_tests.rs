@@ -348,25 +348,32 @@ fn accept_before_deadline(listener: &std::net::TcpListener) -> std::net::TcpStre
 /// Each accepted connection is a fresh attempt: unsuccessful attempts close
 /// before sending headers, reproducing a transient transport failure.
 fn disconnect_server(attempts: usize, succeed: bool) -> (String, std::thread::JoinHandle<usize>) {
+    let mut responses = vec![None; attempts];
+    if succeed {
+        responses[attempts - 1] =
+            Some(&b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"[..]);
+    }
+    response_attempt_server(responses)
+}
+
+fn response_attempt_server(
+    responses: Vec<Option<&'static [u8]>>,
+) -> (String, std::thread::JoinHandle<usize>) {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     listener.set_nonblocking(true).unwrap();
     let worker = std::thread::spawn(move || {
-        for attempt in 0..attempts {
+        let attempts = responses.len();
+        for response in responses {
             let mut stream = accept_before_deadline(&listener);
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();
             let mut request = [0; 4096];
-            // Any request bytes establish that this connection is an attempt.
             assert!(stream.read(&mut request).unwrap() > 0);
-            if succeed && attempt + 1 == attempts {
-                stream
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-                    )
-                    .unwrap();
+            if let Some(response) = response {
+                stream.write_all(response).unwrap();
             }
         }
         attempts
@@ -454,4 +461,194 @@ async fn declared_matrix_path_serializes_array_items() {
         requests[0].url.path(),
         "/users/;id=a%2Fb;id=c%3B%3D%3F%23%25%20%E9%9B%AA"
     );
+}
+
+#[tokio::test]
+async fn sdk_override_revalidates_userinfo_fragments_and_redirects() {
+    let server = MockServer::start().await;
+    let other = MockServer::start().await;
+    let mut spec = test_spec();
+    spec.base_url = Some(server.uri());
+    spec.servers = vec![server.uri()];
+    for target in [
+        format!("{}/next#fragment", server.uri()),
+        server.uri().replacen("http://", "http://user:password@", 1),
+    ] {
+        let mut call = user_by_id_call("1");
+        call.pagination_url = Some(reqwest::Url::parse(&target).unwrap());
+        assert!(execute(&spec, call, ExecutionContext::default())
+            .await
+            .is_err());
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+    Mock::given(path("/next"))
+        .respond_with(
+            ResponseTemplate::new(302).insert_header("location", format!("{}/stolen", other.uri())),
+        )
+        .mount(&server)
+        .await;
+    let mut call = user_by_id_call("1");
+    call.pagination_url = Some(reqwest::Url::parse(&format!("{}/next", server.uri())).unwrap());
+    call.custom_headers
+        .push("X-Api-Key: synthetic-sdk-key".into());
+    assert!(execute(&spec, call, ExecutionContext::default())
+        .await
+        .is_err());
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    assert!(other.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mixed_http_then_transport_exhaustion_reports_final_failure() {
+    let (url, worker) = response_attempt_server(vec![
+        Some(b"HTTP/1.1 503 Unavailable\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"),
+        None,
+        None,
+    ]);
+    let mut spec = test_spec();
+    spec.base_url = Some(url.clone());
+    spec.servers = vec![url];
+    let ctx = ExecutionContext {
+        retry_context: Some(aperture_cli::engine::executor::RetryContext {
+            max_attempts: 3,
+            initial_delay_ms: 1,
+            max_delay_ms: 1,
+            ..Default::default()
+        }),
+        proxy_override: aperture_cli::invocation::ProxyOverride::Disable,
+        ..Default::default()
+    };
+    let error = execute(&spec, user_by_id_call("1"), ctx).await.unwrap_err();
+    assert_eq!(worker.join().unwrap(), 3);
+    assert!(error.to_string().contains("Retry"), "{error}");
+}
+
+#[tokio::test]
+async fn truncated_response_body_retries_then_succeeds() {
+    let (url, worker) = response_attempt_server(vec![
+        Some(b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n{"),
+        Some(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"),
+    ]);
+    let mut spec = test_spec();
+    spec.base_url = Some(url.clone());
+    spec.servers = vec![url];
+    let ctx = ExecutionContext {
+        retry_context: Some(aperture_cli::engine::executor::RetryContext {
+            max_attempts: 2,
+            initial_delay_ms: 10,
+            max_delay_ms: 10,
+            ..Default::default()
+        }),
+        proxy_override: aperture_cli::invocation::ProxyOverride::Disable,
+        ..Default::default()
+    };
+    let start = std::time::Instant::now();
+    execute(&spec, user_by_id_call("1"), ctx)
+        .await
+        .expect("truncated response retry should succeed");
+    assert!(start.elapsed() >= Duration::from_millis(10));
+    assert_eq!(worker.join().unwrap(), 2);
+}
+
+#[tokio::test]
+async fn unsafe_transport_retries_require_key_or_explicit_force() {
+    for (key, force) in [(Some("synthetic-key".to_string()), false), (None, true)] {
+        let (url, worker) = disconnect_server(2, true);
+        let mut spec = test_spec();
+        spec.base_url = Some(url.clone());
+        spec.servers = vec![url];
+        spec.commands[0].method = "POST".into();
+        let ctx = ExecutionContext {
+            idempotency_key: key,
+            retry_context: Some(aperture_cli::engine::executor::RetryContext {
+                max_attempts: 2,
+                initial_delay_ms: 1,
+                max_delay_ms: 1,
+                force_retry: force,
+                ..Default::default()
+            }),
+            proxy_override: aperture_cli::invocation::ProxyOverride::Disable,
+            ..Default::default()
+        };
+        execute(&spec, user_by_id_call("1"), ctx)
+            .await
+            .expect("explicit unsafe retry should succeed");
+        assert_eq!(worker.join().unwrap(), 2);
+    }
+}
+
+#[tokio::test]
+async fn sdk_retry_flag_without_an_actual_key_does_not_authorize_post() {
+    let (url, worker) = disconnect_server(1, false);
+    let mut spec = test_spec();
+    spec.base_url = Some(url.clone());
+    spec.servers = vec![url];
+    spec.commands[0].method = "POST".into();
+    let ctx = ExecutionContext {
+        retry_context: Some(aperture_cli::engine::executor::RetryContext {
+            max_attempts: 3,
+            has_idempotency_key: true,
+            ..Default::default()
+        }),
+        proxy_override: aperture_cli::invocation::ProxyOverride::Disable,
+        ..Default::default()
+    };
+    let error = execute(&spec, user_by_id_call("1"), ctx).await.unwrap_err();
+    assert!(!error.to_string().contains("Retry"), "{error}");
+    assert_eq!(worker.join().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn empty_idempotency_keys_fail_before_requests() {
+    let server = MockServer::start().await;
+    let mut spec = test_spec();
+    spec.base_url = Some(server.uri());
+    spec.servers = vec![server.uri()];
+    for key in ["", "  "] {
+        let ctx = ExecutionContext {
+            idempotency_key: Some(key.into()),
+            ..Default::default()
+        };
+        assert!(execute(&spec, user_by_id_call("1"), ctx).await.is_err());
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn retry_backoff_is_observed_between_server_attempts() {
+    use std::io::Read;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    listener.set_nonblocking(true).unwrap();
+    let worker = std::thread::spawn(move || {
+        let mut accepted = Vec::new();
+        for _ in 0..3 {
+            let mut stream = accept_before_deadline(&listener);
+            accepted.push(std::time::Instant::now());
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 4096];
+            assert!(stream.read(&mut request).unwrap() > 0);
+        }
+        accepted
+    });
+    let mut spec = test_spec();
+    spec.base_url = Some(url.clone());
+    spec.servers = vec![url];
+    let ctx = ExecutionContext {
+        retry_context: Some(aperture_cli::engine::executor::RetryContext {
+            max_attempts: 3,
+            initial_delay_ms: 50,
+            max_delay_ms: 100,
+            ..Default::default()
+        }),
+        proxy_override: aperture_cli::invocation::ProxyOverride::Disable,
+        ..Default::default()
+    };
+    assert!(execute(&spec, user_by_id_call("1"), ctx).await.is_err());
+    let accepted = worker.join().unwrap();
+    assert_eq!(accepted.len(), 3);
+    assert!(accepted[1].duration_since(accepted[0]) >= Duration::from_millis(50));
+    assert!(accepted[2].duration_since(accepted[1]) >= Duration::from_millis(100));
 }

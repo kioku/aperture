@@ -62,8 +62,9 @@ async fn fetch_page_payload<W: std::io::Write + ?Sized>(
     call: OperationCall,
     ctx: ExecutionContext,
     writer: &mut W,
+    session: &mut executor::ExecutionSession,
 ) -> Result<Option<PagePayload>, Error> {
-    let result = executor::execute(spec, call, ctx).await?;
+    let result = executor::execute_in_session(spec, call, ctx, session).await?;
 
     match result {
         ExecutionResult::Success { body, headers, .. } => Ok(Some(PagePayload {
@@ -147,11 +148,12 @@ async fn process_paginated_page<W: std::io::Write + ?Sized>(
     ctx: ExecutionContext,
     writer: &mut W,
     state: &PaginationState,
+    session: &mut executor::ExecutionSession,
 ) -> Result<Option<(usize, bool)>, Error> {
     let Some(PagePayload {
         body,
         response_headers,
-    }) = fetch_page_payload(spec, call.clone(), ctx.clone(), writer).await?
+    }) = fetch_page_payload(spec, call.clone(), ctx.clone(), writer, session).await?
     else {
         return Ok(None);
     };
@@ -194,7 +196,7 @@ async fn process_paginated_page<W: std::io::Write + ?Sized>(
 pub async fn execute_paginated(
     spec: &CachedSpec,
     mut call: OperationCall,
-    ctx: ExecutionContext,
+    mut ctx: ExecutionContext,
     writer: &mut impl std::io::Write,
 ) -> Result<u64, Error> {
     let operation = spec
@@ -203,7 +205,9 @@ pub async fn execute_paginated(
         .find(|c| c.operation_id == call.operation_id)
         .ok_or_else(|| Error::operation_not_found(&call.operation_id))?;
 
+    ctx.auto_paginate = true;
     let state = resolve_pagination_state(operation, &call);
+    let mut session = executor::ExecutionSession::default();
 
     let mut total_items: u64 = 0;
 
@@ -211,7 +215,8 @@ pub async fn execute_paginated(
     for page_num in 0..MAX_PAGES {
         record_page(spec, &call, &ctx, &mut visited)?;
         let Some((page_len, has_next)) =
-            process_paginated_page(spec, &mut call, ctx.clone(), writer, &state).await?
+            process_paginated_page(spec, &mut call, ctx.clone(), writer, &state, &mut session)
+                .await?
         else {
             break;
         };
@@ -344,21 +349,13 @@ fn advance_link_url(
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(constants::HEADER_LINK))
         .map_or("", |(_, value)| value.as_str());
-    let Some(next) = parse_link_next(link) else {
+    let Some(next) = checked_link_next(link)? else {
         return Ok(false);
     };
     let target = current
         .join(&next)
         .map_err(|e| Error::validation_error(format!("Invalid pagination next URL: {e}")))?;
-    if target.origin() != current.origin()
-        || !target.username().is_empty()
-        || target.password().is_some()
-        || target.fragment().is_some()
-    {
-        return Err(Error::validation_error(
-            "Pagination next URL must be same-origin and contain no credentials or fragment",
-        ));
-    }
+    executor::validate_pagination_target(current, &target)?;
     call.pagination_url = Some(target);
     Ok(true)
 }
@@ -410,24 +407,151 @@ fn extract_cursor_value(json: &Value, field: &str) -> Option<String> {
 ///                 <https://api.example.com/items?page=10>; rel="last"`
 #[must_use]
 pub fn parse_link_next(header_value: &str) -> Option<String> {
-    for part in header_value.split(',') {
-        let part = part.trim();
-        let Some(url_end) = part.find('>') else {
-            continue;
-        };
-        if !part.starts_with('<') {
-            continue;
-        }
-        let url = &part[1..url_end];
-        let rest = &part[url_end + 1..];
-        if rest.split(';').any(|seg| {
-            let seg = seg.trim().to_lowercase();
-            seg == r#"rel="next""# || seg == "rel=next"
-        }) {
-            return Some(url.to_string());
+    checked_link_next(header_value).ok().flatten()
+}
+
+/// Delimiters in URI references and quoted parameter values are data, not
+/// link separators. Reject malformed syntax rather than reporting completion.
+#[derive(Default)]
+struct LinkSyntax {
+    quoted: bool,
+    escaped: bool,
+    in_uri: bool,
+}
+
+impl LinkSyntax {
+    const fn consume_quoted(&mut self, character: char) {
+        match character {
+            '\\' => self.escaped = true,
+            '"' => self.quoted = false,
+            _ => {}
         }
     }
-    None
+
+    const fn consume(&mut self, character: char) -> bool {
+        if self.escaped {
+            self.escaped = false;
+            return false;
+        }
+        if self.quoted {
+            self.consume_quoted(character);
+            return false;
+        }
+        if self.in_uri {
+            self.in_uri = character != '>';
+            return false;
+        }
+        match character {
+            '<' => self.in_uri = true,
+            '"' => self.quoted = true,
+            _ => return true,
+        }
+        false
+    }
+}
+
+fn link_parts(value: &str, separator: char) -> Result<Vec<&str>, Error> {
+    let mut syntax = LinkSyntax::default();
+    let mut start = 0;
+    let mut parts = Vec::new();
+    for (offset, character) in value.char_indices() {
+        if syntax.consume(character) && character == separator {
+            parts.push(value[start..offset].trim());
+            start = offset + character.len_utf8();
+        }
+    }
+    if syntax.quoted || syntax.in_uri {
+        return Err(Error::validation_error("Malformed pagination Link header"));
+    }
+    parts.push(value[start..].trim());
+    Ok(parts)
+}
+
+fn link_relation_value(value: &str) -> Result<&str, Error> {
+    let relation = if let Some(quoted) = value.strip_prefix('"') {
+        quoted
+            .strip_suffix('"')
+            .ok_or_else(|| Error::validation_error("Malformed pagination Link relation"))?
+    } else {
+        if value.bytes().any(|byte| byte.is_ascii_whitespace()) {
+            return Err(Error::validation_error(
+                "Malformed pagination Link relation",
+            ));
+        }
+        value
+    };
+    if relation.is_empty() || relation.contains(['"', '\\']) {
+        return Err(Error::validation_error(
+            "Malformed pagination Link relation",
+        ));
+    }
+    Ok(relation)
+}
+
+fn has_next_relation(parameters: &str) -> Result<bool, Error> {
+    let mut relation = None;
+    for parameter in link_parts(parameters, ';')? {
+        let Some((name, value)) = parameter.split_once('=') else {
+            if parameter.trim().eq_ignore_ascii_case("rel") {
+                return Err(Error::validation_error(
+                    "Malformed pagination Link relation",
+                ));
+            }
+            continue;
+        };
+        if !name.trim().eq_ignore_ascii_case("rel") {
+            continue;
+        }
+        if relation.is_some() {
+            return Err(Error::validation_error(
+                "Ambiguous pagination Link relation",
+            ));
+        }
+        relation = Some(link_relation_value(value.trim())?);
+    }
+    Ok(relation.is_some_and(|value| {
+        value
+            .split_ascii_whitespace()
+            .any(|token| token.eq_ignore_ascii_case("next"))
+    }))
+}
+
+fn validate_link_part(uri: &str, parameters: &str) -> Result<(), Error> {
+    let parameters = parameters.trim();
+    if uri.is_empty() || (!parameters.is_empty() && !parameters.starts_with(';')) {
+        return Err(Error::validation_error("Malformed pagination Link header"));
+    }
+    Ok(())
+}
+
+fn next_link_part(part: &str) -> Result<Option<&str>, Error> {
+    let (uri, parameters) = part
+        .strip_prefix('<')
+        .and_then(|part| part.split_once('>'))
+        .ok_or_else(|| Error::validation_error("Malformed pagination Link header"))?;
+    validate_link_part(uri, parameters)?;
+    if has_next_relation(parameters)? {
+        Ok(Some(uri))
+    } else {
+        Ok(None)
+    }
+}
+
+fn checked_link_next(header: &str) -> Result<Option<String>, Error> {
+    if header.trim().is_empty() {
+        return Ok(None);
+    }
+    let mut next = None;
+    for part in link_parts(header, ',')? {
+        let Some(uri) = next_link_part(part)? else {
+            continue;
+        };
+        if next.is_some() {
+            return Err(Error::validation_error("Ambiguous pagination next links"));
+        }
+        next = Some(uri.to_string());
+    }
+    Ok(next)
 }
 
 // ── Parameter detection heuristics ───────────────────────────────────────
@@ -661,5 +785,41 @@ mod tests {
         let has_next = advance_offset_strategy(&mut call, "offset", 5, 5);
         assert!(has_next);
         assert_eq!(call.query_params["offset"], "5");
+    }
+}
+
+#[cfg(test)]
+mod link_adversarial_tests {
+    use super::checked_link_next;
+
+    #[test]
+    fn link_syntax_sweep() {
+        for header in ["", "  ", "</last>; rel=last", "</a>; title=unknown"] {
+            assert_eq!(checked_link_next(header).unwrap(), None);
+        }
+        for header in [
+            "garbage",
+            "<>; rel=next",
+            "</a>rel=next",
+            "</a>; rel",
+            "</a>; rel=",
+            "</a>; rel=prev next",
+            "</a>; rel=\"next\"junk",
+            "</a",
+            "</a>; rel=\"next",
+            "</a>; rel=next; rel=last",
+            "</a>; rel=next, </a>; rel=next",
+        ] {
+            assert!(checked_link_next(header).is_err(), "{header}");
+        }
+        assert_eq!(
+            checked_link_next("</a>; rel=NEXT").unwrap(),
+            Some("/a".into())
+        );
+        assert_eq!(
+            checked_link_next(r#"</a?tag=x,y>; title="semi;comma,quote\""; rel="prev next""#)
+                .unwrap(),
+            Some("/a?tag=x,y".into())
+        );
     }
 }
