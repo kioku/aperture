@@ -251,8 +251,12 @@ impl CommandSearcher {
             );
         }
 
-        // Bonus for alias matches
-        for alias in &command.aliases {
+        // Alias count must not let incidental matches outrank exact operation names.
+        if let Some(alias) = command
+            .aliases
+            .iter()
+            .find(|alias| alias.to_lowercase().contains(&query_lower))
+        {
             Self::add_field_bonus(
                 &query_lower,
                 alias,

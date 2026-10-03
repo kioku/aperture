@@ -472,3 +472,58 @@ fn ordinary_names_match_case_punctuation_and_typos() {
         .search(&specs, "regex:[", None)
         .is_err());
 }
+
+#[test]
+fn incidental_alias_matches_cannot_outrank_exact_names() {
+    let mut spec = create_test_spec("test-api");
+    spec.commands[2].aliases = (0..30).map(|i| format!("get-user-alias-{i}")).collect();
+    let specs = BTreeMap::from([("test-api".to_string(), spec)]);
+    let results = CommandSearcher::new()
+        .search(&specs, "get-user", None)
+        .unwrap();
+    assert_eq!(results[0].command.operation_id, "getUser");
+}
+
+#[test]
+fn search_adversarial_inputs_and_order_are_deterministic() {
+    let mut spec = create_test_spec("test-api");
+    spec.commands[0].operation_id = "getCafé".to_string();
+    let specs = BTreeMap::from([("test-api".to_string(), spec.clone())]);
+    let searcher = CommandSearcher::new();
+    for query in [
+        "",
+        " ",
+        "none",
+        "[]",
+        "✨",
+        "GETCAFÉ",
+        "get.café",
+        "regex:",
+        "regex:(?i)café",
+        "regex:^get",
+        "regex:a{999999999999999999999}",
+    ] {
+        let expected = searcher.search(&specs, query, None);
+        spec.commands.reverse();
+        let reversed = BTreeMap::from([("test-api".to_string(), spec.clone())]);
+        let actual = searcher.search(&reversed, query, None);
+        match (expected, actual) {
+            (Ok(a), Ok(b)) => assert_eq!(
+                a.iter()
+                    .map(|r| (&r.command.operation_id, r.score))
+                    .collect::<Vec<_>>(),
+                b.iter()
+                    .map(|r| (&r.command.operation_id, r.score))
+                    .collect::<Vec<_>>(),
+                "{query}"
+            ),
+            (Err(_), Err(_)) => {}
+            _ => panic!("inconsistent result for {query}"),
+        }
+    }
+    assert!(searcher
+        .search(&specs, "get", Some("unknown"))
+        .unwrap()
+        .is_empty());
+    assert!(searcher.search(&specs, "regex:[", None).is_err());
+}
