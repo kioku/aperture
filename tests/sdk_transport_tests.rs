@@ -187,3 +187,37 @@ async fn cloned_context_honors_changed_proxy_route() {
     assert_eq!(direct_accepts.load(Ordering::SeqCst), 1);
     assert_eq!(proxy_accepts.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn cloned_context_honors_changed_effective_timeout() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert!(read_request(&mut stream).is_some());
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            // The short-timeout client may already have closed its socket.
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]");
+        }
+    });
+    let mut ctx = ExecutionContext {
+        proxy_override: ProxyOverride::Disable,
+        global_config: Some(aperture_cli::config::models::GlobalConfig {
+            default_timeout_secs: 4,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    execute(&spec(&base), call(), ctx.clone()).await.unwrap();
+    ctx.global_config.as_mut().unwrap().default_timeout_secs = 1;
+    let start = std::time::Instant::now();
+    let error = execute(&spec(&base), call(), ctx).await.unwrap_err();
+    assert_eq!(error.to_json().error_type, "Network");
+    assert!(
+        start.elapsed() < std::time::Duration::from_millis(1500),
+        "request must expire before the delayed response"
+    );
+    server.join().unwrap();
+}

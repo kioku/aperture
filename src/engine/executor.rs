@@ -135,8 +135,9 @@ impl ProxyDiagnostics {
 
 /// Context-owned HTTP clients, shared across cloned contexts and batch operations.
 ///
-/// Resolved proxy settings form the key so configuration changes cannot reuse
-/// a client with a different route. No process-global client is retained.
+/// Resolved proxy settings and effective timeout form the key so configuration
+/// changes cannot reuse a client with a different route or deadline.
+/// No process-global client is retained.
 #[derive(Debug, Clone, Default)]
 pub struct HttpClientPool(std::sync::Arc<std::sync::Mutex<HashMap<String, reqwest::Client>>>);
 
@@ -146,6 +147,7 @@ fn transport_key(
 ) -> String {
     let mut digest = Sha256::new();
     digest.update(diagnostics.to_json().to_string());
+    digest.update(effective_timeout_secs(ctx).to_be_bytes());
     digest.update(format!("{:?}", ctx.proxy_override));
     digest.update(format!(
         "{:?}",
@@ -410,7 +412,14 @@ fn log_proxy_diagnostics(diagnostics: &ProxyDiagnostics) {
     );
 }
 
-/// Build HTTP client with default timeout and resolved proxy behavior.
+/// CLI translation applies explicit timeout overrides to `global_config` first.
+fn effective_timeout_secs(ctx: &crate::invocation::ExecutionContext) -> u64 {
+    ctx.global_config
+        .as_ref()
+        .map_or(30, |config| config.default_timeout_secs)
+}
+
+/// Build HTTP client with effective timeout and resolved proxy behavior.
 fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyBuildResult, Error> {
     ensure_tls_provider();
     let (builder, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
@@ -427,11 +436,7 @@ fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyB
         });
     }
     let client = builder
-        .timeout(std::time::Duration::from_secs(
-            ctx.global_config
-                .as_ref()
-                .map_or(30, |config| config.default_timeout_secs),
-        ))
+        .timeout(std::time::Duration::from_secs(effective_timeout_secs(ctx)))
         .build()
         .map_err(|_| {
             Error::request_failed(
