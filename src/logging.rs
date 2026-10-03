@@ -392,7 +392,11 @@ fn log_request_with_operation(
     operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
 ) {
     // Redact sensitive query parameters from URL before logging
-    let redacted_url = redact_url_query_params(url);
+    let redacted_url = if tracing::enabled!(target: "aperture::executor", tracing::Level::INFO) {
+        redact_url_query_params(url)
+    } else {
+        String::new()
+    };
 
     // Log at info level: method, URL, and duration (duration added by caller)
     info!(
@@ -403,18 +407,10 @@ fn log_request_with_operation(
     );
 
     // Log headers at debug level
-    let Some(header_map) = headers else {
-        if let Some(body_content) = body {
-            let redacted_body = secret_ctx.map_or_else(
-                || body_content.to_string(),
-                |ctx| ctx.redact_secrets_in_text(body_content),
-            );
-            trace!(
-                target: "aperture::executor",
-                "Request body: {}",
-                redacted_body
-            );
-        }
+    let Some(header_map) =
+        headers.filter(|_| tracing::enabled!(target: "aperture::executor", tracing::Level::DEBUG))
+    else {
+        log_request_body(body, secret_ctx);
         return;
     };
 
@@ -435,18 +431,21 @@ fn log_request_with_operation(
         );
     }
 
-    // Log body at trace level
-    if let Some(body_content) = body {
-        let redacted_body = secret_ctx.map_or_else(
-            || body_content.to_string(),
-            |ctx| ctx.redact_secrets_in_text(body_content),
-        );
-        trace!(
-            target: "aperture::executor",
-            "Request body: {}",
-            redacted_body
-        );
+    log_request_body(body, secret_ctx);
+}
+
+fn log_request_body(body: Option<&str>, secret_ctx: Option<&SecretContext>) {
+    if !tracing::enabled!(target: "aperture::executor", tracing::Level::TRACE) {
+        return;
     }
+    let Some(body_content) = body else {
+        return;
+    };
+    let redacted_body = secret_ctx.map_or_else(
+        || body_content.to_string(),
+        |ctx| ctx.redact_secrets_in_text(body_content),
+    );
+    trace!(target: "aperture::executor", "Request body: {}", redacted_body);
 }
 
 /// Redacts a header value based on static rules and dynamic secret context.
@@ -539,7 +538,9 @@ fn log_response_with_operation(
     );
 
     // Log headers at debug level
-    let Some(header_map) = headers else {
+    let Some(header_map) =
+        headers.filter(|_| tracing::enabled!(target: "aperture::executor", tracing::Level::DEBUG))
+    else {
         log_response_body(body, max_body_len, secret_ctx);
         return;
     };
@@ -576,6 +577,9 @@ fn truncate_string(s: &str, max_chars: usize) -> &str {
 
 /// Helper function to log response body with truncation
 fn log_response_body(body: Option<&str>, max_body_len: usize, secret_ctx: Option<&SecretContext>) {
+    if !tracing::enabled!(target: "aperture::executor", tracing::Level::TRACE) {
+        return;
+    }
     let Some(body_content) = body else {
         return;
     };
