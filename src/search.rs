@@ -73,8 +73,8 @@ impl CommandSearcher {
     ) -> Result<Vec<CommandSearchResult>, Error> {
         let mut results = Vec::new();
 
-        // Try to compile as regex first
-        let regex_pattern = Regex::new(query).ok();
+        // Regex is opt-in; ordinary words always use keyword/fuzzy matching.
+        let regex_pattern = compile_search_regex(query)?;
 
         for (api_name, spec) in specs {
             // Apply API filter if specified - early continue if filter doesn't match
@@ -102,7 +102,7 @@ impl CommandSearcher {
         }
 
         // Sort by score (highest first)
-        results.sort_by_key(|b| std::cmp::Reverse(b.score));
+        results.sort_by(compare_search_results);
 
         Ok(results)
     }
@@ -138,7 +138,7 @@ impl CommandSearcher {
 
         // Score based on different matching strategies
         regex_pattern.map_or_else(
-            || self.score_with_fuzzy_match(command, query, &search_text, &operation_id_kebab),
+            || self.score_with_fuzzy_match(command, query, &operation_id_kebab),
             |regex| Self::score_with_regex(regex, &search_text),
         )
     }
@@ -168,15 +168,16 @@ impl CommandSearcher {
         &self,
         command: &CachedCommand,
         query: &str,
-        search_text: &str,
         operation_id_kebab: &str,
     ) -> ScoringResult {
         let mut highlights = Vec::new();
-        let mut total_score = 0i64;
+        let normalized_query = normalize_keyword(query);
+        let normalized_name = normalize_keyword(operation_id_kebab);
+        let mut total_score = name_similarity_score(&normalized_name, &normalized_query);
 
-        // Fuzzy match on complete search text
-        if let Some(score) = self.matcher.fuzzy_match(search_text, query) {
-            total_score += score;
+        // Fuzzy matching stays within operation names to avoid cross-field accidents.
+        if let Some(score) = self.matcher.fuzzy_match(operation_id_kebab, query) {
+            total_score += score.clamp(0, 100);
         }
 
         // Bonus score for exact substring matches in various fields
@@ -222,6 +223,17 @@ impl CommandSearcher {
                 summary,
                 "Summary",
                 15,
+                &mut total_score,
+                &mut highlights,
+            );
+        }
+
+        if let Some(description) = &command.description {
+            Self::add_field_bonus(
+                &query_lower,
+                description,
+                "Description",
+                10,
                 &mut total_score,
                 &mut highlights,
             );
@@ -339,6 +351,47 @@ impl Default for CommandSearcher {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Stable tie breakers make ranking independent of specification operation order.
+fn compare_search_results(a: &CommandSearchResult, b: &CommandSearchResult) -> std::cmp::Ordering {
+    b.score
+        .cmp(&a.score)
+        .then_with(|| a.api_context.cmp(&b.api_context))
+        .then_with(|| a.command_path.cmp(&b.command_path))
+        .then_with(|| a.command.operation_id.cmp(&b.command.operation_id))
+}
+
+/// Regex matching is explicit so valid ordinary words do not disable fuzzy search.
+fn compile_search_regex(query: &str) -> Result<Option<Regex>, Error> {
+    query
+        .strip_prefix("regex:")
+        .map(Regex::new)
+        .transpose()
+        .map_err(|error| Error::validation_error(format!("Invalid search regex: {error}")))
+}
+
+/// Ignore punctuation and case when comparing operation names.
+fn normalize_keyword(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Name matches outrank incidental matches in long descriptions.
+fn name_similarity_score(name: &str, query: &str) -> i64 {
+    if query.is_empty() {
+        return 0;
+    }
+    if name == query {
+        return 1_000;
+    }
+    if strsim::damerau_levenshtein(name, query) <= 1 && query.chars().count() >= 4 {
+        return 500;
+    }
+    0
 }
 
 /// Returns the effective command path using display overrides if present.

@@ -229,7 +229,7 @@ fn test_regex_search() {
     specs.insert("test-api".to_string(), create_test_spec("test-api"));
 
     // Regex pattern to find all "get" operations
-    let results = searcher.search(&specs, r"get\w+", None).unwrap();
+    let results = searcher.search(&specs, r"regex:get\w+", None).unwrap();
 
     assert_eq!(results.len(), 2); // getUser and getIssue
     assert!(results
@@ -459,4 +459,16 @@ fn test_search_suggestions_include_display_names() {
         suggestion.contains("accounts") && suggestion.contains("fetch"),
         "Suggestion should use display group and name, got: {suggestions:?}"
     );
+}
+
+#[test]
+fn ordinary_names_match_case_punctuation_and_typos() {
+    let specs = BTreeMap::from([("test-api".to_string(), create_test_spec("test-api"))]);
+    for query in ["get-user", "getuser", "GETUSER", "getusre"] {
+        let results = CommandSearcher::new().search(&specs, query, None).unwrap();
+        assert_eq!(results[0].command.operation_id, "getUser", "{query}");
+    }
+    assert!(CommandSearcher::new()
+        .search(&specs, "regex:[", None)
+        .is_err());
 }

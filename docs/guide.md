@@ -356,6 +356,11 @@ aperture config reinit my-api
 **Canonical role:** primary intent-first discovery. Use search when you know what you want to do but not where the command is.
 
 Search matches operation names, descriptions, display names, and aliases from command mappings.
+Ordinary queries use case-insensitive keyword/fuzzy matching. Operation-name
+matching ignores punctuation and tolerates a single edit or adjacent transposition
+for queries of four or more characters. Exact names rank ahead of typo matches.
+Use `regex:<pattern>` for explicit regex search (case-sensitive unless the pattern
+uses `(?i)`); invalid patterns produce an error. Ties sort by API and command path.
 
 ```bash
 # Search by keyword

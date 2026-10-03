@@ -132,6 +132,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "shellexpand",
+ "strsim",
  "tabled",
  "tempfile",
  "thiserror 2.0.18",
