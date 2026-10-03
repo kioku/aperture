@@ -244,18 +244,41 @@ async fn run_non_config_command(
     run_user_command(cli, manager, output).await
 }
 
-#[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
-async fn run_command(
+/// Keep the dispatcher on the heap so its largest command future does not
+/// consume stack alongside Clap's debug-build command-tree construction.
+fn run_command<'a>(
     cli: Cli,
-    manager: &ConfigManager<OsFileSystem>,
-    output: &Output,
-) -> Result<(), Error> {
-    use aperture_cli::cli::commands::config;
+    manager: &'a ConfigManager<OsFileSystem>,
+    output: &'a Output,
+) -> impl std::future::Future<Output = Result<(), Error>> + 'a {
+    Box::pin(async move {
+        use aperture_cli::cli::commands::config;
 
-    if let Commands::Config { command } = &cli.command {
-        config::execute_config_command(manager, command.clone(), output).await?;
-        return Ok(());
+        if let Commands::Config { command } = &cli.command {
+            config::execute_config_command(manager, command.clone(), output).await?;
+            return Ok(());
+        }
+
+        run_non_config_command(&cli, manager, output).await
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn command_dispatch_future_stays_bounded() {
+        let cli =
+            Cli::try_parse_from(["aperture", "config", "add", "stack-probe", "spec.yaml"]).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ConfigManager::with_fs(OsFileSystem, dir.path().into());
+        let output = Output::new(true, false);
+        let future = run_command(cli, &manager, &output);
+        assert!(
+            std::mem::size_of_val(&future) < 1024,
+            "command dispatcher must not retain an inline command future"
+        );
     }
-
-    run_non_config_command(&cli, manager, output).await
 }
