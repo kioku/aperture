@@ -1885,7 +1885,13 @@ fn security_group_unavailable(
             Err(std::env::VarError::NotPresent) => {
                 return Ok(Some(Error::secret_not_set(name, env_name)))
             }
-            Err(error) => return Err(Error::validation_error(error.to_string())),
+            // VarError's Display includes the raw non-Unicode value, which is
+            // a credential here. Report the configuration error without it.
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(Error::validation_error(format!(
+                    "Credential for security scheme '{name}' is not valid unicode"
+                )))
+            }
         }
     }
     Ok(None)
@@ -2179,6 +2185,39 @@ mod tests {
         crate::spec::SpecTransformer::new()
             .transform("security", &openapi)
             .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn security_non_unicode_credentials_do_not_leak_in_errors() {
+        use std::os::unix::ffi::OsStringExt;
+        let env_name = "APERTURE_SECURITY_NON_UNICODE_C2";
+        let mut spec = security_test_spec();
+        spec.security_schemes
+            .get_mut("available")
+            .unwrap()
+            .aperture_secret
+            .as_mut()
+            .unwrap()
+            .name = env_name.into();
+        std::env::set_var(
+            env_name,
+            std::ffi::OsString::from_vec(b"synthetic-secret-\xff".to_vec()),
+        );
+        let result = apply_security_headers(
+            &mut HeaderMap::new(),
+            &spec,
+            &spec.commands[0],
+            "security",
+            None,
+        );
+        std::env::remove_var(env_name);
+        let error = result.unwrap_err().to_string();
+        assert!(
+            !error.contains("synthetic-secret"),
+            "credential leaked: {error}"
+        );
+        assert!(error.contains("unicode"));
     }
 
     #[test]
