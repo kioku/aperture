@@ -508,47 +508,7 @@ done
     DEPLOY_API_TOKEN: ${{ secrets.DEPLOY_API_TOKEN }}
 ```
 
-## Troubleshooting
-
-### Debug Mode
-
-```bash
-RUST_LOG=debug aperture api my-api users list
-```
-
-### Dry Run
-
-Preview requests without executing:
-
-```bash
-aperture api my-api --dry-run users create --name "Test"
-```
-
-### Validate Spec
-
-Re-add with strict mode to check for issues:
-
-```bash
-aperture config add --strict my-api ./openapi.yaml
-```
-
-### Clear and Reinitialize
-
-```bash
-# Clear cache for specific API
-aperture config clear-cache my-api
-
-# Reinitialize all cached specs
-aperture config reinit --all
-
-# Reinitialize specific spec
-aperture config reinit my-api
-```
-
-A cache-format mismatch after an Aperture upgrade is intentional: older transformed
-spec caches may not contain every response variant needed for safe execution. Run
-`aperture config reinit my-api` (or `--all`) to regenerate them from the stored source
-spec. Aperture rejects the old cache and does not modify it during ordinary API calls.
+## Request behavior
 
 ### Pagination completeness and next links
 
@@ -608,9 +568,53 @@ Cached specifications retain these declarations in cache format version 8.
 Older binary caches must be regenerated; JSON fixtures without serialization
 metadata retain the OpenAPI location defaults.
 
+### Transport retry policy
+
 Transport retries include truncated response-body reads even when the HTTP
 client wraps them as decoding errors. Unrelated decoding, builder, redirect,
 and terminal HTTP failures are not transport retries. Exhaustion reports the
 last attempt rather than an earlier HTTP response. Non-idempotent SDK requests
 require a non-empty idempotency key actually present in the request headers or
 explicit force-retry; an eligibility flag alone does not authorize a retry.
+
+## Troubleshooting
+
+### Debug Mode
+
+```bash
+RUST_LOG=debug aperture api my-api users list
+```
+
+### Dry Run
+
+Preview requests without executing:
+
+```bash
+aperture api my-api --dry-run users create --name "Test"
+```
+
+### Validate Spec
+
+Re-add with strict mode to check for issues:
+
+```bash
+aperture config add --strict my-api ./openapi.yaml
+```
+
+### Clear and Reinitialize
+
+```bash
+# Clear cache for specific API
+aperture config clear-cache my-api
+
+# Reinitialize all cached specs
+aperture config reinit --all
+
+# Reinitialize specific spec
+aperture config reinit my-api
+```
+
+A cache-format mismatch after an Aperture upgrade is intentional: older transformed
+spec caches may not contain every response variant needed for safe execution. Run
+`aperture config reinit my-api` (or `--all`) to regenerate them from the stored source
+spec. Aperture rejects the old cache and does not modify it during ordinary API calls.
