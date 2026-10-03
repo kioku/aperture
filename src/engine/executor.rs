@@ -257,6 +257,45 @@ fn env_proxy_diagnostics() -> Option<ProxyDiagnostics> {
     })
 }
 
+/// Proxy credentials can select an account even when the origin is anonymous.
+/// Conservatively bypass caching for the selected authenticated proxy setup,
+/// including destinations excluded by `NO_PROXY`; never persist proxy identity.
+fn proxy_requires_cache_bypass(ctx: &crate::invocation::ExecutionContext) -> bool {
+    match &ctx.proxy_override {
+        ProxyOverride::Disable => false,
+        ProxyOverride::Use(url) => proxy_url_has_credentials(url),
+        ProxyOverride::Default => default_proxy_has_credentials(ctx.global_config.as_ref()),
+    }
+}
+
+fn proxy_url_has_credentials(url: &str) -> bool {
+    reqwest::Url::parse(url).is_ok_and(|url| !url.username().is_empty() || url.password().is_some())
+}
+
+fn default_proxy_has_credentials(config: Option<&GlobalConfig>) -> bool {
+    let environment: Vec<String> = [
+        ["HTTP_PROXY", "http_proxy"],
+        ["HTTPS_PROXY", "https_proxy"],
+        ["ALL_PROXY", "all_proxy"],
+    ]
+    .iter()
+    .filter_map(|names| first_env_value(names))
+    .collect();
+    if !environment.is_empty() {
+        return environment.iter().any(|url| proxy_url_has_credentials(url));
+    }
+    let Some(proxy) = config.map(|config| &config.proxy) else {
+        return false;
+    };
+    has_config_proxy(proxy)
+        && (non_empty(proxy.username.as_deref()).is_some()
+            || non_empty(proxy.password_env.as_deref()).is_some()
+            || [proxy.http.as_deref(), proxy.https.as_deref()]
+                .into_iter()
+                .flatten()
+                .any(proxy_url_has_credentials))
+}
+
 fn first_env_value(names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| {
         std::env::var(name)
@@ -1720,6 +1759,13 @@ fn prepare_request<'a>(
     })
 }
 
+fn execution_bypasses_cache(
+    operation: &CachedCommand,
+    ctx: &crate::invocation::ExecutionContext,
+) -> bool {
+    ctx.dry_run || !operation.security_requirements.is_empty() || proxy_requires_cache_bypass(ctx)
+}
+
 fn prepare_runtime_context<'a>(
     spec: &'a CachedSpec,
     request: &PreparedRequest<'a>,
@@ -1743,16 +1789,17 @@ fn prepare_runtime_context<'a>(
     }
     // Strict pagination cannot read bodies/Link headers from ordinary requests
     // that may have followed a redirect under the original URL. Partition both
-    // policies, intentionally missing legacy executor keys with no policy tag.
+    // policies. The proxy policy revision also misses entries that older
+    // executors may have populated with authenticated proxy responses.
     let cache_context = prepare_cache_context(
-        if ctx.dry_run || !operation.security_requirements.is_empty() {
+        if execution_bypasses_cache(operation, ctx) {
             None
         } else {
             ctx.cache_config.as_ref()
         },
         &spec.name,
         &format!(
-            "{}:redirects={}",
+            "{}:redirects={}:proxy-auth-bypass=v1",
             operation.operation_id, !strict_pagination
         ),
         method,
