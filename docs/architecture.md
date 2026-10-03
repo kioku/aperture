@@ -299,7 +299,7 @@ This configuration instructs Aperture to use `SENTRY_AUTH_TOKEN` for an operatio
 
 **Supported Authentication Types:**
 
-1. **API Key** (`type: apiKey`): Supports header, query, or cookie placement
+1. **API Key** (`type: apiKey`): Supports header placement. Query and cookie placement fail explicitly; automatic credential injection in those locations is not supported.
 2. **HTTP Bearer** (`type: http`, `scheme: bearer`): Standard Bearer token authentication
 3. **HTTP Basic** (`type: http`, `scheme: basic`): Basic authentication with base64 encoding
 4. **Custom HTTP Schemes** (`type: http`, `scheme: <custom>`): Any scheme not explicitly rejected (e.g., Token, DSN, ApiKey)

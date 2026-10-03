@@ -1754,12 +1754,9 @@ fn security_group_unavailable(
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<Option<Error>, Error> {
+    validate_security_group(group, spec)?;
     for name in group {
-        let Some(scheme) = spec.security_schemes.get(name) else {
-            return Err(Error::validation_error(format!(
-                "Unknown security scheme '{name}'"
-            )));
-        };
+        let scheme = &spec.security_schemes[name];
         let env_name = authentication_env_name(scheme, api_name, global_config);
         let Some(env_name) = env_name else {
             return Ok(Some(Error::validation_error(format!(
@@ -1775,6 +1772,49 @@ fn security_group_unavailable(
         }
     }
     Ok(None)
+}
+
+/// Reject groups we cannot apply completely before checking credentials. Two
+/// schemes targeting the same header cannot both be satisfied by overwriting it.
+fn validate_security_group(group: &[String], spec: &CachedSpec) -> Result<(), Error> {
+    let mut destinations = std::collections::HashSet::new();
+    for name in group {
+        let scheme = spec
+            .security_schemes
+            .get(name)
+            .ok_or_else(|| Error::validation_error(format!("Unknown security scheme '{name}'")))?;
+        let destination = security_header_destination(scheme)?;
+        if !destinations.insert(destination) {
+            return Err(Error::validation_error(
+                "Security group contains conflicting authentication headers",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn security_header_destination(scheme: &CachedSecurityScheme) -> Result<HeaderName, Error> {
+    match scheme.scheme_type.as_str() {
+        constants::AUTH_SCHEME_APIKEY => {
+            if scheme.location.as_deref() != Some("header") {
+                return Err(Error::unsupported_security_scheme("apiKey outside headers"));
+            }
+            let name = scheme.parameter_name.as_deref().ok_or_else(|| {
+                Error::validation_error("API key security scheme has no header name")
+            })?;
+            HeaderName::from_str(name)
+                .map_err(|error| Error::invalid_header_name(name, error.to_string()))
+        }
+        "http" => {
+            if scheme.scheme.as_deref().is_none_or(str::is_empty) {
+                return Err(Error::validation_error(
+                    "HTTP security scheme has no authentication scheme",
+                ));
+            }
+            Ok(HeaderName::from_static("authorization"))
+        }
+        other => Err(Error::unsupported_security_scheme(other)),
+    }
 }
 
 /// Configured secrets take precedence over specification extensions.
@@ -2053,6 +2093,35 @@ mod tests {
         apply_security_headers(&mut headers, &spec, &operation, "security", None).unwrap();
         assert!(headers.contains_key("X-Available"));
         assert!(headers.contains_key("X-Second"));
+    }
+
+    #[test]
+    fn security_rejects_unapplied_or_conflicting_credentials() {
+        for location in ["query", "cookie"] {
+            let mut spec = security_test_spec();
+            spec.security_schemes.get_mut("available").unwrap().location = Some(location.into());
+            let mut headers = HeaderMap::new();
+            assert!(apply_security_headers(
+                &mut headers,
+                &spec,
+                &spec.commands[0],
+                "security",
+                None
+            )
+            .is_err());
+            assert!(headers.is_empty());
+        }
+        let mut spec = security_test_spec();
+        spec.security_schemes
+            .get_mut("second")
+            .unwrap()
+            .parameter_name = Some("x-available".into());
+        let mut operation = spec.commands[0].clone();
+        operation.security_requirements = vec![vec!["available".into(), "second".into()]];
+        assert!(
+            apply_security_headers(&mut HeaderMap::new(), &spec, &operation, "security", None)
+                .is_err()
+        );
     }
 
     #[test]

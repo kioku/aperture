@@ -5,12 +5,61 @@ use openapiv3::OpenAPI;
 fn preprocess_for_compatibility(content: &str) -> Result<serde_json::Value, Error> {
     let mut value: serde_json::Value = if content.trim_start().starts_with('{') {
         serde_json::from_str(content)
+            .or_else(|json_error| {
+                // YAML flow mappings also begin with `{`; retain the JSON-first
+                // fallback without rewriting their source or payloads.
+                parse_yaml_value(content).map_err(|_| json_error)
+            })
             .map_err(|error| Error::serialization_error(error.to_string()))?
     } else {
-        serde_yaml::from_str(content)?
+        parse_yaml_value(content)?
     };
     super::normalization::normalize_document(&mut value);
     Ok(value)
+}
+
+/// Use YAML's own mapping decoder so duplicate-key rejection does not depend on
+/// whether optional dependencies enable `serde_json`'s preserve-order feature.
+fn parse_yaml_value(content: &str) -> Result<serde_json::Value, Error> {
+    let value: serde_yaml::Value = serde_yaml::from_str(content)?;
+    validate_yaml_numbers(&value)?;
+    serde_json::to_value(value).map_err(|error| Error::serialization_error(error.to_string()))
+}
+
+/// Reject numbers JSON cannot represent before serialization can turn them into
+/// null. Mapping serialization retains YAML's numeric response-code keys.
+fn validate_yaml_numbers(value: &serde_yaml::Value) -> Result<(), serde_yaml::Error> {
+    match value {
+        serde_yaml::Value::Number(number) => validate_yaml_number(number),
+        serde_yaml::Value::Sequence(values) => validate_yaml_sequence(values),
+        serde_yaml::Value::Mapping(values) => validate_yaml_mapping(values),
+        serde_yaml::Value::Tagged(value) => validate_yaml_numbers(&value.value),
+        _ => Ok(()),
+    }
+}
+
+fn validate_yaml_number(number: &serde_yaml::Number) -> Result<(), serde_yaml::Error> {
+    if number.as_f64().is_some_and(|number| !number.is_finite()) {
+        return Err(serde::de::Error::custom(
+            "Non-finite YAML number is not a valid JSON value",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_yaml_sequence(values: &[serde_yaml::Value]) -> Result<(), serde_yaml::Error> {
+    for value in values {
+        validate_yaml_numbers(value)?;
+    }
+    Ok(())
+}
+
+fn validate_yaml_mapping(values: &serde_yaml::Mapping) -> Result<(), serde_yaml::Error> {
+    for (key, value) in values {
+        validate_yaml_numbers(key)?;
+        validate_yaml_numbers(value)?;
+    }
+    Ok(())
 }
 
 /// Parses `OpenAPI` content, supporting both 3.0.x (directly) and 3.1.x (via oas3 fallback).
@@ -334,6 +383,94 @@ paths: {}
                     ["application/json"]["example"],
                 payload
             );
+        }
+    }
+
+    #[test]
+    fn flow_yaml_mapping_keeps_yaml_fallback() {
+        let input = "{openapi: 3.0.3, info: {title: Flow, version: '1'}, paths: {}}";
+        assert_eq!(parse_openapi(input).unwrap().info.title, "Flow");
+    }
+
+    #[test]
+    fn adversarial_structural_inputs() {
+        for input in ["", "  ", "{", "openapi: [", "null", "[]",
+            "openapi: 3.0.3\ninfo: {title: Sweep, version: '1'}\npaths: {}\nx-payload: {value: .nan}",
+            "openapi: 3.0.3\ninfo: {title: Sweep, version: '1'}\npaths: {}\nx-payload: {value: .inf}"] {
+            assert!(parse_openapi(input).is_err(), "accepted {input:?}");
+        }
+        let base = serde_json::json!({"openapi":"3.0.3", "info":{"title":"Sweep", "version":"1"},
+            "paths":{"/test":{"get":{"responses":{},"deprecated":2}}}});
+        for input in [base.to_string(), serde_yaml::to_string(&base).unwrap()] {
+            assert!(parse_openapi(&input).is_err());
+        }
+        let duplicate =
+            "openapi: 3.0.3\nopenapi: 3.1.0\ninfo: {title: Sweep, version: '1'}\npaths: {}";
+        assert!(parse_openapi(duplicate).is_err());
+        let json_duplicate = r#"{"openapi":"3.0.1","openapi":"3.0.3","info":{"title":"Sweep","version":"1"},"paths":{},"unknown":{"deprecated":2}}"#;
+        assert_eq!(parse_openapi(json_duplicate).unwrap().openapi, "3.0.3");
+        let numeric_response_key = "openapi: 3.0.3\ninfo: {title: Sweep, version: '1'}\npaths: {/test: {get: {responses: {200: {description: ok}}}}}";
+        assert!(parse_openapi(numeric_response_key).is_ok());
+    }
+
+    #[test]
+    fn schema_traversal_preserves_data_and_boolean_schemas() {
+        let payload = serde_json::json!({"required":1,"nested":{"deprecated":0,"nullable":1}});
+        let leaf = serde_json::json!({"deprecated":1,"readOnly":0,"const":payload,
+            "enum":[payload],"default":payload,"examples":[payload],"x-deep":payload});
+        let schema = serde_json::json!({"properties":{"x-field":leaf},"allOf":[leaf],
+            "anyOf":[leaf],"oneOf":[leaf],"additionalProperties":leaf,"not":leaf,
+            "$defs":{"Leaf":leaf},"patternProperties":{".*":leaf},"dependentSchemas":{"field":leaf},
+            "if":leaf,"then":leaf,"else":leaf,"contains":leaf,"propertyNames":leaf,
+            "unevaluatedProperties":false,"unevaluatedItems":true,"prefixItems":[leaf,false],
+            "items":true,"required":["field"],"$ref":"#/components/schemas/Other"});
+        let input = serde_json::json!({"openapi":"3.1.0","components":{"schemas":{"Root":schema}}});
+        for input in [input.to_string(), serde_yaml::to_string(&input).unwrap()] {
+            let normalized = preprocess_for_compatibility(&input).unwrap();
+            let root = &normalized["components"]["schemas"]["Root"];
+            for child in [
+                &root["properties"]["x-field"],
+                &root["allOf"][0],
+                &root["anyOf"][0],
+                &root["oneOf"][0],
+                &root["additionalProperties"],
+                &root["not"],
+                &root["$defs"]["Leaf"],
+                &root["patternProperties"][".*"],
+                &root["dependentSchemas"]["field"],
+                &root["if"],
+                &root["then"],
+                &root["else"],
+                &root["contains"],
+                &root["propertyNames"],
+                &root["prefixItems"][0],
+            ] {
+                assert_eq!(child["deprecated"], true);
+                assert_eq!(child["readOnly"], false);
+                for key in ["const", "default", "x-deep"] {
+                    assert_eq!(child[key], payload);
+                }
+                assert_eq!(child["enum"][0], payload);
+                assert_eq!(child["examples"][0], payload);
+            }
+            assert_eq!(root["items"], true);
+            assert_eq!(root["unevaluatedProperties"], false);
+            assert_eq!(root["prefixItems"][1], false);
+            assert_eq!(root["required"], serde_json::json!(["field"]));
+        }
+    }
+
+    #[test]
+    fn x_prefixed_callback_names_are_not_extensions() {
+        let input = serde_json::json!({"openapi":"3.0.3", "components":{"callbacks":{
+            "x-callback":{"{$request.body#/url}":{"post":{"deprecated":1,"responses":{}}},
+                "x-payload":{"deprecated":1}}
+        }}});
+        for input in [input.to_string(), serde_yaml::to_string(&input).unwrap()] {
+            let value = preprocess_for_compatibility(&input).unwrap();
+            let callback = &value["components"]["callbacks"]["x-callback"];
+            assert_eq!(callback["{$request.body#/url}"]["post"]["deprecated"], true);
+            assert_eq!(callback["x-payload"]["deprecated"], 1);
         }
     }
 

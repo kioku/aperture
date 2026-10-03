@@ -212,3 +212,56 @@ fn test_load_cached_spec_version_mismatch() {
         _ => panic!("Expected CacheVersionMismatch error, got: {result:?}"),
     }
 }
+
+#[test]
+fn cache_adversarial_layouts() {
+    let cache = TempDir::new().unwrap();
+    let mut spec = create_test_cached_spec();
+    let current = postcard::to_allocvec(&spec).unwrap();
+    fs::write(cache.path().join("current.bin"), &current).unwrap();
+    assert_eq!(load_cached_spec(cache.path(), "current").unwrap(), spec);
+    for (name, bytes) in [
+        ("empty", vec![]),
+        ("truncated", current[..current.len() / 2].to_vec()),
+        ("invalid", vec![255; 10]),
+    ] {
+        fs::write(cache.path().join(format!("{name}.bin")), bytes).unwrap();
+        assert!(load_cached_spec(cache.path(), name)
+            .unwrap_err()
+            .to_string()
+            .contains("corrupt"));
+    }
+    for version in [7, 9] {
+        spec.cache_format_version = version;
+        fs::write(
+            cache.path().join("version.bin"),
+            postcard::to_allocvec(&spec).unwrap(),
+        )
+        .unwrap();
+        assert!(load_cached_spec(cache.path(), "version")
+            .unwrap_err()
+            .to_string()
+            .contains("version"));
+    }
+}
+
+#[test]
+fn metadata_does_not_override_embedded_cache_version() {
+    let cache = TempDir::new().unwrap();
+    let metadata =
+        aperture_cli::cache::metadata::CacheMetadataManager::new(&aperture_cli::fs::OsFileSystem);
+    metadata
+        .update_spec_metadata(cache.path(), "mixed", 0)
+        .unwrap();
+    let mut spec = create_test_cached_spec();
+    spec.cache_format_version = 9;
+    fs::write(
+        cache.path().join("mixed.bin"),
+        postcard::to_allocvec(&spec).unwrap(),
+    )
+    .unwrap();
+    assert!(load_cached_spec(cache.path(), "mixed")
+        .unwrap_err()
+        .to_string()
+        .contains("version"));
+}

@@ -13,7 +13,7 @@ Aperture enforces strict separation between configuration and secrets. API speci
 
 ### API Key
 
-API keys sent in headers, query parameters, or cookies.
+API keys are sent in headers. Query and cookie security schemes are not injected automatically and fail explicitly rather than sending an unauthenticated request.
 
 **OpenAPI spec:**
 
@@ -22,7 +22,7 @@ components:
   securitySchemes:
     apiKey:
       type: apiKey
-      in: header           # or: query, cookie
+      in: header
       name: X-API-Key
       x-aperture-secret:
         source: env

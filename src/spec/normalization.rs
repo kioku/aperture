@@ -172,10 +172,10 @@ fn callbacks(value: &mut Value, version: bool) {
     let Some(callbacks) = value.get_mut("callbacks").and_then(Value::as_object_mut) else {
         return;
     };
-    for (name, callback) in callbacks {
-        if !name.starts_with("x-") {
-            callback_paths(callback, version);
-        }
+    // Callback names are arbitrary, including x-prefixed names. Extensions
+    // inside Callback Objects are excluded by callback_paths itself.
+    for callback in callbacks.values_mut() {
+        callback_paths(callback, version);
     }
 }
 

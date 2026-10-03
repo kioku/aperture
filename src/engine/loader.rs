@@ -37,8 +37,8 @@ pub fn load_cached_spec<P: AsRef<Path>>(
     // Check if spec exists and version is compatible
     let spec = match metadata_manager.check_spec_version(&cache_dir, spec_name) {
         Ok(true) => {
-            // Version is compatible, load spec directly (no version check needed)
-            load_cached_spec_without_version_check(&cache_dir, spec_name)?
+            // Metadata is advisory: the binary may come from a different writer.
+            load_cached_spec_from_metadata(&cache_dir, spec_name)?
         }
         Ok(false) => {
             // Version mismatch or spec not in metadata, fall back to legacy method
@@ -119,8 +119,8 @@ fn check_spec_file_freshness<P: AsRef<Path>>(
     Ok(())
 }
 
-/// Load cached spec without version checking (optimized path)
-fn load_cached_spec_without_version_check<P: AsRef<Path>>(
+/// Load a metadata-indexed cache, validating its own embedded format version.
+fn load_cached_spec_from_metadata<P: AsRef<Path>>(
     cache_dir: P,
     spec_name: &str,
 ) -> Result<CachedSpec, Error> {
@@ -134,8 +134,7 @@ fn load_cached_spec_without_version_check<P: AsRef<Path>>(
 
     let cache_data = fs::read(&cache_path)
         .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
-    postcard::from_bytes(&cache_data)
-        .map_err(|e| Error::cached_spec_corrupted(spec_name, e.to_string()))
+    decode_cached_spec_with_version(&cache_data, spec_name)
 }
 
 /// Load cached spec with embedded version checking (legacy/fallback path)

@@ -464,7 +464,7 @@ impl DocumentationGenerator {
     ) {
         if !command.security_requirements.is_empty() {
             writeln!(help, "## {}\n", style.heading("Authentication")).ok();
-            help.push_str("This operation requires authentication. Alternatives (schemes within each alternative are required together):\n\n");
+            help.push_str("Security alternatives (schemes within each alternative are required together; anonymous permits unauthenticated access):\n\n");
             for group in &command.security_requirements {
                 let names = if group.is_empty() {
                     "anonymous".to_string()
