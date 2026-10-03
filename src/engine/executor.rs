@@ -1808,31 +1808,32 @@ fn format_jaq_results<E: std::fmt::Display>(
 ) -> Result<String, Error> {
     match results {
         Ok(vals) if vals.is_empty() => Ok(constants::NULL_VALUE.to_string()),
-        Ok(vals) if vals.len() == 1 => {
-            let json_val: Value = serde_json::from_str(&vals[0].to_string()).map_err(|e| {
-                Error::serialization_error(format!("Failed to convert result: {e}"))
-            })?;
-            serde_json::to_string_pretty(&json_val)
-                .map_err(|e| Error::serialization_error(format!("Failed to serialize result: {e}")))
-        }
-        Ok(vals) => {
-            let json_vals: Vec<Value> = vals
-                .into_iter()
-                .map(|val| serde_json::from_str(&val.to_string()))
-                .collect::<Result<_, _>>()
-                .map_err(|e| {
-                    Error::serialization_error(format!("Failed to convert results: {e}"))
-                })?;
-            let array = Value::Array(json_vals);
-            serde_json::to_string_pretty(&array).map_err(|e| {
-                Error::serialization_error(format!("Failed to serialize results: {e}"))
-            })
-        }
+        Ok(vals) if vals.len() == 1 => format_single_jaq_result(&vals[0]),
+        Ok(vals) => format_multiple_jaq_results(vals),
         Err(e) => Err(Error::jq_filter_error(
             format!("{filter:?}"),
             format!("Filter execution error: {e}"),
         )),
     }
+}
+
+#[cfg(feature = "jq")]
+fn format_single_jaq_result(val: &Val) -> Result<String, Error> {
+    let json_val: Value = serde_json::from_str(&val.to_string())
+        .map_err(|e| Error::serialization_error(format!("Failed to convert result: {e}")))?;
+    serde_json::to_string_pretty(&json_val)
+        .map_err(|e| Error::serialization_error(format!("Failed to serialize result: {e}")))
+}
+
+#[cfg(feature = "jq")]
+fn format_multiple_jaq_results(vals: Vec<Val>) -> Result<String, Error> {
+    let json_vals: Vec<Value> = vals
+        .into_iter()
+        .map(|val| serde_json::from_str(&val.to_string()))
+        .collect::<Result<_, _>>()
+        .map_err(|e| Error::serialization_error(format!("Failed to convert results: {e}")))?;
+    serde_json::to_string_pretty(&Value::Array(json_vals))
+        .map_err(|e| Error::serialization_error(format!("Failed to serialize results: {e}")))
 }
 
 #[cfg(not(feature = "jq"))]
