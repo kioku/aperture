@@ -427,7 +427,11 @@ fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyB
         });
     }
     let client = builder
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(
+            ctx.global_config
+                .as_ref()
+                .map_or(30, |config| config.default_timeout_secs),
+        ))
         .build()
         .map_err(|_| {
             Error::request_failed(

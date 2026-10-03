@@ -315,7 +315,7 @@ pub enum SettingValue {
 
 /// Maximum allowed timeout value (1 year in seconds).
 /// This prevents overflow when converting to i64 and catches obviously wrong values.
-const MAX_TIMEOUT_SECS: u64 = 365 * 24 * 60 * 60;
+pub(crate) const MAX_TIMEOUT_SECS: u64 = 365 * 24 * 60 * 60;
 
 /// Maximum retry attempts (reasonable upper bound).
 const MAX_RETRY_ATTEMPTS: u64 = 10;

@@ -19,7 +19,7 @@ Thank you for your interest in contributing to Aperture! This document provides 
 
 ### Prerequisites
 
-- Rust 1.70.0 or later
+- Rust 1.91.0 or later (MSRV; CI explicitly checks the locked default, no-default, and all-feature builds)
 - Git
 
 ### Local Development
@@ -216,3 +216,9 @@ By contributing to Aperture, you agree that your contributions will be licensed 
 ---
 
 Thank you for contributing to Aperture!
+
+The current Rust 1.91 minimum is required by standard-library APIs used by the
+source (`Duration::from_mins`/`from_hours`); Rust 1.90 rejects those constructors
+as unstable. The MSRV job uses explicit `cargo +1.91.0` commands so the stable
+`rust-toolchain.toml` cannot silently substitute a newer compiler. All checks use
+`--locked` and include test targets, default/no-default features, and all features.
