@@ -549,3 +549,16 @@ A cache-format mismatch after an Aperture upgrade is intentional: older transfor
 spec caches may not contain every response variant needed for safe execution. Run
 `aperture config reinit my-api` (or `--all`) to regenerate them from the stored source
 spec. Aperture rejects the old cache and does not modify it during ordinary API calls.
+
+### Pagination completeness and next links
+
+Automatic pagination follows both the path and query of `Link: ...; rel="next"`
+URLs, including relative links resolved against the current page. Next links
+must retain the original scheme, host, and effective port, and must not contain
+URL credentials or fragments. Operation authentication and headers are retained
+only for those same-origin requests; cross-origin links return an error before
+sending a request.
+
+Repeated page URLs/cursors and the 1,000-page safety cap return an incomplete
+traversal error when more data remains. Already emitted NDJSON is partial output.
+A closed output pipe stops pagination without fetching another page.

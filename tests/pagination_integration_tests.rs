@@ -49,6 +49,7 @@ const fn base_ctx() -> ExecutionContext {
 
 fn base_call(query_params: HashMap<String, String>) -> OperationCall {
     OperationCall {
+        pagination_url: None,
         operation_id: "listItems".to_string(),
         path_params: HashMap::new(),
         query_params,
@@ -256,7 +257,7 @@ async fn test_offset_pagination_stops_on_empty_page() {
 async fn test_link_header_pagination_collects_all_pages() {
     let server = MockServer::start().await;
     let base = server.uri();
-    let page2_url = format!("{base}/items?page=2");
+    let page2_url = format!("{base}/items-next?page=2&tag=a%2Bb&tag=c");
     let link_header = format!(r#"<{page2_url}>; rel="next", <{base}/items?page=5>; rel="last""#);
 
     // Page 1: responds with Link header pointing to page 2
@@ -273,7 +274,7 @@ async fn test_link_header_pagination_collects_all_pages() {
 
     // Page 2: no Link header — last page
     Mock::given(method("GET"))
-        .and(path("/items"))
+        .and(path("/items-next"))
         .and(query_param("page", "2"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([{"id": 3}])))
         .up_to_n_times(1)
@@ -300,6 +301,15 @@ async fn test_link_header_pagination_collects_all_pages() {
     let items = parse_ndjson(&buf);
     assert_eq!(items[0]["id"], 1);
     assert_eq!(items[2]["id"], 3);
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests[1].url.path(), "/items-next");
+    let tags: Vec<_> = requests[1]
+        .url
+        .query_pairs()
+        .filter(|(key, _)| key == "tag")
+        .map(|(_, value)| value.into_owned())
+        .collect();
+    assert_eq!(tags, vec!["a+b", "c"]);
 }
 
 // ── No-strategy fallback ─────────────────────────────────────────────────
@@ -335,5 +345,187 @@ async fn test_no_strategy_runs_once() {
     assert_eq!(count, 2, "should have output 2 items from the single page");
 
     // Only one request should have been made
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+fn strategy_info(strategy: PaginationStrategy) -> PaginationInfo {
+    PaginationInfo {
+        strategy,
+        cursor_field: Some("next_cursor".into()),
+        cursor_param: Some("cursor".into()),
+        page_param: None,
+        limit_param: None,
+    }
+}
+
+#[tokio::test]
+async fn cross_origin_links_are_rejected_before_request() {
+    let server = MockServer::start().await;
+    let other = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("link", format!("<{}/stolen>; rel=next", other.uri()))
+                .set_body_json(serde_json::json!([1])),
+        )
+        .mount(&server)
+        .await;
+    let spec =
+        make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::LinkHeader));
+    let error = execute_paginated(
+        &spec,
+        base_call(HashMap::new()),
+        base_ctx(),
+        &mut Vec::new(),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("same-origin"));
+    assert!(other.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn repeated_cursor_reports_incomplete_traversal() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"data": [1], "next_cursor": "again"})),
+        )
+        .mount(&server)
+        .await;
+    let spec = make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::Cursor));
+    let error = execute_paginated(
+        &spec,
+        base_call(HashMap::new()),
+        base_ctx(),
+        &mut Vec::new(),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("loop"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn repeated_link_reports_incomplete_traversal() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("link", "</items>; rel=next")
+                .set_body_json(serde_json::json!([1])),
+        )
+        .mount(&server)
+        .await;
+    let spec =
+        make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::LinkHeader));
+    let error = execute_paginated(
+        &spec,
+        base_call(HashMap::new()),
+        base_ctx(),
+        &mut Vec::new(),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("loop"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn full_page_cap_reports_incomplete_traversal() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([1])))
+        .mount(&server)
+        .await;
+    let spec = make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::Offset));
+    let call = base_call(HashMap::from([("limit".into(), "1".into())]));
+    let error = execute_paginated(&spec, call, base_ctx(), &mut Vec::new())
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("cap"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1000);
+}
+
+struct ClosedOutput;
+impl std::io::Write for ClosedOutput {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::ErrorKind::BrokenPipe.into())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn broken_pipe_stops_before_next_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"data": [1], "next_cursor": "again"})),
+        )
+        .mount(&server)
+        .await;
+    let spec = make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::Cursor));
+    execute_paginated(
+        &spec,
+        base_call(HashMap::new()),
+        base_ctx(),
+        &mut ClosedOutput,
+    )
+    .await
+    .unwrap();
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn relative_link_without_query_retains_same_origin_headers() {
+    let server = MockServer::start().await;
+    Mock::given(path("/items"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("link", "<items-next>; rel=next")
+                .set_body_json(serde_json::json!([1])),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(path("/items-next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([2])))
+        .mount(&server)
+        .await;
+    let spec =
+        make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::LinkHeader));
+    let mut call = base_call(HashMap::new());
+    call.custom_headers
+        .push("Authorization: Bearer synthetic-pagination-test".into());
+    let count = execute_paginated(&spec, call, base_ctx(), &mut Vec::new())
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests[1].url.path(), "/items-next");
+    assert_eq!(
+        requests[1].headers.get("authorization").unwrap(),
+        "Bearer synthetic-pagination-test"
+    );
+}
+
+#[tokio::test]
+async fn buffered_broken_pipe_stops_before_next_request() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"data": [1], "next_cursor": "again"})),
+        )
+        .mount(&server)
+        .await;
+    let spec = make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::Cursor));
+    let mut output = std::io::BufWriter::new(ClosedOutput);
+    execute_paginated(&spec, base_call(HashMap::new()), base_ctx(), &mut output)
+        .await
+        .unwrap();
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }

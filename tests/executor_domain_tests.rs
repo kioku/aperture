@@ -62,6 +62,7 @@ fn user_by_id_call(id: &str) -> OperationCall {
     path_params.insert("id".to_string(), id.to_string());
 
     OperationCall {
+        pagination_url: None,
         operation_id: "getUserById".to_string(),
         path_params,
         query_params: HashMap::new(),
@@ -73,6 +74,7 @@ fn user_by_id_call(id: &str) -> OperationCall {
 
 fn body_call(body: RequestBody) -> OperationCall {
     OperationCall {
+        pagination_url: None,
         operation_id: "upload".to_string(),
         path_params: HashMap::new(),
         query_params: HashMap::new(),
@@ -296,4 +298,131 @@ async fn execute_returns_cached_result_on_repeat_call() {
         }
         _ => panic!("Expected Cached result on second call"),
     }
+}
+
+#[tokio::test]
+async fn path_and_query_parameters_are_observed_as_data() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .mount(&server)
+        .await;
+    let mut spec = test_spec();
+    spec.base_url = Some(server.uri());
+    spec.servers = vec![server.uri()];
+    let mut call = user_by_id_call("a/b?#% space雪");
+    call.query_params
+        .insert("key&=?雪".into(), "value+& #雪".into());
+    execute(&spec, call, ExecutionContext::default())
+        .await
+        .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    let url = &requests[0].url;
+    assert_eq!(url.path(), "/users/a%2Fb%3F%23%25%20space%E9%9B%AA");
+    assert_eq!(url.fragment(), None);
+    assert_eq!(
+        url.query_pairs().collect::<Vec<_>>(),
+        vec![("key&=?雪".into(), "value+& #雪".into())]
+    );
+}
+
+fn accept_before_deadline(listener: &std::net::TcpListener) -> std::net::TcpStream {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => return stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "missing retry attempt"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("accept failed: {error}"),
+        }
+    }
+}
+
+/// Each accepted connection is a fresh attempt: unsuccessful attempts close
+/// before sending headers, reproducing a transient transport failure.
+fn disconnect_server(attempts: usize, succeed: bool) -> (String, std::thread::JoinHandle<usize>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let worker = std::thread::spawn(move || {
+        for attempt in 0..attempts {
+            let mut stream = accept_before_deadline(&listener);
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 4096];
+            // Any request bytes establish that this connection is an attempt.
+            assert!(stream.read(&mut request).unwrap() > 0);
+            if succeed && attempt + 1 == attempts {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    )
+                    .unwrap();
+            }
+        }
+        attempts
+    });
+    (format!("http://{address}"), worker)
+}
+
+async fn run_disconnect_request(
+    attempts: usize,
+    succeed: bool,
+    method: &str,
+) -> Result<ExecutionResult, aperture_cli::error::Error> {
+    let (url, worker) = disconnect_server(attempts, succeed);
+    let mut spec = test_spec();
+    spec.base_url = Some(url.clone());
+    spec.servers = vec![url];
+    spec.commands[0].method = method.into();
+    let ctx = ExecutionContext {
+        retry_context: Some(aperture_cli::engine::executor::RetryContext {
+            max_attempts: 3,
+            initial_delay_ms: 10,
+            max_delay_ms: 10,
+            ..Default::default()
+        }),
+        proxy_override: aperture_cli::invocation::ProxyOverride::Disable,
+        ..Default::default()
+    };
+    let start = std::time::Instant::now();
+    let result = execute(&spec, user_by_id_call("1"), ctx).await;
+    assert!(start.elapsed() >= Duration::from_millis(10 * u64::try_from(attempts - 1).unwrap()));
+    assert_eq!(worker.join().unwrap(), attempts);
+    result
+}
+
+#[tokio::test]
+async fn transient_disconnect_retries_then_succeeds() {
+    assert!(run_disconnect_request(2, true, "GET").await.is_ok());
+}
+
+#[tokio::test]
+async fn exhausted_disconnect_retries_report_failure() {
+    let error = run_disconnect_request(3, false, "GET").await.unwrap_err();
+    assert!(error.to_string().contains('3'), "{error}");
+}
+
+#[tokio::test]
+async fn unsafe_request_does_not_retry_disconnect() {
+    assert!(run_disconnect_request(1, false, "POST").await.is_err());
+}
+
+#[tokio::test]
+async fn executor_rejects_cross_origin_pagination_override_before_dry_run() {
+    let mut call = user_by_id_call("1");
+    call.pagination_url = Some(reqwest::Url::parse("https://untrusted.example/items").unwrap());
+    let context = ExecutionContext {
+        dry_run: true,
+        ..Default::default()
+    };
+    let error = execute(&test_spec(), call, context).await.unwrap_err();
+    assert!(error.to_string().contains("same-origin"));
 }

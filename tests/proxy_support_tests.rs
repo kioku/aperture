@@ -134,6 +134,7 @@ fn test_spec(base_url: &str) -> CachedSpec {
 
 fn test_call() -> OperationCall {
     OperationCall {
+        pagination_url: None,
         operation_id: "getResource".to_string(),
         path_params: HashMap::new(),
         query_params: HashMap::new(),

@@ -387,10 +387,7 @@ async fn send_request(
     secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<HttpResponseBytes, Error> {
     let start_time = std::time::Instant::now();
-    let response = request
-        .send()
-        .await
-        .map_err(|e| Error::network_request_failed(e.to_string()))?;
+    let response = request.send().await.map_err(Error::Network)?;
     let status = response.status();
     let duration_ms = start_time.elapsed().as_millis();
     let mut response_headers_map = reqwest::header::HeaderMap::new();
@@ -402,11 +399,7 @@ async fn send_request(
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
-    let response_bytes = response
-        .bytes()
-        .await
-        .map_err(|e| Error::response_read_error(e.to_string()))?
-        .to_vec();
+    let response_bytes = response.bytes().await.map_err(Error::Network)?.to_vec();
 
     if operation.has_binary_response() {
         tracing::debug!(
@@ -729,7 +722,11 @@ async fn handle_retryable_network_error(
     operation: &CachedCommand,
     error: Error,
 ) -> RetryableNetworkError {
-    if !matches!(&error, Error::Network(_)) {
+    // Only transport-stage failures are eligible. Builder, redirect, status,
+    // and decoding errors are terminal. The caller separately enforces the
+    // idempotent-method/idempotency-key/force policy before entering this loop.
+    if !matches!(&error, Error::Network(e) if e.is_connect() || e.is_timeout() || e.is_body() || (e.is_request() && !e.is_builder() && !e.is_redirect()))
+    {
         return RetryableNetworkError::Return(error);
     }
 
@@ -1511,15 +1508,7 @@ fn prepare_request<'a>(
     ctx: &'a crate::invocation::ExecutionContext,
 ) -> Result<PreparedRequest<'a>, Error> {
     let operation = find_validated_operation(spec, &call)?;
-    let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
-    let base_url =
-        resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
-    let url = build_url_from_params(
-        &base_url,
-        &operation.path,
-        &call.path_params,
-        &call.query_params,
-    )?;
+    let url = pagination_request_url(spec, &call, ctx)?.to_string();
     let proxy_build_result = build_http_client(ctx)?;
     let mut headers = build_headers_from_params(
         spec,
@@ -1629,25 +1618,59 @@ fn build_url_from_params(
             .get(&param_name)
             .ok_or_else(|| Error::missing_path_parameter(&param_name))?;
 
-        url.replace_range(open_pos..=close_pos, value);
-        start = open_pos + value.len();
+        let encoded = urlencoding::encode(value);
+        url.replace_range(open_pos..=close_pos, &encoded);
+        start = open_pos + encoded.len();
     }
 
-    // Append query parameters
+    let mut url = reqwest::Url::parse(&url)
+        .map_err(|e| Error::validation_error(format!("Invalid request URL: {e}")))?;
     if !query_params.is_empty() {
-        let mut qs_pairs: Vec<(&String, &String)> = query_params.iter().collect();
-        qs_pairs.sort_by_key(|(k1, _)| *k1);
-
-        let qs: Vec<String> = qs_pairs
-            .into_iter()
-            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
-            .collect();
-
-        url.push('?');
-        url.push_str(&qs.join("&"));
+        let mut pairs: Vec<_> = query_params.iter().collect();
+        pairs.sort_by_key(|(key, _)| *key);
+        url.query_pairs_mut().extend_pairs(pairs);
     }
+    Ok(url.to_string())
+}
 
-    Ok(url)
+/// Resolve the effective URL without constructing a client or reading secrets.
+pub(crate) fn pagination_request_url(
+    spec: &CachedSpec,
+    call: &crate::invocation::OperationCall,
+    ctx: &crate::invocation::ExecutionContext,
+) -> Result<reqwest::Url, Error> {
+    let operation = find_operation_by_id(spec, &call.operation_id)?;
+    let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
+    let base = resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
+    let url = build_url_from_params(
+        &base,
+        &operation.path,
+        &call.path_params,
+        &call.query_params,
+    )?;
+    validate_pagination_url(&url, call.pagination_url.as_ref())
+}
+
+/// Credentials and operation headers are retained only within the original origin.
+fn validate_pagination_url(
+    original: &str,
+    target: Option<&reqwest::Url>,
+) -> Result<reqwest::Url, Error> {
+    let original = reqwest::Url::parse(original)
+        .map_err(|e| Error::validation_error(format!("Invalid request URL: {e}")))?;
+    let Some(target) = target else {
+        return Ok(original);
+    };
+    if target.origin() != original.origin()
+        || !target.username().is_empty()
+        || target.password().is_some()
+        || target.fragment().is_some()
+    {
+        return Err(Error::validation_error(
+            "Pagination next URL must be same-origin and contain no credentials or fragment",
+        ));
+    }
+    Ok(target.clone())
 }
 
 /// Builds HTTP headers from pre-extracted header parameter maps.

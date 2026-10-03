@@ -18,7 +18,7 @@ use crate::engine::executor;
 use crate::error::Error;
 use crate::invocation::{ExecutionContext, ExecutionResult, OperationCall};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Hard page cap: prevents runaway loops on pathological or misconfigured APIs.
 const MAX_PAGES: usize = 1000;
@@ -45,12 +45,14 @@ struct PaginationState {
 fn write_json_line<W: std::io::Write + ?Sized, T: serde::Serialize>(
     writer: &mut W,
     value: &T,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let line = serde_json::to_string(value)
         .map_err(|e| Error::serialization_error(format!("Failed to serialize output line: {e}")))?;
-    match writeln!(writer, "{line}") {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+    // Flush per item so buffered writers expose a closed consumer before the
+    // next page is fetched.
+    match writeln!(writer, "{line}").and_then(|()| writer.flush()) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(false),
         Err(e) => Err(Error::io_error(format!("Failed to write output: {e}"))),
     }
 }
@@ -83,15 +85,17 @@ async fn fetch_page_payload<W: std::io::Write + ?Sized>(
     }
 }
 
-fn emit_items<W: std::io::Write + ?Sized>(json: &Value, writer: &mut W) -> Result<usize, Error> {
+fn emit_items<W: std::io::Write + ?Sized>(
+    json: &Value,
+    writer: &mut W,
+) -> Result<(usize, bool), Error> {
     let items = extract_items(json);
-    let page_len = items.len();
-
-    for item in items {
-        write_json_line(writer, item)?;
+    for (emitted, item) in items.iter().enumerate() {
+        if !write_json_line(writer, item)? {
+            return Ok((emitted, false));
+        }
     }
-
-    Ok(page_len)
+    Ok((items.len(), true))
 }
 
 fn resolve_pagination_state(
@@ -120,6 +124,14 @@ fn resolve_pagination_state(
         .and_then(|v| v.parse().ok())
         .unwrap_or(20);
 
+    if matches!(operation.pagination.strategy, PaginationStrategy::None) {
+        tracing::warn!(
+            operation_id = %call.operation_id,
+            "No pagination metadata detected for this operation; executing once. \
+             Consider adding x-aperture-pagination to the spec."
+        );
+    }
+
     PaginationState {
         strategy: operation.pagination.strategy,
         cursor_field,
@@ -139,7 +151,7 @@ async fn process_paginated_page<W: std::io::Write + ?Sized>(
     let Some(PagePayload {
         body,
         response_headers,
-    }) = fetch_page_payload(spec, call.clone(), ctx, writer).await?
+    }) = fetch_page_payload(spec, call.clone(), ctx.clone(), writer).await?
     else {
         return Ok(None);
     };
@@ -147,12 +159,19 @@ async fn process_paginated_page<W: std::io::Write + ?Sized>(
     let json: Value = serde_json::from_str(&body)
         .map_err(|e| Error::invalid_json_body(format!("Page response is not valid JSON: {e}")))?;
 
-    let page_len = emit_items(&json, writer)?;
+    let (page_len, output_open) = emit_items(&json, writer)?;
+    if !output_open {
+        return Ok(Some((page_len, false)));
+    }
+    if matches!(state.strategy, PaginationStrategy::LinkHeader) {
+        let current = executor::pagination_request_url(spec, call, &ctx)?;
+        let has_next = advance_link_url(call, &response_headers, &current)?;
+        return Ok(Some((page_len, has_next)));
+    }
     let has_next = advance_cursor(
         state.strategy,
         call,
         &json,
-        &response_headers,
         state.cursor_field.as_ref(),
         state.cursor_param.as_ref(),
         &state.page_param,
@@ -172,7 +191,6 @@ async fn process_paginated_page<W: std::io::Write + ?Sized>(
 ///
 /// Returns an error on HTTP failure or malformed JSON. A partial result may
 /// already have been written to `writer` before the error occurs.
-#[allow(clippy::too_many_lines)]
 pub async fn execute_paginated(
     spec: &CachedSpec,
     mut call: OperationCall,
@@ -187,17 +205,11 @@ pub async fn execute_paginated(
 
     let state = resolve_pagination_state(operation, &call);
 
-    if matches!(state.strategy, PaginationStrategy::None) {
-        tracing::warn!(
-            operation_id = %call.operation_id,
-            "No pagination metadata detected for this operation; executing once. \
-             Consider adding x-aperture-pagination to the spec."
-        );
-    }
-
     let mut total_items: u64 = 0;
 
-    for _page_num in 0..MAX_PAGES {
+    let mut visited = HashSet::new();
+    for page_num in 0..MAX_PAGES {
+        record_page(spec, &call, &ctx, &mut visited)?;
         let Some((page_len, has_next)) =
             process_paginated_page(spec, &mut call, ctx.clone(), writer, &state).await?
         else {
@@ -209,9 +221,34 @@ pub async fn execute_paginated(
         if !has_next {
             break;
         }
+        check_page_cap(page_num + 1)?;
     }
 
     Ok(total_items)
+}
+
+fn check_page_cap(pages: usize) -> Result<(), Error> {
+    if pages == MAX_PAGES {
+        return Err(Error::validation_error(
+            "Pagination page cap reached with more data pending; results are incomplete",
+        ));
+    }
+    Ok(())
+}
+
+fn record_page(
+    spec: &CachedSpec,
+    call: &OperationCall,
+    ctx: &ExecutionContext,
+    visited: &mut HashSet<String>,
+) -> Result<(), Error> {
+    let url = executor::pagination_request_url(spec, call, ctx)?;
+    if !visited.insert(url.to_string()) {
+        return Err(Error::validation_error(
+            "Pagination loop detected; results are incomplete",
+        ));
+    }
+    Ok(())
 }
 
 // ── Pagination advance helpers ────────────────────────────────────────────
@@ -223,7 +260,6 @@ fn advance_cursor(
     strategy: PaginationStrategy,
     call: &mut OperationCall,
     json: &Value,
-    response_headers: &HashMap<String, String>,
     cursor_field: Option<&String>,
     cursor_param: Option<&String>,
     page_param: &str,
@@ -231,15 +267,13 @@ fn advance_cursor(
     limit: usize,
 ) -> bool {
     match strategy {
-        PaginationStrategy::None => false,
+        PaginationStrategy::None | PaginationStrategy::LinkHeader => false,
 
         PaginationStrategy::Cursor => {
             advance_cursor_strategy(call, json, cursor_field, cursor_param)
         }
 
         PaginationStrategy::Offset => advance_offset_strategy(call, page_param, page_len, limit),
-
-        PaginationStrategy::LinkHeader => advance_link_header_strategy(call, response_headers),
     }
 }
 
@@ -299,18 +333,34 @@ fn advance_offset_strategy(
     true
 }
 
-/// Advances Link-header pagination. Returns `true` if a `rel="next"` URL was
-/// found and applied.
-fn advance_link_header_strategy(
+/// Relative links resolve against the current page. Authentication remains attached
+/// only to same-origin targets; the executor repeats this check before sending.
+fn advance_link_url(
     call: &mut OperationCall,
-    response_headers: &HashMap<String, String>,
-) -> bool {
-    let link_value = response_headers
+    headers: &HashMap<String, String>,
+    current: &reqwest::Url,
+) -> Result<bool, Error> {
+    let link = headers
         .iter()
-        .find(|(k, _)| k.to_lowercase() == constants::HEADER_LINK)
-        .map_or("", |(_, v)| v.as_str());
-
-    parse_link_next(link_value).is_some_and(|next_url| apply_next_url(call, &next_url))
+        .find(|(key, _)| key.eq_ignore_ascii_case(constants::HEADER_LINK))
+        .map_or("", |(_, value)| value.as_str());
+    let Some(next) = parse_link_next(link) else {
+        return Ok(false);
+    };
+    let target = current
+        .join(&next)
+        .map_err(|e| Error::validation_error(format!("Invalid pagination next URL: {e}")))?;
+    if target.origin() != current.origin()
+        || !target.username().is_empty()
+        || target.password().is_some()
+        || target.fragment().is_some()
+    {
+        return Err(Error::validation_error(
+            "Pagination next URL must be same-origin and contain no credentials or fragment",
+        ));
+    }
+    call.pagination_url = Some(target);
+    Ok(true)
 }
 
 // ── Item extraction ──────────────────────────────────────────────────────
@@ -378,45 +428,6 @@ pub fn parse_link_next(header_value: &str) -> Option<String> {
         }
     }
     None
-}
-
-// ── URL application for LinkHeader strategy ──────────────────────────────
-
-/// Updates `call.query_params` from the query string of a fully-qualified next
-/// URL, keeping the rest of the call unchanged.
-///
-/// Returns `true` if the call was successfully updated with new parameters,
-/// `false` if the URL had no usable query string (caller should stop paginating).
-fn apply_next_url(call: &mut OperationCall, next_url: &str) -> bool {
-    let query_str = if let Some(pos) = next_url.find('?') {
-        &next_url[pos + 1..]
-    } else {
-        tracing::warn!(
-            next_url,
-            "Link next URL has no query string; stopping pagination"
-        );
-        return false;
-    };
-
-    let new_params: HashMap<String, String> = query_str
-        .split('&')
-        .filter_map(|pair| {
-            let mut parts = pair.splitn(2, '=');
-            let key = parts.next().filter(|k| !k.is_empty())?;
-            let val = parts.next().unwrap_or("");
-            Some((
-                urlencoding::decode(key).unwrap_or_default().into_owned(),
-                urlencoding::decode(val).unwrap_or_default().into_owned(),
-            ))
-        })
-        .collect();
-
-    if new_params.is_empty() {
-        return false;
-    }
-
-    call.query_params = new_params;
-    true
 }
 
 // ── Parameter detection heuristics ───────────────────────────────────────
@@ -574,7 +585,7 @@ mod tests {
     #[test]
     fn test_write_json_line_ignores_broken_pipe() {
         let mut writer = BrokenPipeWriter;
-        assert!(write_json_line(&mut writer, &serde_json::json!({"id": 1})).is_ok());
+        assert!(!write_json_line(&mut writer, &serde_json::json!({"id": 1})).unwrap());
     }
 
     #[test]
@@ -588,6 +599,7 @@ mod tests {
     #[test]
     fn test_advance_offset_strategy_increments_page_number() {
         let mut call = crate::invocation::OperationCall {
+            pagination_url: None,
             operation_id: "op".to_string(),
             path_params: HashMap::new(),
             query_params: HashMap::from([("page".to_string(), "1".to_string())]),
@@ -603,6 +615,7 @@ mod tests {
     #[test]
     fn test_advance_offset_strategy_stops_on_partial_page() {
         let mut call = crate::invocation::OperationCall {
+            pagination_url: None,
             operation_id: "op".to_string(),
             path_params: HashMap::new(),
             query_params: HashMap::from([("page".to_string(), "1".to_string())]),
@@ -617,6 +630,7 @@ mod tests {
     #[test]
     fn test_advance_offset_strategy_skip_advances_by_page_len() {
         let mut call = crate::invocation::OperationCall {
+            pagination_url: None,
             operation_id: "op".to_string(),
             path_params: HashMap::new(),
             query_params: HashMap::from([("skip".to_string(), "0".to_string())]),
@@ -636,6 +650,7 @@ mod tests {
     #[test]
     fn test_advance_offset_strategy_offset_advances_by_page_len() {
         let mut call = crate::invocation::OperationCall {
+            pagination_url: None,
             operation_id: "op".to_string(),
             path_params: HashMap::new(),
             query_params: HashMap::from([("offset".to_string(), "0".to_string())]),

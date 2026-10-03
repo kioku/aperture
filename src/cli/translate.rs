@@ -63,6 +63,7 @@ pub fn matches_to_operation_call(
         .unwrap_or_default();
 
     Ok(OperationCall {
+        pagination_url: None,
         operation_id: operation.operation_id.clone(),
         path_params,
         query_params,
