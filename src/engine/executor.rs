@@ -269,7 +269,14 @@ fn proxy_requires_cache_bypass(ctx: &crate::invocation::ExecutionContext) -> boo
 }
 
 fn proxy_url_has_credentials(url: &str) -> bool {
-    reqwest::Url::parse(url).is_ok_and(|url| !url.username().is_empty() || url.password().is_some())
+    // reqwest accepts scheme-less proxy authorities by adding http://. An
+    // opaque URL like `alice:password@host:port` parses without userinfo, so
+    // require a host before accepting the first parse for this policy check.
+    let parsed = reqwest::Url::parse(url)
+        .ok()
+        .filter(reqwest::Url::has_host)
+        .or_else(|| reqwest::Url::parse(&format!("http://{url}")).ok());
+    parsed.is_some_and(|url| !url.username().is_empty() || url.password().is_some())
 }
 
 fn default_proxy_has_credentials(config: Option<&GlobalConfig>) -> bool {
@@ -1799,7 +1806,7 @@ fn prepare_runtime_context<'a>(
         },
         &spec.name,
         &format!(
-            "{}:redirects={}:proxy-auth-bypass=v1",
+            "{}:redirects={}:proxy-auth-bypass=v2",
             operation.operation_id, !strict_pagination
         ),
         method,
@@ -2470,6 +2477,23 @@ mod tests {
             &duplicates,
             "https://example.com/items"
         ));
+    }
+
+    #[test]
+    fn proxy_credential_detection_covers_scheme_less_authorities() {
+        for value in [
+            "http://alice:synthetic@localhost:8080",
+            "alice:synthetic@localhost:8080",
+            "alice@localhost:8080",
+            ":synthetic@localhost:8080",
+            "http://:synthetic@localhost:8080",
+            "socks5://alice:synthetic@localhost:1080",
+        ] {
+            assert!(proxy_url_has_credentials(value), "{value}");
+        }
+        for value in ["http://localhost:8080", "localhost:8080", "", " "] {
+            assert!(!proxy_url_has_credentials(value), "{value}");
+        }
     }
 
     #[test]

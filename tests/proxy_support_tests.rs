@@ -637,6 +637,11 @@ async fn authenticated_proxy_no_proxy_boundary_is_conservative() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn prior_proxy_account_cache_entries_are_not_reused() {
+    assert_prior_proxy_entry_is_not_reused("getResource:redirects=true").await;
+    assert_prior_proxy_entry_is_not_reused("getResource:redirects=true:proxy-auth-bypass=v1").await;
+}
+
+async fn assert_prior_proxy_entry_is_not_reused(operation_identity: &str) {
     use aperture_cli::response_cache::{CacheKey, CachedRequestInfo, ResponseCache};
     let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let _env = EnvGuard::clear_proxy_env();
@@ -659,7 +664,7 @@ async fn prior_proxy_account_cache_entries_are_not_reused() {
     ]);
     let key = CacheKey::from_request(
         "proxy-test",
-        "getResource:redirects=true",
+        operation_identity,
         "GET",
         &url,
         &headers,
@@ -693,4 +698,77 @@ async fn prior_proxy_account_cache_entries_are_not_reused() {
         cache.get(&key).await.unwrap().unwrap().body,
         "alice-private"
     );
+}
+
+fn schemeless_proxy_context(
+    directory: &tempfile::TempDir,
+    mode: &str,
+    authority: String,
+) -> ExecutionContext {
+    let mut ctx = cache_context(directory);
+    match mode {
+        "override" => ctx.proxy_override = ProxyOverride::Use(authority),
+        "config" => {
+            ctx.global_config = Some(GlobalConfig {
+                proxy: ProxyConfig {
+                    http: Some(authority),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        }
+        name => env::set_var(name, authority),
+    }
+    ctx
+}
+
+/// reqwest accepts proxy authorities without a scheme. They must receive the
+/// same account isolation as full URLs, including embedded config credentials.
+#[tokio::test(flavor = "current_thread")]
+async fn schemeless_authenticated_proxy_accounts_never_cache() {
+    let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let _env = EnvGuard::clear_proxy_env();
+    let proxy = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(|request: &wiremock::Request| {
+            let account = request.headers.get("proxy-authorization").unwrap();
+            ResponseTemplate::new(200).set_body_string(account.to_str().unwrap())
+        })
+        .mount(&proxy)
+        .await;
+    let directory = tempfile::TempDir::new().unwrap();
+    let spec = test_spec("http://example.test");
+    for mode in [
+        "override",
+        "config",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ] {
+        for user in ["alice", "bob"] {
+            let authority = proxy
+                .uri()
+                .replace("http://", &format!("{user}:synthetic@"));
+            let ctx = schemeless_proxy_context(&directory, mode, authority);
+            for _ in 0..2 {
+                let result = execute(&spec, test_call(), ctx.clone()).await.unwrap();
+                let ExecutionResult::Success { body, .. } = result else {
+                    panic!("authenticated {mode} proxy returned a cached account");
+                };
+                assert_eq!(
+                    body,
+                    format!(
+                        "Basic {}",
+                        general_purpose::STANDARD.encode(format!("{user}:synthetic"))
+                    )
+                );
+            }
+            if !matches!(mode, "override" | "config") {
+                env::remove_var(mode);
+            }
+        }
+    }
+    assert_eq!(proxy.received_requests().await.unwrap().len(), 24);
+    assert!(!directory.path().join("responses").exists());
 }

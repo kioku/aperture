@@ -269,7 +269,7 @@ aperture api my-api --no-cache users list
 
 Response caching applies only to GET and HEAD. Unsafe methods such as POST always execute; there is no unsafe-method caching opt-in. Cached results retain status and response headers for pagination, but responses that set session cookies are not cached. Dry runs always return a request plan and never read or create the response cache.
 
-Authenticated origin requests and selected proxy configurations containing credentials bypass response-cache reads and writes, even with the legacy authenticated-cache opt-in. This conservative proxy policy also applies to destinations excluded by `NO_PROXY`; explicit `--no-proxy` disables that proxy policy. Anonymous proxy requests remain cacheable. Executor cache keys include a proxy-policy revision so older, potentially account-mixed entries are missed without deleting them. Environment proxy settings take precedence over configured proxies, and explicit CLI proxy overrides take precedence over both.
+Authenticated origin requests and selected proxy configurations containing credentials (including scheme-less proxy authorities such as `user:password@host:port`) bypass response-cache reads and writes, even with the legacy authenticated-cache opt-in. This conservative proxy policy also applies to destinations excluded by `NO_PROXY`; explicit `--no-proxy` disables that proxy policy. Anonymous proxy requests remain cacheable. Executor cache keys include a proxy-policy revision so older, potentially account-mixed entries are missed without deleting them. Environment proxy settings take precedence over configured proxies, and explicit CLI proxy overrides take precedence over both.
 
 ### Cache Management
 
