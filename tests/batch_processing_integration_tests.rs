@@ -1,7 +1,9 @@
 mod test_helpers;
 
 use aperture_cli::batch::{BatchConfig, BatchFile, BatchMetadata, BatchOperation, BatchProcessor};
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
+use aperture_cli::cache::models::{
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+};
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
 use std::collections::HashMap;
@@ -22,6 +24,7 @@ fn create_test_spec() -> CachedSpec {
                 method: constants::HTTP_METHOD_GET.to_string(),
                 path: "/users/{id}".to_string(),
                 parameters: vec![CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -841,4 +844,190 @@ async fn test_body_file_path_interpolated_in_dependent_batch() {
     assert_eq!(result.success_count, 2, "both operations should succeed");
     assert_eq!(result.failure_count, 0);
     mock_server.verify().await;
+}
+
+#[tokio::test]
+async fn zero_concurrency_is_rejected_by_sdk() {
+    let processor = BatchProcessor::new(BatchConfig {
+        max_concurrency: 0,
+        ..Default::default()
+    });
+    let result = processor
+        .execute_batch(
+            &create_test_spec(),
+            BatchFile {
+                metadata: None,
+                operations: vec![],
+            },
+            None,
+            None,
+            true,
+            &OutputFormat::Json,
+            None,
+        )
+        .await;
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("greater than zero"));
+}
+
+#[test]
+fn zero_concurrency_is_rejected_by_cli() {
+    use clap::Parser;
+    assert!(aperture_cli::cli::Cli::try_parse_from([
+        "aperture",
+        "api",
+        "test-api",
+        "--batch-concurrency",
+        "0",
+    ])
+    .is_err());
+}
+
+#[tokio::test]
+async fn configured_timeout_and_cli_override_reach_executor() {
+    use aperture_cli::cli::{translate::cli_to_execution_context, Cli};
+    use aperture_cli::config::models::GlobalConfig;
+    use aperture_cli::invocation::OperationCall;
+    use clap::Parser;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_millis(1_500)))
+        .mount(&server)
+        .await;
+    let mut spec = create_test_spec();
+    spec.base_url = Some(server.uri());
+    let config = GlobalConfig {
+        default_timeout_secs: 1,
+        ..Default::default()
+    };
+    for (extra, succeeds) in [(vec![], false), (vec!["--timeout-secs", "3"], true)] {
+        let cli =
+            Cli::try_parse_from(["aperture", "api", "test-api"].into_iter().chain(extra)).unwrap();
+        let context =
+            cli_to_execution_context(cli.execution_flags().unwrap(), Some(config.clone())).unwrap();
+        let call = OperationCall {
+            pagination_url: None,
+            operation_id: "getUserById".to_string(),
+            path_params: HashMap::from([("id".to_string(), "123".to_string())]),
+            query_params: HashMap::new(),
+            header_params: HashMap::new(),
+            body: None,
+            custom_headers: vec![],
+        };
+        let result = aperture_cli::engine::executor::execute(&spec, call, context).await;
+        assert_eq!(result.is_ok(), succeeds, "{result:?}");
+    }
+}
+
+/// Run the compiled test binary under GNU time -v with `CLI_BATCH_BENCH_OPS`
+/// set to 1, 25, 100, or 1000 to measure fixed-concurrency large-spec RSS.
+#[tokio::test]
+#[ignore = "manual fixed-concurrency RSS benchmark"]
+async fn large_spec_fixed_concurrency_memory_benchmark() {
+    let count = std::env::var("CLI_BATCH_BENCH_OPS")
+        .unwrap_or_else(|_| "100".to_string())
+        .parse::<usize>()
+        .unwrap();
+    let mut spec = create_test_spec();
+    let template = spec.commands[0].clone();
+    for index in spec.commands.len()..1_000 {
+        let mut command = template.clone();
+        command.operation_id = format!("unusedOperation{index}");
+        spec.commands.push(command);
+    }
+    let operations = (0..count)
+        .map(|_| BatchOperation {
+            args: vec![
+                "users".to_string(),
+                "get-user-by-id".to_string(),
+                "--id".to_string(),
+                "123".to_string(),
+            ],
+            ..Default::default()
+        })
+        .collect();
+    let processor = BatchProcessor::new(BatchConfig {
+        max_concurrency: 1,
+        show_progress: false,
+        suppress_output: true,
+        ..Default::default()
+    });
+    let result = processor
+        .execute_batch(
+            &spec,
+            BatchFile {
+                metadata: None,
+                operations,
+            },
+            None,
+            None,
+            true,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.success_count, count);
+}
+
+#[tokio::test]
+async fn batch_selection_does_not_treat_global_values_as_commands() {
+    let mut spec = create_test_spec();
+    let mut decoy = spec.commands[0].clone();
+    decoy.name = "json".to_string();
+    decoy.tags = vec!["json".to_string()];
+    decoy.operation_id = "users".to_string();
+    spec.commands.insert(0, decoy);
+    let processor = BatchProcessor::new(BatchConfig {
+        show_progress: false,
+        suppress_output: true,
+        ..Default::default()
+    });
+    let result = processor
+        .execute_batch(
+            &spec,
+            BatchFile {
+                metadata: None,
+                operations: vec![BatchOperation {
+                    args: ["--format", "json", "users", "get-user-by-id", "--id", "123"]
+                        .map(str::to_string)
+                        .to_vec(),
+                    ..Default::default()
+                }],
+            },
+            None,
+            None,
+            true,
+            &OutputFormat::Json,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.failure_count, 0, "{:?}", result.results);
+}
+
+#[tokio::test]
+async fn extreme_concurrency_is_rejected_without_panicking() {
+    let processor = BatchProcessor::new(BatchConfig {
+        max_concurrency: usize::MAX,
+        ..Default::default()
+    });
+    let result = processor
+        .execute_batch(
+            &create_test_spec(),
+            BatchFile {
+                metadata: None,
+                operations: vec![],
+            },
+            None,
+            None,
+            true,
+            &OutputFormat::Json,
+            None,
+        )
+        .await;
+    assert!(result.is_err());
 }

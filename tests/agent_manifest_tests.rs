@@ -9,7 +9,7 @@ use aperture_cli::agent::{
 };
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
-    CachedSecurityScheme, CachedSpec, PaginationInfo,
+    CachedSecurityScheme, CachedSpec, PaginationInfo, ParameterSerialization,
 };
 use aperture_cli::config::models::{ApiConfig, GlobalConfig};
 use aperture_cli::constants;
@@ -104,6 +104,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             path: "/users/{id}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -116,6 +117,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                     example: Some("12345".to_string()),
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "include".to_string(),
                     location: "query".to_string(),
                     required: false,
@@ -145,7 +147,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                     example: None,
                 },
             ],
-            security_requirements: vec!["bearerAuth".to_string()],
+            security_requirements: vec![vec!["bearerAuth".to_string()]],
             tags: vec!["users".to_string(), "admin".to_string()],
             deprecated: false,
             external_docs_url: Some("https://docs.example.com/users".to_string()),
@@ -179,7 +181,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                 schema: None,
                 example: None,
             }],
-            security_requirements: vec!["apiKeyAuth".to_string()],
+            security_requirements: vec![vec!["apiKeyAuth".to_string()]],
             tags: vec!["users".to_string()],
             deprecated: true,
             external_docs_url: None,
@@ -297,7 +299,7 @@ fn test_comprehensive_manifest_generation() {
         Some("Get user by ID with full details".to_string())
     );
     assert_eq!(get_user.summary, Some("Get user by ID".to_string()));
-    assert_eq!(get_user.security_requirements, vec!["bearerAuth"]);
+    assert_eq!(get_user.security_requirements, vec![vec!["bearerAuth"]]);
     assert_eq!(get_user.tags, vec!["users", "admin"]);
     assert_eq!(get_user.original_tags, vec!["users", "admin"]);
     assert!(!get_user.deprecated);
@@ -332,7 +334,7 @@ fn test_comprehensive_manifest_generation() {
 
     assert_eq!(create_user.name, "create-user");
     assert!(create_user.deprecated);
-    assert_eq!(create_user.security_requirements, vec!["apiKeyAuth"]);
+    assert_eq!(create_user.security_requirements, vec![vec!["apiKeyAuth"]]);
     assert!(create_user.request_body.is_some());
 
     let request_body = create_user.request_body.as_ref().unwrap();
@@ -590,7 +592,7 @@ fn test_manifest_from_openapi() {
         cmd.external_docs_url,
         Some("https://docs.example.com/users".to_string())
     );
-    assert_eq!(cmd.security_requirements, vec!["bearerAuth"]);
+    assert_eq!(cmd.security_requirements, vec![vec!["bearerAuth"]]);
 
     // Verify parameter metadata
     assert_eq!(cmd.parameters.len(), 1);
