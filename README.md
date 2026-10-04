@@ -233,3 +233,23 @@ cargo install aperture-cli --features "jq openapi31"
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+## Workflow skills
+
+Aperture bundles version-matched instructions and hosts user-installed Markdown workflows:
+
+```sh
+aperture skills list --json
+aperture skills get core --full
+aperture skills install ./release-workflow/
+aperture skills install '# Release workflow' --name release
+aperture skills get release --full --json
+aperture skills uninstall release
+```
+
+The generic user library defaults to `<config directory>/skills`; configure it with
+`aperture config set skills.directory workflows` (relative to the config directory).
+Imports also support files, stdin (`-`), and bounded single-document HTTP(S) URLs.
+Skills never execute hooks or grant permissions. Read the [skills guide](docs/skills.md)
+for metadata, provenance, limits, replacement/ownership safety, all discovery modes,
+and manual agent integration using the [thin discovery stub](skills/aperture/SKILL.md).

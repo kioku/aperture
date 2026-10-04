@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GlobalConfig {
+    #[serde(default)]
+    pub skills: SkillsConfig,
     #[serde(default = "default_timeout_secs_value")]
     pub default_timeout_secs: u64,
     #[serde(default)]
@@ -88,6 +90,7 @@ impl Default for RetryDefaults {
 impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
+            skills: SkillsConfig::default(),
             default_timeout_secs: 30,
             agent_defaults: AgentDefaults::default(),
             retry_defaults: RetryDefaults::default(),
@@ -179,4 +182,22 @@ pub struct ApertureSecret {
 pub enum SecretSource {
     Env,
     // Keychain, // Future option
+}
+
+/// User workflow library configuration; paths are literal, with no shell expansion.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SkillsConfig {
+    #[serde(default = "default_skills_directory")]
+    pub directory: String,
+}
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            directory: default_skills_directory(),
+        }
+    }
+}
+
+fn default_skills_directory() -> String {
+    "skills".into()
 }

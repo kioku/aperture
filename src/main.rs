@@ -254,7 +254,10 @@ async fn run_user_command(
         Commands::Overview { api, all, format } => {
             run_overview_command(manager, api.as_deref(), *all, format, output)
         }
-        Commands::BuildInfo { .. } | Commands::Completion { .. } | Commands::Complete { .. } => {
+        Commands::Skills { .. }
+        | Commands::BuildInfo { .. }
+        | Commands::Completion { .. }
+        | Commands::Complete { .. } => {
             unreachable!()
         }
         Commands::Config { .. } => unreachable!("config commands are handled separately"),
@@ -266,6 +269,9 @@ async fn run_non_config_command(
     manager: &ConfigManager<OsFileSystem>,
     output: &Output,
 ) -> Result<(), Error> {
+    if let Commands::Skills { command } = &cli.command {
+        return aperture_cli::skills::execute(manager, command.as_ref()).await;
+    }
     if let Some(result) = run_completion_command(cli) {
         return result;
     }
