@@ -50,18 +50,18 @@ identity, binary SHA-256 and exact byte counts are in [gh-233.json](gh-233.json)
 
 | Features | Operations | Selected | Before ms | After ms | Before RSS | After RSS |
 |---|---:|---|---:|---:|---:|---:|
-| Default | 10 | First | 4.18 | 3.84 | 5.24 | 5.21 |
-| Default | 10 | Last | 4.01 | 3.99 | 5.25 | 5.27 |
-| Default | 1,000 | First | 15.95 | 6.21 | 13.87 | 6.22 |
-| Default | 1,000 | Last | 15.97 | 7.67 | 14.07 | 6.07 |
-| Default | 5,000 | First | 68.57 | 17.03 | 50.17 | 11.25 |
-| Default | 5,000 | Last | 69.08 | 22.15 | 50.30 | 11.20 |
-| All | 10 | First | 3.99 | 3.85 | 5.43 | 5.55 |
-| All | 10 | Last | 4.22 | 3.91 | 5.31 | 5.41 |
-| All | 1,000 | First | 16.51 | 6.33 | 14.04 | 6.40 |
-| All | 1,000 | Last | 15.96 | 7.34 | 14.08 | 6.41 |
-| All | 5,000 | First | 65.40 | 16.35 | 50.23 | 11.37 |
-| All | 5,000 | Last | 67.94 | 22.13 | 50.32 | 11.12 |
+| Default | 10 | First | 4.18 | 3.88 | 5.24 | 5.23 |
+| Default | 10 | Last | 4.01 | 3.89 | 5.25 | 5.28 |
+| Default | 1,000 | First | 15.95 | 6.24 | 13.87 | 6.19 |
+| Default | 1,000 | Last | 15.97 | 7.19 | 14.07 | 6.24 |
+| Default | 5,000 | First | 68.57 | 16.13 | 50.17 | 11.10 |
+| Default | 5,000 | Last | 69.08 | 21.45 | 50.30 | 11.07 |
+| All | 10 | First | 3.99 | 3.92 | 5.43 | 5.46 |
+| All | 10 | Last | 4.22 | 4.10 | 5.31 | 5.38 |
+| All | 1,000 | First | 16.51 | 6.34 | 14.04 | 6.47 |
+| All | 1,000 | Last | 15.96 | 7.57 | 14.08 | 6.51 |
+| All | 5,000 | First | 65.40 | 16.24 | 50.23 | 11.31 |
+| All | 5,000 | Last | 67.94 | 21.58 | 50.32 | 11.48 |
 
 Default 5,000-operation latency improves 68–75%; peak memory improves about 78%.
 These are local warm-process observations, not cold-start, server-latency or
