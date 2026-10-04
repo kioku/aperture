@@ -258,6 +258,12 @@ impl Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Show embedded package version and source identity without loading configuration
+    BuildInfo {
+        /// Output machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate shell completion scripts
     Completion {
         /// Target shell
