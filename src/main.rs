@@ -16,19 +16,13 @@ async fn main() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let matches = parse_cli_matches();
     let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
+    if print_build_info(&cli.command) {
+        return;
+    }
     aperture_cli::cli::tracing_init::init_tracing(cli.verbosity);
     let json_errors = cli.json_errors;
 
-    let manager = std::env::var(constants::ENV_APERTURE_CONFIG_DIR).map_or_else(
-        |_| match ConfigManager::new() {
-            Ok(manager) => manager,
-            Err(e) => {
-                aperture_cli::cli::errors::print_error_with_json(&e, json_errors);
-                std::process::exit(1);
-            }
-        },
-        |config_dir| ConfigManager::with_fs(OsFileSystem, PathBuf::from(config_dir)),
-    );
+    let manager = config_manager(json_errors);
 
     let config = manager.load_global_config().unwrap_or_else(|error| {
         aperture_cli::cli::errors::print_error_with_json(&error, json_errors);
@@ -44,6 +38,39 @@ async fn main() {
         aperture_cli::cli::errors::print_error_with_json(&e, json_errors);
         std::process::exit(1);
     }
+}
+
+fn config_manager(json_errors: bool) -> ConfigManager<OsFileSystem> {
+    std::env::var(constants::ENV_APERTURE_CONFIG_DIR).map_or_else(
+        |_| match ConfigManager::new() {
+            Ok(manager) => manager,
+            Err(e) => {
+                aperture_cli::cli::errors::print_error_with_json(&e, json_errors);
+                std::process::exit(1);
+            }
+        },
+        |config_dir| ConfigManager::with_fs(OsFileSystem, PathBuf::from(config_dir)),
+    )
+}
+
+/// Build information is independent of configuration and execution defaults.
+fn print_build_info(command: &Commands) -> bool {
+    let Commands::BuildInfo { json } = command else {
+        return false;
+    };
+    let info = aperture_cli::build_info::current();
+    if *json {
+        println!(
+            "{}",
+            serde_json::to_string(&info).expect("build info is serializable")
+        );
+    } else {
+        println!(
+            "aperture-cli {}\nSource revision: {}\nSource state: {}",
+            info.version, info.revision, info.source_state
+        );
+    }
+    true
 }
 
 fn parse_cli_matches() -> clap::ArgMatches {
@@ -227,7 +254,9 @@ async fn run_user_command(
         Commands::Overview { api, all, format } => {
             run_overview_command(manager, api.as_deref(), *all, format, output)
         }
-        Commands::Completion { .. } | Commands::Complete { .. } => unreachable!(),
+        Commands::BuildInfo { .. } | Commands::Completion { .. } | Commands::Complete { .. } => {
+            unreachable!()
+        }
         Commands::Config { .. } => unreachable!("config commands are handled separately"),
     }
 }

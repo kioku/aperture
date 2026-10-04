@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod atomic;
 pub mod batch;
+pub mod build_info;
 pub mod cache;
 pub mod cli;
 pub mod command_guidance;
