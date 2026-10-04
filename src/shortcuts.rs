@@ -4,6 +4,7 @@ use crate::cache::models::{CachedCommand, CachedSpec};
 use crate::constants;
 use crate::utils::to_kebab_case;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 /// Builds the full command path for a resolved shortcut, using effective
 /// display names when command mappings are active.
@@ -61,11 +62,11 @@ pub enum ResolutionResult {
 #[allow(clippy::struct_field_names)]
 pub struct ShortcutResolver {
     /// Map of operation IDs to specs and commands
-    operation_map: HashMap<String, Vec<(String, CachedSpec, CachedCommand)>>,
+    operation_map: HashMap<String, Vec<(String, Arc<CachedSpec>, CachedCommand)>>,
     /// Map of HTTP method + path combinations
-    method_path_map: HashMap<String, Vec<(String, CachedSpec, CachedCommand)>>,
+    method_path_map: HashMap<String, Vec<(String, Arc<CachedSpec>, CachedCommand)>>,
     /// Map of tag-based shortcuts
-    tag_map: HashMap<String, Vec<(String, CachedSpec, CachedCommand)>>,
+    tag_map: HashMap<String, Vec<(String, Arc<CachedSpec>, CachedCommand)>>,
 }
 
 impl ShortcutResolver {
@@ -84,8 +85,11 @@ impl ShortcutResolver {
         self.clear_indexes();
 
         for (api_name, spec) in specs {
+            // One owned snapshot per API; identifier/tag entries share it.
+            // Resolution still returns an owned CachedSpec for API compatibility.
+            let spec = Arc::new(spec.clone());
             for command in &spec.commands {
-                self.index_single_command(api_name, spec, command);
+                self.index_single_command(api_name, &spec, command);
             }
         }
     }
@@ -96,7 +100,12 @@ impl ShortcutResolver {
         self.tag_map.clear();
     }
 
-    fn index_single_command(&mut self, api_name: &str, spec: &CachedSpec, command: &CachedCommand) {
+    fn index_single_command(
+        &mut self,
+        api_name: &str,
+        spec: &Arc<CachedSpec>,
+        command: &CachedCommand,
+    ) {
         let operation_kebab = to_kebab_case(&command.operation_id);
         self.index_operation_identifiers(api_name, spec, command, &operation_kebab);
         self.index_method_path(api_name, spec, command);
@@ -107,7 +116,7 @@ impl ShortcutResolver {
     fn index_operation_identifiers(
         &mut self,
         api_name: &str,
-        spec: &CachedSpec,
+        spec: &Arc<CachedSpec>,
         command: &CachedCommand,
         operation_kebab: &str,
     ) {
@@ -120,7 +129,12 @@ impl ShortcutResolver {
         }
     }
 
-    fn index_method_path(&mut self, api_name: &str, spec: &CachedSpec, command: &CachedCommand) {
+    fn index_method_path(
+        &mut self,
+        api_name: &str,
+        spec: &Arc<CachedSpec>,
+        command: &CachedCommand,
+    ) {
         let method_path_key = format!("{} {}", command.method.to_uppercase(), command.path);
         self.method_path_map
             .entry(method_path_key)
@@ -131,7 +145,7 @@ impl ShortcutResolver {
     fn index_display_and_aliases(
         &mut self,
         api_name: &str,
-        spec: &CachedSpec,
+        spec: &Arc<CachedSpec>,
         command: &CachedCommand,
     ) {
         if let Some(display_name) = command.display_name.as_deref() {
@@ -146,7 +160,7 @@ impl ShortcutResolver {
     fn index_tags(
         &mut self,
         api_name: &str,
-        spec: &CachedSpec,
+        spec: &Arc<CachedSpec>,
         command: &CachedCommand,
         operation_kebab: &str,
     ) {
@@ -176,7 +190,7 @@ impl ShortcutResolver {
         &mut self,
         key: &str,
         api_name: &str,
-        spec: &CachedSpec,
+        spec: &Arc<CachedSpec>,
         command: &CachedCommand,
     ) {
         self.operation_map
@@ -189,7 +203,7 @@ impl ShortcutResolver {
         &mut self,
         key: &str,
         api_name: &str,
-        spec: &CachedSpec,
+        spec: &Arc<CachedSpec>,
         command: &CachedCommand,
     ) {
         self.tag_map.entry(key.to_string()).or_default().push((
@@ -314,7 +328,7 @@ impl ShortcutResolver {
                 .iter()
                 .map(|(api_name, spec, command)| ResolvedShortcut {
                     full_command: build_full_command(api_name, command),
-                    spec: spec.clone(),
+                    spec: spec.as_ref().clone(),
                     command: command.clone(),
                     confidence: 95, // High confidence for exact operation ID match
                 })
@@ -337,7 +351,7 @@ impl ShortcutResolver {
                 .iter()
                 .map(|(api_name, spec, command)| ResolvedShortcut {
                     full_command: build_full_command(api_name, command),
-                    spec: spec.clone(),
+                    spec: spec.as_ref().clone(),
                     command: command.clone(),
                     confidence: 90, // High confidence for exact method+path match
                 })
@@ -355,7 +369,7 @@ impl ShortcutResolver {
             for (api_name, spec, command) in matches {
                 candidates.push(ResolvedShortcut {
                     full_command: build_full_command(api_name, command),
-                    spec: spec.clone(),
+                    spec: spec.as_ref().clone(),
                     command: command.clone(),
                     confidence: 70, // Medium confidence for tag-only match
                 });
@@ -379,7 +393,7 @@ impl ShortcutResolver {
             for (api_name, spec, command) in matches {
                 candidates.push(ResolvedShortcut {
                     full_command: build_full_command(api_name, command),
-                    spec: spec.clone(),
+                    spec: spec.as_ref().clone(),
                     command: command.clone(),
                     confidence: 85, // Higher confidence for tag+operation match
                 });
@@ -408,7 +422,7 @@ impl ShortcutResolver {
                 for (api_name, spec, command) in matches {
                     candidates.push(ResolvedShortcut {
                         full_command: build_full_command(api_name, command),
-                        spec: spec.clone(),
+                        spec: spec.as_ref().clone(),
                         command: command.clone(),
                         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                         confidence: std::cmp::min(60, (score / 10).max(20) as u8), // Scale fuzzy score
@@ -456,5 +470,67 @@ impl ShortcutResolver {
 impl Default for ShortcutResolver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::*;
+
+    #[test]
+    fn index_entries_share_one_spec_snapshot() {
+        let mut spec = CachedSpec::new_for_test("test");
+        let command = CachedCommand {
+            name: "pets".to_string(),
+            description: Some("Get pet by ID".to_string()),
+            summary: None,
+            operation_id: "getPetById".to_string(),
+            method: "GET".to_string(),
+            path: "/pets/{id}".to_string(),
+            parameters: vec![],
+            request_body: None,
+            responses: vec![],
+            security_requirements: vec![],
+            tags: vec!["pets".to_string()],
+            deprecated: false,
+            external_docs_url: None,
+            examples: vec![],
+            display_group: None,
+            display_name: None,
+            aliases: vec![],
+            hidden: false,
+            pagination: crate::cache::models::PaginationInfo::default(),
+        };
+        spec.commands.push(command.clone());
+        let mut second = command;
+        second.operation_id = "createPet".to_string();
+        second.method = "POST".to_string();
+        spec.commands.push(second);
+        let specs = BTreeMap::from([("test".to_string(), spec)]);
+        let mut resolver = ShortcutResolver::new();
+        resolver.index_specs(&specs);
+        let first = &resolver.operation_map["getPetById"][0].1;
+        assert_eq!(first.commands.len(), 2);
+        let snapshot = Arc::downgrade(first);
+        for entries in resolver
+            .operation_map
+            .values()
+            .chain(resolver.method_path_map.values())
+            .chain(resolver.tag_map.values())
+        {
+            for entry in entries {
+                assert!(
+                    Arc::ptr_eq(first, &entry.1),
+                    "entries must share their spec"
+                );
+            }
+        }
+        // Re-indexing must release old snapshots, not retain stale API data.
+        resolver.index_specs(&BTreeMap::new());
+        assert!(snapshot.upgrade().is_none());
+        assert!(matches!(
+            resolver.resolve_shortcut(&["getPetById".to_string()]),
+            ResolutionResult::NotFound
+        ));
     }
 }
