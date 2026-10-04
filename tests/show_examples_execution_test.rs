@@ -6,7 +6,8 @@ mod test_helpers;
 /// by actually executing a command (not just parsing arguments). This catches bugs
 /// like incorrect Clap API usage or wrong `ArgMatches` level being passed to executor.
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+    CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
@@ -32,6 +33,7 @@ fn create_nested_test_spec() -> CachedSpec {
                 method: "GET".to_string(),
                 path: "/users".to_string(),
                 parameters: vec![CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "active".to_string(),
                     location: "query".to_string(),
                     required: false,
@@ -65,6 +67,7 @@ fn create_nested_test_spec() -> CachedSpec {
                 path: "/users/{id}".to_string(),
                 parameters: vec![
                     CachedParameter {
+                        serialization: ParameterSerialization::default(),
                         name: "id".to_string(),
                         location: "path".to_string(),
                         required: true,
@@ -77,6 +80,7 @@ fn create_nested_test_spec() -> CachedSpec {
                         example: None,
                     },
                     CachedParameter {
+                        serialization: ParameterSerialization::default(),
                         name: "includeDetails".to_string(),
                         location: "query".to_string(),
                         required: false,

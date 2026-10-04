@@ -2,7 +2,7 @@ mod test_helpers;
 
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
-    PaginationInfo, CACHE_FORMAT_VERSION,
+    PaginationInfo, ParameterSerialization, CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
@@ -87,6 +87,7 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
             method: "GET".to_string(),
             path: "/users/{id}".to_string(),
             parameters: vec![CachedParameter {
+                serialization: ParameterSerialization::default(),
                 name: "id".to_string(),
                 location: "path".to_string(),
                 required: true,
@@ -100,7 +101,7 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
             }],
             request_body: None,
             responses: vec![],
-            security_requirements: vec!["bearerAuth".to_string(), "apiKeyAuth".to_string()],
+            security_requirements: vec![vec!["bearerAuth".to_string(), "apiKeyAuth".to_string()]],
             tags: vec!["users".to_string()],
             deprecated: false,
             external_docs_url: None,
@@ -570,6 +571,7 @@ async fn test_no_authentication_configured() {
             method: "GET".to_string(),
             path: "/users/{id}".to_string(),
             parameters: vec![CachedParameter {
+                serialization: ParameterSerialization::default(),
                 name: "id".to_string(),
                 location: "path".to_string(),
                 required: true,

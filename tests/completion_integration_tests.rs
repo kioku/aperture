@@ -2,6 +2,7 @@ mod common;
 
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedResponse, CachedSpec, PaginationInfo,
+    ParameterSerialization,
 };
 use aperture_cli::constants;
 use common::aperture_cmd;
@@ -39,6 +40,7 @@ fn write_completion_fixture() -> TempDir {
             path: "/users/{userId}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "userId".to_string(),
                     location: constants::PARAM_LOCATION_PATH.to_string(),
                     required: true,
@@ -51,6 +53,7 @@ fn write_completion_fixture() -> TempDir {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "limit".to_string(),
                     location: constants::PARAM_LOCATION_QUERY.to_string(),
                     required: false,

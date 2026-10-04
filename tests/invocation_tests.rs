@@ -13,6 +13,7 @@ fn operation_call_preserves_pre_extracted_parameters() {
     header_params.insert("x-request-id".to_string(), "req-1".to_string());
 
     let call = OperationCall {
+        pagination_url: None,
         operation_id: "getUserById".to_string(),
         path_params,
         query_params,

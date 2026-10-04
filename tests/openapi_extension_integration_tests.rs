@@ -73,7 +73,7 @@ async fn test_bearer_auth_extension_parsing_from_yaml() {
         .iter()
         .find(|cmd| cmd.operation_id == "getUserById")
         .expect("getUserById command not found");
-    assert_eq!(user_command.security_requirements, vec!["bearerAuth"]);
+    assert_eq!(user_command.security_requirements, vec![vec!["bearerAuth"]]);
 }
 
 #[tokio::test]
@@ -111,7 +111,7 @@ async fn test_api_key_extension_parsing_from_yaml() {
         .iter()
         .find(|cmd| cmd.operation_id == "getData")
         .expect("getData command not found");
-    assert_eq!(data_command.security_requirements, vec!["apiKeyAuth"]);
+    assert_eq!(data_command.security_requirements, vec![vec!["apiKeyAuth"]]);
 }
 
 #[tokio::test]
@@ -154,14 +154,20 @@ async fn test_multiple_schemes_extension_parsing_from_json() {
         .iter()
         .find(|cmd| cmd.operation_id == "getBearerProtected")
         .expect("getBearerProtected command not found");
-    assert_eq!(bearer_command.security_requirements, vec!["bearerAuth"]);
+    assert_eq!(
+        bearer_command.security_requirements,
+        vec![vec!["bearerAuth"]]
+    );
 
     let api_key_command = cached_spec
         .commands
         .iter()
         .find(|cmd| cmd.operation_id == "getApiKeyProtected")
         .expect("getApiKeyProtected command not found");
-    assert_eq!(api_key_command.security_requirements, vec!["apiKeyAuth"]);
+    assert_eq!(
+        api_key_command.security_requirements,
+        vec![vec!["apiKeyAuth"]]
+    );
 }
 
 #[tokio::test]
