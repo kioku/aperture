@@ -15,20 +15,6 @@ use crate::shortcuts::{ResolutionResult, ShortcutResolver};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-/// Adds connection/timeout context to network errors.
-fn enrich_network_error(e: Error) -> Error {
-    let Error::Network(ref req_err) = e else {
-        return e;
-    };
-    if req_err.is_connect() {
-        return e.with_context("Failed to connect to API server");
-    }
-    if req_err.is_timeout() {
-        return e.with_context("Request timed out");
-    }
-    e
-}
-
 /// Writes a structured JSON error as the final NDJSON line when `--json-errors` is active.
 fn emit_pagination_error_ndjson(cli: &Cli, writer: &mut impl std::io::Write, error: &Error) {
     if !cli.json_errors {
@@ -362,7 +348,6 @@ async fn execute_paginated_api_runtime(
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
-            let e = enrich_network_error(e);
             // When --json-errors is active, emit the error as the final NDJSON
             // line on stdout so pipeline consumers can detect mid-stream failure
             // without inspecting stderr.
@@ -380,9 +365,7 @@ async fn execute_standard_api_runtime(
     jq_filter: Option<&str>,
     output_file: Option<&str>,
 ) -> Result<(), Error> {
-    let result = executor::execute(spec, call, ctx)
-        .await
-        .map_err(enrich_network_error)?;
+    let result = executor::execute(spec, call, ctx).await?;
 
     crate::cli::render::render_result_with_binary_destination(
         &result,

@@ -11,6 +11,77 @@ use serde_json;
 use std::collections::HashMap;
 use std::fmt::Write;
 
+const fn path_style(style: &openapiv3::PathStyle) -> &'static str {
+    match style {
+        openapiv3::PathStyle::Simple => "simple",
+        openapiv3::PathStyle::Label => "label",
+        openapiv3::PathStyle::Matrix => "matrix",
+    }
+}
+
+const fn query_style(style: &openapiv3::QueryStyle) -> &'static str {
+    match style {
+        openapiv3::QueryStyle::Form => "form",
+        openapiv3::QueryStyle::SpaceDelimited => "spaceDelimited",
+        openapiv3::QueryStyle::PipeDelimited => "pipeDelimited",
+        openapiv3::QueryStyle::DeepObject => "deepObject",
+    }
+}
+
+fn parameter_serialization(param: &Parameter) -> crate::cache::models::ParameterSerialization {
+    let style = match param {
+        Parameter::Path { style, .. } => path_style(style),
+        Parameter::Query { style, .. } => query_style(style),
+        Parameter::Header { .. } => "simple",
+        Parameter::Cookie { .. } => "form",
+    };
+    crate::cache::models::ParameterSerialization {
+        style: Some(style.to_string()),
+        explode: param.parameter_data_ref().explode,
+        allow_reserved: matches!(
+            param,
+            Parameter::Query {
+                allow_reserved: true,
+                ..
+            }
+        ),
+        unsupported_schema: unsupported_parameter_schema(&param.parameter_data_ref().format),
+        content_based: matches!(
+            param.parameter_data_ref().format,
+            openapiv3::ParameterSchemaOrContent::Content(_)
+        ),
+    }
+}
+
+fn unsupported_parameter_schema(format: &openapiv3::ParameterSchemaOrContent) -> bool {
+    match format {
+        openapiv3::ParameterSchemaOrContent::Schema(schema) => serde_json::to_value(schema)
+            .map_or(true, |schema| {
+                !super::parameter_schema::supported_shape(&schema)
+            }),
+        openapiv3::ParameterSchemaOrContent::Content(_) => false,
+    }
+}
+
+/// Resolve only schema positions, preserving arbitrary example/default values.
+fn resolved_parameter(spec: &OpenAPI, param: &Parameter) -> Result<Parameter, Error> {
+    let mut param = param.clone();
+    let data = match &mut param {
+        Parameter::Path { parameter_data, .. }
+        | Parameter::Query { parameter_data, .. }
+        | Parameter::Header { parameter_data, .. }
+        | Parameter::Cookie { parameter_data, .. } => parameter_data,
+    };
+    if let openapiv3::ParameterSchemaOrContent::Schema(schema) = &mut data.format {
+        let value = serde_json::to_value(&*schema)
+            .map_err(|error| Error::serialization_error(error.to_string()))?;
+        let resolved = super::parameter_schema::resolve(spec, value)?;
+        *schema = serde_json::from_value(resolved)
+            .map_err(|error| Error::validation_error(error.to_string()))?;
+    }
+    Ok(param)
+}
+
 /// Type alias for schema type information extracted from a schema kind
 /// Returns: (`schema_type`, `format`, `default_value`, `enum_values`)
 type SchemaTypeInfo = (String, Option<String>, Option<String>, Vec<String>);
@@ -194,13 +265,13 @@ impl SpecTransformer {
             .unwrap_or_default()
     }
 
-    fn extract_global_security_requirements(spec: &OpenAPI) -> Vec<String> {
+    fn extract_global_security_requirements(spec: &OpenAPI) -> Vec<Vec<String>> {
         spec.security
             .iter()
             .flat_map(|security_group| {
                 security_group
                     .iter()
-                    .flat_map(|security_req| security_req.keys().cloned())
+                    .map(|security_req| security_req.keys().cloned().collect())
             })
             .collect()
     }
@@ -246,7 +317,7 @@ impl SpecTransformer {
         path: &str,
         path_item: &ReferenceOr<openapiv3::PathItem>,
         skip_endpoints: &[(String, String)],
-        global_security_requirements: &[String],
+        global_security_requirements: &[Vec<String>],
         commands: &mut Vec<CachedCommand>,
     ) -> Result<(), Error> {
         let ReferenceOr::Item(item) = path_item else {
@@ -285,7 +356,7 @@ impl SpecTransformer {
         method: &str,
         path: &str,
         operation: &Operation,
-        global_security_requirements: &[String],
+        global_security_requirements: &[Vec<String>],
     ) -> Result<CachedCommand, Error> {
         let operation_id = operation
             .operation_id
@@ -349,10 +420,14 @@ impl SpecTransformer {
         parameters
             .iter()
             .map(|param_ref| match param_ref {
-                ReferenceOr::Item(param) => Ok(Self::transform_parameter(param)),
+                ReferenceOr::Item(param) => {
+                    Ok(Self::transform_parameter(&resolved_parameter(spec, param)?))
+                }
                 ReferenceOr::Reference { reference } => {
                     let param = Self::resolve_parameter_reference(spec, reference)?;
-                    Ok(Self::transform_parameter(&param))
+                    Ok(Self::transform_parameter(&resolved_parameter(
+                        spec, &param,
+                    )?))
                 }
             })
             .collect()
@@ -372,14 +447,14 @@ impl SpecTransformer {
 
     fn resolve_security_requirements(
         operation: &Operation,
-        global_security_requirements: &[String],
-    ) -> Vec<String> {
+        global_security_requirements: &[Vec<String>],
+    ) -> Vec<Vec<String>> {
         operation.security.as_ref().map_or_else(
             || global_security_requirements.to_vec(),
             |security_reqs| {
                 security_reqs
                     .iter()
-                    .flat_map(|security_req| security_req.keys().cloned())
+                    .map(|security_req| security_req.keys().cloned().collect())
                     .collect()
             },
         )
@@ -414,6 +489,7 @@ impl SpecTransformer {
             .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()));
 
         CachedParameter {
+            serialization: parameter_serialization(param),
             name: param_data.name.clone(),
             location: location_str.to_string(),
             required: param_data.required,
@@ -1235,6 +1311,47 @@ fn update_offset_pagination_params(
 #[allow(clippy::field_reassign_with_default)]
 #[allow(clippy::too_many_lines)]
 mod tests {
+    #[test]
+    fn security_groups_preserve_inheritance_and_overrides() {
+        let spec: openapiv3::OpenAPI = serde_json::from_value(serde_json::json!({
+            "openapi":"3.0.3","info":{"title":"Security","version":"1"},
+            "security":[{"tokenA":[]},{"tokenB":[],"key":[]}],
+            "paths":{}
+        }))
+        .unwrap();
+        let global = super::SpecTransformer::extract_global_security_requirements(&spec);
+        assert_eq!(global.len(), 2);
+        assert_eq!(global[0], vec!["tokenA"]);
+        let mut combined = global[1].clone();
+        combined.sort();
+        assert_eq!(combined, vec!["key", "tokenB"]);
+        let inherited = openapiv3::Operation::default();
+        assert_eq!(
+            super::SpecTransformer::resolve_security_requirements(&inherited, &global),
+            global
+        );
+        for requirements in [
+            serde_json::json!([]),
+            serde_json::json!([{}]),
+            serde_json::json!([{"other":[]}]),
+        ] {
+            let operation: openapiv3::Operation =
+                serde_json::from_value(serde_json::json!({"responses":{},"security":requirements}))
+                    .unwrap();
+            let expected: Vec<Vec<String>> = operation
+                .security
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|group| group.keys().cloned().collect())
+                .collect();
+            assert_eq!(
+                super::SpecTransformer::resolve_security_requirements(&operation, &global),
+                expected
+            );
+        }
+    }
+
     use super::*;
     use openapiv3::{
         Components, Info, OpenAPI, Operation, Parameter, ParameterData, ParameterSchemaOrContent,

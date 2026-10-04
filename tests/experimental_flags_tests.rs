@@ -1,4 +1,6 @@
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
+use aperture_cli::cache::models::{
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+};
 use aperture_cli::constants;
 use aperture_cli::engine::generator::{generate_command_tree, generate_command_tree_with_flags};
 use std::collections::HashMap;
@@ -17,6 +19,7 @@ fn create_test_spec() -> CachedSpec {
             path: "/users/{id}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: constants::PARAM_LOCATION_PATH.to_string(),
                     required: true,
@@ -29,6 +32,7 @@ fn create_test_spec() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "include_profile".to_string(),
                     location: constants::PARAM_LOCATION_QUERY.to_string(),
                     required: false,

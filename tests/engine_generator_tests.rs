@@ -1,5 +1,6 @@
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, CachedSpec, PaginationInfo,
+    ParameterSerialization,
 };
 use aperture_cli::constants;
 use aperture_cli::engine::generator::{
@@ -11,6 +12,7 @@ use std::collections::HashMap;
 macro_rules! cached_parameter {
     ($name:expr, $location:expr, $required:expr) => {
         CachedParameter {
+            serialization: ParameterSerialization::default(),
             name: $name.to_string(),
             location: $location.to_string(),
             required: $required,
@@ -25,6 +27,7 @@ macro_rules! cached_parameter {
     };
     ($name:expr, $location:expr, $required:expr, $schema:expr) => {
         CachedParameter {
+            serialization: ParameterSerialization::default(),
             name: $name.to_string(),
             location: $location.to_string(),
             required: $required,
