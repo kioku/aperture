@@ -185,10 +185,13 @@ jobs:
       - name: Setup Rust (MSRV)
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.70.0
+          toolchain: 1.91.0
 
       - name: Check MSRV compatibility
-        run: cargo check --verbose
+        run: |
+          cargo +1.91.0 check --locked --all-targets
+          cargo +1.91.0 check --locked --all-targets --no-default-features
+          cargo +1.91.0 check --locked --all-targets --all-features
 
   nix:
     name: Nix Build

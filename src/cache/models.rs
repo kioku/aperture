@@ -105,7 +105,9 @@ pub struct SkippedEndpoint {
 /// Version 5: Added `display_group`, `display_name`, `aliases`, `hidden` fields for command mapping
 /// Version 6: Added `pagination` field to `CachedCommand` for auto-pagination support
 /// Version 7: Preserves all response media and `default` declarations during transformation
-pub const CACHE_FORMAT_VERSION: u32 = 7;
+/// Version 8: Preserves security requirement alternatives instead of flattening schemes
+/// Version 9: Retains parameter serialization metadata (postcard layout change)
+pub const CACHE_FORMAT_VERSION: u32 = 9;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -154,8 +156,9 @@ pub struct CachedCommand {
     pub parameters: Vec<CachedParameter>,
     pub request_body: Option<CachedRequestBody>,
     pub responses: Vec<CachedResponse>,
-    /// Security requirements for this operation (references to security scheme names)
-    pub security_requirements: Vec<String>,
+    /// Security alternatives: OR across groups, AND across scheme names within a group.
+    /// An empty group permits anonymous access; OAuth scopes are not enforced.
+    pub security_requirements: Vec<Vec<String>>,
     /// All tags associated with this operation
     pub tags: Vec<String>,
     /// Whether this operation is deprecated
@@ -236,8 +239,26 @@ impl CachedCommand {
     }
 }
 
+/// `OpenAPI` wire representation, separate from the parameter's input schema.
+/// Missing metadata uses the `OpenAPI` location defaults for legacy JSON fixtures.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ParameterSerialization {
+    pub style: Option<String>,
+    pub explode: Option<bool>,
+    #[serde(default)]
+    pub allow_reserved: bool,
+    /// Content-based parameters require a media-specific serializer, not style expansion.
+    #[serde(default)]
+    pub content_based: bool,
+    /// The schema does not provide a supported unambiguous serialization shape.
+    #[serde(default)]
+    pub unsupported_schema: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CachedParameter {
+    #[serde(default)]
+    pub serialization: ParameterSerialization,
     pub name: String,
     pub location: String,
     pub required: bool,

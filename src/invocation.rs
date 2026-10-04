@@ -38,6 +38,8 @@ impl RequestBody {
 /// can be constructed from clap `ArgMatches`, a GUI form, or programmatically.
 #[derive(Debug, Clone)]
 pub struct OperationCall {
+    /// Same-origin pagination target; validated again before authentication is attached.
+    pub pagination_url: Option<reqwest::Url>,
     /// The `operationId` from the `OpenAPI` spec (e.g., `"getUserById"`).
     pub operation_id: String,
 
@@ -75,6 +77,8 @@ pub enum ProxyOverride {
 
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionContext {
+    /// Shared connection pool; clones reuse clients only for matching transport settings.
+    pub http_clients: crate::engine::executor::HttpClientPool,
     /// If true, show the request that would be made without executing it.
     pub dry_run: bool,
 
@@ -137,6 +141,10 @@ pub enum ExecutionResult {
     Cached {
         /// Cached response body text.
         body: String,
+        /// Original HTTP status.
+        status: u16,
+        /// Original response headers, excluding credentials and session cookies.
+        headers: HashMap<String, String>,
     },
 
     /// The operation completed but produced no response body.

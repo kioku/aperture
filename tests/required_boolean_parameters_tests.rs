@@ -13,7 +13,8 @@ mod test_helpers;
 /// 4. Required booleans work correctly when provided
 /// 5. Optional booleans continue to work as before (default to false when absent)
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+    CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
@@ -39,6 +40,7 @@ fn create_spec_with_required_boolean_path_param() -> CachedSpec {
             path: "/items/{id}/{active}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -51,6 +53,7 @@ fn create_spec_with_required_boolean_path_param() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "active".to_string(),
                     location: "path".to_string(),
                     required: true, // REQUIRED boolean
@@ -97,6 +100,7 @@ fn create_spec_with_required_boolean_query_param() -> CachedSpec {
             method: "GET".to_string(),
             path: "/users".to_string(),
             parameters: vec![CachedParameter {
+                serialization: ParameterSerialization::default(),
                 name: "includeInactive".to_string(),
                 location: "query".to_string(),
                 required: true, // REQUIRED boolean
@@ -143,6 +147,7 @@ fn create_spec_with_mixed_boolean_params() -> CachedSpec {
             path: "/search".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "required-flag".to_string(),
                     location: "query".to_string(),
                     required: true, // REQUIRED
@@ -155,6 +160,7 @@ fn create_spec_with_mixed_boolean_params() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "optional-flag".to_string(),
                     location: "query".to_string(),
                     required: false, // OPTIONAL
@@ -275,7 +281,9 @@ fn test_required_boolean_query_parameter_with_flag_succeeds() {
     let (_, operation_matches) = sub_matches.subcommand().unwrap();
 
     assert!(
-        operation_matches.get_flag("includeInactive"),
+        *operation_matches
+            .get_one::<bool>("includeInactive")
+            .unwrap_or(&false),
         "Boolean flag should be true when provided"
     );
 }
@@ -318,17 +326,21 @@ fn test_mixed_required_and_optional_booleans() {
     let (_, operation_matches) = sub_matches.subcommand().unwrap();
 
     assert!(
-        operation_matches.get_flag("required-flag"),
+        *operation_matches
+            .get_one::<bool>("required-flag")
+            .unwrap_or(&false),
         "Required flag should be true"
     );
     assert!(
-        operation_matches.get_flag("optional-flag"),
+        *operation_matches
+            .get_one::<bool>("optional-flag")
+            .unwrap_or(&false),
         "Optional flag should be true"
     );
 }
 
 #[test]
-fn test_optional_boolean_defaults_to_false_when_absent() {
+fn test_optional_boolean_is_omitted_when_absent() {
     let spec = create_spec_with_mixed_boolean_params();
     let cmd = generate_command_tree_with_flags(&spec, false);
 
@@ -341,12 +353,14 @@ fn test_optional_boolean_defaults_to_false_when_absent() {
     let (_, operation_matches) = sub_matches.subcommand().unwrap();
 
     assert!(
-        operation_matches.get_flag("required-flag"),
+        *operation_matches
+            .get_one::<bool>("required-flag")
+            .unwrap_or(&false),
         "Required flag should be true"
     );
     assert!(
-        !operation_matches.get_flag("optional-flag"),
-        "Optional flag should default to false when not provided"
+        operation_matches.get_one::<bool>("optional-flag").is_none(),
+        "Optional flag should be omitted when not provided"
     );
 }
 
@@ -475,4 +489,156 @@ async fn test_required_boolean_query_param_adds_to_query_string() {
         "Request should succeed with includeInactive=true in query string: {:?}",
         result.err()
     );
+}
+
+#[test]
+fn explicit_boolean_values_preserve_omission() {
+    for (location, required) in [
+        ("query", false),
+        ("query", true),
+        ("header", false),
+        ("header", true),
+    ] {
+        let mut spec = create_spec_with_required_boolean_query_param();
+        spec.commands[0].parameters[0].location = location.to_string();
+        spec.commands[0].parameters[0].required = required;
+        let command = generate_command_tree_with_flags(&spec, false);
+        let omitted = command
+            .clone()
+            .try_get_matches_from(["aperture", "users", "list-users"]);
+        assert_eq!(omitted.is_err(), required);
+        if let Ok(matches) = omitted {
+            let call =
+                aperture_cli::cli::translate::matches_to_operation_call(&spec, &matches).unwrap();
+            assert!(call.query_params.is_empty());
+            assert!(call.header_params.is_empty());
+        }
+        for value in ["true", "false"] {
+            let matches = command
+                .clone()
+                .try_get_matches_from([
+                    "aperture",
+                    "users",
+                    "list-users",
+                    "--include-inactive",
+                    value,
+                ])
+                .unwrap();
+            let call =
+                aperture_cli::cli::translate::matches_to_operation_call(&spec, &matches).unwrap();
+            let params = if location == "query" {
+                call.query_params
+            } else {
+                call.header_params
+            };
+            assert_eq!(params.get("includeInactive").unwrap(), value);
+        }
+    }
+}
+
+#[tokio::test]
+async fn explicit_false_is_serialized_for_query_and_header() {
+    for location in ["query", "header"] {
+        let server = MockServer::start().await;
+        let mock = Mock::given(method("GET")).and(path("/users"));
+        let mock = if location == "query" {
+            mock.and(wiremock::matchers::query_param("includeInactive", "false"))
+        } else {
+            mock.and(wiremock::matchers::header("includeInactive", "false"))
+        };
+        mock.respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let mut spec = create_spec_with_required_boolean_query_param();
+        spec.base_url = Some(server.uri());
+        spec.commands[0].parameters[0].location = location.to_string();
+        let matches = generate_command_tree_with_flags(&spec, false)
+            .try_get_matches_from([
+                "aperture",
+                "users",
+                "list-users",
+                "--include-inactive",
+                "false",
+            ])
+            .unwrap();
+        let call =
+            aperture_cli::cli::translate::matches_to_operation_call(&spec, &matches).unwrap();
+        let result = aperture_cli::engine::executor::execute(
+            &spec,
+            call,
+            aperture_cli::invocation::ExecutionContext::default(),
+        )
+        .await;
+        assert!(result.is_ok(), "{result:?}");
+    }
+}
+
+#[test]
+fn boolean_values_reject_malformed_duplicate_and_unknown_arguments() {
+    for (location, positional) in [
+        ("query", false),
+        ("header", false),
+        ("query", true),
+        ("header", true),
+    ] {
+        let mut spec = create_spec_with_required_boolean_query_param();
+        spec.commands[0].parameters[0].location = location.to_string();
+        let command = generate_command_tree_with_flags(&spec, positional);
+        for value in ["", " ", "none", "0", "1", "TRUE", "maybe"] {
+            assert!(
+                command
+                    .clone()
+                    .try_get_matches_from([
+                        "aperture",
+                        "users",
+                        "list-users",
+                        "--include-inactive",
+                        value,
+                    ])
+                    .is_err(),
+                "{location}, positional={positional}, value={value}"
+            );
+        }
+        assert!(command
+            .clone()
+            .try_get_matches_from([
+                "aperture",
+                "users",
+                "list-users",
+                "--include-inactive",
+                "false",
+                "--include-inactive",
+                "true",
+            ])
+            .is_err());
+        assert!(command
+            .clone()
+            .try_get_matches_from([
+                "aperture",
+                "users",
+                "list-users",
+                "--include-inactive",
+                "false",
+                "--unknown",
+            ])
+            .is_err());
+        let matches = command
+            .try_get_matches_from([
+                "aperture",
+                "users",
+                "list-users",
+                "--include-inactive",
+                "false",
+            ])
+            .unwrap();
+        let call =
+            aperture_cli::cli::translate::matches_to_operation_call(&spec, &matches).unwrap();
+        let params = if location == "query" {
+            call.query_params
+        } else {
+            call.header_params
+        };
+        assert_eq!(params.get("includeInactive").unwrap(), "false");
+    }
 }

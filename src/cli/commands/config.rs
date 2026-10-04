@@ -281,10 +281,9 @@ fn handle_reinit(
         return Ok(());
     }
     let Some(spec_name) = context else {
-        // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-        // ast-grep-ignore: no-println
-        eprintln!("Error: Either specify a spec name or use --all flag");
-        std::process::exit(1);
+        return Err(Error::validation_error(
+            "Either specify a spec name or use --all flag",
+        ));
     };
     let spec_name = validate_api_name(&spec_name)?;
     reinit_spec(manager, &spec_name, output)
@@ -1129,10 +1128,9 @@ pub async fn clear_response_cache(
         cache.clear_all().await?
     } else {
         let Some(api) = api_name else {
-            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-            // ast-grep-ignore: no-println
-            eprintln!("Error: Either specify an API name or use --all flag");
-            std::process::exit(1);
+            return Err(Error::validation_error(
+                "Either specify an API name or use --all flag",
+            ));
         };
         cache.clear_api_cache(api).await?
     };

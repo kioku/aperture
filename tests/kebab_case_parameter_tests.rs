@@ -1,6 +1,8 @@
 mod test_helpers;
 
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
+use aperture_cli::cache::models::{
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+};
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
 use aperture_cli::engine::executor::execute_request;
@@ -24,6 +26,7 @@ fn create_snake_case_spec() -> CachedSpec {
             path: "/orgs/{organization_id_or_slug}/details".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "organization_id_or_slug".to_string(),
                     location: constants::PARAM_LOCATION_PATH.to_string(),
                     required: true,
@@ -36,6 +39,7 @@ fn create_snake_case_spec() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "include_members".to_string(),
                     location: constants::PARAM_LOCATION_QUERY.to_string(),
                     required: false,
@@ -48,6 +52,7 @@ fn create_snake_case_spec() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "X_Custom_Header".to_string(),
                     location: constants::PARAM_LOCATION_HEADER.to_string(),
                     required: false,
@@ -208,6 +213,7 @@ fn test_mixed_case_parameters_normalization() {
             path: "/data/{DataID}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "DataID".to_string(),
                     location: constants::PARAM_LOCATION_PATH.to_string(),
                     required: true,
@@ -220,6 +226,7 @@ fn test_mixed_case_parameters_normalization() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "IncludeMetaData".to_string(),
                     location: constants::PARAM_LOCATION_QUERY.to_string(),
                     required: false,
