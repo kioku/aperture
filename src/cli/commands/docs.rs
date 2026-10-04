@@ -315,7 +315,7 @@ fn render_api_reference_index(
     output: &Output,
 ) -> Result<(), Error> {
     let style = DiscoveryStyle::for_stdout();
-    let specs = load_all_specs(manager)?;
+    let specs = load_scoped_spec(manager, api)?;
     let doc_gen = DocumentationGenerator::new(specs);
     let reference = doc_gen.generate_api_reference_index_styled(api, style)?;
     write_stdout_line(&reference)?;
@@ -334,7 +334,7 @@ fn render_api_reference_index_json(
     manager: &ConfigManager<OsFileSystem>,
     api: &str,
 ) -> Result<(), Error> {
-    let specs = load_all_specs(manager)?;
+    let specs = load_scoped_spec(manager, api)?;
     let spec = specs.get(api).ok_or_else(|| Error::spec_not_found(api))?;
     let visible_commands = spec
         .commands
@@ -390,7 +390,7 @@ fn render_command_help(
     output: &Output,
 ) -> Result<(), Error> {
     let style = DiscoveryStyle::for_stdout();
-    let specs = load_all_specs(manager)?;
+    let specs = load_scoped_spec(manager, api)?;
     let doc_gen = DocumentationGenerator::new(specs);
     let help = doc_gen.generate_command_help_styled(api, tag, operation, style)?;
     if enhanced {
@@ -415,7 +415,7 @@ fn render_command_help_json(
     tag: &str,
     operation: &str,
 ) -> Result<(), Error> {
-    let specs = load_all_specs(manager)?;
+    let specs = load_scoped_spec(manager, api)?;
     let spec = specs.get(api).ok_or_else(|| Error::spec_not_found(api))?;
     let command = find_docs_command(spec, api, tag, operation)?;
 
@@ -556,7 +556,7 @@ fn render_single_api_overview(
     output: &Output,
 ) -> Result<(), Error> {
     let style = DiscoveryStyle::for_stdout();
-    let specs = load_all_specs(manager)?;
+    let specs = load_scoped_spec(manager, api)?;
     let doc_gen = DocumentationGenerator::new(specs);
     let overview = doc_gen.generate_api_overview_styled(api, style)?;
     write_stdout_line(&overview)?;
@@ -583,7 +583,7 @@ fn render_single_api_overview_json(
     manager: &ConfigManager<OsFileSystem>,
     api: &str,
 ) -> Result<(), Error> {
-    let specs = load_all_specs(manager)?;
+    let specs = load_scoped_spec(manager, api)?;
     let spec = specs.get(api).ok_or_else(|| Error::spec_not_found(api))?;
     let visible_commands = spec
         .commands
@@ -761,6 +761,20 @@ fn summarize_methods(spec_commands: &[crate::cache::models::CachedCommand]) -> V
         .into_iter()
         .map(|entry| format!("{}: {}", entry.method, entry.count))
         .collect()
+}
+
+/// Load only the requested API, preserving its cache diagnostics. Scoped discovery
+/// must not enumerate or deserialize other APIs, even when their caches are broken.
+fn load_scoped_spec(
+    manager: &ConfigManager<OsFileSystem>,
+    api: &str,
+) -> Result<BTreeMap<String, CachedSpec>, Error> {
+    let cache_dir = manager.config_dir().join(constants::DIR_CACHE);
+    let spec = loader::load_cached_spec(&cache_dir, api).map_err(|error| match error {
+        Error::Io(_) => Error::spec_not_found(api),
+        other => other,
+    })?;
+    Ok(BTreeMap::from([(api.to_string(), spec)]))
 }
 
 /// Load all cached specs from the manager
