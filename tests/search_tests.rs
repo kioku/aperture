@@ -537,12 +537,12 @@ fn regex_search_preserves_unicode_classes_and_case_folding() {
     let specs = BTreeMap::from([("test-api".to_string(), spec)]);
     let searcher = CommandSearcher::new();
     for query in [
-        r"regex:(?i)CAFÉ",
+        r"regex:(?i)café",
         r"regex:\p{Greek}+",
         r"regex:\p{Nd}+",
         r"regex:\bκαλημέρα\b",
         r"regex:CAFÉ|missing",
-        r"regex:(?i:CAFÉ)",
+        r"regex:(?i:café)",
     ] {
         let results = searcher.search(&specs, query, None).unwrap();
         assert_eq!(results.len(), 1, "{query}");
