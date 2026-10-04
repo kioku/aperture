@@ -35,7 +35,6 @@ name = "aperture"
 path = "src/main.rs"
 
 [dependencies]
-ahash = { version = "0.8.12", optional = true }
 anyhow = "1.0.103"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.6.0", features = ["derive"] }
@@ -84,7 +83,7 @@ rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs
 
 [features]
 default = []
-jq = ["jaq-core", "jaq-json", "jaq-std", "ahash"]
+jq = ["jaq-core", "jaq-json", "jaq-std"]
 openapi31 = ["oas3"]
 integration = []
 

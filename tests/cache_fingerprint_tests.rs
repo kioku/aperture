@@ -253,3 +253,34 @@ fn test_metadata_backward_compatibility() {
         .assert()
         .success();
 }
+
+#[test]
+fn same_size_and_mtime_edit_still_invalidates_cache() {
+    let config = TempDir::new().unwrap();
+    let source = config.path().join("source.yaml");
+    fs::write(&source, minimal_spec()).unwrap();
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", config.path())
+        .args(["config", "add", "fp-test", source.to_str().unwrap()])
+        .assert()
+        .success();
+    let stored = config.path().join("specs/fp-test.yaml");
+    let original_time = fs::metadata(&stored).unwrap().modified().unwrap();
+    let original = fs::read_to_string(&stored).unwrap();
+    let edited = original.replace("List users", "List other");
+    assert_eq!(edited.len(), original.len());
+    assert_ne!(edited, original);
+    fs::write(&stored, edited).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&stored)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(original_time))
+        .unwrap();
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", config.path())
+        .args(["list-commands", "fp-test"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("stale"));
+}
