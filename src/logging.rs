@@ -983,11 +983,11 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_string_emoji() {
-        // Emoji can be multiple bytes
-        let text = "Hello 👋🌍!";
+    fn test_truncate_string_four_byte_unicode() {
+        // Deseret letters occupy four UTF-8 bytes but each counts as one character.
+        let text = "Hello 𐐀𐐨!";
         assert_eq!(truncate_string(text, 6), "Hello ");
-        assert_eq!(truncate_string(text, 7), "Hello 👋");
-        assert_eq!(truncate_string(text, 8), "Hello 👋🌍");
+        assert_eq!(truncate_string(text, 7), "Hello 𐐀");
+        assert_eq!(truncate_string(text, 8), "Hello 𐐀𐐨");
     }
 }
