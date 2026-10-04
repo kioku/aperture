@@ -1,0 +1,706 @@
+{
+  "base_commit": "85db320c62554a5aed361fcbe66f99d2c96b083f",
+  "toolchain": "rustc 1.91.1 (ed61e7d7e 2025-11-07) (built from a source tarball)\nbinary: rustc\ncommit-hash: ed61e7d7e242494fb7057f2657300d9e77bb4fcb\ncommit-date: 2025-11-07\nhost: x86_64-unknown-linux-gnu\nrelease: 1.91.1\nLLVM version: 21.1.7\n",
+  "profile": "release optz/fatLTO/strip/panicabort/codegen1, default/all features",
+  "removed_lock_packages": [
+    [
+      "android_system_properties",
+      "0.1.5"
+    ],
+    [
+      "dashmap",
+      "6.1.0"
+    ],
+    [
+      "hashbrown",
+      "0.14.5"
+    ],
+    [
+      "iana-time-zone",
+      "0.1.63"
+    ],
+    [
+      "iana-time-zone-haiku",
+      "0.1.2"
+    ],
+    [
+      "ppv-lite86",
+      "0.2.21"
+    ],
+    [
+      "rand",
+      "0.9.2"
+    ],
+    [
+      "rand_chacha",
+      "0.9.0"
+    ],
+    [
+      "rand_core",
+      "0.9.5"
+    ],
+    [
+      "windows-core",
+      "0.61.2"
+    ],
+    [
+      "windows-implement",
+      "0.60.0"
+    ],
+    [
+      "windows-interface",
+      "0.59.1"
+    ],
+    [
+      "windows-link",
+      "0.1.3"
+    ],
+    [
+      "windows-result",
+      "0.3.4"
+    ],
+    [
+      "windows-strings",
+      "0.4.2"
+    ],
+    [
+      "zerocopy",
+      "0.8.26"
+    ],
+    [
+      "zerocopy-derive",
+      "0.8.26"
+    ]
+  ],
+  "changed_versions": [],
+  "artifacts": {
+    "baseline-default": {
+      "bytes": 6287576,
+      "sha256": "212886af36354673b71ba6b7c01def9eb59fa850cdd12677a132c36a89fa17f6"
+    },
+    "baseline-all": {
+      "bytes": 8032560,
+      "sha256": "6f3cd383bf8d10005f1219cfdd6ed8ab04896cdedf15425445bc4e447b778105"
+    },
+    "chrono-default": {
+      "bytes": 6287576,
+      "sha256": "4b45460850faf89f8bf7b1ed69ee68ff62fce1a232d5491aa1c3f92c60f34f11"
+    },
+    "governor-default": {
+      "bytes": 6275280,
+      "sha256": "1687936e84d55786549a94f53cf6ea4ee4b62c79b3518a177d55336e824d8c42"
+    },
+    "regex-minimal-default": {
+      "bytes": 5947568,
+      "sha256": "2c1aedcc7b60d36bc6ebcca425add92ed87e973b00cdc6abb2ec23282f2b2cf6"
+    },
+    "regex-tuned-default": {
+      "bytes": 6275288,
+      "sha256": "bd71e417cdb1491be9b8688160eee1e870fdfdd79d4312ad90e1994b5a4849eb"
+    },
+    "combined-default": {
+      "bytes": 6275280,
+      "sha256": "a7e9a6654f5d87a9f74796bfe25af871503ae526b4ee9f3989956db663cc1d96"
+    },
+    "combined-all": {
+      "bytes": 8020264,
+      "sha256": "12c3c87766f2574a9658967f9cc2b1e751a446c937f89312529d08a215ed39b1"
+    }
+  },
+  "measurements": {
+    "isolated": {
+      "method": "All candidates independently versus original manifest/lock, unchanged release profile z/fat/strip/panicabort/codegen1. 5 warmups+35 interleaved startup samples; 3 warmups+15 interleaved search samples. Isolated config, no real requests.",
+      "compatibility_comparisons": 54,
+      "variants": {
+        "baseline": {
+          "startup": [
+            {
+              "operations": 10,
+              "index": 0,
+              "median_ms": 6.481001
+            },
+            {
+              "operations": 10,
+              "index": 9,
+              "median_ms": 5.030282
+            },
+            {
+              "operations": 1000,
+              "index": 0,
+              "median_ms": 7.961409
+            },
+            {
+              "operations": 1000,
+              "index": 999,
+              "median_ms": 8.653025
+            },
+            {
+              "operations": 5000,
+              "index": 0,
+              "median_ms": 17.312649
+            },
+            {
+              "operations": 5000,
+              "index": 4999,
+              "median_ms": 25.475104
+            }
+          ],
+          "search": [
+            {
+              "query": "regex:nomatchliteral",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 28.656186
+            },
+            {
+              "query": "regex:(?:a|aa)*b",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 34.367704
+            },
+            {
+              "query": "regex:^get-item-[0-9]+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 38.819819
+            },
+            {
+              "query": "regex:(?i)CAF\u00c9",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 38.402138
+            },
+            {
+              "query": "regex:\\p{Greek}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 49.808074
+            },
+            {
+              "query": "regex:\\p{Nd}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 40.345895
+            }
+          ]
+        },
+        "chrono": {
+          "startup": [
+            {
+              "operations": 10,
+              "index": 0,
+              "median_ms": 5.629699
+            },
+            {
+              "operations": 10,
+              "index": 9,
+              "median_ms": 5.050901
+            },
+            {
+              "operations": 1000,
+              "index": 0,
+              "median_ms": 7.91903
+            },
+            {
+              "operations": 1000,
+              "index": 999,
+              "median_ms": 8.615975
+            },
+            {
+              "operations": 5000,
+              "index": 0,
+              "median_ms": 17.829318
+            },
+            {
+              "operations": 5000,
+              "index": 4999,
+              "median_ms": 24.709501
+            }
+          ],
+          "search": [
+            {
+              "query": "regex:nomatchliteral",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 27.798425
+            },
+            {
+              "query": "regex:(?:a|aa)*b",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 34.482521
+            },
+            {
+              "query": "regex:^get-item-[0-9]+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 36.932699
+            },
+            {
+              "query": "regex:(?i)CAF\u00c9",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 38.640353
+            },
+            {
+              "query": "regex:\\p{Greek}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 48.235226
+            },
+            {
+              "query": "regex:\\p{Nd}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 39.68601
+            }
+          ]
+        },
+        "governor": {
+          "startup": [
+            {
+              "operations": 10,
+              "index": 0,
+              "median_ms": 5.393395
+            },
+            {
+              "operations": 10,
+              "index": 9,
+              "median_ms": 4.912035
+            },
+            {
+              "operations": 1000,
+              "index": 0,
+              "median_ms": 7.544628
+            },
+            {
+              "operations": 1000,
+              "index": 999,
+              "median_ms": 8.842431
+            },
+            {
+              "operations": 5000,
+              "index": 0,
+              "median_ms": 17.412237
+            },
+            {
+              "operations": 5000,
+              "index": 4999,
+              "median_ms": 24.376798
+            }
+          ],
+          "search": [
+            {
+              "query": "regex:nomatchliteral",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 27.872123
+            },
+            {
+              "query": "regex:(?:a|aa)*b",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 34.703817
+            },
+            {
+              "query": "regex:^get-item-[0-9]+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 38.782689
+            },
+            {
+              "query": "regex:(?i)CAF\u00c9",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 40.375505
+            },
+            {
+              "query": "regex:\\p{Greek}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 48.186928
+            },
+            {
+              "query": "regex:\\p{Nd}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 40.230779
+            }
+          ]
+        },
+        "regex": {
+          "startup": [
+            {
+              "operations": 10,
+              "index": 0,
+              "median_ms": 6.129299
+            },
+            {
+              "operations": 10,
+              "index": 9,
+              "median_ms": 5.10957
+            },
+            {
+              "operations": 1000,
+              "index": 0,
+              "median_ms": 7.471919
+            },
+            {
+              "operations": 1000,
+              "index": 999,
+              "median_ms": 8.598696
+            },
+            {
+              "operations": 5000,
+              "index": 0,
+              "median_ms": 17.771019
+            },
+            {
+              "operations": 5000,
+              "index": 4999,
+              "median_ms": 25.416356
+            }
+          ],
+          "search": [
+            {
+              "query": "regex:nomatchliteral",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 28.833712
+            },
+            {
+              "query": "regex:(?:a|aa)*b",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 34.171768
+            },
+            {
+              "query": "regex:^get-item-[0-9]+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 37.496837
+            },
+            {
+              "query": "regex:(?i)CAF\u00c9",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 39.6677
+            },
+            {
+              "query": "regex:\\p{Greek}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 303.153626
+            },
+            {
+              "query": "regex:\\p{Nd}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 41.096419
+            }
+          ]
+        }
+      }
+    },
+    "tuned": {
+      "method": "All candidates independently versus original manifest/lock, unchanged release profile z/fat/strip/panicabort/codegen1. 5 warmups+35 interleaved startup samples; 3 warmups+15 interleaved search samples. Isolated config, no real requests.",
+      "compatibility_comparisons": 18,
+      "variants": {
+        "baseline": {
+          "startup": [
+            {
+              "operations": 10,
+              "index": 0,
+              "median_ms": 5.15008
+            },
+            {
+              "operations": 10,
+              "index": 9,
+              "median_ms": 4.863306
+            },
+            {
+              "operations": 1000,
+              "index": 0,
+              "median_ms": 6.909552
+            },
+            {
+              "operations": 1000,
+              "index": 999,
+              "median_ms": 8.221184
+            },
+            {
+              "operations": 5000,
+              "index": 0,
+              "median_ms": 19.171359
+            },
+            {
+              "operations": 5000,
+              "index": 4999,
+              "median_ms": 24.988775
+            }
+          ],
+          "search": [
+            {
+              "query": "regex:nomatchliteral",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 28.033469
+            },
+            {
+              "query": "regex:(?:a|aa)*b",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 34.399333
+            },
+            {
+              "query": "regex:^get-item-[0-9]+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 37.34638
+            },
+            {
+              "query": "regex:(?i)CAF\u00c9",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 36.047968
+            },
+            {
+              "query": "regex:\\p{Greek}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 45.954186
+            },
+            {
+              "query": "regex:\\p{Nd}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 38.417437
+            }
+          ]
+        },
+        "regex-tuned": {
+          "startup": [
+            {
+              "operations": 10,
+              "index": 0,
+              "median_ms": 4.516693
+            },
+            {
+              "operations": 10,
+              "index": 9,
+              "median_ms": 5.035582
+            },
+            {
+              "operations": 1000,
+              "index": 0,
+              "median_ms": 7.271284
+            },
+            {
+              "operations": 1000,
+              "index": 999,
+              "median_ms": 8.384141
+            },
+            {
+              "operations": 5000,
+              "index": 0,
+              "median_ms": 19.085441
+            },
+            {
+              "operations": 5000,
+              "index": 4999,
+              "median_ms": 26.041182
+            }
+          ],
+          "search": [
+            {
+              "query": "regex:nomatchliteral",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 27.751825
+            },
+            {
+              "query": "regex:(?:a|aa)*b",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 34.520891
+            },
+            {
+              "query": "regex:^get-item-[0-9]+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 36.139975
+            },
+            {
+              "query": "regex:(?i)CAF\u00c9",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 36.85895
+            },
+            {
+              "query": "regex:\\p{Greek}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 46.212691
+            },
+            {
+              "query": "regex:\\p{Nd}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 39.227519
+            }
+          ]
+        }
+      }
+    },
+    "combined": {
+      "method": "All candidates independently versus original manifest/lock, unchanged release profile z/fat/strip/panicabort/codegen1. 5 warmups+35 interleaved startup samples; 3 warmups+15 interleaved search samples. Isolated config, no real requests.",
+      "compatibility_comparisons": 18,
+      "variants": {
+        "baseline": {
+          "startup": [
+            {
+              "operations": 10,
+              "index": 0,
+              "median_ms": 4.021464
+            },
+            {
+              "operations": 10,
+              "index": 9,
+              "median_ms": 3.962825
+            },
+            {
+              "operations": 1000,
+              "index": 0,
+              "median_ms": 6.412563
+            },
+            {
+              "operations": 1000,
+              "index": 999,
+              "median_ms": 7.47842
+            },
+            {
+              "operations": 5000,
+              "index": 0,
+              "median_ms": 16.143424
+            },
+            {
+              "operations": 5000,
+              "index": 4999,
+              "median_ms": 22.028918
+            }
+          ],
+          "search": [
+            {
+              "query": "regex:nomatchliteral",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 27.005822
+            },
+            {
+              "query": "regex:(?:a|aa)*b",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 32.699549
+            },
+            {
+              "query": "regex:^get-item-[0-9]+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 34.954612
+            },
+            {
+              "query": "regex:(?i)CAF\u00c9",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 37.535566
+            },
+            {
+              "query": "regex:\\p{Greek}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 47.817025
+            },
+            {
+              "query": "regex:\\p{Nd}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 40.275477
+            }
+          ]
+        },
+        "combined": {
+          "startup": [
+            {
+              "operations": 10,
+              "index": 0,
+              "median_ms": 3.969695
+            },
+            {
+              "operations": 10,
+              "index": 9,
+              "median_ms": 3.871247
+            },
+            {
+              "operations": 1000,
+              "index": 0,
+              "median_ms": 6.402913
+            },
+            {
+              "operations": 1000,
+              "index": 999,
+              "median_ms": 7.428271
+            },
+            {
+              "operations": 5000,
+              "index": 0,
+              "median_ms": 16.431168
+            },
+            {
+              "operations": 5000,
+              "index": 4999,
+              "median_ms": 22.112676
+            }
+          ],
+          "search": [
+            {
+              "query": "regex:nomatchliteral",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 26.57452
+            },
+            {
+              "query": "regex:(?:a|aa)*b",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 32.361487
+            },
+            {
+              "query": "regex:^get-item-[0-9]+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 34.867453
+            },
+            {
+              "query": "regex:(?i)CAF\u00c9",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 38.077034
+            },
+            {
+              "query": "regex:\\p{Greek}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 46.849406
+            },
+            {
+              "query": "regex:\\p{Nd}+",
+              "operations": 1000,
+              "description_bytes": 4122,
+              "median_ms": 39.582872
+            }
+          ]
+        }
+      }
+    }
+  }
+}

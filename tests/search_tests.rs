@@ -529,3 +529,26 @@ fn search_adversarial_inputs_and_order_are_deterministic() {
         .is_empty());
     assert!(searcher.search(&specs, "regex:[", None).is_err());
 }
+
+#[test]
+fn regex_search_preserves_unicode_classes_and_case_folding() {
+    let mut spec = create_test_spec("test-api");
+    spec.commands[0].summary = Some("CAFÉ καλημέρα ٣".to_string());
+    let specs = BTreeMap::from([("test-api".to_string(), spec)]);
+    let searcher = CommandSearcher::new();
+    for query in [
+        r"regex:(?i)CAFÉ",
+        r"regex:\p{Greek}+",
+        r"regex:\p{Nd}+",
+        r"regex:\bκαλημέρα\b",
+        r"regex:CAFÉ|missing",
+        r"regex:(?i:CAFÉ)",
+    ] {
+        let results = searcher.search(&specs, query, None).unwrap();
+        assert_eq!(results.len(), 1, "{query}");
+        assert_eq!(results[0].command.operation_id, "getUser", "{query}");
+    }
+    for query in ["regex:[", "regex:(?=café)"] {
+        assert!(searcher.search(&specs, query, None).is_err(), "{query}");
+    }
+}

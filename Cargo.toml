@@ -36,7 +36,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.103"
-chrono = { version = "0.4", features = ["serde"] }
+# Cache metadata needs UTC timestamps, not local time zones or DateTime serialization.
+chrono = { version = "0.4", default-features = false, features = ["now"] }
 clap = { version = "4.6.0", features = ["derive"] }
 jaq-core = { version = "3.1.1", optional = true }
 jaq-json = { version = "2.0.3", features = ["serde"], optional = true }
@@ -59,7 +60,8 @@ fastrand = "2.4.1"
 fs2 = "0.4.3"
 fuzzy-matcher = "0.3.7"
 futures-util = "0.3"
-governor = "0.10.4"
+# Direct batch limiter only; retain the existing Quanta clock without keyed/jitter support.
+governor = { version = "0.10.4", default-features = false, features = ["std", "quanta"] }
 httpdate = "1.0"
 indexmap = "2.14.0"
 sha2 = "0.10.8"
