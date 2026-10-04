@@ -13,7 +13,7 @@ are frequently sequential with data dependencies between steps — for example,
 
 Without dependency support, agents must issue individual `aperture` invocations for
 each step, parse intermediate results, and construct subsequent calls. This
-introduces per-step latency from the agent ↔ tool roundtrip and pushes orchestration
+introduces per-step latency from the roundtrip between the agent and tool and pushes orchestration
 complexity into the agent.
 
 The design space included three broad approaches:

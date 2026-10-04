@@ -497,7 +497,7 @@ fn search_adversarial_inputs_and_order_are_deterministic() {
         " ",
         "none",
         "[]",
-        "✨",
+        "漢字",
         "GETCAFÉ",
         "get.café",
         "regex:",
