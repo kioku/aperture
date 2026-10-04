@@ -552,3 +552,107 @@ fn regex_search_preserves_unicode_classes_and_case_folding() {
         assert!(searcher.search(&specs, query, None).is_err(), "{query}");
     }
 }
+
+fn intent_spec() -> CachedSpec {
+    let mut spec = create_test_spec("intent");
+    for (command, (id, method, summary)) in spec.commands.iter_mut().zip([
+        ("pulls/get", "GET", "Get a pull request"),
+        ("pulls/list", "GET", "List all pull requests"),
+        ("pulls/create", "POST", "Create a pull request"),
+        (
+            "repos/get-review",
+            "GET",
+            "Get pull request review protection",
+        ),
+    ]) {
+        command.operation_id = id.into();
+        command.method = method.into();
+        command.summary = Some(summary.into());
+        command.description = Some("POST create pull request documentation".into());
+        command.path = "/unrelated".into();
+    }
+    spec
+}
+
+#[test]
+fn multiword_intent_and_method_qualification() {
+    let specs = BTreeMap::from([("intent".into(), intent_spec())]);
+    let searcher = CommandSearcher::new();
+    for query in [
+        "get pull request",
+        "GET pull request",
+        "  gEt   pull   request  ",
+    ] {
+        let results = searcher.search(&specs, query, None).unwrap();
+        assert_eq!(results[0].command.operation_id, "pulls/get", "{query}");
+        assert!(results.iter().all(|r| r.command.method == "GET"));
+    }
+    let results = searcher.search(&specs, "POST create", None).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].command.operation_id, "pulls/create");
+    let results = searcher.search(&specs, "list pull requests", None).unwrap();
+    assert_eq!(results[0].command.operation_id, "pulls/list");
+    for query in ["pull requester", "pull a missing", "", "   "] {
+        assert!(
+            searcher.search(&specs, query, None).unwrap().is_empty(),
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn multiword_tokens_include_discovery_names_without_fuzzy_cross_field_matches() {
+    let mut spec = intent_spec();
+    spec.commands[0].display_group = Some("codeReviews".into());
+    spec.commands[0].display_name = Some("fetchItem".into());
+    spec.commands[0].aliases = vec!["inspect-change".into()];
+    let specs = BTreeMap::from([("intent".into(), spec)]);
+    for query in [
+        "code reviews",
+        "fetch item",
+        "inspect change",
+        "GET inspect change",
+    ] {
+        let results = CommandSearcher::new().search(&specs, query, None).unwrap();
+        assert_eq!(results[0].command.operation_id, "pulls/get");
+    }
+    assert!(CommandSearcher::new()
+        .search(&specs, "fetch missing", None)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn intent_tokens_preserve_articles_unicode_filters_and_ties() {
+    let mut spec = intent_spec();
+    spec.commands[0].summary = Some("Get a café request".into());
+    let mut specs = BTreeMap::from([("intent".into(), spec.clone())]);
+    let searcher = CommandSearcher::new();
+    for query in ["GET café request", "GET café-request", "get a café request"] {
+        let results = searcher.search(&specs, query, Some("intent")).unwrap();
+        assert_eq!(results.len(), 1, "{query}");
+        assert_eq!(results[0].command.operation_id, "pulls/get");
+    }
+    assert!(searcher
+        .search(&specs, "GET café requests", None)
+        .unwrap()
+        .is_empty());
+    assert!(searcher
+        .search(&specs, "GET café request", Some("other"))
+        .unwrap()
+        .is_empty());
+    let before = searcher.search(&specs, "pull request", None).unwrap();
+    spec.commands.reverse();
+    specs.insert("intent".into(), spec);
+    let after = searcher.search(&specs, "pull request", None).unwrap();
+    assert_eq!(
+        before
+            .iter()
+            .map(|r| (&r.command.operation_id, r.score))
+            .collect::<Vec<_>>(),
+        after
+            .iter()
+            .map(|r| (&r.command.operation_id, r.score))
+            .collect::<Vec<_>>()
+    );
+}
