@@ -63,7 +63,7 @@ identity, binary SHA-256 and exact byte counts are in [gh-233.json](gh-233.json)
 | All | 5,000 | First | 65.40 | 16.24 | 50.23 | 11.31 |
 | All | 5,000 | Last | 67.94 | 21.58 | 50.32 | 11.48 |
 
-Default 5,000-operation latency improves 68–75%; peak memory improves about 78%.
+Default 5,000-operation latency improves 69–76%; peak memory improves about 78%.
 These are local warm-process observations, not cold-start, server-latency or
 cross-platform guarantees. Small-case differences are too small for strong claims.
 
