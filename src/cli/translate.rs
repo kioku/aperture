@@ -63,6 +63,7 @@ pub fn matches_to_operation_call(
         .unwrap_or_default();
 
     Ok(OperationCall {
+        pagination_url: None,
         operation_id: operation.operation_id.clone(),
         path_params,
         query_params,
@@ -223,11 +224,13 @@ fn extract_param(
         return;
     }
 
-    // Boolean parameters are flags (SetTrue action in clap)
-    // Path booleans always need a value (true/false); query/header only when true
-    let flag_set = matches.get_flag(&param.name);
-    if flag_set || param.location == "path" {
-        target.insert(param.name.clone(), flag_set.to_string());
+    if param.location == "path" {
+        target.insert(
+            param.name.clone(),
+            matches.get_flag(&param.name).to_string(),
+        );
+    } else if let Some(value) = matches.get_one::<bool>(&param.name) {
+        target.insert(param.name.clone(), value.to_string());
     }
 }
 
@@ -359,12 +362,15 @@ pub fn cli_to_execution_context(
         })
     };
 
+    let global_config = resolve_execution_defaults(execution, global_config);
+
     // Build retry context
     let retry_context = build_retry_context(execution, global_config.as_ref())?;
 
     let proxy_override = proxy_override_from_execution_flags(execution);
 
     Ok(ExecutionContext {
+        http_clients: crate::engine::executor::HttpClientPool::default(),
         dry_run: execution.dry_run,
         idempotency_key: execution.idempotency_key.clone(),
         cache_config,
@@ -432,5 +438,19 @@ fn resolve_retry_delay_ms(delay: Option<&str>, default_ms: u64) -> Result<u64, E
     match delay {
         Some(delay_str) => Ok(parse_duration(delay_str)?.as_millis() as u64),
         None => Ok(default_ms),
+    }
+}
+
+/// Explicit execution flags take precedence over persisted defaults.
+pub(crate) fn resolve_execution_defaults(
+    execution: &ExecutionFlags,
+    global_config: Option<GlobalConfig>,
+) -> Option<GlobalConfig> {
+    if let Some(timeout) = execution.timeout_secs {
+        let mut config = global_config.unwrap_or_default();
+        config.default_timeout_secs = timeout;
+        Some(config)
+    } else {
+        global_config
     }
 }

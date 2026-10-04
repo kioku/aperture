@@ -15,20 +15,6 @@ use crate::shortcuts::{ResolutionResult, ShortcutResolver};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-/// Adds connection/timeout context to network errors.
-fn enrich_network_error(e: Error) -> Error {
-    let Error::Network(ref req_err) = e else {
-        return e;
-    };
-    if req_err.is_connect() {
-        return e.with_context("Failed to connect to API server");
-    }
-    if req_err.is_timeout() {
-        return e.with_context("Request timed out");
-    }
-    e
-}
-
 /// Writes a structured JSON error as the final NDJSON line when `--json-errors` is active.
 fn emit_pagination_error_ndjson(cli: &Cli, writer: &mut impl std::io::Write, error: &Error) {
     if !cli.json_errors {
@@ -362,7 +348,6 @@ async fn execute_paginated_api_runtime(
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
-            let e = enrich_network_error(e);
             // When --json-errors is active, emit the error as the final NDJSON
             // line on stdout so pipeline consumers can detect mid-stream failure
             // without inspecting stderr.
@@ -380,9 +365,7 @@ async fn execute_standard_api_runtime(
     jq_filter: Option<&str>,
     output_file: Option<&str>,
 ) -> Result<(), Error> {
-    let result = executor::execute(spec, call, ctx)
-        .await
-        .map_err(enrich_network_error)?;
+    let result = executor::execute(spec, call, ctx).await?;
 
     crate::cli::render::render_result_with_binary_destination(
         &result,
@@ -442,6 +425,7 @@ const RESERVED_EXECUTION_FLAGS: &[(&str, bool)] = &[
     ("--jq", true),
     ("--batch-file", true),
     ("--batch-concurrency", true),
+    ("--timeout-secs", true),
     ("--batch-rate-limit", true),
     ("--cache", false),
     ("--no-cache", false),
@@ -665,6 +649,8 @@ pub async fn execute_batch_operations(
     cli: &Cli,
     execution: &ExecutionFlags,
 ) -> Result<(), Error> {
+    let global_config =
+        crate::cli::translate::resolve_execution_defaults(execution, global_config.cloned());
     let batch_file =
         BatchProcessor::parse_batch_file(std::path::Path::new(batch_file_path)).await?;
     let batch_config = BatchConfig {
@@ -680,7 +666,7 @@ pub async fn execute_batch_operations(
         .execute_batch(
             spec,
             batch_file,
-            global_config,
+            global_config.as_ref(),
             None,
             execution.dry_run,
             &execution.format,
@@ -775,7 +761,9 @@ pub async fn execute_shortcut_command(
     let output = Output::new(cli.quiet, cli.json_errors);
 
     if args.is_empty() {
-        print_shortcut_usage();
+        return Err(Error::validation_error(
+            "No command specified\nUsage: aperture run <shortcut> [args...]",
+        ));
     }
 
     let specs = manager.list_specs()?;
@@ -845,51 +833,14 @@ async fn handle_shortcut_resolution(
             let final_args = [operation_args, user_args].concat();
             execute_api_command(context, final_args, cli).await
         }
-        ResolutionResult::Ambiguous(matches) => {
-            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-            // ast-grep-ignore: no-println
-            eprintln!("{}", resolver.format_ambiguous_suggestions(&matches));
-            // ast-grep-ignore: no-println
-            eprintln!("\nTip: Also try 'aperture search <term>' to explore available commands");
-            std::process::exit(1);
-        }
-        ResolutionResult::NotFound => {
-            // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-            // ast-grep-ignore: no-println
-            eprintln!("No command found for shortcut: {}", args.join(" "));
-            // ast-grep-ignore: no-println
-            eprintln!("Try one of these:");
-            // ast-grep-ignore: no-println
-            eprintln!(
-                "  aperture search '{}'    # Search for similar commands",
-                args[0]
-            );
-            // ast-grep-ignore: no-println
-            eprintln!("  aperture commands <api>       # List available commands for an API");
-            // ast-grep-ignore: no-println
-            eprintln!("  aperture api <api> --help     # Show help for an API");
-            std::process::exit(1);
-        }
+        ResolutionResult::Ambiguous(matches) => Err(Error::validation_error(
+            resolver.format_ambiguous_suggestions(&matches),
+        )),
+        ResolutionResult::NotFound => Err(Error::validation_error(format!(
+            "No command found for shortcut: {}\nTry 'aperture search' to explore available commands",
+            args.join(" "),
+        ))),
     }
-}
-
-fn print_shortcut_usage() -> ! {
-    // Must appear regardless of APERTURE_LOG; tracing may suppress at low levels.
-    // ast-grep-ignore: no-println
-    eprintln!("Error: No command specified");
-    // ast-grep-ignore: no-println
-    eprintln!("Usage: aperture run <shortcut> [args...]");
-    // ast-grep-ignore: no-println
-    eprintln!("Examples:");
-    // ast-grep-ignore: no-println
-    eprintln!("  aperture run getUserById --id 123");
-    // ast-grep-ignore: no-println
-    eprintln!("  aperture run --api billing getUserById --id 123");
-    // ast-grep-ignore: no-println
-    eprintln!("  aperture run GET /users/123");
-    // ast-grep-ignore: no-println
-    eprintln!("  aperture run users list");
-    std::process::exit(1);
 }
 
 fn count_shortcut_args(args: &[String]) -> usize {

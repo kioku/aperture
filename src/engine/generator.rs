@@ -94,45 +94,81 @@ pub fn generate_command_tree_for_api_with_flags(
     api_name: &str,
     use_positional_args: bool,
 ) -> Command {
-    let mut root_command = Command::new(constants::CLI_ROOT_COMMAND)
-        .version(to_static_str(spec.version.clone()))
-        .about(format!("CLI for {} API", spec.name))
-        // Add global flags that should be available to all operations
-        // These are hidden from subcommand help to reduce noise - they're documented in `aperture --help`
-        .arg(
-            Arg::new("jq")
-                .long("jq")
-                .global(true)
-                .hide(true)
-                .help("Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')")
-                .value_name("FILTER")
-                .action(ArgAction::Set),
-        )
-        .arg(
-            Arg::new("format")
-                .long("format")
-                .global(true)
-                .hide(true)
-                .help("Output format for response data")
-                .value_name("FORMAT")
-                .value_parser(["json", "yaml", "table"])
-                .default_value("json")
-                .action(ArgAction::Set),
-        )
-        .arg(
-            Arg::new("server-var")
-                .long("server-var")
-                .global(true)
-                .hide(true)
-                .help("Set server template variable (e.g., --server-var region=us --server-var env=prod)")
-                .value_name("KEY=VALUE")
-                .action(ArgAction::Append),
-        );
+    generate_tree_for_commands(spec, api_name, use_positional_args, spec.commands.iter())
+}
+
+/// Build only the selected operation's clap tree for batch parsing.
+/// This avoids allocating every operation in a large immutable specification.
+pub(crate) fn generate_batch_command_tree(
+    spec: &CachedSpec,
+    args: &[String],
+) -> Result<Command, crate::error::Error> {
+    // Parse the two command positions with the same global argument grammar as
+    // execution. Flag values must never participate in operation selection.
+    let (group, remaining) = parse_batch_subcommand(
+        std::iter::once(std::ffi::OsString::from(constants::CLI_ROOT_COMMAND))
+            .chain(args.iter().map(std::ffi::OsString::from)),
+    )?;
+    let (operation, _) =
+        parse_batch_subcommand(std::iter::once(std::ffi::OsString::from(&group)).chain(remaining))?;
+    let selected = spec
+        .commands
+        .iter()
+        .find(|command| {
+            to_kebab_case(&effective_group_name(command)) == group
+                && (effective_subcommand_name(command) == operation
+                    || command
+                        .aliases
+                        .iter()
+                        .any(|alias| to_kebab_case(alias) == operation))
+        })
+        .ok_or_else(|| crate::error::Error::validation_error("Batch operation was not found"))?;
+    Ok(generate_tree_for_commands(
+        spec,
+        "<api>",
+        false,
+        std::iter::once(selected),
+    ))
+}
+
+/// Parse one command level, leaving operation arguments untouched for execution.
+fn parse_batch_subcommand(
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<(String, Vec<std::ffi::OsString>), crate::error::Error> {
+    let matches = with_global_args(Command::new(constants::CLI_ROOT_COMMAND))
+        .allow_external_subcommands(true)
+        .try_get_matches_from(args)
+        .map_err(|error| crate::error::Error::validation_error(error.to_string()))?;
+    let (name, remaining) = matches
+        .subcommand()
+        .ok_or_else(|| crate::error::Error::validation_error("Batch command was not found"))?;
+    Ok((
+        name.to_string(),
+        remaining
+            .get_many::<std::ffi::OsString>("")
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect(),
+    ))
+}
+
+fn generate_tree_for_commands<'a>(
+    spec: &CachedSpec,
+    api_name: &str,
+    use_positional_args: bool,
+    commands: impl Iterator<Item = &'a CachedCommand>,
+) -> Command {
+    let mut root_command = with_global_args(
+        Command::new(constants::CLI_ROOT_COMMAND)
+            .version(to_static_str(spec.version.clone()))
+            .about(format!("CLI for {} API", spec.name)),
+    );
 
     // Group commands by their effective group name (display_group override or tag)
     let mut command_groups: HashMap<String, Vec<&CachedCommand>> = HashMap::new();
 
-    for command in &spec.commands {
+    for command in commands {
         let group_name = effective_group_name(command);
         command_groups.entry(group_name).or_default().push(command);
     }
@@ -207,6 +243,42 @@ pub fn generate_command_tree_for_api_with_flags(
     root_command
 }
 
+/// Keep operation selection and execution on the same global-flag grammar.
+fn with_global_args(command: Command) -> Command {
+    command
+        // Add global flags that should be available to all operations
+        // These are hidden from subcommand help to reduce noise - they're documented in `aperture --help`
+        .arg(
+            Arg::new("jq")
+                .long("jq")
+                .global(true)
+                .hide(true)
+                .help("Apply JQ filter to response data (e.g., '.name', '.[] | select(.active)')")
+                .value_name("FILTER")
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("format")
+                .long("format")
+                .global(true)
+                .hide(true)
+                .help("Output format for response data")
+                .value_name("FORMAT")
+                .value_parser(["json", "yaml", "table"])
+                .default_value("json")
+                .action(ArgAction::Set),
+        )
+        .arg(
+            Arg::new("server-var")
+                .long("server-var")
+                .global(true)
+                .hide(true)
+                .help("Set server template variable (e.g., --server-var region=us --server-var env=prod)")
+                .value_name("KEY=VALUE")
+                .action(ArgAction::Append),
+        )
+}
+
 /// Attaches `--body` and `--body-file` args to a command that accepts a request body.
 ///
 /// When the spec marks the body as required, `--body-file` is an equally valid way to
@@ -271,19 +343,9 @@ fn effective_subcommand_name(command: &CachedCommand) -> String {
 ///
 /// # Boolean Parameter Handling
 ///
-/// Boolean parameters use `ArgAction::SetTrue`, treating them as flags:
-///
-/// **Path Parameters:**
-/// - Always optional regardless of `OpenAPI` `required` field
-/// - Flag presence = true (substitutes "true" in path), absence = false (substitutes "false")
-/// - Example: `/items/{active}` with `--active` → `/items/true`, without → `/items/false`
-///
-/// **Query/Header Parameters:**
-/// - **Optional booleans** (`required: false`): Flag presence = true, absence = false
-/// - **Required booleans** (`required: true`): Flag MUST be provided, presence = true
-/// - Example: `--verbose` (optional) omitted means `verbose=false`
-///
-/// This differs from non-boolean parameters which require explicit values (e.g., `--id 123`).
+/// Query/header booleans accept explicit true/false values. A bare flag remains
+/// shorthand for true; omission is distinct from false. Path flags retain their
+/// existing default-false behavior.
 fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool) -> Arg {
     let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
 
@@ -339,7 +401,10 @@ fn create_scoped_parameter_arg(param: &CachedParameter, is_boolean: bool) -> Arg
             .long(long_name)
             .help(help)
             .required(param.required)
-            .action(ArgAction::SetTrue)
+            .action(ArgAction::Set)
+            .value_parser(clap::value_parser!(bool))
+            .num_args(0..=1)
+            .default_missing_value("true")
     } else {
         let value_name = to_static_str(param.name.to_uppercase());
         Arg::new(param_name_static)
@@ -360,7 +425,10 @@ fn create_generic_parameter_arg(param: &CachedParameter, is_boolean: bool) -> Ar
             .long(long_name)
             .help(format!("{} parameter", param.name))
             .required(param.required)
-            .action(ArgAction::SetTrue)
+            .action(ArgAction::Set)
+            .value_parser(clap::value_parser!(bool))
+            .num_args(0..=1)
+            .default_missing_value("true")
     } else {
         let value_name = to_static_str(param.name.to_uppercase());
         Arg::new(param_name_static)

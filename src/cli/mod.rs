@@ -110,9 +110,15 @@ pub struct ExecutionFlags {
         long,
         value_name = "N",
         default_value = "5",
+        value_parser = parse_batch_concurrency,
         help = "Maximum number of concurrent requests for batch operations"
     )]
     pub batch_concurrency: usize,
+
+    /// Request timeout in seconds (overrides configured default).
+    #[arg(long, global = true, value_name = "SECONDS",
+        value_parser = clap::value_parser!(u64).range(1..=crate::config::settings::MAX_TIMEOUT_SECS))]
+    pub timeout_secs: Option<u64>,
 
     /// Rate limit for batch operations (requests per second)
     #[arg(
@@ -212,7 +218,9 @@ pub struct ExecutionFlags {
 pub struct Cli {
     /// Output all errors as structured JSON to stderr
     /// When used with batch operations, outputs a clean JSON summary at the end
-    #[arg(long, global = true, help = "Output errors in JSON format")]
+    #[arg(long, global = true, action = ArgAction::Set, value_parser = clap::value_parser!(bool),
+        num_args = 0..=1, require_equals = true, default_missing_value = "true", default_value = "false",
+        help = "Output errors in JSON format (use --json-errors=false to override configuration)")]
     pub json_errors: bool,
 
     /// Suppress non-essential output (success messages, tips, hints)
@@ -1078,6 +1086,20 @@ pub enum ConfigCommands {
         #[arg(long, value_name = "OPERATION_ID")]
         operation: Option<String>,
     },
+}
+
+/// Zero permits cannot make progress; reject them before entering batch execution.
+fn parse_batch_concurrency(value: &str) -> Result<usize, String> {
+    let concurrency: usize = value
+        .parse()
+        .map_err(|_| "Expected a positive integer".to_string())?;
+    if concurrency == 0 {
+        return Err("Batch concurrency must be greater than zero".to_string());
+    }
+    if concurrency > tokio::sync::Semaphore::MAX_PERMITS {
+        return Err("Batch concurrency exceeds the supported maximum".to_string());
+    }
+    Ok(concurrency)
 }
 
 #[cfg(test)]

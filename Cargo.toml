@@ -2,6 +2,7 @@
 name = "aperture-cli"
 version = "0.1.9"
 edition = "2021"
+rust-version = "1.91"
 description = "Dynamic CLI generator for OpenAPI specifications"
 license = "MIT"
 repository = "https://github.com/kioku/aperture"
@@ -44,6 +45,7 @@ jaq-std = { version = "3.0.3", optional = true }
 oas3 = { version = "0.22", features = ["yaml-spec"], optional = true }
 openapiv3 = "2.2.0"
 regex = "1"
+strsim = "0.11"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 serde = "1.0.228"
 serde_json = "1.0.149"
@@ -57,6 +59,7 @@ base64 = "0.22.1"
 fastrand = "2.4.1"
 fs2 = "0.4.3"
 fuzzy-matcher = "0.3.7"
+futures-util = "0.3"
 governor = "0.10.4"
 httpdate = "1.0"
 indexmap = "2.14.0"
