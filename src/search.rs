@@ -72,6 +72,9 @@ impl CommandSearcher {
         api_filter: Option<&str>,
     ) -> Result<Vec<CommandSearchResult>, Error> {
         let mut results = Vec::new();
+        if query.trim().is_empty() {
+            return Ok(results);
+        }
 
         // Regex is opt-in; ordinary words always use keyword/fuzzy matching.
         let regex_pattern = compile_search_regex(query)?;
@@ -170,6 +173,9 @@ impl CommandSearcher {
         query: &str,
         operation_id_kebab: &str,
     ) -> ScoringResult {
+        if query.split_whitespace().count() > 1 {
+            return score_intent(command, query, operation_id_kebab);
+        }
         let mut highlights = Vec::new();
         let normalized_query = normalize_keyword(query);
         let normalized_name = normalize_keyword(operation_id_kebab);
@@ -355,6 +361,94 @@ impl Default for CommandSearcher {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Intent matching uses whole Unicode alphanumeric tokens, never fuzzy text
+/// assembled across fields. A leading HTTP method qualifies multiword queries.
+fn score_intent(command: &CachedCommand, query: &str, operation_name: &str) -> ScoringResult {
+    let mut words = query.split_whitespace();
+    let first = words.next().unwrap_or_default();
+    let qualified = is_http_method(first);
+    if qualified && !command.method.eq_ignore_ascii_case(first) {
+        return ScoringResult::default();
+    }
+    let intent = if qualified {
+        words.collect::<Vec<_>>().join(" ")
+    } else {
+        query.to_string()
+    };
+    let tokens = keyword_tokens(&intent);
+    if tokens.is_empty() {
+        return ScoringResult::default();
+    }
+    let aliases = command.aliases.join(" ");
+    // Search the same word boundaries users see in generated command paths.
+    let display_name = to_kebab_case(command.display_name.as_deref().unwrap_or(""));
+    let group = to_kebab_case(command.display_group.as_deref().unwrap_or(&command.name));
+    let fields = [
+        ("Operation", operation_name, 300),
+        ("Summary", command.summary.as_deref().unwrap_or(""), 200),
+        (
+            "Description",
+            command.description.as_deref().unwrap_or(""),
+            100,
+        ),
+        ("Path", command.path.as_str(), 150),
+        ("Display name", display_name.as_str(), 300),
+        ("Group", group.as_str(), 150),
+        ("Alias", aliases.as_str(), 300),
+    ];
+    let tokenized: Vec<_> = fields
+        .iter()
+        .map(|(_, text, _)| keyword_tokens(text))
+        .collect();
+    if !tokens
+        .iter()
+        .all(|token| tokenized.iter().any(|field| field.contains(token)))
+    {
+        return ScoringResult::default();
+    }
+    let mut result = score_intent_fields(&fields, &tokenized, &tokens);
+    result.score += name_similarity_score(
+        &normalize_keyword(operation_name),
+        &normalize_keyword(&intent),
+    );
+    result
+}
+
+/// Field coherence supplies a bounded bonus, independent of alias count.
+fn score_intent_fields(
+    fields: &[(&str, &str, i64)],
+    tokenized: &[Vec<String>],
+    tokens: &[String],
+) -> ScoringResult {
+    let mut result = ScoringResult {
+        score: 80,
+        highlights: Vec::new(),
+    };
+    for ((label, text, bonus), field) in fields.iter().zip(tokenized) {
+        if tokens.iter().all(|token| field.contains(token)) {
+            let extra = field.len().saturating_sub(tokens.len()).min(20);
+            result.score = result.score.max(bonus - i64::try_from(extra).unwrap_or(20));
+            result.highlights.push(format!("{label}: {text}"));
+        }
+    }
+    result
+}
+
+fn is_http_method(word: &str) -> bool {
+    [
+        "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT",
+    ]
+    .iter()
+    .any(|method| word.eq_ignore_ascii_case(method))
+}
+
+fn keyword_tokens(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect()
 }
 
 /// Stable tie breakers make ranking independent of specification operation order.

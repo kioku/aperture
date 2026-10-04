@@ -183,9 +183,22 @@ jobs:
         if: matrix.cross
         run: cargo install cross --locked
 
+      # cross forwards only explicitly allowed environment variables.
+      - name: Embed checked-out source identity
+        shell: bash
+        run: |
+          echo "APERTURE_BUILD_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          if [ -z "$(git status --porcelain --untracked-files=normal)" ]; then
+            echo "APERTURE_BUILD_SOURCE_STATE=clean" >> "$GITHUB_ENV"
+          else
+            echo "APERTURE_BUILD_SOURCE_STATE=dirty" >> "$GITHUB_ENV"
+          fi
+
       - name: Build (cross)
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }}
+        env:
+          CROSS_BUILD_ENV_PASSTHROUGH: APERTURE_BUILD_REVISION APERTURE_BUILD_SOURCE_STATE
 
       - name: Build (native)
         if: "!matrix.cross"

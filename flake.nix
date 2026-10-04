@@ -49,6 +49,13 @@
 
           buildFeatures = features;
 
+          # Preserve identity after cleanSource removes Git metadata.
+          APERTURE_BUILD_REVISION = self.rev or (if self ? dirtyRev then pkgs.lib.removeSuffix "-dirty" self.dirtyRev else "unknown");
+          APERTURE_BUILD_SOURCE_STATE =
+            if self ? rev then "clean"
+            else if self ? dirtyRev then "dirty"
+            else "unknown";
+
           # Tests require network access (wiremock) which is unavailable
           # in the Nix build sandbox.  They are validated separately in CI.
           doCheck = false;
