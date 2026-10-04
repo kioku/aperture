@@ -2,6 +2,7 @@
 
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedResponse, PaginationInfo,
+    ParameterSerialization,
 };
 use aperture_cli::constants;
 
@@ -18,6 +19,7 @@ fn init_crypto_provider() {
 #[must_use]
 pub fn test_parameter(name: &str, location: &str, required: bool) -> CachedParameter {
     CachedParameter {
+        serialization: ParameterSerialization::default(),
         name: name.to_string(),
         location: location.to_string(),
         required,

@@ -13,7 +13,8 @@ mod test_helpers;
 /// 4. Required booleans work correctly when provided
 /// 5. Optional booleans continue to work as before (default to false when absent)
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+    CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
@@ -39,6 +40,7 @@ fn create_spec_with_required_boolean_path_param() -> CachedSpec {
             path: "/items/{id}/{active}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -51,6 +53,7 @@ fn create_spec_with_required_boolean_path_param() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "active".to_string(),
                     location: "path".to_string(),
                     required: true, // REQUIRED boolean
@@ -97,6 +100,7 @@ fn create_spec_with_required_boolean_query_param() -> CachedSpec {
             method: "GET".to_string(),
             path: "/users".to_string(),
             parameters: vec![CachedParameter {
+                serialization: ParameterSerialization::default(),
                 name: "includeInactive".to_string(),
                 location: "query".to_string(),
                 required: true, // REQUIRED boolean
@@ -143,6 +147,7 @@ fn create_spec_with_mixed_boolean_params() -> CachedSpec {
             path: "/search".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "required-flag".to_string(),
                     location: "query".to_string(),
                     required: true, // REQUIRED
@@ -155,6 +160,7 @@ fn create_spec_with_mixed_boolean_params() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "optional-flag".to_string(),
                     location: "query".to_string(),
                     required: false, // OPTIONAL
