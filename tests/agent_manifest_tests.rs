@@ -9,7 +9,7 @@ use aperture_cli::agent::{
 };
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedRequestBody, CachedResponse,
-    CachedSecurityScheme, CachedSpec, PaginationInfo,
+    CachedSecurityScheme, CachedSpec, PaginationInfo, ParameterSerialization,
 };
 use aperture_cli::config::models::{ApiConfig, GlobalConfig};
 use aperture_cli::constants;
@@ -104,6 +104,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
             path: "/users/{id}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -116,6 +117,7 @@ fn create_comprehensive_test_spec() -> CachedSpec {
                     example: Some("12345".to_string()),
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "include".to_string(),
                     location: "query".to_string(),
                     required: false,

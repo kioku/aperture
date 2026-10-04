@@ -2,7 +2,7 @@ mod test_helpers;
 
 use aperture_cli::cache::models::{
     CachedApertureSecret, CachedCommand, CachedParameter, CachedSecurityScheme, CachedSpec,
-    PaginationInfo,
+    PaginationInfo, ParameterSerialization,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
@@ -16,6 +16,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 macro_rules! cached_parameter {
     ($name:expr, $location:expr, $required:expr) => {
         CachedParameter {
+            serialization: ParameterSerialization::default(),
             name: $name.to_string(),
             location: $location.to_string(),
             required: $required,

@@ -700,7 +700,7 @@ no authentication requirement. Operation-level security replaces global security
 including an explicitly empty array. OAuth scopes are not enforced.
 
 SDK consumers must update the field type from `string[]` to `string[][]`. Parsed
-spec cache format 8 invalidates earlier flattened representations; rebuild stale
+spec cache format 9 invalidates earlier flattened representations; rebuild stale
 caches from their original specs. Execution selects the first alternative whose
 credentials are configured and available, and applies only that group's headers.
 Malformed configuration or header values still fail rather than silently choosing

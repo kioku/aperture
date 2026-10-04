@@ -1,5 +1,6 @@
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+    CACHE_FORMAT_VERSION,
 };
 use aperture_cli::engine::generator::generate_command_tree_with_flags;
 
@@ -22,6 +23,7 @@ fn create_test_spec_with_boolean_params() -> CachedSpec {
             path: "/test".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "enabled".to_string(),
                     location: "query".to_string(),
                     required: false,
@@ -34,6 +36,7 @@ fn create_test_spec_with_boolean_params() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "verbose".to_string(),
                     location: "query".to_string(),
                     required: false,
@@ -46,6 +49,7 @@ fn create_test_spec_with_boolean_params() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "limit".to_string(),
                     location: "query".to_string(),
                     required: false,
@@ -94,6 +98,7 @@ fn create_test_spec_with_examples_param() -> CachedSpec {
             path: "/projects".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "examples".to_string(),
                     location: "query".to_string(),
                     required: false,
@@ -106,6 +111,7 @@ fn create_test_spec_with_examples_param() -> CachedSpec {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "page".to_string(),
                     location: "query".to_string(),
                     required: false,
@@ -337,6 +343,7 @@ fn test_boolean_path_parameters() {
             path: "/items/{id}/{active}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -349,6 +356,7 @@ fn test_boolean_path_parameters() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "active".to_string(),
                     location: "path".to_string(),
                     required: true,

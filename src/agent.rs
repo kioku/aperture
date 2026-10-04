@@ -1434,6 +1434,7 @@ mod tests {
                 method: constants::HTTP_METHOD_GET.to_string(),
                 path: "/users/{id}".to_string(),
                 parameters: vec![CachedParameter {
+                    serialization: crate::cache::models::ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: constants::PARAM_LOCATION_PATH.to_string(),
                     required: true,

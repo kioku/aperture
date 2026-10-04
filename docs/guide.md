@@ -269,6 +269,8 @@ aperture api my-api --no-cache users list
 
 Response caching applies only to GET and HEAD. Unsafe methods such as POST always execute; there is no unsafe-method caching opt-in. Cached results retain status and response headers for pagination, but responses that set session cookies are not cached. Dry runs always return a request plan and never read or create the response cache.
 
+Authenticated origin requests and selected proxy configurations containing credentials (including scheme-less proxy authorities such as `user:password@host:port`) bypass response-cache reads and writes, even with the legacy authenticated-cache opt-in. This conservative proxy policy also applies to destinations excluded by `NO_PROXY`; explicit `--no-proxy` disables that proxy policy. Anonymous proxy requests remain cacheable. Executor cache keys include a proxy-policy revision so older, potentially account-mixed entries are missed without deleting them. Environment proxy settings take precedence over configured proxies, and explicit CLI proxy overrides take precedence over both.
+
 ### Cache Management
 
 ```bash
@@ -514,6 +516,88 @@ done
   env:
     DEPLOY_API_TOKEN: ${{ secrets.DEPLOY_API_TOKEN }}
 ```
+
+## Request behavior
+
+### Pagination completeness and next links
+
+Automatic pagination follows both the path and query of `Link: ...; rel="next"`
+URLs, including relative links resolved against the current page. Next links
+must retain the original scheme, host, and effective port, and must not contain
+URL credentials or fragments. Operation authentication and headers are retained
+only for those same-origin requests; cross-origin links return an error before
+sending a request. Pagination rejects HTTP redirects (including same-origin
+redirects); the server must provide a validated next link instead. This keeps
+relative-link resolution and custom authentication headers within this policy.
+Link lists preserve commas in URLs and quoted attributes, support relation-token
+lists, and reject malformed or ambiguous next targets rather than silently
+reporting completion. Multiple Link header fields are treated as one list.
+One traversal reuses its HTTP connection pool.
+
+Pagination uses shared, context-scoped HTTP clients keyed by transport settings
+and redirect policy. Strict pagination rejects all redirects, including
+same-origin redirects. Its response-cache identity is separate from ordinary
+requests that follow redirects, so a warmed ordinary client or cached redirect
+cannot bypass pagination boundaries. Direct cached pagination responses retain
+Link headers and continue to avoid network requests on repeated traversals.
+
+Repeated page URLs/cursors and the 1,000-page safety cap return an incomplete
+traversal error when more data remains. Already emitted NDJSON is partial output.
+A closed output pipe stops pagination without fetching another page.
+
+### OpenAPI URL parameter serialization
+
+Path parameters use their declared `simple`, `label`, or `matrix` style and
+`explode` setting. The defaults are `simple` and `explode=false`. Each data
+component is percent-encoded before style punctuation is inserted, so commas,
+semicolons, equals signs, slashes, question marks, hashes, percent signs, spaces,
+and Unicode remain data. Label expansion also encodes data dots when exploding.
+
+The CLI accepts scalar strings directly. For array/object parameters, pass a
+JSON array/object of non-null primitive values, for example
+`--id '["blue","black"]'` or `--id '{"a":"blue","b":"black"}'`.
+Arrays/objects retain their declared wire representation rather than sending
+the JSON source text. Primitive number, integer, and boolean inputs must match
+the declared type; item/property primitive types are checked too. Local
+`#/components/schemas/` references are resolved, including array items and object
+properties. Empty/description-only schemas retain opaque string input; string-only
+compositions also use scalar encoding. These codecs select a wire shape, not full
+JSON Schema validation. Examples/defaults are preserved as payload data.
+Object keys are sorted for deterministic URLs. Duplicate JSON object keys keep
+the last value, as in the JSON decoder; duplicate array values are preserved.
+Unknown object properties are accepted unless their primitive type is declared.
+Empty collections are omitted.
+
+Query parameters use structured URL pairs with encoded keys and values.
+`form` defaults to `explode=true`: arrays produce repeated keys and objects
+produce separate property keys. Unexploded form uses comma-separated values;
+`spaceDelimited` and `pipeDelimited` support arrays with `explode=false`.
+`deepObject` supports flat objects with explicit `explode=true`.
+
+Unsupported representations return validation errors before a request is sent:
+content-based parameters; missing/cyclic/external schema references; ambiguous
+compound compositions and composed item/property schemas; null or nested compound values;
+`allowReserved=true`; exploded delimited query arrays; ambiguous delimiter data
+inside unexploded/delimited query values; and bracket-containing deep-object
+property names. Use exploded form when query data contains its delimiter.
+Dot-only path segments (including label expansion that produces `.` or `..`)
+are rejected because URL parsers would normalize them and change the path.
+
+Cached specifications retain these declarations in parsed-spec cache format version 9.
+This replaces layout 8 (grouped security) and is separate from response-cache keys.
+Older binary caches must be regenerated; JSON fixtures without serialization
+metadata retain the OpenAPI location defaults.
+
+### Transport retry policy
+
+Transport retries include truncated response-body reads even when the HTTP
+client wraps them as decoding errors. Unrelated decoding, builder, redirect,
+and terminal HTTP failures are not transport retries. Exhaustion reports the
+last attempt rather than an earlier HTTP response. Non-idempotent SDK requests
+require a non-empty idempotency key actually present in the request headers or
+explicit force-retry; an eligibility flag alone does not authorize a retry.
+Transport error messages omit request URLs to avoid exposing URL credentials;
+SDK and CLI JSON errors retain their network classification.
 
 ## Troubleshooting
 

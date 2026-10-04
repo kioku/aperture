@@ -23,6 +23,7 @@ fn spec(base: &str) -> CachedSpec {
 
 fn call() -> OperationCall {
     OperationCall {
+        pagination_url: None,
         operation_id: "listItems".into(),
         path_params: HashMap::new(),
         query_params: HashMap::new(),
@@ -118,6 +119,22 @@ fn sdk_child() {
         assert!(
             rustls::crypto::CryptoProvider::get_default().is_none(),
             "dry run must not initialize TLS or build a client"
+        );
+        ctx.auto_paginate = true;
+        assert!(matches!(
+            execute(&spec, call(), ctx.clone()).await.unwrap(),
+            ExecutionResult::DryRun { .. }
+        ));
+        let mut override_call = call();
+        override_call.pagination_url =
+            Some(reqwest::Url::parse(&format!("{base}/items?page=2")).unwrap());
+        assert!(matches!(
+            execute(&spec, override_call, ctx.clone()).await.unwrap(),
+            ExecutionResult::DryRun { .. }
+        ));
+        assert!(
+            rustls::crypto::CryptoProvider::get_default().is_none(),
+            "pagination dry run must not initialize TLS or a client"
         );
         ctx.dry_run = false;
         spec.commands[0].pagination = PaginationInfo {

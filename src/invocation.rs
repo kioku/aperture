@@ -38,6 +38,8 @@ impl RequestBody {
 /// can be constructed from clap `ArgMatches`, a GUI form, or programmatically.
 #[derive(Debug, Clone)]
 pub struct OperationCall {
+    /// Same-origin pagination target; validated again before authentication is attached.
+    pub pagination_url: Option<reqwest::Url>,
     /// The `operationId` from the `OpenAPI` spec (e.g., `"getUserById"`).
     pub operation_id: String,
 

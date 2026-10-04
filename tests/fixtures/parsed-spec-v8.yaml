@@ -1,0 +1,31 @@
+openapi: 3.0.3
+info:
+  title: Referenced scalar parameters
+  version: '1'
+servers:
+  - url: http://127.0.0.1:9
+paths:
+  /users/{id}:
+    get:
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - name: q
+          in: query
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    Id:
+      type: string

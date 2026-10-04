@@ -135,8 +135,8 @@ impl ProxyDiagnostics {
 
 /// Context-owned HTTP clients, shared across cloned contexts and batch operations.
 ///
-/// Resolved proxy settings and effective timeout form the key so configuration
-/// changes cannot reuse a client with a different route or deadline.
+/// Resolved proxy settings, effective timeout and redirect policy form the key
+/// so configuration changes cannot reuse a client with different transport rules.
 /// No process-global client is retained.
 #[derive(Debug, Clone, Default)]
 pub struct HttpClientPool(std::sync::Arc<std::sync::Mutex<HashMap<String, reqwest::Client>>>);
@@ -255,6 +255,52 @@ fn env_proxy_diagnostics() -> Option<ProxyDiagnostics> {
         no_proxy: no_proxy.map_or_else(Vec::new, |value| parse_no_proxy_entries(&value)),
         ..ProxyDiagnostics::default()
     })
+}
+
+/// Proxy credentials can select an account even when the origin is anonymous.
+/// Conservatively bypass caching for the selected authenticated proxy setup,
+/// including destinations excluded by `NO_PROXY`; never persist proxy identity.
+fn proxy_requires_cache_bypass(ctx: &crate::invocation::ExecutionContext) -> bool {
+    match &ctx.proxy_override {
+        ProxyOverride::Disable => false,
+        ProxyOverride::Use(url) => proxy_url_has_credentials(url),
+        ProxyOverride::Default => default_proxy_has_credentials(ctx.global_config.as_ref()),
+    }
+}
+
+fn proxy_url_has_credentials(url: &str) -> bool {
+    // reqwest accepts scheme-less proxy authorities by adding http://. An
+    // opaque URL like `alice:password@host:port` parses without userinfo, so
+    // require a host before accepting the first parse for this policy check.
+    let parsed = reqwest::Url::parse(url)
+        .ok()
+        .filter(reqwest::Url::has_host)
+        .or_else(|| reqwest::Url::parse(&format!("http://{url}")).ok());
+    parsed.is_some_and(|url| !url.username().is_empty() || url.password().is_some())
+}
+
+fn default_proxy_has_credentials(config: Option<&GlobalConfig>) -> bool {
+    let environment: Vec<String> = [
+        ["HTTP_PROXY", "http_proxy"],
+        ["HTTPS_PROXY", "https_proxy"],
+        ["ALL_PROXY", "all_proxy"],
+    ]
+    .iter()
+    .filter_map(|names| first_env_value(names))
+    .collect();
+    if !environment.is_empty() {
+        return environment.iter().any(|url| proxy_url_has_credentials(url));
+    }
+    let Some(proxy) = config.map(|config| &config.proxy) else {
+        return false;
+    };
+    has_config_proxy(proxy)
+        && (non_empty(proxy.username.as_deref()).is_some()
+            || non_empty(proxy.password_env.as_deref()).is_some()
+            || [proxy.http.as_deref(), proxy.https.as_deref()]
+                .into_iter()
+                .flatten()
+                .any(proxy_url_has_credentials))
 }
 
 fn first_env_value(names: &[&str]) -> Option<String> {
@@ -420,10 +466,13 @@ fn effective_timeout_secs(ctx: &crate::invocation::ExecutionContext) -> u64 {
 }
 
 /// Build HTTP client with effective timeout and resolved proxy behavior.
-fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyBuildResult, Error> {
+fn build_http_client(
+    ctx: &crate::invocation::ExecutionContext,
+    pagination: bool,
+) -> Result<ProxyBuildResult, Error> {
     ensure_tls_provider();
     let (builder, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
-    let key = transport_key(ctx, &diagnostics);
+    let key = format!("{}:{pagination}", transport_key(ctx, &diagnostics));
     let mut clients = ctx
         .http_clients
         .0
@@ -435,6 +484,13 @@ fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyB
             diagnostics,
         });
     }
+
+    // Pagination follows only explicitly validated links, never redirects.
+    let builder = if pagination {
+        builder.redirect(reqwest::redirect::Policy::none())
+    } else {
+        builder
+    };
     let client = builder
         .timeout(std::time::Duration::from_secs(effective_timeout_secs(ctx)))
         .build()
@@ -454,6 +510,30 @@ fn build_http_client(ctx: &crate::invocation::ExecutionContext) -> Result<ProxyB
     })
 }
 
+/// Preserve the complete Link list and reject undecodable header data rather
+/// than mistaking it for a missing next page.
+fn collect_response_headers(headers: &HeaderMap) -> Result<HashMap<String, String>, Error> {
+    let mut response_headers: HashMap<String, String> = headers
+        .iter()
+        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    // Multiple Link fields form one list. Dropping fields could hide an
+    // ambiguous next target or silently report the traversal as complete.
+    let links = headers
+        .get_all(reqwest::header::LINK)
+        .iter()
+        .map(|value| {
+            value
+                .to_str()
+                .map_err(|_| Error::validation_error("Invalid pagination Link header encoding"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if !links.is_empty() {
+        response_headers.insert(constants::HEADER_LINK.to_string(), links.join(", "));
+    }
+    Ok(response_headers)
+}
+
 /// Send HTTP request and retain response bytes until the operation's media type is known.
 async fn send_request(
     request: reqwest::RequestBuilder,
@@ -462,25 +542,22 @@ async fn send_request(
     secret_ctx: Option<&logging::SecretContext>,
 ) -> Result<HttpResponseBytes, Error> {
     let start_time = std::time::Instant::now();
+    // Remove only the URL: native error classification and typed causes survive.
     let response = request
         .send()
         .await
-        .map_err(|e| Error::network_request_failed(e.to_string()))?;
+        .map_err(|error| Error::Network(error.without_url()))?;
     let status = response.status();
     let duration_ms = start_time.elapsed().as_millis();
     let mut response_headers_map = reqwest::header::HeaderMap::new();
     for (name, value) in response.headers() {
         response_headers_map.insert(name.clone(), value.clone());
     }
-    let response_headers = response
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-        .collect();
+    let response_headers = collect_response_headers(response.headers())?;
     let response_bytes = response
         .bytes()
         .await
-        .map_err(|e| Error::response_read_error(e.to_string()))?
+        .map_err(|error| Error::Network(error.without_url()))?
         .to_vec();
 
     if operation.has_binary_response() {
@@ -647,6 +724,7 @@ async fn retry_request_with_backoff(
                         response_headers,
                         response_text,
                     } => {
+                        last_error = None;
                         last_status = Some(status);
                         last_response_headers = Some(response_headers);
                         last_response_text = Some(response_text);
@@ -665,6 +743,11 @@ async fn retry_request_with_backoff(
             {
                 RetryableNetworkError::Return(error) => return Err(error),
                 RetryableNetworkError::Retry(error) => {
+                    // Exhaustion must describe the last attempt, not a stale
+                    // HTTP response from before the transport failure.
+                    last_status = None;
+                    last_response_headers = None;
+                    last_response_text = None;
                     last_error = Some(error);
                 }
             },
@@ -796,6 +879,35 @@ async fn handle_retryable_http_response(
     }
 }
 
+fn transport_stage(error: &reqwest::Error) -> bool {
+    error.is_connect()
+        || error.is_timeout()
+        || error.is_body()
+        || (error.is_request() && !error.is_builder() && !error.is_redirect())
+}
+
+/// `Response::bytes` wraps body transport failures in a Decode error. Inspect
+/// typed sources, not messages; unrelated decoding failures remain terminal.
+fn is_retryable_network_error(error: &Error) -> bool {
+    let Error::Network(network) = error else {
+        return false;
+    };
+    if transport_stage(network) {
+        return true;
+    }
+    let mut source = std::error::Error::source(network);
+    while let Some(error) = source {
+        if error
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(transport_stage)
+        {
+            return true;
+        }
+        source = error.source();
+    }
+    false
+}
+
 async fn handle_retryable_network_error(
     retry_config: &RetryConfig,
     attempt: u32,
@@ -804,7 +916,10 @@ async fn handle_retryable_network_error(
     operation: &CachedCommand,
     error: Error,
 ) -> RetryableNetworkError {
-    if !matches!(&error, Error::Network(_)) {
+    // Only transport-stage failures are eligible. Builder, redirect, status,
+    // and unrelated decoding errors are terminal. The caller separately enforces the
+    // idempotent-method/idempotency-key/force policy before entering this loop.
+    if !is_retryable_network_error(&error) {
         return RetryableNetworkError::Return(error);
     }
 
@@ -1237,12 +1352,16 @@ fn add_idempotency_key(
     headers: &mut HeaderMap,
     idempotency_key: Option<&String>,
 ) -> Result<(), Error> {
-    if let Some(key) = idempotency_key {
-        headers.insert(
-            HeaderName::from_static("idempotency-key"),
-            HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
-        );
+    let Some(key) = idempotency_key else {
+        return Ok(());
+    };
+    if key.trim().is_empty() {
+        return Err(Error::invalid_idempotency_key());
     }
+    headers.insert(
+        HeaderName::from_static("idempotency-key"),
+        HeaderValue::from_str(key).map_err(|_| Error::invalid_idempotency_key())?,
+    );
     Ok(())
 }
 
@@ -1413,7 +1532,6 @@ async fn resolve_pre_execution_result(
 ///
 /// Returns errors for authentication failures, network issues, invalid
 /// parameters, and response validation problems.
-#[allow(clippy::too_many_lines)]
 pub async fn execute(
     spec: &CachedSpec,
     call: crate::invocation::OperationCall,
@@ -1508,16 +1626,9 @@ fn prepare_execution<'a>(
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
 ) -> Result<PreparedExecution<'a>, Error> {
+    let strict_pagination = ctx.auto_paginate || call.pagination_url.is_some();
     let request = prepare_request(spec, call, ctx)?;
-    let runtime = prepare_runtime_context(
-        spec,
-        request.operation,
-        &request.method,
-        &request.url,
-        &request.headers_clone,
-        request.body.as_ref(),
-        ctx,
-    )?;
+    let runtime = prepare_runtime_context(spec, &request, ctx, strict_pagination)?;
 
     Ok(PreparedExecution {
         operation: request.operation,
@@ -1610,12 +1721,13 @@ fn find_validated_operation<'a>(
 
 fn prepare_transport(
     ctx: &crate::invocation::ExecutionContext,
+    pagination: bool,
 ) -> Result<(Option<reqwest::Client>, ProxyDiagnostics), Error> {
     if ctx.dry_run {
         let (_, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
         return Ok((None, diagnostics));
     }
-    let result = build_http_client(ctx)?;
+    let result = build_http_client(ctx, pagination)?;
     Ok((Some(result.client), result.diagnostics))
 }
 
@@ -1625,16 +1737,9 @@ fn prepare_request<'a>(
     ctx: &'a crate::invocation::ExecutionContext,
 ) -> Result<PreparedRequest<'a>, Error> {
     let operation = find_validated_operation(spec, &call)?;
-    let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
-    let base_url =
-        resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
-    let url = build_url_from_params(
-        &base_url,
-        &operation.path,
-        &call.path_params,
-        &call.query_params,
-    )?;
-    let (client, proxy_diagnostics) = prepare_transport(ctx)?;
+    let url = pagination_request_url(spec, &call, ctx)?.to_string();
+    let pagination = ctx.auto_paginate || call.pagination_url.is_some();
+    let (client, proxy_diagnostics) = prepare_transport(ctx, pagination)?;
     let mut headers = build_headers_from_params(
         spec,
         operation,
@@ -1661,15 +1766,24 @@ fn prepare_request<'a>(
     })
 }
 
+fn execution_bypasses_cache(
+    operation: &CachedCommand,
+    ctx: &crate::invocation::ExecutionContext,
+) -> bool {
+    ctx.dry_run || !operation.security_requirements.is_empty() || proxy_requires_cache_bypass(ctx)
+}
+
 fn prepare_runtime_context<'a>(
     spec: &'a CachedSpec,
-    operation: &'a CachedCommand,
-    method: &Method,
-    url: &str,
-    headers: &HeaderMap,
-    body: Option<&RequestBody>,
+    request: &PreparedRequest<'a>,
     ctx: &'a crate::invocation::ExecutionContext,
+    strict_pagination: bool,
 ) -> Result<PreparedRuntimeContext<'a>, Error> {
+    let operation = request.operation;
+    let method = &request.method;
+    let url = &request.url;
+    let headers = &request.headers_clone;
+    let body = request.body.as_ref();
     if operation.has_binary_io()
         && ctx
             .cache_config
@@ -1680,14 +1794,21 @@ fn prepare_runtime_context<'a>(
             "--cache is not supported for operations with binary request or response bodies",
         ));
     }
+    // Strict pagination cannot read bodies/Link headers from ordinary requests
+    // that may have followed a redirect under the original URL. Partition both
+    // policies. The proxy policy revision also misses entries that older
+    // executors may have populated with authenticated proxy responses.
     let cache_context = prepare_cache_context(
-        if ctx.dry_run || !operation.security_requirements.is_empty() {
+        if execution_bypasses_cache(operation, ctx) {
             None
         } else {
             ctx.cache_config.as_ref()
         },
         &spec.name,
-        &operation.operation_id,
+        &format!(
+            "{}:redirects={}:proxy-auth-bypass=v2",
+            operation.operation_id, !strict_pagination
+        ),
         method,
         url,
         headers,
@@ -1695,6 +1816,11 @@ fn prepare_runtime_context<'a>(
     )?;
     let retry_ctx = ctx.retry_context.clone().map(|mut rc| {
         rc.method = Some(method.to_string());
+        // SDK context fields can disagree; only a key actually sent on the
+        // request authorizes retries of non-idempotent methods.
+        rc.has_idempotency_key = headers
+            .get("idempotency-key")
+            .is_some_and(|value| !value.as_bytes().iter().all(u8::is_ascii_whitespace));
         rc
     });
     let secret_ctx =
@@ -1730,42 +1856,68 @@ fn build_url_from_params(
     path_template: &str,
     path_params: &HashMap<String, String>,
     query_params: &HashMap<String, String>,
+    parameters: &[crate::cache::models::CachedParameter],
 ) -> Result<String, Error> {
-    let mut url = format!("{}{}", base_url.trim_end_matches('/'), path_template);
-
-    // Substitute path parameters: replace {param} with values from the map
-    let mut start = 0;
-    while let Some(open) = url[start..].find('{') {
-        let open_pos = start + open;
-        let Some(close) = url[open_pos..].find('}') else {
-            break;
-        };
-        let close_pos = open_pos + close;
-        let param_name = url[open_pos + 1..close_pos].to_string();
-
-        let value = path_params
-            .get(&param_name)
-            .ok_or_else(|| Error::missing_path_parameter(&param_name))?;
-
-        url.replace_range(open_pos..=close_pos, value);
-        start = open_pos + value.len();
-    }
-
-    // Append query parameters
+    let template = format!("{}{}", base_url.trim_end_matches('/'), path_template);
+    let url = super::url_serialization::expand_path_template(&template, path_params, parameters)?;
+    super::url_serialization::validate_path_segments(&url)?;
+    let mut url = reqwest::Url::parse(&url)
+        .map_err(|e| Error::validation_error(format!("Invalid request URL: {e}")))?;
     if !query_params.is_empty() {
-        let mut qs_pairs: Vec<(&String, &String)> = query_params.iter().collect();
-        qs_pairs.sort_by_key(|(k1, _)| *k1);
-
-        let qs: Vec<String> = qs_pairs
-            .into_iter()
-            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
-            .collect();
-
-        url.push('?');
-        url.push_str(&qs.join("&"));
+        let pairs = super::url_serialization::query_parameters(parameters, query_params)?;
+        url.query_pairs_mut().extend_pairs(pairs);
     }
+    Ok(url.to_string())
+}
 
-    Ok(url)
+/// Resolve the effective URL without constructing a client or reading secrets.
+pub(crate) fn pagination_request_url(
+    spec: &CachedSpec,
+    call: &crate::invocation::OperationCall,
+    ctx: &crate::invocation::ExecutionContext,
+) -> Result<reqwest::Url, Error> {
+    let operation = find_operation_by_id(spec, &call.operation_id)?;
+    let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
+    let base = resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
+    let url = build_url_from_params(
+        &base,
+        &operation.path,
+        &call.path_params,
+        &call.query_params,
+        &operation.parameters,
+    )?;
+    validate_pagination_url(&url, call.pagination_url.as_ref())
+}
+
+/// Credentials and operation headers are retained only within the original origin.
+fn validate_pagination_url(
+    original: &str,
+    target: Option<&reqwest::Url>,
+) -> Result<reqwest::Url, Error> {
+    let original = reqwest::Url::parse(original)
+        .map_err(|e| Error::validation_error(format!("Invalid request URL: {e}")))?;
+    let Some(target) = target else {
+        return Ok(original);
+    };
+    validate_pagination_target(&original, target)?;
+    Ok(target.clone())
+}
+
+/// Validate before attaching any operation authentication or custom headers.
+pub(crate) fn validate_pagination_target(
+    original: &reqwest::Url,
+    target: &reqwest::Url,
+) -> Result<(), Error> {
+    if target.origin() != original.origin()
+        || !target.username().is_empty()
+        || target.password().is_some()
+        || target.fragment().is_some()
+    {
+        return Err(Error::validation_error(
+            "Pagination next URL must be same-origin and contain no credentials or fragment",
+        ));
+    }
+    Ok(())
 }
 
 /// Builds HTTP headers from pre-extracted header parameter maps.
@@ -2328,6 +2480,23 @@ mod tests {
     }
 
     #[test]
+    fn proxy_credential_detection_covers_scheme_less_authorities() {
+        for value in [
+            "http://alice:synthetic@localhost:8080",
+            "alice:synthetic@localhost:8080",
+            "alice@localhost:8080",
+            ":synthetic@localhost:8080",
+            "http://:synthetic@localhost:8080",
+            "socks5://alice:synthetic@localhost:1080",
+        ] {
+            assert!(proxy_url_has_credentials(value), "{value}");
+        }
+        for value in ["http://localhost:8080", "localhost:8080", "", " "] {
+            assert!(!proxy_url_has_credentials(value), "{value}");
+        }
+    }
+
+    #[test]
     fn transport_keys_distinguish_rotated_proxy_passwords() {
         let password_env = "APERTURE_REVIEW_PROXY_PASSWORD";
         let mut config = GlobalConfig::default();
@@ -2447,6 +2616,7 @@ mod tests {
             "/items",
             &std::collections::HashMap::new(),
             &query,
+            &[],
         )
         .expect("url build should succeed");
 
