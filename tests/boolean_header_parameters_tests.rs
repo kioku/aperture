@@ -13,7 +13,8 @@ mod test_helpers;
 /// 5. Work with kebab-case name conversion
 /// 6. Work alongside other parameter types
 use aperture_cli::cache::models::{
-    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, CACHE_FORMAT_VERSION,
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+    CACHE_FORMAT_VERSION,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::engine::executor::execute_request;
@@ -31,6 +32,7 @@ fn create_spec_with_boolean_headers(
 
     if required_bool_header {
         parameters.push(CachedParameter {
+            serialization: ParameterSerialization::default(),
             name: "X-Enable-Feature".to_string(),
             location: "header".to_string(),
             required: true,
@@ -46,6 +48,7 @@ fn create_spec_with_boolean_headers(
 
     if optional_bool_header {
         parameters.push(CachedParameter {
+            serialization: ParameterSerialization::default(),
             name: "X-Verbose".to_string(),
             location: "header".to_string(),
             required: false,
@@ -284,6 +287,7 @@ async fn test_mixed_boolean_and_string_headers() {
 
     // Add a string header parameter
     spec.commands[0].parameters.push(CachedParameter {
+        serialization: ParameterSerialization::default(),
         name: "X-API-Key".to_string(),
         location: "header".to_string(),
         required: false,
@@ -352,6 +356,7 @@ async fn test_kebab_case_boolean_header_conversion() {
             method: "GET".to_string(),
             path: "/resources".to_string(),
             parameters: vec![CachedParameter {
+                serialization: ParameterSerialization::default(),
                 name: "enableCaching".to_string(), // camelCase
                 location: "header".to_string(),
                 required: false,
@@ -443,6 +448,7 @@ async fn test_boolean_header_with_query_and_path_params() {
             path: "/items/{id}".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -455,6 +461,7 @@ async fn test_boolean_header_with_query_and_path_params() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "verbose".to_string(),
                     location: "query".to_string(),
                     required: false,
@@ -467,6 +474,7 @@ async fn test_boolean_header_with_query_and_path_params() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "X-Include-Metadata".to_string(),
                     location: "header".to_string(),
                     required: false,
@@ -563,6 +571,7 @@ async fn test_multiple_boolean_headers() {
             path: "/resources".to_string(),
             parameters: vec![
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "X-Enable-Cache".to_string(),
                     location: "header".to_string(),
                     required: false,
@@ -575,6 +584,7 @@ async fn test_multiple_boolean_headers() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "X-Verbose".to_string(),
                     location: "header".to_string(),
                     required: false,
@@ -587,6 +597,7 @@ async fn test_multiple_boolean_headers() {
                     example: None,
                 },
                 CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "X-Debug".to_string(),
                     location: "header".to_string(),
                     required: false,

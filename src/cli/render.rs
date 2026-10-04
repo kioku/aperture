@@ -82,7 +82,7 @@ pub fn render_result_with_binary_destination(
     output_file: Option<&str>,
 ) -> Result<(), Error> {
     match result {
-        ExecutionResult::Success { body, .. } | ExecutionResult::Cached { body } => {
+        ExecutionResult::Success { body, .. } | ExecutionResult::Cached { body, .. } => {
             render_text_body(body, format, jq_filter)?;
         }
         ExecutionResult::Binary { body, .. } => {
@@ -148,7 +148,7 @@ pub fn render_result_to_string(
     jq_filter: Option<&str>,
 ) -> Result<Option<String>, Error> {
     match result {
-        ExecutionResult::Success { body, .. } | ExecutionResult::Cached { body } => {
+        ExecutionResult::Success { body, .. } | ExecutionResult::Cached { body, .. } => {
             if body.is_empty() {
                 return Ok(None);
             }

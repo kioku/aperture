@@ -1,7 +1,9 @@
 mod test_helpers;
 
 use aperture_cli::batch::{BatchConfig, BatchFile, BatchMetadata, BatchOperation, BatchProcessor};
-use aperture_cli::cache::models::{CachedCommand, CachedParameter, CachedSpec, PaginationInfo};
+use aperture_cli::cache::models::{
+    CachedCommand, CachedParameter, CachedSpec, PaginationInfo, ParameterSerialization,
+};
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
 use std::collections::HashMap;
@@ -22,6 +24,7 @@ fn create_test_spec() -> CachedSpec {
                 method: constants::HTTP_METHOD_GET.to_string(),
                 path: "/users/{id}".to_string(),
                 parameters: vec![CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".to_string(),
                     location: "path".to_string(),
                     required: true,
@@ -906,6 +909,7 @@ async fn configured_timeout_and_cli_override_reach_executor() {
         let context =
             cli_to_execution_context(cli.execution_flags().unwrap(), Some(config.clone())).unwrap();
         let call = OperationCall {
+            pagination_url: None,
             operation_id: "getUserById".to_string(),
             path_params: HashMap::from([("id".to_string(), "123".to_string())]),
             query_params: HashMap::new(),

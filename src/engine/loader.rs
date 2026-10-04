@@ -37,8 +37,8 @@ pub fn load_cached_spec<P: AsRef<Path>>(
     // Check if spec exists and version is compatible
     let spec = match metadata_manager.check_spec_version(&cache_dir, spec_name) {
         Ok(true) => {
-            // Version is compatible, load spec directly (no version check needed)
-            load_cached_spec_without_version_check(&cache_dir, spec_name)?
+            // Metadata is advisory: the binary may come from a different writer.
+            load_cached_spec_from_metadata(&cache_dir, spec_name)?
         }
         Ok(false) => {
             // Version mismatch or spec not in metadata, fall back to legacy method
@@ -119,8 +119,8 @@ fn check_spec_file_freshness<P: AsRef<Path>>(
     Ok(())
 }
 
-/// Load cached spec without version checking (optimized path)
-fn load_cached_spec_without_version_check<P: AsRef<Path>>(
+/// Load a metadata-indexed cache, validating its own embedded format version.
+fn load_cached_spec_from_metadata<P: AsRef<Path>>(
     cache_dir: P,
     spec_name: &str,
 ) -> Result<CachedSpec, Error> {
@@ -134,8 +134,7 @@ fn load_cached_spec_without_version_check<P: AsRef<Path>>(
 
     let cache_data = fs::read(&cache_path)
         .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
-    postcard::from_bytes(&cache_data)
-        .map_err(|e| Error::cached_spec_corrupted(spec_name, e.to_string()))
+    decode_cached_spec_with_version(&cache_data, spec_name)
 }
 
 /// Load cached spec with embedded version checking (legacy/fallback path)
@@ -153,10 +152,30 @@ fn load_cached_spec_with_version_check<P: AsRef<Path>>(
 
     let cache_data = fs::read(&cache_path)
         .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
-    let cached_spec: CachedSpec = postcard::from_bytes(&cache_data)
-        .map_err(|e| Error::cached_spec_corrupted(spec_name, e.to_string()))?;
+    decode_cached_spec_with_version(&cache_data, spec_name)
+}
 
-    // Check cache format version
+/// Reject older model layouts before attempting to decode their changed fields.
+fn decode_cached_spec_with_version(
+    cache_data: &[u8],
+    spec_name: &str,
+) -> Result<CachedSpec, Error> {
+    // The version is the first postcard field. Check it before decoding a model
+    // whose shape may have changed (for example, flattened security in format 7).
+    let (version, _) = postcard::take_from_bytes::<u32>(cache_data)
+        .map_err(|error| Error::cached_spec_corrupted(spec_name, error.to_string()))?;
+    if version < CACHE_FORMAT_VERSION {
+        return Err(Error::cache_version_mismatch(
+            spec_name,
+            version,
+            CACHE_FORMAT_VERSION,
+        ));
+    }
+    let cached_spec: CachedSpec = postcard::from_bytes(cache_data)
+        .map_err(|error| Error::cached_spec_corrupted(spec_name, error.to_string()))?;
+
+    // Validate unknown/newer versions only after decoding, so arbitrary corrupt
+    // bytes are not mistaken for a future format based on their first byte.
     if cached_spec.cache_format_version != CACHE_FORMAT_VERSION {
         return Err(Error::cache_version_mismatch(
             spec_name,
@@ -166,4 +185,17 @@ fn load_cached_spec_with_version_check<P: AsRef<Path>>(
     }
 
     Ok(cached_spec)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn stale_cache_version_is_rejected_before_model_decode() {
+        let cache = tempfile::tempdir().unwrap();
+        let data = postcard::to_allocvec(&7u32).unwrap();
+        std::fs::write(cache.path().join("legacy.bin"), data).unwrap();
+        let error = super::load_cached_spec(cache.path(), "legacy").unwrap_err();
+        assert!(error.to_string().contains("version"));
+        assert!(!error.to_string().contains("corrupt"));
+    }
 }

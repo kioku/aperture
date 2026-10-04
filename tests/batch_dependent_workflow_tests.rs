@@ -5,6 +5,7 @@ mod test_helpers;
 use aperture_cli::batch::{BatchConfig, BatchFile, BatchOperation, BatchProcessor};
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedRequestBody, CachedSpec, PaginationInfo,
+    ParameterSerialization,
 };
 use aperture_cli::cli::OutputFormat;
 use aperture_cli::constants;
@@ -57,6 +58,7 @@ fn test_spec(base_url: &str) -> CachedSpec {
                 method: constants::HTTP_METHOD_GET.into(),
                 path: "/users/{id}".into(),
                 parameters: vec![CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "id".into(),
                     location: "path".into(),
                     required: true,
@@ -89,6 +91,7 @@ fn test_spec(base_url: &str) -> CachedSpec {
                 method: constants::HTTP_METHOD_POST.into(),
                 path: "/groups/{group_id}/members".into(),
                 parameters: vec![CachedParameter {
+                    serialization: ParameterSerialization::default(),
                     name: "group_id".into(),
                     location: "path".into(),
                     required: true,

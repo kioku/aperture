@@ -63,6 +63,7 @@ pub fn matches_to_operation_call(
         .unwrap_or_default();
 
     Ok(OperationCall {
+        pagination_url: None,
         operation_id: operation.operation_id.clone(),
         path_params,
         query_params,
@@ -369,6 +370,7 @@ pub fn cli_to_execution_context(
     let proxy_override = proxy_override_from_execution_flags(execution);
 
     Ok(ExecutionContext {
+        http_clients: crate::engine::executor::HttpClientPool::default(),
         dry_run: execution.dry_run,
         idempotency_key: execution.idempotency_key.clone(),
         cache_config,
