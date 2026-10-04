@@ -97,12 +97,48 @@ pub fn generate_command_tree_for_api_with_flags(
     generate_tree_for_commands(spec, api_name, use_positional_args, spec.commands.iter())
 }
 
+/// Build the selected invocation without allocating unrelated operations.
+/// Unresolved paths retain the complete tree for discovery and diagnostics.
+pub(crate) fn generate_invocation_command_tree(
+    spec: &CachedSpec,
+    api_name: &str,
+    args: &[String],
+    use_positional_args: bool,
+) -> Command {
+    select_invocation_command(spec, args).map_or_else(
+        |_| generate_command_tree_for_api_with_flags(spec, api_name, use_positional_args),
+        |selected| {
+            generate_tree_for_commands(
+                spec,
+                api_name,
+                use_positional_args,
+                std::iter::once(selected),
+            )
+        },
+    )
+}
+
 /// Build only the selected operation's clap tree for batch parsing.
 /// This avoids allocating every operation in a large immutable specification.
 pub(crate) fn generate_batch_command_tree(
     spec: &CachedSpec,
     args: &[String],
 ) -> Result<Command, crate::error::Error> {
+    let selected = select_invocation_command(spec, args)?;
+    Ok(generate_tree_for_commands(
+        spec,
+        "<api>",
+        false,
+        std::iter::once(selected),
+    ))
+}
+
+/// Resolve canonical/mapped paths and aliases using the execution flag grammar.
+/// Failure is advisory for interactive invocations, which retain full diagnostics.
+fn select_invocation_command<'a>(
+    spec: &'a CachedSpec,
+    args: &[String],
+) -> Result<&'a CachedCommand, crate::error::Error> {
     // Parse the two command positions with the same global argument grammar as
     // execution. Flag values must never participate in operation selection.
     let (group, remaining) = parse_batch_subcommand(
@@ -111,8 +147,7 @@ pub(crate) fn generate_batch_command_tree(
     )?;
     let (operation, _) =
         parse_batch_subcommand(std::iter::once(std::ffi::OsString::from(&group)).chain(remaining))?;
-    let selected = spec
-        .commands
+    spec.commands
         .iter()
         .find(|command| {
             to_kebab_case(&effective_group_name(command)) == group
@@ -122,13 +157,7 @@ pub(crate) fn generate_batch_command_tree(
                         .iter()
                         .any(|alias| to_kebab_case(alias) == operation))
         })
-        .ok_or_else(|| crate::error::Error::validation_error("Batch operation was not found"))?;
-    Ok(generate_tree_for_commands(
-        spec,
-        "<api>",
-        false,
-        std::iter::once(selected),
-    ))
+        .ok_or_else(|| crate::error::Error::validation_error("Batch operation was not found"))
 }
 
 /// Parse one command level, leaving operation arguments untouched for execution.
@@ -446,4 +475,136 @@ fn capitalize_first(s: &str) -> String {
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().chain(chars).collect()
     })
+}
+
+#[cfg(test)]
+mod invocation_tests {
+    use super::*;
+
+    fn spec() -> CachedSpec {
+        let document = crate::spec::parse_openapi(
+            r#"{
+            "openapi":"3.0.3", "info":{"title":"Test","version":"1"},
+            "paths":{
+                "/items/{id}":{"get":{"operationId":"getFirst","tags":["items"],
+                    "parameters":[{"name":"id","in":"path","required":true,
+                        "schema":{"type":"string"}}],"responses":{"200":{"description":"OK"}}}},
+                "/items":{"get":{"operationId":"getSecond","tags":["items"],
+                    "responses":{"200":{"description":"OK"}}}},
+                "/other":{"get":{"operationId":"getOther","tags":["other"],
+                    "responses":{"200":{"description":"OK"}}}}
+            }}"#,
+        )
+        .unwrap();
+        crate::spec::transformer::SpecTransformer::new()
+            .transform("test", &document)
+            .unwrap()
+    }
+
+    fn tree(spec: &CachedSpec, args: &[&str], positional: bool) -> Command {
+        generate_invocation_command_tree(
+            spec,
+            "test",
+            &args.iter().map(|s| (*s).to_string()).collect::<Vec<_>>(),
+            positional,
+        )
+    }
+
+    #[test]
+    fn invocation_allocates_only_selected_operation() {
+        let command = tree(&spec(), &["items", "get-first"], false);
+        assert_eq!(command.get_subcommands().count(), 1);
+        assert_eq!(
+            command
+                .find_subcommand("items")
+                .unwrap()
+                .get_subcommands()
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn discovery_and_unknown_paths_retain_full_tree() {
+        for args in [
+            vec![],
+            vec!["--help"],
+            vec!["items", "--help"],
+            vec!["items", "unknown"],
+            vec!["none", "get-first"],
+        ] {
+            let command = tree(&spec(), &args, false);
+            assert_eq!(command.get_subcommands().count(), 2);
+            assert_eq!(
+                command
+                    .find_subcommand("items")
+                    .unwrap()
+                    .get_subcommands()
+                    .count(),
+                2
+            );
+        }
+    }
+
+    #[test]
+    fn global_values_do_not_select_operations() {
+        for args in [
+            vec!["--server-var", "region=other", "items", "get-first"],
+            vec!["items", "--server-var", "region=get-second", "get-first"],
+        ] {
+            let command = tree(&spec(), &args, false);
+            assert_eq!(
+                command
+                    .find_subcommand("items")
+                    .unwrap()
+                    .get_subcommands()
+                    .count(),
+                1
+            );
+            assert!(command
+                .find_subcommand("items")
+                .unwrap()
+                .find_subcommand("get-first")
+                .is_some());
+        }
+    }
+
+    #[test]
+    fn mapped_alias_and_hidden_operation_remain_selectable() {
+        let mut spec = spec();
+        let selected = spec
+            .commands
+            .iter_mut()
+            .find(|c| c.operation_id == "getFirst")
+            .unwrap();
+        selected.display_group = Some("Mapped Group".to_string());
+        selected.display_name = Some("Mapped Operation".to_string());
+        selected.aliases = vec!["Fetch Alias".to_string()];
+        selected.hidden = true;
+        let command = tree(&spec, &["mapped-group", "fetch-alias"], false);
+        assert_eq!(command.get_subcommands().count(), 1);
+        let matches = command
+            .try_get_matches_from(["api", "mapped-group", "fetch-alias", "--id", "42"])
+            .unwrap();
+        assert_eq!(
+            matches.subcommand().unwrap().1.subcommand_name(),
+            Some("mapped-operation")
+        );
+    }
+
+    #[test]
+    fn selected_parameters_preserve_flag_and_positional_modes() {
+        for (positional, args) in [
+            (false, vec!["api", "items", "get-first", "--id", "42"]),
+            (true, vec!["api", "items", "get-first", "42"]),
+        ] {
+            let command = tree(&spec(), &["items", "get-first"], positional);
+            let matches = command.try_get_matches_from(args).unwrap();
+            let operation = matches.subcommand().unwrap().1.subcommand().unwrap().1;
+            assert_eq!(
+                operation.get_one::<String>("id").map(String::as_str),
+                Some("42")
+            );
+        }
+    }
 }

@@ -382,7 +382,7 @@ fn parse_dynamic_matches(
     args: &[String],
     use_positional_args: bool,
 ) -> Result<clap::ArgMatches, clap::Error> {
-    generator::generate_command_tree_for_api_with_flags(spec, context, use_positional_args)
+    generator::generate_invocation_command_tree(spec, context, args, use_positional_args)
         .try_get_matches_from(
             std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args.iter().cloned()),
         )
@@ -394,7 +394,7 @@ fn parse_dynamic_matches_relaxed(
     args: &[String],
     use_positional_args: bool,
 ) -> Result<clap::ArgMatches, clap::Error> {
-    generator::generate_command_tree_for_api_with_flags(spec, context, use_positional_args)
+    generator::generate_invocation_command_tree(spec, context, args, use_positional_args)
         .ignore_errors(true)
         .try_get_matches_from(
             std::iter::once(constants::CLI_ROOT_COMMAND.to_string()).chain(args.iter().cloned()),

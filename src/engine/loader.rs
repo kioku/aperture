@@ -2,14 +2,13 @@ use crate::cache::fingerprint::compute_content_hash;
 use crate::cache::metadata::CacheMetadataManager;
 use crate::cache::models::{CachedSpec, CACHE_FORMAT_VERSION};
 use crate::error::Error;
-use crate::fs::OsFileSystem;
+use crate::fs::{FileSystem, OsFileSystem};
 use std::fs;
 use std::path::Path;
 
 /// Loads a cached `OpenAPI` specification from the binary cache with optimized version checking.
 ///
-/// This function uses a global cache metadata file for fast version checking before
-/// loading the full specification, significantly improving performance.
+/// Reads global metadata once and always validates the binary's embedded version.
 ///
 /// After version checks pass, validates the spec file fingerprint (mtime, size, content hash)
 /// against the cached metadata. If the spec file has been modified since caching, returns
@@ -30,29 +29,29 @@ pub fn load_cached_spec<P: AsRef<Path>>(
     cache_dir: P,
     spec_name: &str,
 ) -> Result<CachedSpec, Error> {
-    // Fast version check using metadata
     let fs = OsFileSystem;
     let metadata_manager = CacheMetadataManager::new(&fs);
+    load_with_metadata_manager(cache_dir.as_ref(), spec_name, &metadata_manager)
+}
 
-    // Check if spec exists and version is compatible
-    let spec = match metadata_manager.check_spec_version(&cache_dir, spec_name) {
-        Ok(true) => {
-            // Metadata is advisory: the binary may come from a different writer.
-            load_cached_spec_from_metadata(&cache_dir, spec_name)?
-        }
-        Ok(false) => {
-            // Version mismatch or spec not in metadata, fall back to legacy method
-            load_cached_spec_with_version_check(&cache_dir, spec_name)?
-        }
-        Err(_) => {
-            // Metadata loading failed, fall back to legacy method
-            load_cached_spec_with_version_check(&cache_dir, spec_name)?
-        }
-    };
-
-    // Validate spec file fingerprint to detect stale caches
-    check_spec_file_freshness(&cache_dir, spec_name, &metadata_manager)?;
-
+/// Metadata is advisory; the binary's own version is always authoritative.
+/// Keep one metadata snapshot for version-independent source freshness checks.
+fn load_with_metadata_manager<F: FileSystem>(
+    cache_dir: &Path,
+    spec_name: &str,
+    metadata_manager: &CacheMetadataManager<'_, F>,
+) -> Result<CachedSpec, Error> {
+    let metadata = metadata_manager.load_metadata(cache_dir).ok();
+    let spec = load_cached_spec_with_version_check(cache_dir, spec_name)?;
+    let fingerprint = metadata.as_ref().and_then(|metadata| {
+        let stored = metadata.specs.get(spec_name)?;
+        Some((
+            stored.content_hash.as_deref()?,
+            stored.mtime_secs?,
+            stored.spec_file_size?,
+        ))
+    });
+    check_spec_file_freshness(cache_dir, spec_name, fingerprint)?;
     Ok(spec)
 }
 
@@ -67,12 +66,9 @@ pub fn load_cached_spec<P: AsRef<Path>>(
 fn check_spec_file_freshness<P: AsRef<Path>>(
     cache_dir: P,
     spec_name: &str,
-    metadata_manager: &CacheMetadataManager<'_, OsFileSystem>,
+    fingerprint: Option<(&str, u64, u64)>,
 ) -> Result<(), Error> {
-    // Bail early if no fingerprint data (legacy metadata) or metadata error
-    let Ok(Some((stored_hash, stored_mtime, stored_size))) =
-        metadata_manager.get_stored_fingerprint(&cache_dir, spec_name)
-    else {
+    let Some((stored_hash, stored_mtime, stored_size)) = fingerprint else {
         return Ok(());
     };
 
@@ -117,24 +113,6 @@ fn check_spec_file_freshness<P: AsRef<Path>>(
     }
 
     Ok(())
-}
-
-/// Load a metadata-indexed cache, validating its own embedded format version.
-fn load_cached_spec_from_metadata<P: AsRef<Path>>(
-    cache_dir: P,
-    spec_name: &str,
-) -> Result<CachedSpec, Error> {
-    let cache_path = cache_dir
-        .as_ref()
-        .join(format!("{spec_name}{}", crate::constants::FILE_EXT_BIN));
-
-    if !cache_path.exists() {
-        return Err(Error::cached_spec_not_found(spec_name));
-    }
-
-    let cache_data = fs::read(&cache_path)
-        .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
-    decode_cached_spec_with_version(&cache_data, spec_name)
 }
 
 /// Load cached spec with embedded version checking (legacy/fallback path)
@@ -189,6 +167,49 @@ fn decode_cached_spec_with_version(
 
 #[cfg(test)]
 mod tests {
+    mockall::mock! {
+        MetadataFs {}
+        impl crate::fs::FileSystem for MetadataFs {
+            fn read_to_string(&self, path: &std::path::Path) -> std::io::Result<String>;
+            fn write_all(&self, path: &std::path::Path, contents: &[u8]) -> std::io::Result<()>;
+            fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()>;
+            fn remove_file(&self, path: &std::path::Path) -> std::io::Result<()>;
+            fn remove_dir_all(&self, path: &std::path::Path) -> std::io::Result<()>;
+            fn exists(&self, path: &std::path::Path) -> bool;
+            fn is_dir(&self, path: &std::path::Path) -> bool;
+            fn is_file(&self, path: &std::path::Path) -> bool;
+            fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<std::path::PathBuf>;
+            fn read_dir(&self, path: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>>;
+        }
+    }
+
+    #[test]
+    fn metadata_is_read_once_even_when_advisory_version_is_stale() {
+        let cache = tempfile::tempdir().unwrap();
+        let document = crate::spec::parse_openapi(
+            r#"{
+            "openapi":"3.0.3","info":{"title":"Test","version":"1"},"paths":{}
+        }"#,
+        )
+        .unwrap();
+        let spec = crate::spec::transformer::SpecTransformer::new()
+            .transform("test", &document)
+            .unwrap();
+        std::fs::write(
+            cache.path().join("test.bin"),
+            postcard::to_allocvec(&spec).unwrap(),
+        )
+        .unwrap();
+        let mut fs = MockMetadataFs::new();
+        fs.expect_exists().times(1).return_const(true);
+        fs.expect_read_to_string()
+            .times(1)
+            .returning(|_| Ok(r#"{"cache_format_version":1,"specs":{}}"#.to_string()));
+        let manager = super::CacheMetadataManager::new(&fs);
+        let loaded = super::load_with_metadata_manager(cache.path(), "test", &manager).unwrap();
+        assert_eq!(loaded.cache_format_version, super::CACHE_FORMAT_VERSION);
+    }
+
     #[test]
     fn stale_cache_version_is_rejected_before_model_decode() {
         let cache = tempfile::tempdir().unwrap();
