@@ -85,16 +85,15 @@ pub(super) fn bounded_read(reader: impl Read) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 fn local(path: &Path) -> Result<Import, Error> {
-    storage::check_path(path)?;
-    let metadata = path.symlink_metadata()?;
-    let identity = path.canonicalize()?.to_string_lossy().into_owned();
+    let (metadata, pinned) = pin_source(path)?;
+    let identity = pinned.to_string_lossy().into_owned();
     let fallback = path
         .file_stem()
         .and_then(|name| name.to_str())
         .map(str::to_owned);
     if metadata.is_file() {
         return single(
-            bounded_read(std::fs::File::open(path)?)?,
+            bounded_read(std::fs::File::open(&pinned)?)?,
             "file",
             identity,
             fallback,
@@ -103,8 +102,26 @@ fn local(path: &Path) -> Result<Import, Error> {
     if !metadata.is_dir() {
         return Err(invalid("Skill source must be a regular file or directory"));
     }
-    directory_import(path, identity)
+    let mut imported = directory_import(&pinned, identity)?;
+    imported.fallback = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned);
+    Ok(imported)
 }
+/// Trust selected source ancestors, but never a symlink selected as the source.
+fn pin_source(path: &Path) -> Result<(std::fs::Metadata, PathBuf), Error> {
+    // Remove trailing separators before lstat: a trailing slash can follow a
+    // selected directory symlink on Unix even when using symlink_metadata.
+    let selected: PathBuf = path.components().collect();
+    let path = selected.as_path();
+    let metadata = path.symlink_metadata()?;
+    if metadata.is_symlink() {
+        return Err(invalid("Symlinked skill sources are forbidden"));
+    }
+    Ok((metadata, path.canonicalize()?))
+}
+
 fn directory_import(path: &Path, identity: String) -> Result<Import, Error> {
     Ok(Import {
         files: snapshot(path)?,

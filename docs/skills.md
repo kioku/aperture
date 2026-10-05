@@ -36,7 +36,7 @@ Native TOML:
 directory = "workflows"
 ```
 
-Relative paths resolve against the **configuration directory**, not the current working directory. Absolute paths are supported. Paths are literal: no environment-variable or tilde expansion; expand them explicitly in your shell if desired. Empty paths, `~` prefixes, parent traversal, and symlinked library paths are rejected. The library is independent of API specs, caches, secrets, and agent tool directories. This setting does not install anything into an agent's configuration.
+Relative paths resolve against the **configuration directory**, not the current working directory. Absolute paths are supported. Paths are literal: no environment-variable or tilde expansion; expand them explicitly in your shell if desired. Empty paths, `~` prefixes, and parent traversal are rejected. The explicitly configured library root (including a root alias) is trusted and canonicalized, or its nearest existing ancestor is pinned when the library is absent. Read-only core discovery does not create the library. Dangling root aliases fail; symlinks below the pinned boundary remain forbidden. The library is independent of API specs, caches, secrets, and agent tool directories. This setting does not install anything into an agent's configuration.
 
 ## Import and remove
 
@@ -48,7 +48,11 @@ aperture skills install '# Release workflow' --name release
 cat SKILL.md | aperture skills install - --name release
 aperture skills install ./updated-workflow/ --name release --replace
 aperture skills uninstall release
+aperture skills install ./SKILL.md --name release --json
+aperture skills uninstall release --json
 ```
+
+Mutation `--json` success output is an object with exactly `status` (`"installed"` or `"uninstalled"`) and `name` (the installed identifier), both strings. It contains no skill content. Ordinary output remains `Installed <name>` / `Uninstalled <name>`; global `--json-errors` controls failures separately.
 
 The positional source is detected in this order:
 
@@ -57,7 +61,7 @@ The positional source is detected in this order:
 3. An existing local path: regular file or directory. Existing paths win over ambiguous plain prose; use stdin to force literal content.
 4. Literal Markdown. Missing path-looking inputs fail instead of installing the path spelling. Path-looking means a slash/backslash, a leading dot/tilde, a `.md` extension (case-insensitive), or a colon. Multiline content, headings starting `#`, and frontmatter starting `---` are literal-looking instead. Use `./name` for a missing extensionless path; a bare word otherwise counts as literal prose and needs `--name`.
 
-A directory must contain root `SKILL.md`; other regular files retain their relative hierarchy. Empty directories are not preserved. Symlinks (including source ancestors), special files, traversal, unsafe Windows filenames, and case-insensitive reference collisions are rejected. Filenames may contain spaces or Unicode, but not control characters, Windows punctuation, trailing dots/spaces, or reserved device stems such as `CON.txt`.
+Existing source ancestors may be aliases: the selected regular file/directory is canonicalized before reading, but a selected source symlink or dangling alias is rejected. A directory must contain root `SKILL.md`; other regular files retain their relative hierarchy. Empty directories are not preserved. Selected source entries that are symlinks, nested symlinks, special files, traversal, unsafe Windows filenames, and case-insensitive reference collisions are rejected. Filenames may contain spaces or Unicode, but not control characters, Windows punctuation, trailing dots/spaces, or reserved device stems such as `CON.txt`.
 
 ### Metadata, names, and fallbacks
 

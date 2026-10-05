@@ -34,9 +34,15 @@ pub enum SkillsCommand {
         name: Option<String>,
         #[arg(long)]
         replace: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Remove an installer-owned user skill
-    Uninstall { name: String },
+    Uninstall {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Dispatch local operations without executing skills or accessing API credentials.
@@ -54,13 +60,12 @@ pub async fn execute(
             source,
             name,
             replace,
+            json,
         }) => {
-            let installed = import_skill(&root, source, name.as_deref(), *replace).await?;
-            crate::stdoutln!("Installed {installed}");
+            install_and_render(&root, source, name.as_deref(), *replace, *json).await?;
         }
-        Some(SkillsCommand::Uninstall { name }) => {
-            storage::uninstall(&root, name)?;
-            crate::stdoutln!("Uninstalled {name}");
+        Some(SkillsCommand::Uninstall { name, json }) => {
+            uninstall_and_render(&root, name, *json)?;
         }
         _ => print_discovery(manager, &root, command)?,
     }
@@ -146,4 +151,43 @@ fn render_identity(entry: &library::Entry) {
             provenance.content_sha256
         );
     }
+}
+
+/// Mutation output contains identity and outcome only, never imported content.
+fn render_mutation(status: &str, name: &str, json: bool) -> Result<(), Error> {
+    #[derive(serde::Serialize)]
+    struct MutationResult<'a> {
+        status: &'a str,
+        name: &'a str,
+    }
+    if json {
+        crate::stdoutln!(
+            "{}",
+            serde_json::to_string(&MutationResult { status, name })?
+        );
+    } else {
+        let verb = if status == "installed" {
+            "Installed"
+        } else {
+            "Uninstalled"
+        };
+        crate::stdoutln!("{verb} {name}");
+    }
+    Ok(())
+}
+
+async fn install_and_render(
+    root: &std::path::Path,
+    source: &str,
+    name: Option<&str>,
+    replace: bool,
+    json: bool,
+) -> Result<(), Error> {
+    let installed = import_skill(root, source, name, replace).await?;
+    render_mutation("installed", &installed, json)
+}
+
+fn uninstall_and_render(root: &std::path::Path, name: &str, json: bool) -> Result<(), Error> {
+    storage::uninstall(root, name)?;
+    render_mutation("uninstalled", name, json)
 }

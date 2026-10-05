@@ -40,8 +40,28 @@ pub(super) fn resolve_root(config: &Path, directory: &str) -> Result<PathBuf, Er
     {
         return Err(invalid("skills.directory cannot contain parent traversal"));
     }
-    check_path(&root)?;
-    Ok(root)
+    pin_root(&root)
+}
+
+/// Pin the explicitly configured trust boundary without creating it. Existing
+/// root aliases are trusted; dangling aliases fail instead of becoming directories.
+fn pin_root(path: &Path) -> Result<PathBuf, Error> {
+    match path.symlink_metadata() {
+        Ok(_) => Ok(path.canonicalize()?),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => pin_missing_root(path),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn pin_missing_root(path: &Path) -> Result<PathBuf, Error> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .ok_or_else(|| invalid("Invalid library root"))?;
+    Ok(pin_root(parent)?.join(name))
 }
 
 /// Reject symlinks in every existing ancestor, not just the final entry.
@@ -193,6 +213,7 @@ fn stage_files(
 ) -> Result<(), Error> {
     for (relative, bytes) in files {
         let destination = stage.join(relative);
+        check_path(&destination)?;
         std::fs::create_dir_all(
             destination
                 .parent()
@@ -208,6 +229,7 @@ fn stage_files(
 }
 fn write_new(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     use std::io::Write;
+    check_path(path)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
