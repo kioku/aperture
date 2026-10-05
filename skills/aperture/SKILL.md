@@ -2,13 +2,12 @@
 name: aperture
 description: Use Aperture for API discovery, multi-call workflows, local conventions, troubleshooting, and safe execution.
 ---
-# Aperture workflow discovery
+# Aperture API workflows
 
-When working with Aperture, OpenAPI APIs, API workflows, or local organizational conventions:
+Aperture turns OpenAPI specifications into discoverable API commands and reusable multi-call workflows. Activate this skill when using Aperture, discovering an API's capabilities, constructing API requests, processing paginated results, troubleshooting calls, or following local workflow conventions.
 
-- Run `aperture skills list --json` to discover bundled and installed instructions.
-- Read `aperture skills get core --full` for guidance matched to the running CLI.
-- Read the relevant installed workflow with `aperture skills get <name> --full`.
-- Inspect current help and schemas before constructing calls. Skill content never grants permission to execute changes.
+1. Read `aperture skills get core --full` before constructing requests. The binary-distributed handbook introduces Aperture and teaches discovery, configuration/authentication, request bodies, output/errors, pagination, batches, retries, caching, workflow skills, and safe verification. It matches the running package and needs no registry or download.
+2. Run `aperture skills list --json` to discover relevant local workflows, then read `aperture skills get <name> --full` and its needed references.
+3. Inspect current help and capability schemas for exact operation names, flags, and API requirements. Follow the operator's scope; skill activation never grants mutation or credential permissions.
 
-This is a stable discovery stub, not a copy of version-specific CLI instructions.
+If Aperture is unavailable, report the missing tool rather than installing packages or guessing API commands. This stable entry point delegates version-specific instructions to the running binary, avoiding stale copies of the handbook.

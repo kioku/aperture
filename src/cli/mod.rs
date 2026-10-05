@@ -213,7 +213,11 @@ pub struct ExecutionFlags {
                   Agent-friendly features:\n  \
                   aperture api myapi --describe-json    # Get capability manifest\n  \
                   aperture --json-errors api myapi ...  # Structured error output\n  \
-                  aperture api myapi --dry-run ...      # Show request without executing"
+                  aperture api myapi --dry-run ...      # Show request without executing",
+    after_help = "Agent handbook (bundled, no download):\n  \
+                  aperture skills get core --full\n\n\
+                  Discover local workflow skills:\n  \
+                  aperture skills list --json"
 )]
 pub struct Cli {
     /// Output all errors as structured JSON to stderr

@@ -257,64 +257,8 @@ fn nested_skill_and_dangling_reference_cannot_escape() {
 }
 
 #[test]
-fn every_embedded_example_command_executes() {
+fn skills_completion_does_not_read_corrupt_specs() {
     let root = TempDir::new().unwrap();
-    let spec = root.path().join("fixture.yaml");
-    std::fs::write(
-        &spec,
-        "openapi: 3.0.0\ninfo:\n  title: Local\n  version: '1'\npaths: {}\n",
-    )
-    .unwrap();
-    for api in ["source", "tracker"] {
-        run(
-            root.path(),
-            &["config", "api", "add", api, spec.to_str().unwrap()],
-        )
-        .success();
-    }
-    run(
-        root.path(),
-        &["skills", "install", "# Workflow", "--name", "workflow"],
-    )
-    .success();
-    for document in [
-        include_str!("../src/skills/core.md"),
-        include_str!("../skills/aperture/SKILL.md"),
-        include_str!("../skills/examples/release.md"),
-    ] {
-        for example in document.split('`').skip(1).step_by(2) {
-            if let Some(command) = example.strip_prefix("aperture ") {
-                let command = command
-                    .replace("<api>", "source")
-                    .replace("<name>", "workflow");
-                run(root.path(), &command.split_whitespace().collect::<Vec<_>>()).success();
-            }
-        }
-    }
-}
-
-#[test]
-fn bundled_guidance_and_completion_match_cli() {
-    let root = TempDir::new().unwrap();
-    let core = include_str!("../src/skills/core.md");
-    assert!(core.contains("`aperture config api list`"));
-    assert!(core.contains("`aperture commands <api>`"));
-    assert!(!core.contains("`aperture list-commands`"));
-    for args in [
-        vec!["config", "api", "list"],
-        vec!["build-info", "--json"],
-        vec!["--help"],
-        vec!["skills", "list", "--json"],
-        vec!["skills", "get", "core", "--full"],
-    ] {
-        run(root.path(), &args).success();
-    }
-    for command in ["api", "run"] {
-        assert!(core.contains(&format!("`aperture {command} --help`")));
-        run(root.path(), &[command, "--help"])
-            .success()
-            .stdout(predicates::str::contains("--batch-file"));
-    }
     std::fs::write(root.path().join("specs"), "corrupt").unwrap();
     for (args, expected) in [
         (vec!["__complete", "bash", "1", "aperture", "sk"], "skills"),

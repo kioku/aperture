@@ -2,6 +2,12 @@
 
 Aperture is designed as an API execution runtime for autonomous AI agents. This guide covers the features that make Aperture agent-friendly and patterns for integrating it into agentic workflows.
 
+## Start with the bundled handbook
+
+Run `aperture skills get core --full` for the self-contained operating handbook matched to the running CLI. It introduces Aperture, maps its commands, and teaches discovery, configuration/authentication, request construction, output, pagination, batches, retry safety, caches, and verification. It is compiled into Cargo, Nix, and standalone binaries; agents need no registry, companion files, or network to read it.
+
+Use [skills/aperture/SKILL.md](../skills/aperture/SKILL.md) as the agent-discovery entry point. It directs agents to fetch the current binary's handbook before constructing requests and to read relevant local workflow skills. Skills never grant execution permissions. See [Workflow skills](skills.md) for installation and storage details; consult generated help and manifests for actual API operation names and supported flags.
+
 ## Design Philosophy
 
 Traditional API CLI tools optimize for human developers: interactive prompts, colorized output, verbose help text. Aperture takes a different approach:
