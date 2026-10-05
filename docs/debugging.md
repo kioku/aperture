@@ -35,33 +35,32 @@ APERTURE_LOG=warn aperture api myapi users get-user --id 123
 ```
 
 ### Info
-Shows request/response summaries with method, URL, status, and duration.
+Shows request/response summaries with method, status and duration. Anonymous request URLs remain visible; authenticated URLs are omitted.
 
 ```bash
 APERTURE_LOG=info aperture api myapi users get-user --id 123
 ```
 
-Output example:
+Anonymous output example:
 ```
 → GET https://api.example.com/users/123
 ← 200 OK (143ms)
 ```
 
 ### Debug
-Includes redacted request headers and anonymous response headers in addition to info-level logging. Authenticated response-header names and values are omitted because both are server-controlled.
+Includes redacted request and response headers for anonymous requests. Authenticated request URLs and all request/response header names and values are omitted; method, status and timing remain available.
 
 ```bash
 APERTURE_LOG=debug aperture api myapi users get-user --id 123
 aperture -v api myapi users get-user --id 123  # Equivalent
 ```
 
-Output example:
+Anonymous output example:
 ```
 → GET https://api.example.com/users/123
 Request headers:
   Content-Type: application/json
   User-Agent: aperture/0.1.8
-  Authorization: [REDACTED]
 ← 200 OK (143ms)
 Response headers:
   Content-Type: application/json
@@ -69,18 +68,17 @@ Response headers:
 ```
 
 ### Trace
-Includes request and response bodies (with automatic truncation). Provides maximum verbosity.
+Includes anonymous request and response bodies (with automatic truncation). Authenticated body diagnostics are omitted.
 
 ```bash
 APERTURE_LOG=trace aperture api myapi users get-user --id 123
 aperture -vv api myapi users get-user --id 123  # Equivalent
 ```
 
-Output example:
+Anonymous output example:
 ```
 → GET https://api.example.com/users/123
 Request headers:
-  Authorization: [REDACTED]
 Request body: (none)
 ← 200 OK (143ms)
 Response headers:
@@ -98,7 +96,7 @@ aperture -v api myapi users get-user --id 123
 ```
 
 ### `-vv` (Double Verbosity)
-Enables trace-level logging (equivalent to `APERTURE_LOG=trace`), including request/response bodies.
+Enables trace-level logging (equivalent to `APERTURE_LOG=trace`), including anonymous request/response bodies. Authenticated bodies and metadata remain omitted.
 
 ```bash
 aperture -vv api myapi users get-user --id 123
@@ -121,7 +119,7 @@ APERTURE_LOG=debug APERTURE_LOG_FORMAT=json aperture api myapi users get-user --
 ```
 
 ### `APERTURE_LOG_MAX_BODY`
-Configures the maximum number of characters to include in request/response body logs. Default is 1000.
+Configures the maximum number of characters to include in anonymous request/response body logs. Default is 1000.
 
 ```bash
 APERTURE_LOG_MAX_BODY=5000 aperture -vv api myapi users get-user --id 123
@@ -169,7 +167,7 @@ Sensitive query parameters in URLs are automatically redacted:
 In addition to the static header and query parameter lists above, Aperture dynamically redacts secrets configured via `x-aperture-secret` extensions in your OpenAPI spec or config-based secrets. These values are:
 
 - **Redacted in header values**: If any header value exactly matches a configured secret
-- **Authenticated response headers omitted**: Header names and values can encode arbitrary credential transformations; status and timing remain available. Selected proxy credentials also participate in request-header and URL redaction.
+- **Authenticated metadata omitted**: Request URLs and all request/response header names and values can encode arbitrary credential transformations; method, status and timing remain available. This also covers selected authenticated proxies and non-UTF8 credential bytes.
 - **Authenticated body diagnostics omitted**: When final request headers or transport configuration carry recognized credentials, request/response bodies are not logged and error bodies are replaced with a safe placeholder. This also covers Authorization overrides, short tokens and transformed server reflections. Successful requested response output is unchanged.
 - **Anonymous body redaction is best effort**: Literal configured secrets of 8+ characters are redacted; arbitrary transformations cannot be recognized. Review diagnostics before sharing them.
 
@@ -199,7 +197,7 @@ When authentication headers are missing or incorrect:
 aperture -v api myapi users get-user --id 123
 ```
 
-Check the output for the `Authorization` header (shown as `[REDACTED]` but the log will confirm it was sent).
+Authenticated diagnostics omit header metadata. Check your configured secret reference and final override locally; do not print credentials to diagnose authentication.
 
 ### Debugging Unexpected Response Data
 When the API returns unexpected data:
@@ -208,7 +206,7 @@ When the API returns unexpected data:
 aperture -vv api myapi users get-user --id 123
 ```
 
-The full response body will be logged, helping you identify issues with the API response.
+For anonymous requests, the response body is logged up to `APERTURE_LOG_MAX_BODY`. Authenticated body logs are omitted; inspect intentionally requested successful response output locally.
 
 ### Debugging Network Timeouts
 To see request timing information:
@@ -254,13 +252,13 @@ If a request unexpectedly uses or bypasses a proxy, check the priority order:
 `NO_PROXY` values are comma-separated hosts, IPs, or domains (for example `localhost,127.0.0.1,.internal.corp.example`). SOCKS proxies are not enabled in the default build.
 
 ### Debugging Header-Related Issues
-To inspect all headers being sent and received:
+To inspect anonymous request and response header diagnostics:
 
 ```bash
 aperture -v api myapi users get-user --id 123
 ```
 
-The debug output shows redacted request headers and anonymous response headers. Authenticated response headers are omitted; use deliberately requested successful header output when needed.
+The debug output shows redacted anonymous request and response headers. Authenticated request URLs and all header diagnostics are omitted; use deliberately requested successful response header output when needed.
 
 ## Log Output Destination
 
@@ -323,7 +321,7 @@ APERTURE_LOG=debug aperture api myapi --batch-file operations.yaml
 1. **Start with `-v`**: Use `-v` for debug output before escalating to `-vv`
 2. **Use JSON format for automation**: Pipe logs to tools like `jq` for processing
 3. **Keep body size reasonable**: Increase `APERTURE_LOG_MAX_BODY` only when needed
-4. **Check redaction**: The `[REDACTED]` markers confirm sensitive headers are being protected
+4. **Check diagnostic scope**: Authenticated metadata and bodies are omitted; anonymous literal redaction is best effort
 5. **Use with --dry-run**: Combine `-v` with `--dry-run` to see the request without executing it
 6. **Sanitize proxy URLs**: Prefer `proxy.username` plus `proxy.password_env` over embedding credentials in proxy URLs
 

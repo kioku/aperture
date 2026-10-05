@@ -42,7 +42,9 @@ We automatically pretty-print JSON responses when possible:
 - Agents can still parse the output
 
 #### 4. Error Messages with Context
-Error messages include the full response body for failed requests:
+Historical design: error messages included the full response body for failed requests.
+Current authenticated diagnostics omit response bodies and retain status/operation
+context; anonymous errors retain useful response content:
 - Helps with debugging API issues
 - Provides context for both humans and agents
 - Preserves the original error information

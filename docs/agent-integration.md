@@ -201,20 +201,23 @@ aperture api my-api -q users list | jq '.users[].id'
 
 ## Dry Run Mode
 
-The `--dry-run` flag shows the HTTP request that would be made without executing it. Useful for validation and debugging.
+The `--dry-run` flag describes the HTTP request without executing it. Anonymous request details remain useful for validation; authenticated URLs, headers and JSON bodies are omitted.
 
 ```bash
 aperture api my-api --dry-run users create --name "Test User"
 ```
 
-**Output:**
+**Authenticated output (selected fields):**
 
-```
-POST https://api.example.com/users
-Authorization: Bearer <redacted>
-Content-Type: application/json
-
-{"name": "Test User"}
+```json
+{
+  "dry_run": true,
+  "method": "POST",
+  "url": "<authenticated request URL omitted>",
+  "headers": {},
+  "body": "<authenticated request body omitted>",
+  "operation_id": "createUser"
+}
 ```
 
 ## Automatic Pagination
@@ -453,7 +456,7 @@ In dependent mode, execution halts immediately on the first failure. Subsequent 
 ```
 Starting dependent batch execution: 3 operations
 Operation 'create' completed
-Operation 'get-user' failed: HttpError: HTTP 404 error for 'myapi': (empty response)
+Operation 'get-user' failed: Batch operation failed (HttpError, HTTP 404)
 Dependent batch completed: 1/3 operations successful in 0.11s
 ```
 

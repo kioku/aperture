@@ -262,7 +262,7 @@ As an additional defense-in-depth measure, authentication headers are scrubbed f
 
 Executor requests with repeated header fields bypass caching because the cache key input cannot represent multiple values for one header. New cache entries omit all request-header metadata and strip URL userinfo, query strings, and fragments. The low-level SDK cache API has no OpenAPI security context: its request keys include every supplied header in a length-framed SHA-256 digest to separate credential identities. Callers must supply the complete request when generating keys and must not put secrets in response bodies or unrecognized response headers. Both executor and low-level cache storage skip responses with `Set-Cookie` and unsafe request methods.
 
-Enabled request logging redacts URL userinfo and sensitive query parameters, including percent-encoded parameter names and custom query API keys declared by the operation. Disabled logging still avoids URL, header, and body redaction work.
+Enabled anonymous request logging redacts URL userinfo and sensitive query parameters, including percent-encoded parameter names and custom query API keys declared by the operation. Authenticated request URLs and all request header diagnostics are omitted. Disabled logging still avoids URL, header, and body redaction work.
 
 Cache filenames escape caller-supplied components, including path separators and Unicode. The new key encoding intentionally invalidates previous request-key matches; existing files remain on disk until cleared or expired.
 
@@ -384,13 +384,19 @@ silently treated as anonymous access.
 
 Final recognized credential headers (including declared API-key headers and
 Authorization overrides), URL userinfo, and authenticated proxy configuration
-suppress request/response body trace logging and all server-controlled response-header
-diagnostics, including header names. Text API
+suppress request URLs, request/response body trace logging and all request/response
+header diagnostics, including header names. Text API
 errors retain status, operation identity and safe hints, but omit authenticated
 response bodies, since servers can transform credentials in arbitrary ways.
-Dry-run omits authenticated JSON request bodies and redacts final credential
-forms in headers and URLs. Basic password/pair/encoded-pair and bare bearer tokens
-are tracked independently of the configured-secret minimum length. Selected proxy
+Dry-run omits authenticated JSON request bodies and all request headers (an empty
+header object), and replaces the URL with an omission marker. Basic
+password/pair/encoded-pair and bare bearer tokens are tracked independently of the
+configured-secret minimum length. Compatible UTF-8 header bytes, repeated ASCII
+spaces and tabs are collected without changing outgoing HTTP grammar. Basic
+password extraction does not depend on username UTF-8 validity. Non-UTF8
+credentials remain accepted by the SDK header boundary; diagnostic omission, not
+lossy string matching, protects that path. Literal form collection does not
+recognize arbitrary transformations. Selected proxy
 raw, percent-encoded and Basic credential forms are included without changing proxy
 precedence, bypass rules, rotation or transport/cache isolation. Binary
 handling and successful requested response output remain unchanged.

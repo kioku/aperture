@@ -133,7 +133,7 @@ impl SecretContext {
             }
             // Sensitivity does not depend on UTF-8 decoding or credential length.
             self.authenticated = true;
-            let Ok(value) = value.to_str() else {
+            let Ok(value) = std::str::from_utf8(value.as_bytes()) else {
                 continue;
             };
             self.add_active_credential(value);
@@ -212,23 +212,44 @@ impl SecretContext {
     }
 
     fn add_authorization_forms(&mut self, value: &str) {
-        let Some((scheme, credential)) = value.split_once(' ') else {
+        // Header grammar allows HTAB and repeated spaces. This is diagnostic
+        // extraction only: it never normalizes or rejects the outgoing value.
+        let Some((scheme, credential)) = value.split_once([' ', '\t']) else {
             return;
         };
+        let credential = credential.trim_matches([' ', '\t']);
         self.add_active_credential(credential);
         if !scheme.eq_ignore_ascii_case("basic") {
             return;
         }
-        let Some(pair) = STANDARD
-            .decode(credential)
-            .ok()
-            .and_then(|bytes| String::from_utf8(bytes).ok())
-        else {
+        let Ok(pair) = STANDARD.decode(credential) else {
             return;
         };
-        self.add_active_credential(&pair);
-        if let Some((_, password)) = pair.split_once(':') {
-            self.add_active_credential(password);
+        self.add_utf8_credential(&pair);
+        if let Some(colon) = pair.iter().position(|byte| *byte == b':') {
+            // Invalid username bytes must not hide a compatible password.
+            self.add_utf8_credential(&pair[colon + 1..]);
+        }
+    }
+
+    fn add_utf8_credential(&mut self, bytes: &[u8]) {
+        if let Ok(value) = std::str::from_utf8(bytes) {
+            self.add_active_credential(value);
+        }
+    }
+
+    /// Authenticated outgoing metadata may contain transformed credentials or
+    /// non-UTF8 bytes. Omission avoids a false guarantee from literal/lossy matching.
+    #[must_use]
+    pub fn diagnostic_url(
+        &self,
+        url: &str,
+        operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
+    ) -> String {
+        if self.is_authenticated() {
+            "<authenticated request URL omitted>".to_string()
+        } else {
+            self.redact_secrets_in_text(&redact_operation_url(url, operation_context))
         }
     }
 
@@ -572,11 +593,10 @@ fn log_request_with_operation(
 ) {
     // Redact sensitive query parameters from URL before logging
     let redacted_url = if tracing::enabled!(target: "aperture::executor", tracing::Level::INFO) {
-        let redacted = redact_operation_url(url, operation_context);
-        match secret_ctx {
-            Some(ctx) => ctx.redact_secrets_in_text(&redacted),
-            None => redacted,
-        }
+        secret_ctx.map_or_else(
+            || redact_operation_url(url, operation_context),
+            |ctx| ctx.diagnostic_url(url, operation_context),
+        )
     } else {
         String::new()
     };
@@ -588,6 +608,12 @@ fn log_request_with_operation(
         method.to_uppercase(),
         redacted_url
     );
+
+    // Names as well as values are caller-controlled. Never render authenticated
+    // metadata, even when a credential cannot be represented as UTF-8.
+    if secret_ctx.is_some_and(SecretContext::is_authenticated) {
+        return;
+    }
 
     // Log headers at debug level
     let Some(header_map) =

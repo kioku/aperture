@@ -1500,8 +1500,10 @@ fn build_dry_run_result(
         return None;
     }
 
+    // Omit names and values: outgoing metadata can contain transformed secrets.
     let headers_map: HashMap<String, String> = headers
         .iter()
+        .filter(|_| !secret_ctx.is_authenticated())
         .map(|(k, v)| {
             let value = logging::redact_operation_header_value(
                 k.as_str(),
@@ -1527,7 +1529,7 @@ fn build_dry_run_result(
     let request_info = serde_json::json!({
         "dry_run": true,
         "method": method.to_string(),
-        "url": secret_ctx.redact_secrets_in_text(&logging::redact_operation_url(url, Some((spec, operation)))),
+        "url": secret_ctx.diagnostic_url(url, Some((spec, operation))),
         "headers": headers_map,
         "body": body_info,
         "operation_id": operation.operation_id,
