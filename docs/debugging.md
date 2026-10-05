@@ -169,12 +169,11 @@ Sensitive query parameters in URLs are automatically redacted:
 In addition to the static header and query parameter lists above, Aperture dynamically redacts secrets configured via `x-aperture-secret` extensions in your OpenAPI spec or config-based secrets. These values are:
 
 - **Redacted in header values**: If any header value exactly matches a configured secret
-- **Redacted in request/response bodies**: If the secret appears anywhere in the body (only for secrets 8+ characters to avoid false positives)
-
-This means your API keys and tokens configured in environment variables will never appear in logs, even if they're echoed back in error responses.
+- **Authenticated body diagnostics omitted**: When final request headers or transport configuration carry recognized credentials, request/response bodies are not logged and error bodies are replaced with a safe placeholder. This also covers Authorization overrides, short tokens and transformed server reflections. Successful requested response output is unchanged.
+- **Anonymous body redaction is best effort**: Literal configured secrets of 8+ characters are redacted; arbitrary transformations cannot be recognized. Review diagnostics before sharing them.
 
 ### Body Truncation
-Response bodies are truncated at 1000 characters by default to avoid logging excessively large payloads. You can increase this with `APERTURE_LOG_MAX_BODY`.
+Unauthenticated response bodies are truncated at 1000 characters by default to avoid logging excessively large payloads. You can increase this with `APERTURE_LOG_MAX_BODY`.
 
 ## JSON Output Format
 

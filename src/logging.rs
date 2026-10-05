@@ -8,6 +8,7 @@
 
 use crate::cache::models::CachedSpec;
 use crate::config::models::GlobalConfig;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use tracing::{debug, info, trace};
 
 /// Minimum length for a secret to be redacted in body content.
@@ -25,6 +26,8 @@ pub struct SecretContext {
     secrets: Vec<String>,
     /// Final active credential values, including per-invocation overrides.
     active_secrets: Vec<String>,
+    /// Final request carries credentials; untrusted bodies must not be diagnosed.
+    authenticated: bool,
 }
 
 /// Collects non-empty secret values from spec's security schemes.
@@ -102,6 +105,7 @@ impl SecretContext {
         Self {
             secrets,
             active_secrets: Vec::new(),
+            authenticated: false,
         }
     }
 
@@ -113,17 +117,97 @@ impl SecretContext {
         operation: &crate::cache::models::CachedCommand,
         headers: &reqwest::header::HeaderMap,
     ) -> Self {
-        self.active_secrets
-            .extend(headers.iter().filter_map(|(name, value)| {
-                should_redact_operation_header(name.as_str(), spec, operation)
-                    .then(|| value.to_str().ok())
-                    .flatten()
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string)
-            }));
+        for (name, value) in headers {
+            if !should_redact_operation_header(name.as_str(), spec, operation) {
+                continue;
+            }
+            // Sensitivity does not depend on UTF-8 decoding or credential length.
+            self.authenticated = true;
+            let Ok(value) = value.to_str() else {
+                continue;
+            };
+            self.add_active_credential(value);
+            if name == reqwest::header::AUTHORIZATION {
+                self.add_authorization_forms(value);
+            }
+        }
         self.active_secrets.sort();
         self.active_secrets.dedup();
         self
+    }
+
+    /// Includes Basic credentials that reqwest derives implicitly from URL userinfo.
+    #[must_use]
+    pub fn with_request_url(mut self, url: &str) -> Self {
+        let Ok(url) = reqwest::Url::parse(url) else {
+            return self;
+        };
+        if url.username().is_empty() && url.password().is_none() {
+            return self;
+        }
+        self.authenticated = true;
+        let username =
+            urlencoding::decode(url.username()).unwrap_or_else(|_| url.username().into());
+        let password = url.password().unwrap_or_default();
+        let password = urlencoding::decode(password).unwrap_or_else(|_| password.into());
+        let pair = format!("{username}:{password}");
+        let authorization = format!("Basic {}", STANDARD.encode(pair));
+        self.add_active_credential(&authorization);
+        self.add_authorization_forms(&authorization);
+        self
+    }
+
+    /// Marks transport authentication that is attached outside the operation headers.
+    /// This is conservative for authenticated proxies excluded by `NO_PROXY`.
+    #[must_use]
+    pub const fn with_authenticated_transport(mut self, authenticated: bool) -> Self {
+        self.authenticated |= authenticated;
+        self
+    }
+
+    fn add_active_credential(&mut self, value: &str) {
+        if !value.is_empty() {
+            self.active_secrets.push(value.to_string());
+        }
+    }
+
+    fn add_authorization_forms(&mut self, value: &str) {
+        let Some((scheme, credential)) = value.split_once(' ') else {
+            return;
+        };
+        self.add_active_credential(credential);
+        if !scheme.eq_ignore_ascii_case("basic") {
+            return;
+        }
+        let Some(pair) = STANDARD
+            .decode(credential)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+        else {
+            return;
+        };
+        self.add_active_credential(&pair);
+        if let Some((_, password)) = pair.split_once(':') {
+            self.add_active_credential(password);
+        }
+    }
+
+    /// Whether active operation or transport credentials make body diagnostics unsafe.
+    /// Configured but unused secrets alone do not make an anonymous request authenticated.
+    #[must_use]
+    pub const fn is_authenticated(&self) -> bool {
+        self.authenticated
+    }
+
+    /// Renders an error diagnostic, never an authenticated server-controlled body.
+    /// Literal redaction is only a best-effort aid for anonymous diagnostics.
+    #[must_use]
+    pub fn diagnostic_body(&self, body: &str) -> String {
+        if self.is_authenticated() {
+            "<authenticated response body omitted>".to_string()
+        } else {
+            self.redact_secrets_in_text(body)
+        }
     }
 
     /// Checks if a value exactly matches any configured or active secret.
@@ -137,8 +221,10 @@ impl SecretContext {
 
     /// Redacts all occurrences of secrets in the given text.
     ///
-    /// Only redacts secrets that are at least `MIN_SECRET_LENGTH_FOR_BODY_REDACTION`
-    /// characters long to avoid false positives with short values.
+    /// Configured values use `MIN_SECRET_LENGTH_FOR_BODY_REDACTION` to limit false
+    /// positives. Final active credential forms are redacted regardless of length.
+    /// This cannot recognize arbitrary transformations; use `diagnostic_body`
+    /// for untrusted error bodies.
     #[must_use]
     pub fn redact_secrets_in_text(&self, text: &str) -> String {
         let mut result = text.to_string();
@@ -328,7 +414,9 @@ fn sensitive_operation_query(
         })
 }
 
-fn redact_operation_url(
+/// Redacts URL credentials and declared operation query security parameters.
+#[must_use]
+pub fn redact_operation_url(
     url: &str,
     operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
 ) -> String {
@@ -417,7 +505,9 @@ pub fn log_operation_request(
     );
 }
 
-fn redact_operation_header_value(
+/// Redacts standard, declared, and final credential forms from a header value.
+#[must_use]
+pub fn redact_operation_header_value(
     header_name: &str,
     value: &str,
     secret_ctx: Option<&SecretContext>,
@@ -491,6 +581,9 @@ fn log_request_body(body: Option<&str>, secret_ctx: Option<&SecretContext>) {
     if !tracing::enabled!(target: "aperture::executor", tracing::Level::TRACE) {
         return;
     }
+    if secret_ctx.is_some_and(SecretContext::is_authenticated) {
+        return;
+    }
     let Some(body_content) = body else {
         return;
     };
@@ -518,7 +611,10 @@ fn redact_header_value(
         return "[REDACTED]".to_string();
     }
 
-    value.to_string()
+    secret_ctx.map_or_else(
+        || value.to_string(),
+        |ctx| ctx.redact_secrets_in_text(value),
+    )
 }
 
 /// Logs an HTTP response with optional headers and body
@@ -631,6 +727,9 @@ fn truncate_string(s: &str, max_chars: usize) -> &str {
 /// Helper function to log response body with truncation
 fn log_response_body(body: Option<&str>, max_body_len: usize, secret_ctx: Option<&SecretContext>) {
     if !tracing::enabled!(target: "aperture::executor", tracing::Level::TRACE) {
+        return;
+    }
+    if secret_ctx.is_some_and(SecretContext::is_authenticated) {
         return;
     }
     let Some(body_content) = body else {

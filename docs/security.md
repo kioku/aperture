@@ -379,3 +379,21 @@ If a specification was already registered with unsupported alternatives before
 this correction, run `aperture config reinit` to rebuild its parsed-spec cache.
 Unknown scheme references in cached commands remain errors rather than being
 silently treated as anonymous access.
+
+### Authenticated operation diagnostics
+
+Final recognized credential headers (including declared API-key headers and
+Authorization overrides), URL userinfo, and authenticated proxy configuration
+suppress request/response body trace logging. Text API
+errors retain status, operation identity and safe hints, but omit authenticated
+response bodies, since servers can transform credentials in arbitrary ways.
+Dry-run omits authenticated JSON request bodies and redacts final credential
+forms in headers and URLs. Basic password/pair/encoded-pair and bare bearer tokens
+are tracked independently of the configured-secret minimum length. Binary
+handling and successful requested response output remain unchanged.
+
+Anonymous diagnostics retain useful bodies with best-effort literal redaction.
+An undeclared environment-expanded custom credential header is not yet recognized
+by this boundary; declare its API-key security scheme/mapping and avoid diagnostic
+logging or caching for that override path. Successful output can itself contain
+sensitive API data; protect it as you would the response from the API directly.

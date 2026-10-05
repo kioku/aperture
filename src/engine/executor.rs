@@ -1413,6 +1413,7 @@ fn build_dry_run_result(
     spec: &CachedSpec,
     operation: &CachedCommand,
     proxy: &ProxyDiagnostics,
+    secret_ctx: &logging::SecretContext,
 ) -> Option<ExecutionResult> {
     if !dry_run {
         return None;
@@ -1421,16 +1422,20 @@ fn build_dry_run_result(
     let headers_map: HashMap<String, String> = headers
         .iter()
         .map(|(k, v)| {
-            let value = if logging::should_redact_operation_header(k.as_str(), spec, operation) {
-                "[REDACTED]".to_string()
-            } else {
-                v.to_str().unwrap_or("<binary>").to_string()
-            };
+            let value = logging::redact_operation_header_value(
+                k.as_str(),
+                v.to_str().unwrap_or("<binary>"),
+                Some(secret_ctx),
+                Some((spec, operation)),
+            );
             (k.as_str().to_string(), value)
         })
         .collect();
 
     let body_info = match body {
+        Some(RequestBody::Json(_)) if secret_ctx.is_authenticated() => {
+            serde_json::Value::String("<authenticated request body omitted>".to_string())
+        }
         Some(RequestBody::Json(source)) => serde_json::Value::String(source.clone()),
         Some(RequestBody::Binary(bytes)) => serde_json::json!({
             "binary": true,
@@ -1441,7 +1446,7 @@ fn build_dry_run_result(
     let request_info = serde_json::json!({
         "dry_run": true,
         "method": method.to_string(),
-        "url": url,
+        "url": secret_ctx.redact_secrets_in_text(&logging::redact_operation_url(url, Some((spec, operation)))),
         "headers": headers_map,
         "body": body_info,
         "operation_id": operation.operation_id,
@@ -1470,7 +1475,7 @@ async fn finalize_execution_result(
         let error_body = if operation.has_binary_response() {
             format!("<{} binary response bytes>", response_bytes.len())
         } else {
-            secret_ctx.redact_secrets_in_text(&String::from_utf8_lossy(&response_bytes))
+            secret_ctx.diagnostic_body(&String::from_utf8_lossy(&response_bytes))
         };
         return Err(handle_http_error(status, error_body, spec, operation));
     }
@@ -1529,6 +1534,7 @@ struct PreExecutionInput<'a> {
     spec: &'a CachedSpec,
     operation: &'a CachedCommand,
     proxy: &'a ProxyDiagnostics,
+    secret_ctx: &'a logging::SecretContext,
 }
 
 async fn resolve_pre_execution_result(
@@ -1543,6 +1549,7 @@ async fn resolve_pre_execution_result(
         input.spec,
         input.operation,
         input.proxy,
+        input.secret_ctx,
     );
     if dry_run.is_some() {
         return Ok(dry_run);
@@ -1573,6 +1580,7 @@ pub async fn execute(
         spec,
         operation: prepared.operation,
         proxy: &prepared.proxy_diagnostics,
+        secret_ctx: &prepared.secret_ctx,
     })
     .await?
     {
@@ -1849,7 +1857,9 @@ fn prepare_runtime_context<'a>(
     });
     let secret_ctx =
         logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref())
-            .with_active_operation_headers(spec, operation, headers);
+            .with_active_operation_headers(spec, operation, headers)
+            .with_request_url(url)
+            .with_authenticated_transport(proxy_requires_cache_bypass(ctx));
 
     Ok(PreparedRuntimeContext {
         cache_context,
