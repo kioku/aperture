@@ -546,7 +546,13 @@ impl SettingInfo {
 }
 
 fn parse_directory(value: &str) -> Result<SettingValue, Error> {
-    if value.trim().is_empty() || value.contains('\0') || value.starts_with('~') {
+    if value.trim().is_empty()
+        || value.contains('\0')
+        || value.starts_with('~')
+        || std::path::Path::new(value)
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
         return Err(Error::invalid_setting_value(
             SettingKey::SkillsDirectory,
             value,

@@ -152,3 +152,27 @@ fn required_apis_report_only_local_configuration() {
     assert!(!root.path().join("cache").exists());
     assert!(!root.path().join("config.toml").exists());
 }
+
+#[test]
+fn invalid_library_directory_is_rejected_before_persistence() {
+    let root = TempDir::new().unwrap();
+    cli(&root)
+        .args(["config", "set", "skills.directory", "valid-library"])
+        .assert()
+        .success();
+    let original = std::fs::read(root.path().join("config.toml")).unwrap();
+    for invalid in ["../outside", "nested/../../outside", "", " ", "~/skills"] {
+        cli(&root)
+            .args(["config", "set", "skills.directory", invalid])
+            .assert()
+            .failure();
+        assert_eq!(
+            std::fs::read(root.path().join("config.toml")).unwrap(),
+            original
+        );
+    }
+    cli(&root)
+        .args(["skills", "get", "core", "--json"])
+        .assert()
+        .success();
+}

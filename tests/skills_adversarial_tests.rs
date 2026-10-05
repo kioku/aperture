@@ -367,17 +367,32 @@ fn directory_size_depth_and_case_collisions_are_rejected() {
         .arg(reserved.path())
         .assert()
         .failure();
-    #[cfg(unix)]
-    {
-        let collision = directory();
-        fs::create_dir(collision.path().join("Refs")).unwrap();
-        fs::create_dir(collision.path().join("refs")).unwrap();
-        fs::write(collision.path().join("Refs/a.md"), "x").unwrap();
-        fs::write(collision.path().join("refs/b.md"), "x").unwrap();
-        cli(&root)
-            .args(["skills", "install"])
-            .arg(collision.path())
-            .assert()
-            .failure();
+    assert_filesystem_case_collision(&root);
+}
+
+fn assert_filesystem_case_collision(root: &TempDir) {
+    let collision = directory();
+    // Case-insensitive filesystems represent these spellings as one directory.
+    // Exercise that valid snapshot too; synthetic unit tests cover both-name maps.
+    fs::create_dir_all(collision.path().join("Refs")).unwrap();
+    fs::create_dir_all(collision.path().join("refs")).unwrap();
+    fs::write(collision.path().join("Refs/a.md"), "x").unwrap();
+    fs::write(collision.path().join("refs/b.md"), "x").unwrap();
+    let names: Vec<_> = fs::read_dir(collision.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    let distinct =
+        names.iter().any(|name| name == "Refs") && names.iter().any(|name| name == "refs");
+    let result = cli(root)
+        .args(["skills", "install"])
+        .arg(collision.path())
+        .assert();
+    if distinct {
+        result.failure();
+    } else {
+        result.success();
+        let output = json(root, &["skills", "get", "release", "--full", "--json"]);
+        assert_eq!(output["files"].as_object().unwrap().len(), 2);
     }
 }

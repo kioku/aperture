@@ -71,6 +71,11 @@ pub(super) fn check_path(path: &Path) -> Result<(), Error> {
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component);
+        // A canonical Windows prefix (such as \\?\C:) is not a complete
+        // filesystem path until its root/normal components have been appended.
+        if matches!(component, Component::Prefix(_) | Component::RootDir) {
+            continue;
+        }
         match current.symlink_metadata() {
             Ok(metadata) if metadata.is_symlink() => {
                 return Err(invalid("Symlinked skill paths are forbidden"))
@@ -411,6 +416,36 @@ fn ownership_bytes(target: &Path) -> Result<Vec<u8>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_paths_are_checked_without_probing_incomplete_roots() {
+        let root = tempfile::tempdir().unwrap();
+        let pinned = root.path().canonicalize().unwrap();
+        check_path(&pinned).unwrap();
+        check_path(&pinned.join("absent-library")).unwrap();
+        std::fs::write(pinned.join("regular-file"), "content").unwrap();
+        check_path(&pinned.join("regular-file")).unwrap();
+    }
+
+    #[test]
+    fn case_collisions_are_rejected_independently_of_host_filesystem() {
+        for paths in [
+            ["Refs/a.md", "refs/b.md"],
+            ["refs/A.md", "refs/a.md"],
+            ["Refs", "refs/b.md"],
+        ] {
+            let files = paths
+                .into_iter()
+                .map(|path| (PathBuf::from(path), b"reference".to_vec()))
+                .collect();
+            assert!(validate_files(&files).is_err());
+        }
+        let valid = BTreeMap::from([
+            (PathBuf::from("Refs/a.md"), b"a".to_vec()),
+            (PathBuf::from("Refs/b.md"), b"b".to_vec()),
+        ]);
+        assert!(validate_files(&valid).is_ok());
+    }
 
     #[test]
     fn replacement_rename_failure_restores_original() {
