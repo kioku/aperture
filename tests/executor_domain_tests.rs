@@ -40,6 +40,7 @@ fn test_spec() -> CachedSpec {
             }],
             request_body: None,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec!["users".to_string()],
             deprecated: false,
@@ -745,6 +746,7 @@ fn tenant_security_spec(location: &str) -> CachedSpec {
             location: Some(location.into()),
             parameter_name: Some("X-Tenant-Secret".into()),
             description: None,
+            oauth2_flows: None,
             bearer_format: None,
             aperture_secret: None,
         },
@@ -846,6 +848,7 @@ async fn custom_api_key_from_secret_mapping_never_reaches_cache_disk() {
             location: Some("header".into()),
             parameter_name: Some("X-Tenant-Secret".into()),
             description: None,
+            oauth2_flows: None,
             bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".into(),

@@ -30,6 +30,7 @@ fn make_command(tag: &str, operation_id: &str, method: &str, path: &str) -> Cach
             schema: Some(r#"{"type": "object"}"#.to_string()),
             example: None,
         }],
+        security_scopes: Vec::new(),
         security_requirements: vec![],
         tags: vec![tag.to_string()],
         deprecated: false,

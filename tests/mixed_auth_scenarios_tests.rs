@@ -255,8 +255,8 @@ paths:
     // Should have 3 operations (getUsers, getPublic, getMixed) - getAdmin should be skipped
     assert_eq!(
         cached_spec.commands.len(),
-        3,
-        "Should have 3 available operations"
+        4,
+        "Should have 4 available operations"
     );
 
     let op_names: Vec<&str> = cached_spec
@@ -271,20 +271,11 @@ paths:
         "Should include getMixed (has alternative auth)"
     );
     assert!(
-        !op_names.contains(&"getAdmin"),
-        "Should not include getAdmin (only OAuth2)"
+        op_names.contains(&"getAdmin"),
+        "Should include getAdmin (OAuth2)"
     );
 
-    // Check skipped endpoints
-    assert_eq!(
-        cached_spec.skipped_endpoints.len(),
-        1,
-        "Should have 1 skipped endpoint"
-    );
-    let skipped = &cached_spec.skipped_endpoints[0];
-    assert_eq!(skipped.path, "/admin");
-    assert_eq!(skipped.method, "GET");
-    assert!(skipped.reason.contains("unsupported authentication"));
+    assert!(cached_spec.skipped_endpoints.is_empty());
 }
 
 #[test]
@@ -327,23 +318,11 @@ paths:
     fs.write_all(&spec_path, spec_content.as_bytes())
         .expect("Failed to write spec");
 
-    // Should fail in strict mode
     let result = manager.add_spec(&name("mixed-auth-strict"), &spec_path, false, true);
-    assert!(result.is_err(), "Expected failure in strict mode");
-
-    if let Err(Error::Internal {
-        kind: aperture_cli::error::ErrorKind::Validation,
-        message: msg,
-        ..
-    }) = result
-    {
-        assert!(
-            msg.contains("OAuth2") || msg.contains("unsupported authentication"),
-            "Expected OAuth2 error, got: {msg}"
-        );
-    } else {
-        panic!("Expected Validation error, got: {result:?}");
-    }
+    assert!(
+        result.is_ok(),
+        "Expected OAuth2 support in strict mode: {result:?}"
+    );
 }
 
 #[test]
@@ -406,24 +385,18 @@ paths:
     let cached_spec: aperture_cli::cache::models::CachedSpec =
         postcard::from_bytes(&cached_content).expect("Failed to deserialize");
 
-    // Should have only getPublic operation (getPrivate uses global OAuth2)
-    assert_eq!(
-        cached_spec.commands.len(),
-        1,
-        "Should have 1 available operation"
-    );
-    assert_eq!(
-        cached_spec.commands[0].operation_id, "getPublic",
-        "Should include getPublic"
-    );
-
-    // Should have one skipped endpoint
-    assert_eq!(
-        cached_spec.skipped_endpoints.len(),
-        1,
-        "Should have 1 skipped endpoint"
-    );
-    assert_eq!(cached_spec.skipped_endpoints[0].path, "/private");
+    assert_eq!(cached_spec.commands.len(), 2);
+    assert!(cached_spec
+        .commands
+        .iter()
+        .any(|command| command.operation_id == "getPublic"
+            && command.security_requirements.is_empty()));
+    assert!(cached_spec
+        .commands
+        .iter()
+        .any(|command| command.operation_id == "getPrivate"
+            && command.security_requirements == vec![vec!["oauth2Auth".to_string()]]));
+    assert!(cached_spec.skipped_endpoints.is_empty());
 }
 
 #[test]
@@ -562,8 +535,8 @@ paths:
     // Should have 2 operations (getPublic with no auth, getAdmin with bearer override)
     assert_eq!(
         cached_spec.commands.len(),
-        2,
-        "Should have 2 available operations"
+        3,
+        "Should have 3 available operations"
     );
 
     let op_names: Vec<&str> = cached_spec
@@ -580,19 +553,11 @@ paths:
         "Should include getAdmin (bearer override)"
     );
     assert!(
-        !op_names.contains(&"getUsers"),
-        "Should not include getUsers (inherits global OAuth2)"
+        op_names.contains(&"getUsers"),
+        "Should include getUsers (inherits global OAuth2)"
     );
 
-    // Check skipped endpoints
-    assert_eq!(
-        cached_spec.skipped_endpoints.len(),
-        1,
-        "Should have 1 skipped endpoint"
-    );
-    let skipped = &cached_spec.skipped_endpoints[0];
-    assert_eq!(skipped.path, "/users");
-    assert!(skipped.reason.contains("unsupported authentication"));
+    assert!(cached_spec.skipped_endpoints.is_empty());
 }
 
 #[test]

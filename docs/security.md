@@ -143,13 +143,41 @@ aperture config list-secrets my-api
 
 This allows overriding spec-defined mappings without editing the spec.
 
+## OAuth2 external access tokens
+
+OpenAPI `type: oauth2` schemes are supported using access tokens obtained outside
+Aperture. Keep the original OAuth2 declaration and map its scheme name to an
+environment variable, either with `x-aperture-secret` or a configured override:
+
+```bash
+aperture config secret set my-api oauth2 --env MY_API_ACCESS_TOKEN
+```
+
+Acquire and update `MY_API_ACCESS_TOKEN` using your provider's tools. Aperture
+reads it at invocation time and sends `Authorization: Bearer <token>` to the API.
+Configured mappings override extensions. Token values are not stored in config
+or parsed-spec caches; authenticated requests bypass the response cache.
+
+Discovery retains declared flows and operation scope requirements. These describe
+the API contract, not verified grants: Aperture does not inspect opaque tokens,
+verify JWTs, or validate expiry or granted scopes. `--describe-json` reports
+`execution_mode: "externalBearerToken"` and `token_grants_verified: false` for
+OAuth2 scheme details, plus `security_scopes` aligned with security alternatives.
+
+Aperture performs no login, grant exchange, authorization URL navigation, token
+endpoint requests, refresh, or token persistence. Missing or invalid credentials
+fail before execution. API authentication failures are reported under the existing
+retry policy; they never trigger token acquisition or refresh. Replace an expired
+or rejected token externally before invoking the API again. Registration,
+discovery, and dry-run never contact the declared OAuth2 flow URLs.
+
 ## Unsupported Authentication
 
 The following require complex flows and are not supported:
 
 | Type | Reason |
 |------|--------|
-| OAuth2 (all flows) | Requires browser interaction, token refresh |
+| OAuth2 token acquisition/refresh | Use external provider tools |
 | OpenID Connect | Requires discovery, token management |
 | HTTP Negotiate | Kerberos/NTLM require system integration |
 | Mutual TLS | Certificate management out of scope |
@@ -167,7 +195,7 @@ Aperture accepts specs with unsupported features:
 
 ```bash
 aperture config add my-api ./openapi.yaml
-# Warning: Skipping 3 endpoints requiring OAuth2 authentication
+# Warning: Skipping 3 endpoints requiring OpenID Connect authentication
 # Added my-api with 47 available commands
 ```
 
@@ -177,7 +205,7 @@ Reject specs containing any unsupported features:
 
 ```bash
 aperture config add --strict my-api ./openapi.yaml
-# Error: Specification contains unsupported authentication: oauth2
+# Error: Specification contains unsupported authentication: openIdConnect
 ```
 
 ## The x-aperture-secret Extension

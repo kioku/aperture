@@ -309,7 +309,10 @@ fn metadata_survives_json_and_binary_roundtrips_with_legacy_json_defaults() {
     json.as_object_mut().unwrap().remove("serialization");
     let legacy: CachedParameter = serde_json::from_value(json).unwrap();
     assert_eq!(legacy.serialization, ParameterSerialization::default());
-    assert_eq!(aperture_cli::cache::models::CACHE_FORMAT_VERSION, 9);
+    assert_eq!(
+        cached.cache_format_version,
+        aperture_cli::cache::models::CACHE_FORMAT_VERSION
+    );
 }
 
 #[tokio::test]

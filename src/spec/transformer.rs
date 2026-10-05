@@ -398,6 +398,22 @@ impl SpecTransformer {
             request_body,
             responses,
             security_requirements,
+            security_scopes: operation
+                .security
+                .as_ref()
+                .or(spec.security.as_ref())
+                .map(|groups| {
+                    groups
+                        .iter()
+                        .map(|group| {
+                            group
+                                .iter()
+                                .map(|(name, scopes)| (name.clone(), scopes.clone()))
+                                .collect()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             tags: operation.tags.clone(),
             deprecated: operation.deprecated,
             external_docs_url: operation
@@ -826,6 +842,7 @@ impl SpecTransformer {
                     location: Some(location_str.to_string()),
                     parameter_name: Some(param_name.clone()),
                     description: description.clone(),
+                    oauth2_flows: None,
                     bearer_format: None,
                     aperture_secret,
                 })
@@ -844,12 +861,27 @@ impl SpecTransformer {
                     location: Some(constants::LOCATION_HEADER.to_string()),
                     parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
                     description: description.clone(),
+                    oauth2_flows: None,
                     bearer_format: bearer_format.clone(),
                     aperture_secret,
                 })
             }
-            // OAuth2 and OpenID Connect should be rejected in validation
-            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+            SecurityScheme::OAuth2 {
+                flows, description, ..
+            } => Some(CachedSecurityScheme {
+                name: name.to_string(),
+                scheme_type: "oauth2".to_string(),
+                scheme: None,
+                location: Some(constants::LOCATION_HEADER.to_string()),
+                parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
+                description: description.clone(),
+                bearer_format: None,
+                oauth2_flows: Some(
+                    serde_json::to_string(flows).expect("OAuth2 flows are serializable"),
+                ),
+                aperture_secret: Self::extract_aperture_secret(scheme),
+            }),
+            SecurityScheme::OpenIDConnect { .. } => None,
         }
     }
 
@@ -864,10 +896,10 @@ impl SpecTransformer {
         scheme: &SecurityScheme,
     ) -> Option<&indexmap::IndexMap<String, serde_json::Value>> {
         match scheme {
-            SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. } => {
-                Some(extensions)
-            }
-            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+            SecurityScheme::APIKey { extensions, .. }
+            | SecurityScheme::HTTP { extensions, .. }
+            | SecurityScheme::OAuth2 { extensions, .. } => Some(extensions),
+            SecurityScheme::OpenIDConnect { .. } => None,
         }
     }
 

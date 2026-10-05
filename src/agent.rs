@@ -269,6 +269,9 @@ pub struct CommandInfo {
     /// Security requirements for this operation
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub security_requirements: Vec<Vec<String>>,
+    /// Declared requirements, not verified token grants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub security_scopes: Vec<HashMap<String, Vec<String>>>,
     /// Tags associated with this operation (kebab-case)
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
@@ -448,7 +451,7 @@ pub struct ResponseSchemaInfo {
 /// Detailed, parsable security scheme description
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SecuritySchemeInfo {
-    /// Type of security scheme (http, apiKey)
+    /// Type of security scheme (http, apiKey, oauth2)
     #[serde(rename = "type")]
     pub scheme_type: String,
     /// Optional description of the security scheme
@@ -465,6 +468,13 @@ pub struct SecuritySchemeInfo {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "scheme", rename_all = "camelCase")]
 pub enum SecuritySchemeDetails {
+    /// External bearer execution; flow URLs are discovery metadata only.
+    #[serde(rename = "oauth2")]
+    OAuth2 {
+        flows: serde_json::Value,
+        execution_mode: String,
+        token_grants_verified: bool,
+    },
     /// HTTP authentication scheme (e.g., bearer, basic)
     #[serde(rename = "bearer")]
     HttpBearer {
@@ -741,6 +751,7 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
         parameters,
         request_body,
         security_requirements: cached_command.security_requirements.clone(),
+        security_scopes: cached_command.security_scopes.clone(),
         tags: cached_command
             .tags
             .iter()
@@ -867,6 +878,15 @@ fn cached_security_scheme_details(
     scheme: &crate::cache::models::CachedSecurityScheme,
 ) -> SecuritySchemeDetails {
     match scheme.scheme_type.as_str() {
+        "oauth2" => SecuritySchemeDetails::OAuth2 {
+            flows: scheme
+                .oauth2_flows
+                .as_deref()
+                .and_then(|flows| serde_json::from_str(flows).ok())
+                .unwrap_or_default(),
+            execution_mode: "externalBearerToken".to_string(),
+            token_grants_verified: false,
+        },
         constants::SECURITY_TYPE_HTTP => cached_http_security_details(scheme),
         constants::AUTH_SCHEME_APIKEY => SecuritySchemeDetails::ApiKey {
             location: scheme
@@ -1012,6 +1032,22 @@ fn convert_openapi_operation_to_info(
         parameters,
         request_body,
         security_requirements,
+        security_scopes: operation
+            .security
+            .as_ref()
+            .or(global_security)
+            .map(|groups| {
+                groups
+                    .iter()
+                    .map(|group| {
+                        group
+                            .iter()
+                            .map(|(name, scopes)| (name.clone(), scopes.clone()))
+                            .collect()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         tags: operation.tags.iter().map(|t| to_kebab_case(t)).collect(),
         original_tags: operation.tags.clone(),
         deprecated: operation.deprecated,
@@ -1294,7 +1330,19 @@ fn convert_openapi_security_scheme(
             description.as_ref(),
             extract_aperture_secret_from_extensions(scheme),
         )),
-        SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+        SecurityScheme::OAuth2 {
+            flows, description, ..
+        } => Some(SecuritySchemeInfo {
+            scheme_type: "oauth2".to_string(),
+            description: description.clone(),
+            details: SecuritySchemeDetails::OAuth2 {
+                flows: serde_json::to_value(flows).expect("OAuth2 flows are serializable"),
+                execution_mode: "externalBearerToken".to_string(),
+                token_grants_verified: false,
+            },
+            aperture_secret: extract_aperture_secret_from_extensions(scheme),
+        }),
+        SecurityScheme::OpenIDConnect { .. } => None,
     }
 }
 
@@ -1358,10 +1406,10 @@ const fn security_scheme_extensions(
     scheme: &SecurityScheme,
 ) -> Option<&indexmap::IndexMap<String, serde_json::Value>> {
     match scheme {
-        SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. } => {
-            Some(extensions)
-        }
-        SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+        SecurityScheme::APIKey { extensions, .. }
+        | SecurityScheme::HTTP { extensions, .. }
+        | SecurityScheme::OAuth2 { extensions, .. } => Some(extensions),
+        SecurityScheme::OpenIDConnect { .. } => None,
     }
 }
 
@@ -1414,6 +1462,7 @@ mod tests {
                 location: Some(constants::LOCATION_HEADER.to_string()),
                 parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
                 description: None,
+                oauth2_flows: None,
                 bearer_format: None,
                 aperture_secret: Some(CachedApertureSecret {
                     source: constants::SOURCE_ENV.to_string(),
@@ -1448,6 +1497,7 @@ mod tests {
                 }],
                 request_body: None,
                 responses: vec![],
+                security_scopes: Vec::new(),
                 security_requirements: vec![vec!["bearerAuth".to_string()]],
                 tags: vec!["users".to_string()],
                 deprecated: false,

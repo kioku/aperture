@@ -107,7 +107,8 @@ pub struct SkippedEndpoint {
 /// Version 7: Preserves all response media and `default` declarations during transformation
 /// Version 8: Preserves security requirement alternatives instead of flattening schemes
 /// Version 9: Retains parameter serialization metadata (postcard layout change)
-pub const CACHE_FORMAT_VERSION: u32 = 9;
+/// Version 10: Retains `OAuth2` flows and per-alternative declared scope requirements
+pub const CACHE_FORMAT_VERSION: u32 = 10;
 
 /// Global cache metadata for all cached specifications
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -159,6 +160,9 @@ pub struct CachedCommand {
     /// Security alternatives: OR across groups, AND across scheme names within a group.
     /// An empty group permits anonymous access; OAuth scopes are not enforced.
     pub security_requirements: Vec<Vec<String>>,
+    /// Declared scope lists, aligned with security alternatives; token grants are not verified.
+    #[serde(default)]
+    pub security_scopes: Vec<HashMap<String, Vec<String>>>,
     /// All tags associated with this operation
     pub tags: Vec<String>,
     /// Whether this operation is deprecated
@@ -398,6 +402,10 @@ pub struct CachedSecurityScheme {
     pub description: Option<String>,
     /// Bearer format for HTTP bearer schemes (e.g., "JWT")
     pub bearer_format: Option<String>,
+    /// JSON-encoded `OAuth2` flow declarations (postcard cannot decode `Value`).
+    /// Discovery metadata only; never used to acquire or refresh tokens.
+    #[serde(default)]
+    pub oauth2_flows: Option<String>,
     /// x-aperture-secret mapping for environment variable resolution
     pub aperture_secret: Option<CachedApertureSecret>,
 }
@@ -493,6 +501,7 @@ mod tests {
                     example: None,
                 },
             ],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec![],
             deprecated: false,

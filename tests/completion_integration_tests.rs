@@ -74,6 +74,7 @@ fn write_completion_fixture() -> TempDir {
                 schema: Some(r#"{"type":"object"}"#.to_string()),
                 example: None,
             }],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec!["users".to_string()],
             deprecated: false,

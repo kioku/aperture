@@ -1276,8 +1276,13 @@ fn insert_http_authorization_header(
     security_scheme: &CachedSecurityScheme,
     secret_value: &str,
 ) -> Result<(), Error> {
-    let Some(scheme_str) = &security_scheme.scheme else {
-        return Ok(());
+    let scheme_str = if security_scheme.scheme_type == "oauth2" {
+        constants::AUTH_SCHEME_BEARER
+    } else {
+        let Some(scheme) = security_scheme.scheme.as_deref() else {
+            return Ok(());
+        };
+        scheme
     };
 
     let auth_value = build_http_authorization_value(scheme_str, secret_value);
@@ -1321,7 +1326,7 @@ fn add_authentication_header(
         constants::AUTH_SCHEME_APIKEY => {
             insert_api_key_header(headers, security_scheme, &resolved_secret.value)?;
         }
-        "http" => {
+        "http" | "oauth2" => {
             insert_http_authorization_header(headers, security_scheme, &resolved_secret.value)?;
         }
         _ => {
@@ -2080,16 +2085,18 @@ fn security_header_destination(scheme: &CachedSecurityScheme) -> Result<HeaderNa
             HeaderName::from_str(name)
                 .map_err(|error| Error::invalid_header_name(name, error.to_string()))
         }
-        "http" => {
-            if scheme.scheme.as_deref().is_none_or(str::is_empty) {
-                return Err(Error::validation_error(
-                    "HTTP security scheme has no authentication scheme",
-                ));
-            }
-            Ok(HeaderName::from_static("authorization"))
-        }
+        "http" | "oauth2" => authorization_destination(scheme),
         other => Err(Error::unsupported_security_scheme(other)),
     }
+}
+
+fn authorization_destination(scheme: &CachedSecurityScheme) -> Result<HeaderName, Error> {
+    if scheme.scheme_type == "http" && scheme.scheme.as_deref().is_none_or(str::is_empty) {
+        return Err(Error::validation_error(
+            "HTTP security scheme has no authentication scheme",
+        ));
+    }
+    Ok(HeaderName::from_static("authorization"))
 }
 
 /// Configured secrets take precedence over specification extensions.
@@ -2542,6 +2549,7 @@ mod tests {
             parameters: vec![],
             request_body,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec![],
             deprecated: false,

@@ -136,6 +136,7 @@ struct OperationDetailsJson {
     request_body: Option<RequestBodyJson>,
     responses: Vec<ResponseJson>,
     security_requirements: Vec<Vec<String>>,
+    security_scopes: Vec<std::collections::HashMap<String, Vec<String>>>,
     examples: Vec<CommandExampleJson>,
 }
 
@@ -462,6 +463,7 @@ fn build_operation_details_json(api: &str, command: &CachedCommand) -> Operation
         request_body: serialize_request_body(command),
         responses: serialize_responses(command),
         security_requirements: command.security_requirements.clone(),
+        security_scopes: command.security_scopes.clone(),
         examples: serialize_examples(api, command),
     }
 }
