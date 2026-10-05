@@ -669,9 +669,12 @@ mappings; configure those separately with `config secret set`.
 
 Authenticated response diagnostics omit response-derived details to protect
 credentials, including parse/validation errors and warnings. Downloads containing
-raw or encoded credential values (including the Basic password) are rejected
-before registration, even if the document is otherwise valid. This conservative
-check can also reject a document that coincidentally contains a credential value.
+captured credential forms (including the Basic password) are rejected before
+registration, even if the document is otherwise valid. Checks inspect decoded
+JSON/YAML keys and values, parsed models, and the final mapped cache before writes,
+so parser escapes cannot hide a reflected value. This conservative check can also
+reject a document that coincidentally contains a credential value. It does not
+attempt to recognize arbitrary server-side encryption or transformations.
 Public URL and local-file diagnostics retain their usual detail.
 
 To explicitly download a replacement, run `config api add NAME URL --force`.
@@ -681,7 +684,9 @@ clears the old reference after successful replacement. A successful local-file
 replacement also clears it. Failed downloads, validation or handled write
 failures retain the previous registration and settings through rollback. Each
 file write is atomic, but the multi-file update is not crash-atomic; a persistent
-storage failure can also prevent rollback and is reported explicitly.
+storage failure can also prevent rollback; a safe persistence error explicitly
+warns that the previous state may be incomplete, without exposing storage causes
+or response content.
 
 `config api reinit NAME` and `config api reinit --all` rebuild caches from local
 registered files. They never download or resolve fetch credentials and preserve

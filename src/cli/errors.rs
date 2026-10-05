@@ -170,6 +170,9 @@ fn write_error<W: std::io::Write>(error: &Error, writer: &mut W) {
             toml_err,
             constants::ERR_TOML_SYNTAX,
         ),
+        Error::RegistrationRollbackFailed => {
+            let _ = writeln!(writer, "Persistence Error\n{error}");
+        }
         Error::Anyhow(anyhow_err) => {
             let _ = writeln!(writer, "Error\n{anyhow_err}");
         }

@@ -38,9 +38,7 @@ impl Snapshot {
             rollback_failed |= restored.is_err();
         }
         if rollback_failed {
-            return Err(Error::invalid_config(format!(
-                "Registration failed and rollback could not restore all files: {original}"
-            )));
+            return Err(Error::RegistrationRollbackFailed);
         }
         Err(original)
     }

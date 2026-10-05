@@ -57,7 +57,11 @@ impl Server {
     fn builder() -> reqwest::ClientBuilder {
         reqwest::Client::builder()
             .no_proxy()
-            .add_root_certificate(reqwest::Certificate::from_pem(CERT).unwrap())
+            // A synthetic fixture must not depend on OS/keychain trust policy.
+            // WebPKI still verifies the chain, validity, signatures and hostname.
+            .tls_certs_only([reqwest::Certificate::from_pem(CERT).unwrap()])
+            // The listener is IPv4-only; avoid platform-specific localhost resolution.
+            .resolve("localhost", "127.0.0.1:0".parse().unwrap())
     }
 }
 
@@ -320,14 +324,14 @@ async fn register_with_strict(
         .get("protected")
         .and_then(|api| api.fetch_auth.as_ref());
     let auth = args.select(&server.url, saved)?;
-    let content = fetch_spec_with_builder(
+    let (content, credentials) = fetch_spec_with_credentials(
         &server.url,
         std::time::Duration::from_secs(3),
         auth.as_ref(),
         Server::builder(),
     )
     .await?;
-    manager.register_fetched_spec(&name, &content, strict, auth)
+    manager.register_guarded_spec(&name, &content, strict, auth, credentials.as_ref())
 }
 
 #[tokio::test]
@@ -443,6 +447,7 @@ async fn explicit_no_auth_clears_reference_only_after_success() {
 struct FailFs {
     writes: std::sync::atomic::AtomicUsize,
     fail_at: std::sync::atomic::AtomicUsize,
+    persistent: bool,
 }
 
 impl FileSystem for FailFs {
@@ -481,8 +486,11 @@ impl FileSystem for FailFs {
             .writes
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             + 1;
-        if number == self.fail_at.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(std::io::Error::other("synthetic write failure"));
+        let fail_at = self.fail_at.load(std::sync::atomic::Ordering::Relaxed);
+        if fail_at != 0 && (number == fail_at || (self.persistent && number >= fail_at)) {
+            return Err(std::io::Error::other(
+                "private-storage-secret: synthetic write failure",
+            ));
         }
         OsFileSystem.atomic_write(path, bytes)
     }
@@ -499,6 +507,7 @@ fn rollback_replacement(fail_at: usize) {
     let dir = tempfile::tempdir().unwrap();
     let fs = FailFs {
         writes: 0.into(),
+        persistent: false,
         fail_at: 0.into(),
     };
     let manager = ConfigManager::with_fs(fs, dir.path().into());
@@ -549,6 +558,7 @@ fn rollback_initial(fail_at: usize) {
     let dir = tempfile::tempdir().unwrap();
     let fs = FailFs {
         writes: 0.into(),
+        persistent: false,
         fail_at: fail_at.into(),
     };
     let manager = ConfigManager::with_fs(fs, dir.path().into());
@@ -755,4 +765,237 @@ async fn valid_reflected_credentials_are_not_persisted() {
         assert!(!dir.path().join("config.toml").exists());
     }
     std::env::remove_var("APERTURE_FETCH_STORAGE_REFLECTION");
+}
+
+#[tokio::test]
+async fn escaped_credentials_are_rejected_before_initial_registration() {
+    for method in [FetchMethod::Basic, FetchMethod::Bearer, FetchMethod::Header] {
+        for yaml in [false, true] {
+            let secret = "private-decoded-token";
+            let escaped = escape_fixture(secret, yaml);
+            let body = if yaml {
+                format!(
+                    "openapi: 3.0.3\ninfo: {{title: \"{escaped}\", version: '1'}}\npaths: {{}}\n"
+                )
+            } else {
+                format!("{{\"openapi\":\"3.0.3\",\"info\":{{\"title\":\"{escaped}\",\"version\":\"1\"}},\"paths\":{{}}}}")
+            };
+            let server = Server::new(move |_| ok(&body));
+            let dir = tempfile::tempdir().unwrap();
+            let manager = ConfigManager::with_fs(OsFileSystem, dir.path().into());
+            std::env::set_var(
+                "APERTURE_FETCH_DECODED",
+                if method == FetchMethod::Basic {
+                    "user:private-decoded-token"
+                } else {
+                    secret
+                },
+            );
+            let args = FetchAuthArgs {
+                fetch_auth: Some(method),
+                fetch_auth_env: Some("APERTURE_FETCH_DECODED".into()),
+                fetch_header_name: (method == FetchMethod::Header).then(|| "X-Key".into()),
+            };
+            assert!(register(&manager, &server, &args).await.is_err());
+            assert!(!dir.path().join("specs/protected.yaml").exists());
+            assert!(!dir.path().join(".cache/protected.bin").exists());
+            assert!(!dir.path().join("config.toml").exists());
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        }
+    }
+    std::env::remove_var("APERTURE_FETCH_DECODED");
+}
+
+#[test]
+fn authenticated_storage_failures_preserve_safe_categories_and_rollback_notice() {
+    for persistent in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ConfigManager::with_fs(
+            FailFs {
+                writes: 0.into(),
+                fail_at: 0.into(),
+                persistent,
+            },
+            dir.path().into(),
+        );
+        let name = ApiContextName::new("protected").unwrap();
+        let auth = FetchAuth::new(
+            FetchMethod::Bearer,
+            "STORAGE_SYNTH",
+            None,
+            "https://example.com",
+        )
+        .unwrap();
+        manager
+            .register_fetched_spec(&name, SPEC, false, Some(auth.clone()))
+            .unwrap();
+        let paths = [
+            "specs/protected.yaml",
+            ".cache/protected.bin",
+            ".cache/cache_metadata.json",
+            "config.toml",
+        ];
+        let before = paths.map(|path| std::fs::read(dir.path().join(path)).unwrap());
+        manager
+            .fs
+            .writes
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        manager
+            .fs
+            .fail_at
+            .store(2, std::sync::atomic::Ordering::Relaxed);
+        let error = manager
+            .register_fetched_spec(
+                &name,
+                &SPEC.replace("Protected", "Replacement"),
+                false,
+                Some(auth),
+            )
+            .unwrap_err();
+        let json = serde_json::to_value(error.to_json()).unwrap();
+        let diagnostic = format!("{error} {error:?} {json}");
+        assert!(!diagnostic.contains("synthetic write failure"));
+        assert!(!diagnostic.contains("private-storage-secret"));
+        assert!(diagnostic.contains("Runtime"));
+        if persistent {
+            assert!(matches!(error, Error::RegistrationRollbackFailed));
+            assert!(diagnostic.contains("previous state may be incomplete"));
+            assert_eq!(json["details"]["rollback_failed"], true);
+            assert_ne!(before[0], std::fs::read(dir.path().join(paths[0])).unwrap());
+        } else {
+            let after = paths.map(|path| std::fs::read(dir.path().join(path)).unwrap());
+            assert_eq!(before, after);
+        }
+    }
+}
+
+#[tokio::test]
+async fn hermetic_fixture_still_rejects_untrusted_certificates_and_wrong_names() {
+    let server = Server::new(|_| ok(SPEC));
+    let untrusted = reqwest::Client::builder()
+        .no_proxy()
+        .tls_certs_only([])
+        .resolve("localhost", "127.0.0.1:0".parse().unwrap());
+    assert!(fetch_spec_with_builder(
+        &server.url,
+        std::time::Duration::from_secs(3),
+        None,
+        untrusted
+    )
+    .await
+    .is_err());
+    let wrong_name = server.url.replace("localhost", "wrong-name.invalid");
+    assert!(fetch_spec_with_builder(
+        &wrong_name,
+        std::time::Duration::from_secs(3),
+        None,
+        Server::builder().resolve("wrong-name.invalid", "127.0.0.1:0".parse().unwrap())
+    )
+    .await
+    .is_err());
+    assert!(server.requests.lock().unwrap().is_empty());
+}
+
+fn escaped_boundary_documents() -> Vec<String> {
+    let mut documents = Vec::new();
+    for version in ["3.0.3", "3.1.0"] {
+        let fields = [
+            r#""info":{"title":"SECRET","version":"1"},"paths":{}"#,
+            r#""info":{"title":"Safe","version":"1"},"paths":{"/SECRET":{"get":{"description":"safe","responses":{}}}}"#,
+            r#""info":{"title":"Safe","version":"1"},"paths":{"/safe":{"get":{"description":"SECRET","responses":{}}}}"#,
+            r#""info":{"title":"Safe","version":"1"},"paths":{},"x-SECRET":{"safe":"safe"}"#,
+            r#""info":{"title":"Safe","version":"1"},"paths":{},"x-data":{"value":"SECRET"}"#,
+            r#""info":{"title":"Safe","version":"1"},"paths":{},"components":{"schemas":{"Example":{"type":"string","example":"SECRET"}}}"#,
+        ];
+        let json_escape = escape_fixture("private-boundary-token", false);
+        for fields in fields {
+            documents.push(
+                format!("{{\"openapi\":\"{version}\",{fields}}}").replace("SECRET", &json_escape),
+            );
+        }
+        let yaml_escape = escape_fixture("private-boundary-token", true);
+        documents.push(format!("{{openapi: {version}, info: {{title: Safe, version: '1'}}, paths: {{}}, x-extra: {{\"{yaml_escape}\": safe}}}}"));
+        documents.push(format!("openapi: {version}\ninfo: {{title: Safe, version: '1'}}\npaths: {{}}\nx-extra: [\"{yaml_escape}\"]\n"));
+    }
+    documents
+}
+
+#[tokio::test]
+async fn decoded_keys_values_and_parser_modes_preserve_replacements() {
+    std::env::set_var("APERTURE_FETCH_BOUNDARY", "private-boundary-token");
+    for body in escaped_boundary_documents() {
+        let server = Server::new(move |_| ok(&body));
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ConfigManager::with_fs(OsFileSystem, dir.path().into());
+        let name = ApiContextName::new("protected").unwrap();
+        manager
+            .register_fetched_spec(&name, SPEC, false, None)
+            .unwrap();
+        manager.set_secret(&name, "operation", "OP_TOKEN").unwrap();
+        let paths = [
+            "specs/protected.yaml",
+            ".cache/protected.bin",
+            ".cache/cache_metadata.json",
+            "config.toml",
+        ];
+        let before = paths.map(|path| std::fs::read(dir.path().join(path)).unwrap());
+        let args = FetchAuthArgs {
+            fetch_auth: Some(FetchMethod::Bearer),
+            fetch_auth_env: Some("APERTURE_FETCH_BOUNDARY".into()),
+            fetch_header_name: None,
+        };
+        let error = register(&manager, &server, &args).await.unwrap_err();
+        assert!(!format!("{error} {error:?}").contains("private-boundary-token"));
+        let after = paths.map(|path| std::fs::read(dir.path().join(path)).unwrap());
+        assert_eq!(before, after);
+    }
+    std::env::remove_var("APERTURE_FETCH_BOUNDARY");
+}
+
+#[test]
+fn final_cache_guard_rejects_post_transformation_reflections_before_writes() {
+    std::env::set_var("APERTURE_FETCH_CACHE_BOUNDARY", "private-cache-token");
+    let auth = FetchAuth::new(
+        FetchMethod::Bearer,
+        "APERTURE_FETCH_CACHE_BOUNDARY",
+        None,
+        "https://example.com",
+    )
+    .unwrap();
+    let credentials = auth.resolve_download().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let manager = ConfigManager::with_fs(OsFileSystem, dir.path().into());
+    let spec = crate::spec::parse_openapi(SPEC).unwrap();
+    let validation = SpecValidator::new().validate_with_mode(&spec, false);
+    // The cache name is not a response field: this specifically exercises the final
+    // persistence boundary rather than the earlier document reflection check.
+    let error = manager
+        .add_spec_from_validated_openapi(
+            "private-cache-token",
+            &spec,
+            SPEC,
+            &validation,
+            false,
+            RegistrationAuth {
+                reference: Some(auth),
+                credentials: Some(&credentials),
+            },
+        )
+        .unwrap_err();
+    assert!(!format!("{error} {error:?}").contains("private-cache-token"));
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    std::env::remove_var("APERTURE_FETCH_CACHE_BOUNDARY");
+}
+
+fn escape_fixture(value: &str, yaml: bool) -> String {
+    use std::fmt::Write as _;
+    let mut escaped = String::new();
+    for character in value.chars() {
+        if yaml {
+            write!(escaped, "\\x{:02x}", u32::from(character)).unwrap();
+        } else {
+            write!(escaped, "\\u{:04x}", u32::from(character)).unwrap();
+        }
+    }
+    escaped
 }

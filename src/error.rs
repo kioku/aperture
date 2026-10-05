@@ -29,6 +29,11 @@ pub enum Error {
     #[error("TOML parsing error: {0}")]
     Toml(#[from] toml::de::Error),
 
+    /// Handled registration failed and at least one snapshot could not be restored.
+    /// This variant deliberately contains no untrusted storage or response text.
+    #[error("Registration persistence failed; rollback could not restore all files; previous state may be incomplete")]
+    RegistrationRollbackFailed,
+
     // Consolidated error variant using new infrastructure
     #[error("{kind}: {message}")]
     Internal {
@@ -270,6 +275,12 @@ impl Error {
             Option<Cow<'static, str>>,
             Option<serde_json::Value>,
         ) = match self {
+            Self::RegistrationRollbackFailed => (
+                "Runtime",
+                self.to_string(),
+                None,
+                Some(json!({"rollback_failed": true, "previous_state_may_be_incomplete": true})),
+            ),
             Self::Io(io_err) => io_error_json_parts(io_err),
             Self::Network(req_err) => network_error_json_parts(req_err),
             Self::Yaml(yaml_err) => (

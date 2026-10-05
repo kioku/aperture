@@ -16,6 +16,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Registration keeps the persisted reference separate from ephemeral download material.
+/// Offline rebuilds carry only the reference and never resolve credentials.
+#[derive(Default)]
+struct RegistrationAuth<'a> {
+    reference: Option<FetchAuth>,
+    credentials: Option<&'a DownloadCredentials>,
+}
+
 /// Struct to hold categorized validation warnings
 struct CategorizedWarnings<'a> {
     content_type: Vec<&'a crate::spec::validator::ValidationWarning>,
@@ -280,13 +288,16 @@ impl<F: FileSystem> ConfigManager<F> {
             &content,
             &validation_result,
             strict,
-            if preserve_fetch {
-                self.load_global_config()?
-                    .api_configs
-                    .get(name.as_str())
-                    .and_then(|api| api.fetch_auth.clone())
-            } else {
-                None
+            RegistrationAuth {
+                reference: if preserve_fetch {
+                    self.load_global_config()?
+                        .api_configs
+                        .get(name.as_str())
+                        .and_then(|api| api.fetch_auth.clone())
+                } else {
+                    None
+                },
+                credentials: None,
             },
         )
     }
@@ -338,11 +349,17 @@ impl<F: FileSystem> ConfigManager<F> {
             .get(name.as_str())
             .and_then(|api| api.fetch_auth.as_ref());
         let auth = args.select(url, saved)?;
-        let content =
-            fetch_spec_with_auth(url, std::time::Duration::from_secs(30), auth.as_ref()).await?;
-        self.register_fetched_spec(name, &content, strict, auth)
+        let (content, credentials) = fetch_spec_with_credentials(
+            url,
+            std::time::Duration::from_secs(30),
+            auth.as_ref(),
+            reqwest::Client::builder(),
+        )
+        .await?;
+        self.register_guarded_spec(name, &content, strict, auth, credentials.as_ref())
     }
 
+    #[cfg(test)]
     fn register_fetched_spec(
         &self,
         name: &ApiContextName,
@@ -350,15 +367,30 @@ impl<F: FileSystem> ConfigManager<F> {
         strict: bool,
         auth: Option<FetchAuth>,
     ) -> Result<(), Error> {
+        self.register_guarded_spec(name, content, strict, auth, None)
+    }
+
+    fn register_guarded_spec(
+        &self,
+        name: &ApiContextName,
+        content: &str,
+        strict: bool,
+        auth: Option<FetchAuth>,
+        credentials: Option<&DownloadCredentials>,
+    ) -> Result<(), Error> {
         let authenticated = auth.is_some();
-        let result = self.register_fetched_spec_inner(name, content, strict, auth);
+        let result = self.register_fetched_spec_inner(name, content, strict, auth, credentials);
         // Every response-derived diagnostic is untrusted, including transformation and
         // mapping errors. Do not attempt substring redaction: servers can reflect
         // decoded, encoded or otherwise transformed credentials in arbitrary fields.
         if authenticated {
-            result.map_err(|_| Error::validation_error(
-                "Authenticated specification registration failed; response details withheld to protect download credentials",
-            ))
+            result.map_err(|error| match error {
+                Error::RegistrationRollbackFailed => error,
+                Error::Io(_) => Error::io_error("Authenticated specification persistence failed; response details withheld to protect download credentials"),
+                _ => Error::validation_error(
+                    "Authenticated specification registration failed; response details withheld to protect download credentials",
+                ),
+            })
         } else {
             result
         }
@@ -370,8 +402,15 @@ impl<F: FileSystem> ConfigManager<F> {
         content: &str,
         strict: bool,
         auth: Option<FetchAuth>,
+        credentials: Option<&DownloadCredentials>,
     ) -> Result<(), Error> {
+        if let Some(credentials) = credentials {
+            credentials.validate_document(content)?;
+        }
         let openapi_spec = crate::spec::parse_openapi(content)?;
+        if let Some(credentials) = credentials {
+            credentials.validate_stored(&openapi_spec)?;
+        }
         let validation_result = SpecValidator::new().validate_with_mode(&openapi_spec, strict);
         if !validation_result.is_valid() {
             return validation_result.into_result();
@@ -390,7 +429,10 @@ impl<F: FileSystem> ConfigManager<F> {
             content,
             &validation_result,
             strict,
-            auth,
+            RegistrationAuth {
+                reference: auth,
+                credentials,
+            },
         )
     }
 
@@ -1019,7 +1061,7 @@ impl<F: FileSystem> ConfigManager<F> {
             &content,
             &validation_result,
             strict,
-            None,
+            RegistrationAuth::default(),
         )
     }
 
@@ -1680,14 +1722,19 @@ impl<F: FileSystem> ConfigManager<F> {
         content: &str,
         validation_result: &crate::spec::validator::ValidationResult,
         strict: bool,
-        fetch_auth: Option<FetchAuth>,
+        auth: RegistrationAuth<'_>,
     ) -> Result<(), Error> {
         // Transform to cached representation
         let mut cached_spec =
             Self::transform_spec_to_cached(name, openapi_spec, validation_result)?;
 
         // Apply command mappings from config (if any)
-        self.apply_command_mapping_if_configured(name, &mut cached_spec, fetch_auth.is_some())?;
+        self.apply_command_mapping_if_configured(name, &mut cached_spec, auth.reference.is_some())?;
+
+        // Inspect the final mapped representation before any persistence operation.
+        if let Some(credentials) = auth.credentials {
+            credentials.validate_cache(&cached_spec)?;
+        }
 
         // Create directories
         let (spec_path, cache_path) = self.create_spec_directories(name)?;
@@ -1708,7 +1755,7 @@ impl<F: FileSystem> ConfigManager<F> {
             &spec_path,
             &cache_path,
             strict,
-            fetch_auth,
+            auth.reference,
         );
         snapshot.finish(&self.fs, result)
     }
@@ -2255,6 +2302,17 @@ async fn fetch_spec_with_builder(
     auth: Option<&FetchAuth>,
     builder: reqwest::ClientBuilder,
 ) -> Result<String, Error> {
+    let (content, _) = fetch_spec_with_credentials(url, timeout, auth, builder).await?;
+    Ok(content)
+}
+
+#[allow(clippy::future_not_send)]
+async fn fetch_spec_with_credentials(
+    url: &str,
+    timeout: std::time::Duration,
+    auth: Option<&FetchAuth>,
+    builder: reqwest::ClientBuilder,
+) -> Result<(String, Option<DownloadCredentials>), Error> {
     let builder = fetch_client_builder(url, timeout, auth, builder)?;
     let credentials = auth.map(FetchAuth::resolve_download).transpose()?;
     let client = builder
@@ -2264,20 +2322,29 @@ async fn fetch_spec_with_builder(
     if let Some(credentials) = &credentials {
         request = request.header(credentials.header.0.clone(), credentials.header.1.clone());
     }
-    let response = request
+    let response = send_spec_request(request).await?;
+    let content = validate_authenticated_content(
+        validate_spec_response(response).await?,
+        credentials.as_ref(),
+    )?;
+    Ok((content, credentials))
+}
+
+#[allow(clippy::future_not_send)]
+async fn send_spec_request(request: reqwest::RequestBuilder) -> Result<reqwest::Response, Error> {
+    request
         .send()
         .await
-        .map_err(|error| fetch_network_error(&error))?;
-    validate_authenticated_content(validate_spec_response(response).await?, credentials)
+        .map_err(|error| fetch_network_error(&error))
 }
 
 /// Keep response guarding ahead of parsing and all registration writes.
 fn validate_authenticated_content(
     content: String,
-    credentials: Option<DownloadCredentials>,
+    credentials: Option<&DownloadCredentials>,
 ) -> Result<String, Error> {
     if let Some(credentials) = credentials {
-        credentials.validate_response(&content)?;
+        credentials.validate_document(&content)?;
     }
     Ok(content)
 }

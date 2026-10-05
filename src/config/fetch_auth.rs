@@ -35,6 +35,58 @@ pub(super) struct DownloadCredentials {
 }
 
 impl DownloadCredentials {
+    /// Inspect decoded keys and values, including fields ignored by `OpenAPI` models.
+    pub(super) fn validate_document(&self, content: &str) -> Result<(), Error> {
+        self.validate_response(content)?;
+        let value: serde_yaml::Value = serde_yaml::from_str(content)
+            .map_err(|_| invalid("invalid authenticated specification document"))?;
+        self.validate_value(&value)
+    }
+
+    fn validate_value(&self, value: &serde_yaml::Value) -> Result<(), Error> {
+        match value {
+            serde_yaml::Value::String(value) => self.validate_response(value),
+            serde_yaml::Value::Sequence(values) => values
+                .iter()
+                .try_for_each(|value| self.validate_value(value)),
+            serde_yaml::Value::Mapping(values) => values.iter().try_for_each(|(key, value)| {
+                self.validate_value(key)?;
+                self.validate_value(value)
+            }),
+            serde_yaml::Value::Tagged(value) => self.validate_value(&value.value),
+            _ => Ok(()),
+        }
+    }
+
+    /// Inspect semantic strings in a parsed or transformed serializable model.
+    pub(super) fn validate_stored<T: Serialize>(&self, value: &T) -> Result<(), Error> {
+        let decoded = serde_yaml::to_value(value)
+            .map_err(|_| invalid("cannot inspect authenticated specification"))?;
+        self.validate_value(&decoded)?;
+        Ok(())
+    }
+
+    /// Inspect the final semantic model and exact bytes destined for the cache.
+    pub(super) fn validate_cache(
+        &self,
+        value: &crate::cache::models::CachedSpec,
+    ) -> Result<(), Error> {
+        self.validate_stored(value)?;
+        let bytes = postcard::to_allocvec(value)
+            .map_err(|_| invalid("cannot inspect authenticated cache"))?;
+        if self.reflected_values.iter().any(|value| {
+            !value.is_empty()
+                && bytes
+                    .windows(value.len())
+                    .any(|window| window == value.as_bytes())
+        }) {
+            return Err(invalid(
+                "downloaded specification contains reflected credentials",
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_response(&self, content: &str) -> Result<(), Error> {
         if self
             .reflected_values
