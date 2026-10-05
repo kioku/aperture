@@ -103,6 +103,9 @@ impl Default for GlobalConfig {
 /// Per-API configuration for base URLs and environment-specific settings
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ApiConfig {
+    /// Origin-bound environment reference used only for specification downloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetch_auth: Option<super::fetch_auth::FetchAuth>,
     /// Override base URL for this API
     pub base_url_override: Option<String>,
     /// Environment-specific base URLs (e.g., "dev", "staging", "prod")
@@ -131,6 +134,7 @@ impl ApiConfig {
             && self.environment_urls.is_empty()
             && self.secrets.is_empty()
             && self.command_mapping.is_none()
+            && self.fetch_auth.is_none()
     }
 }
 

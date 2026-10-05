@@ -82,6 +82,14 @@ impl MockFileSystem {
 }
 
 impl FileSystem for MockFileSystem {
+    fn read_bytes(&self, path: &Path) -> io::Result<Vec<u8>> {
+        self.files
+            .lock()
+            .unwrap()
+            .get(path)
+            .cloned()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "File not found"))
+    }
     fn read_to_string(&self, path: &Path) -> io::Result<String> {
         if *self.io_error_on_read.lock().unwrap() {
             return Err(io::Error::other("Mock I/O error on read"));

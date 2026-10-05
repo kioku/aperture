@@ -319,6 +319,7 @@ mod tests {
             api_configs.insert(
                 "test-api".to_string(),
                 ApiConfig {
+                    fetch_auth: None,
                     base_url_override: Some("https://config.example.com".to_string()),
                     environment_urls: HashMap::new(),
                     strict_mode: false,
@@ -354,6 +355,7 @@ mod tests {
             api_configs.insert(
                 "test-api".to_string(),
                 ApiConfig {
+                    fetch_auth: None,
                     base_url_override: Some("https://config.example.com".to_string()),
                     environment_urls,
                     strict_mode: false,
@@ -391,6 +393,7 @@ mod tests {
             api_configs.insert(
                 "test-api".to_string(),
                 ApiConfig {
+                    fetch_auth: None,
                     base_url_override: Some("https://config.example.com".to_string()),
                     environment_urls: HashMap::new(),
                     strict_mode: false,
@@ -583,6 +586,7 @@ mod tests {
             api_configs.insert(
                 "test-api".to_string(),
                 ApiConfig {
+                    fetch_auth: None,
                     base_url_override: Some("https://{region}-override.example.com".to_string()),
                     environment_urls: HashMap::new(),
                     strict_mode: false,

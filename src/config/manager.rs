@@ -2,6 +2,7 @@ use crate::cache::fingerprint::{compute_content_hash, get_file_mtime_secs};
 use crate::cache::metadata::CacheMetadataManager;
 use crate::cache::models::CachedSecurityScheme;
 use crate::config::context_name::ApiContextName;
+use crate::config::fetch_auth::{FetchAuth, FetchAuthArgs};
 use crate::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
@@ -70,13 +71,19 @@ impl<F: FileSystem> ConfigManager<F> {
             .collect()
     }
 
-    /// Save the strict mode preference for an API
-    fn save_strict_preference(&self, api_name: &str, strict: bool) -> Result<(), Error> {
+    /// Persist registration preferences without modifying operation authentication.
+    fn save_registration_preferences(
+        &self,
+        api_name: &str,
+        strict: bool,
+        fetch_auth: Option<FetchAuth>,
+    ) -> Result<(), Error> {
         let mut config = self.load_global_config()?;
         let api_config = config
             .api_configs
             .entry(api_name.to_string())
             .or_insert_with(|| ApiConfig {
+                fetch_auth: None,
                 base_url_override: None,
                 environment_urls: HashMap::new(),
                 strict_mode: false,
@@ -84,6 +91,7 @@ impl<F: FileSystem> ConfigManager<F> {
                 command_mapping: None,
             });
         api_config.strict_mode = strict;
+        api_config.fetch_auth = fetch_auth;
         self.save_global_config(&config)?;
         Ok(())
     }
@@ -222,6 +230,30 @@ impl<F: FileSystem> ConfigManager<F> {
         force: bool,
         strict: bool,
     ) -> Result<(), Error> {
+        self.add_local_spec(name, file_path, force, strict, false)
+    }
+
+    /// Rebuild from the registered local source without resolving download credentials.
+    ///
+    /// # Errors
+    /// Returns local read, validation or persistence errors.
+    pub fn reinit_local_spec(
+        &self,
+        name: &ApiContextName,
+        path: &Path,
+        strict: bool,
+    ) -> Result<(), Error> {
+        self.add_local_spec(name, path, true, strict, true)
+    }
+
+    fn add_local_spec(
+        &self,
+        name: &ApiContextName,
+        file_path: &Path,
+        force: bool,
+        strict: bool,
+        preserve_fetch: bool,
+    ) -> Result<(), Error> {
         self.check_spec_exists(name.as_str(), force)?;
 
         let content = self.fs.read_to_string(file_path)?;
@@ -248,6 +280,14 @@ impl<F: FileSystem> ConfigManager<F> {
             &content,
             &validation_result,
             strict,
+            if preserve_fetch {
+                self.load_global_config()?
+                    .api_configs
+                    .get(name.as_str())
+                    .and_then(|api| api.fetch_auth.clone())
+            } else {
+                None
+            },
         )
     }
 
@@ -274,33 +314,58 @@ impl<F: FileSystem> ConfigManager<F> {
         force: bool,
         strict: bool,
     ) -> Result<(), Error> {
+        self.add_spec_from_url_with_fetch(name, url, force, strict, &FetchAuthArgs::default())
+            .await
+    }
+
+    /// Register or explicitly replace a remote source, with independent fetch authentication.
+    ///
+    /// # Errors
+    /// Returns reference validation, download, specification or persistence errors.
+    #[allow(clippy::future_not_send)]
+    pub async fn add_spec_from_url_with_fetch(
+        &self,
+        name: &ApiContextName,
+        url: &str,
+        force: bool,
+        strict: bool,
+        args: &FetchAuthArgs,
+    ) -> Result<(), Error> {
         self.check_spec_exists(name.as_str(), force)?;
+        let config = self.load_global_config()?;
+        let saved = config
+            .api_configs
+            .get(name.as_str())
+            .and_then(|api| api.fetch_auth.as_ref());
+        let auth = args.select(url, saved)?;
+        let content =
+            fetch_spec_with_auth(url, std::time::Duration::from_secs(30), auth.as_ref()).await?;
+        self.register_fetched_spec(name, &content, strict, auth)
+    }
 
-        // Fetch content from URL
-        let content = fetch_spec_from_url(url).await?;
-        let openapi_spec = crate::spec::parse_openapi(&content)?;
-
-        // Validate against Aperture's supported feature set using SpecValidator
-        let validator = SpecValidator::new();
-        let validation_result = validator.validate_with_mode(&openapi_spec, strict);
-
-        // Check for errors first
+    fn register_fetched_spec(
+        &self,
+        name: &ApiContextName,
+        content: &str,
+        strict: bool,
+        auth: Option<FetchAuth>,
+    ) -> Result<(), Error> {
+        let openapi_spec = crate::spec::parse_openapi(content)?;
+        let validation_result = SpecValidator::new().validate_with_mode(&openapi_spec, strict);
         if !validation_result.is_valid() {
             return validation_result.into_result();
         }
-
-        // Count total operations for better UX
-        let total_operations = Self::count_total_operations(&openapi_spec);
-
-        // Display warnings if any
-        Self::display_validation_warnings(&validation_result.warnings, Some(total_operations));
-
+        Self::display_validation_warnings(
+            &validation_result.warnings,
+            Some(Self::count_total_operations(&openapi_spec)),
+        );
         self.add_spec_from_validated_openapi(
             name.as_str(),
             &openapi_spec,
-            &content,
+            content,
             &validation_result,
             strict,
+            auth,
         )
     }
 
@@ -335,6 +400,28 @@ impl<F: FileSystem> ConfigManager<F> {
             let path = std::path::Path::new(file_or_url);
             self.add_spec(name, path, force, strict)
         }
+    }
+
+    /// Add a source with explicit fetch flags; local replacement clears old metadata.
+    ///
+    /// # Errors
+    /// Returns invalid flag combinations or registration errors.
+    #[allow(clippy::future_not_send)]
+    pub async fn add_spec_auto_with_fetch(
+        &self,
+        name: &ApiContextName,
+        source: &str,
+        force: bool,
+        strict: bool,
+        args: &FetchAuthArgs,
+    ) -> Result<(), Error> {
+        if is_url(source) {
+            return self
+                .add_spec_from_url_with_fetch(name, source, force, strict, args)
+                .await;
+        }
+        args.select(source, None)?;
+        self.add_spec(name, Path::new(source), force, strict)
     }
 
     /// Lists all registered API contexts.
@@ -405,8 +492,24 @@ impl<F: FileSystem> ConfigManager<F> {
         let metadata_manager = CacheMetadataManager::new(&self.fs);
         // Ignore errors if metadata removal fails - the important files are already removed
         let _ = metadata_manager.remove_spec_metadata(&cache_dir, name);
+        self.clear_fetch_reference(name)?;
 
         Ok(())
+    }
+
+    /// A deleted source must not bootstrap a later registration with its old fetch credentials.
+    fn clear_fetch_reference(&self, name: &str) -> Result<(), Error> {
+        let mut config = self.load_global_config()?;
+        let Some(api) = config.api_configs.get_mut(name) else {
+            return Ok(());
+        };
+        if api.fetch_auth.take().is_none() {
+            return Ok(());
+        }
+        if api.is_empty() {
+            config.api_configs.remove(name);
+        }
+        self.save_global_config(&config)
     }
 
     /// Opens an API specification in the default editor.
@@ -729,6 +832,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .api_configs
             .entry(api_name.to_string())
             .or_insert_with(|| ApiConfig {
+                fetch_auth: None,
                 base_url_override: None,
                 environment_urls: HashMap::new(),
                 strict_mode: false,
@@ -882,6 +986,7 @@ impl<F: FileSystem> ConfigManager<F> {
             &content,
             &validation_result,
             strict,
+            None,
         )
     }
 
@@ -919,6 +1024,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .api_configs
             .entry(api_name.to_string())
             .or_insert_with(|| ApiConfig {
+                fetch_auth: None,
                 base_url_override: None,
                 environment_urls: HashMap::new(),
                 strict_mode: false,
@@ -1130,6 +1236,7 @@ impl<F: FileSystem> ConfigManager<F> {
             .api_configs
             .entry(api_name.to_string())
             .or_insert_with(|| ApiConfig {
+                fetch_auth: None,
                 base_url_override: None,
                 environment_urls: HashMap::new(),
                 strict_mode: false,
@@ -1502,12 +1609,10 @@ impl<F: FileSystem> ConfigManager<F> {
         spec_path: &Path,
         cache_path: &Path,
     ) -> Result<(), Error> {
-        // Write original spec file atomically
-        self.fs.atomic_write(spec_path, content.as_bytes())?;
-
-        // Serialize and write cached representation atomically
+        // Stage the binary representation before changing the registered source.
         let cached_data = postcard::to_allocvec(cached_spec)
             .map_err(|e| Error::serialization_error(e.to_string()))?;
+        self.fs.atomic_write(spec_path, content.as_bytes())?;
         self.fs.atomic_write(cache_path, &cached_data)?;
 
         // Compute fingerprint for cache invalidation
@@ -1542,6 +1647,7 @@ impl<F: FileSystem> ConfigManager<F> {
         content: &str,
         validation_result: &crate::spec::validator::ValidationResult,
         strict: bool,
+        fetch_auth: Option<FetchAuth>,
     ) -> Result<(), Error> {
         // Transform to cached representation
         let mut cached_spec =
@@ -1553,11 +1659,43 @@ impl<F: FileSystem> ConfigManager<F> {
         // Create directories
         let (spec_path, cache_path) = self.create_spec_directories(name)?;
 
-        // Write files
-        self.write_spec_files(name, content, &cached_spec, &spec_path, &cache_path)?;
+        let paths = vec![
+            spec_path.clone(),
+            cache_path.clone(),
+            self.config_dir
+                .join(constants::DIR_CACHE)
+                .join(constants::CACHE_METADATA_FILENAME),
+            self.config_dir.join(constants::CONFIG_FILENAME),
+        ];
+        let snapshot = super::registration::Snapshot::capture(&self.fs, paths)?;
+        let result = self.commit_registration(
+            name,
+            content,
+            &cached_spec,
+            &spec_path,
+            &cache_path,
+            strict,
+            fetch_auth,
+        );
+        snapshot.finish(&self.fs, result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn commit_registration(
+        &self,
+        name: &str,
+        content: &str,
+        cached_spec: &crate::cache::models::CachedSpec,
+        spec_path: &Path,
+        cache_path: &Path,
+        strict: bool,
+        fetch_auth: Option<FetchAuth>,
+    ) -> Result<(), Error> {
+        // Each write is atomic; the snapshot restores handled failures across the group.
+        self.write_spec_files(name, content, cached_spec, spec_path, cache_path)?;
 
         // Save strict mode preference
-        self.save_strict_preference(name, strict)?;
+        self.save_registration_preferences(name, strict, fetch_auth)?;
 
         Ok(())
     }
@@ -2022,43 +2160,98 @@ pub fn is_url(input: &str) -> bool {
 const MAX_RESPONSE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
 
 #[allow(clippy::future_not_send)]
-async fn fetch_spec_from_url(url: &str) -> Result<String, Error> {
-    fetch_spec_from_url_with_timeout(url, std::time::Duration::from_secs(30)).await
-}
-
-#[allow(clippy::future_not_send)]
 async fn fetch_spec_from_url_with_timeout(
     url: &str,
     timeout: std::time::Duration,
 ) -> Result<String, Error> {
-    // Create HTTP client with timeout and security limits
-    let client = reqwest::Client::builder()
-        .timeout(timeout)
+    fetch_spec_with_auth(url, timeout, None).await
+}
+
+#[allow(clippy::future_not_send)]
+async fn fetch_spec_with_auth(
+    url: &str,
+    timeout: std::time::Duration,
+    auth: Option<&FetchAuth>,
+) -> Result<String, Error> {
+    fetch_spec_with_builder(url, timeout, auth, reqwest::Client::builder()).await
+}
+
+fn fetch_client_builder(
+    url: &str,
+    timeout: std::time::Duration,
+    auth: Option<&FetchAuth>,
+    builder: reqwest::ClientBuilder,
+) -> Result<reqwest::ClientBuilder, Error> {
+    let parsed =
+        reqwest::Url::parse(url).map_err(|_| Error::invalid_config("Invalid specification URL"))?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(Error::invalid_config(
+            "Specification URLs must not contain userinfo",
+        ));
+    }
+    let mut builder = builder.timeout(timeout);
+    if let Some(reference) = auth {
+        reference.validate_target(url)?;
+        let reference = reference.clone();
+        builder = builder.redirect(authenticated_redirect_policy(reference));
+    }
+    Ok(builder)
+}
+
+fn authenticated_redirect_policy(reference: FetchAuth) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= 10 {
+            return attempt.error("Specification redirect limit exceeded");
+        }
+        match reference.validate_target(attempt.url().as_str()) {
+            Ok(()) => attempt.follow(),
+            Err(_) => attempt.error("Unsafe authenticated specification redirect"),
+        }
+    })
+}
+
+#[allow(clippy::future_not_send)]
+async fn fetch_spec_with_builder(
+    url: &str,
+    timeout: std::time::Duration,
+    auth: Option<&FetchAuth>,
+    builder: reqwest::ClientBuilder,
+) -> Result<String, Error> {
+    let builder = fetch_client_builder(url, timeout, auth, builder)?;
+    let header = auth.map(FetchAuth::resolve).transpose()?;
+    let client = builder
         .build()
-        .map_err(|e| Error::network_request_failed(format!("Failed to create HTTP client: {e}")))?;
+        .map_err(|_| Error::network_request_failed("Failed to create specification HTTP client"))?;
+    let mut request = client.get(url);
+    if let Some((name, value)) = header {
+        request = request.header(name, value);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| fetch_network_error(&error))?;
+    validate_spec_response(response).await
+}
 
-    // Make the request
-    let response = client.get(url).send().await.map_err(|e| {
-        // Use early returns to avoid nested if-else chain
-        if e.is_timeout() {
-            return Error::network_request_failed(format!(
-                "Request timed out after {} seconds",
-                timeout.as_secs()
-            ));
-        }
+fn fetch_network_error(error: &reqwest::Error) -> Error {
+    if error.is_timeout() {
+        return Error::network_request_failed("Specification request timed out");
+    }
+    if error.is_connect() {
+        return Error::network_request_failed("Failed to connect to specification server");
+    }
+    Error::network_request_failed(
+        "Network error downloading specification (possibly unsafe redirect)",
+    )
+}
 
-        if e.is_connect() {
-            return Error::network_request_failed(format!("Failed to connect to {url}: {e}"));
-        }
-
-        Error::network_request_failed(format!("Network error: {e}"))
-    })?;
-
+#[allow(clippy::future_not_send)]
+async fn validate_spec_response(response: reqwest::Response) -> Result<String, Error> {
     // Check response status
     if !response.status().is_success() {
         return Err(Error::request_failed(
             response.status(),
-            format!("HTTP {} from {url}", response.status()),
+            format!("Specification download returned HTTP {}", response.status()),
         ));
     }
 
@@ -2080,21 +2273,26 @@ async fn fetch_spec_from_url_with_timeout(
 /// Helper function to download and validate response body
 #[allow(clippy::future_not_send)]
 async fn download_and_validate_response(response: reqwest::Response) -> Result<String, Error> {
-    // Read response body with size limit
-    let bytes = response
-        .bytes()
+    let mut response = response;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|e| Error::network_request_failed(format!("Failed to read response body: {e}")))?;
-
-    // Double-check size after download
-    if bytes.len() > usize::try_from(MAX_RESPONSE_SIZE).unwrap_or(usize::MAX) {
-        return Err(Error::network_request_failed(format!(
-            "Response too large: {} bytes (max {MAX_RESPONSE_SIZE} bytes)",
-            bytes.len()
-        )));
+        .map_err(|_| Error::network_request_failed("Failed to read specification response"))?
+    {
+        if bytes.len().saturating_add(chunk.len())
+            > usize::try_from(MAX_RESPONSE_SIZE).unwrap_or(usize::MAX)
+        {
+            return Err(Error::network_request_failed(
+                "Specification response exceeds size limit",
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
     }
-
-    // Convert to string
-    String::from_utf8(bytes.to_vec())
-        .map_err(|e| Error::network_request_failed(format!("Invalid UTF-8 in response: {e}")))
+    String::from_utf8(bytes)
+        .map_err(|_| Error::network_request_failed("Specification response is not UTF-8"))
 }
+
+#[cfg(test)]
+#[path = "fetch_tests.rs"]
+mod fetch_tests;

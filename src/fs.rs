@@ -2,6 +2,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub trait FileSystem {
+    /// Read raw bytes for lossless registration rollback, including binary caches.
+    ///
+    /// # Errors
+    /// Returns filesystem read errors. In-memory filesystems must override this.
+    fn read_bytes(&self, path: &Path) -> io::Result<Vec<u8>> {
+        std::fs::read(path)
+    }
+
     /// Reads the entire contents of a file into a string.
     ///
     /// # Errors
