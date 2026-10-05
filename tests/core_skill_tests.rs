@@ -173,3 +173,29 @@ fn handbook_requests_and_batches_match_generated_capabilities() {
         2
     );
 }
+
+#[test]
+fn root_help_directs_agents_to_the_bundled_handbook() {
+    let root = TempDir::new().unwrap();
+    let config = root.path().join("absent-config");
+    for flag in ["-h", "--help"] {
+        Command::new(assert_cmd::cargo::cargo_bin!("aperture"))
+            .env("APERTURE_CONFIG_DIR", &config)
+            .args([flag])
+            .assert()
+            .success()
+            .stdout(predicates::str::contains("aperture skills get core --full"))
+            .stdout(predicates::str::contains("aperture skills list --json"));
+    }
+    assert!(!config.exists());
+}
+
+#[test]
+fn core_description_explains_when_and_why_to_use_it() {
+    let frontmatter = CORE.split("---").nth(1).unwrap();
+    let metadata: serde_yaml::Value = serde_yaml::from_str(frontmatter).unwrap();
+    let description = metadata["description"].as_str().unwrap();
+    assert!(description.starts_with("Use when "));
+    assert!(description.contains("Aperture"));
+    assert!(description.contains("to learn"));
+}

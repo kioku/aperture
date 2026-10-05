@@ -1,6 +1,6 @@
 ---
 name: core
-description: "Learn Aperture's complete API workflow: discover capabilities, configure APIs, construct safe requests, process results, and compose verified automation."
+description: "Use when discovering or executing APIs with Aperture, planning multi-call workflows, or troubleshooting requests, to learn the running CLI's capabilities and avoid guessed commands, unsafe calls, and unverified outcomes."
 ---
 # Aperture: an agent's operating handbook
 
