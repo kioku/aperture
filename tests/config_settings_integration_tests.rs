@@ -79,8 +79,8 @@ fn test_config_settings_json_output() {
     assert!(parsed.is_array());
     let settings = parsed.as_array().unwrap();
 
-    // Includes the user skill directory alongside timeout, retry, and proxy settings.
-    assert_eq!(settings.len(), 11);
+    // Includes the response limit alongside skill, timeout, retry, and proxy settings.
+    assert_eq!(settings.len(), 12);
     assert!(settings
         .iter()
         .any(|setting| setting["key"] == "skills.directory"));
@@ -377,4 +377,31 @@ fn configured_json_errors_cover_command_usage_errors() {
         assert!(!output.status.success());
         assert!(serde_json::from_slice::<serde_json::Value>(&output.stderr).is_err());
     }
+}
+
+#[test]
+fn response_limit_setting_roundtrips_and_rejects_invalid_values() {
+    let temp_dir = TempDir::new().unwrap();
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "set", "max_response_bytes", "12345"])
+        .assert()
+        .success();
+    let output = aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp_dir.path())
+        .args(["config", "get", "max_response_bytes", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["value"], "12345");
+    for invalid in ["0", "none", "18446744073709551616"] {
+        aperture_cmd()
+            .env("APERTURE_CONFIG_DIR", temp_dir.path())
+            .args(["config", "set", "max_response_bytes", invalid])
+            .assert()
+            .failure();
+    }
+    let config = std::fs::read_to_string(temp_dir.path().join("config.toml")).unwrap();
+    assert!(config.contains("max_response_bytes = 12345"));
 }

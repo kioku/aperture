@@ -77,6 +77,8 @@ pub enum ProxyOverride {
 
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionContext {
+    /// Per-call byte limit; overrides global configuration and the 64 MiB default.
+    pub max_response_bytes: Option<u64>,
     /// Shared connection pool; clones reuse clients only for matching transport settings.
     pub http_clients: crate::engine::executor::HttpClientPool,
     /// If true, show the request that would be made without executing it.
@@ -97,7 +99,7 @@ pub struct ExecutionContext {
     /// Per-invocation proxy behavior override.
     pub proxy_override: ProxyOverride,
 
-    /// Global configuration for URL resolution and secret lookup.
+    /// Global configuration for URL resolution, secrets and execution defaults.
     pub global_config: Option<GlobalConfig>,
 
     /// Server template variable overrides (e.g., `["region=us", "env=prod"]`).

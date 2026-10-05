@@ -135,6 +135,7 @@ fn build_matches(include_show_examples: bool) -> clap::ArgMatches {
 #[allow(clippy::missing_const_for_fn)]
 fn base_execution_flags() -> ExecutionFlags {
     ExecutionFlags {
+        max_response_bytes: None,
         describe_json: false,
         dry_run: false,
         idempotency_key: None,

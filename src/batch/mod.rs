@@ -866,6 +866,7 @@ impl BatchProcessor {
         let retry_context = build_batch_retry_context(operation, global_config)?;
 
         let ctx = ExecutionContext {
+            max_response_bytes: None,
             dry_run,
             idempotency_key: None,
             cache_config,
