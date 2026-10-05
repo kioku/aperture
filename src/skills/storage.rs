@@ -417,6 +417,23 @@ fn ownership_bytes(target: &Path) -> Result<Vec<u8>, Error> {
 mod tests {
     use super::*;
 
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn non_unicode_reference_names_are_rejected_without_filesystem_creation() {
+        #[cfg(unix)]
+        let name = {
+            use std::os::unix::ffi::OsStringExt;
+            std::ffi::OsString::from_vec(vec![0xff])
+        };
+        #[cfg(windows)]
+        let name = {
+            use std::os::windows::ffi::OsStringExt;
+            std::ffi::OsString::from_wide(&[0xd800])
+        };
+        assert!(safe_relative(Path::new(&name)).is_err());
+        assert!(safe_relative(Path::new("references/valid.md")).is_ok());
+    }
+
     #[test]
     fn canonical_paths_are_checked_without_probing_incomplete_roots() {
         let root = tempfile::tempdir().unwrap();

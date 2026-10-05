@@ -264,12 +264,22 @@ fn symlinks_and_non_utf8_paths_are_rejected() {
         .assert()
         .failure();
     fs::remove_file(source.path().join("escape")).unwrap();
-    fs::write(source.path().join(OsString::from_vec(vec![0xff])), "x").unwrap();
-    cli(&root)
-        .args(["skills", "install"])
-        .arg(source.path())
-        .assert()
-        .failure();
+    let invalid_path = source.path().join(OsString::from_vec(vec![0xff]));
+    match fs::write(&invalid_path, "x") {
+        Ok(()) => {
+            cli(&root)
+                .args(["skills", "install"])
+                .arg(source.path())
+                .assert()
+                .failure();
+        }
+        Err(error) => {
+            // Some filesystems (including macOS APFS) reject the fixture itself.
+            // Do not hide arbitrary I/O failures or skip the symlink assertions.
+            assert_eq!(error.raw_os_error(), Some(libc::EILSEQ));
+            assert!(!invalid_path.exists());
+        }
+    }
     let library = root.path().join("skills");
     fs::create_dir(&library).unwrap();
     symlink(outside.path(), library.join("release")).unwrap();
