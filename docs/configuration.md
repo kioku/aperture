@@ -635,3 +635,59 @@ Legacy flat commands remain available during migration. Examples:
 | `config set-secret ...` | `config secret set ...` |
 | `config clear-cache ...` | `config cache clear ...` |
 | `config settings` | `config setting list` |
+
+### Protected specification downloads
+
+Download credentials are independent from API-operation secrets. Select an
+explicit method and an environment-variable reference when registering a
+protected specification (the hidden `config add` compatibility alias accepts the
+same flags):
+
+```sh
+aperture config api add openproject https://example.com/spec.yml \
+  --fetch-auth basic --fetch-auth-env OPENPROJECT_SPEC_CREDENTIALS
+aperture config api add myapi https://example.com/openapi.json \
+  --fetch-auth bearer --fetch-auth-env SPEC_ACCESS_TOKEN
+aperture config api add myapi https://example.com/openapi.json \
+  --fetch-auth header --fetch-header-name X-API-Key --fetch-auth-env SPEC_API_KEY
+```
+
+Basic values are `username:password`, split at the first colon; passwords may
+contain colons. Bearer values are raw tokens, without an `Authorization` prefix.
+Custom-header values go into the named header. Empty values, control bytes,
+invalid environment names and transport/routing headers are rejected.
+`Authorization` requires Basic or Bearer mode. Credentials cannot be supplied as
+literal arguments or URL userinfo.
+
+Aperture stores only the method, environment-variable name, optional header name
+and bound HTTPS origin. It resolves the environment value on each download, so
+rotation requires no configuration rewrite. Authenticated downloads require
+HTTPS and allow at most ten same-origin HTTPS redirects, retaining the effective
+port; cross-origin, downgrade and userinfo targets are rejected before forwarding
+credentials. Fetch authentication does not create or change operation secret
+mappings; configure those separately with `config secret set`.
+
+Authenticated response diagnostics omit response-derived details to protect
+credentials, including parse/validation errors and warnings. Downloads containing
+captured credential forms (including the Basic password) are rejected before
+registration, even if the document is otherwise valid. Checks inspect decoded
+JSON/YAML keys and values, parsed models, and the final mapped cache before writes,
+so parser escapes cannot hide a reflected value. This conservative check can also
+reject a document that coincidentally contains a credential value. It does not
+attempt to recognize arbitrary server-side encryption or transformations.
+Public URL and local-file diagnostics retain their usual detail.
+
+To explicitly download a replacement, run `config api add NAME URL --force`.
+Omitting fetch flags reuses a saved reference only for its bound origin. For a
+new origin, explicitly select authentication or `--fetch-auth none`; the latter
+clears the old reference after successful replacement. A successful local-file
+replacement also clears it. Failed downloads, validation or handled write
+failures retain the previous registration and settings through rollback. Each
+file write is atomic, but the multi-file update is not crash-atomic; a persistent
+storage failure can also prevent rollback; a safe persistence error explicitly
+warns that the previous state may be incomplete, without exposing storage causes
+or response content.
+
+`config api reinit NAME` and `config api reinit --all` rebuild caches from local
+registered files. They never download or resolve fetch credentials and preserve
+the saved fetch reference, even when its environment variable is absent.

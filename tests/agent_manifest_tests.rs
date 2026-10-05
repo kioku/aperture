@@ -408,6 +408,7 @@ fn test_manifest_with_global_config() {
     api_configs.insert(
         "Test API".to_string(),
         ApiConfig {
+            fetch_auth: None,
             base_url_override: Some("https://override.example.com".to_string()),
             environment_urls: HashMap::new(),
             strict_mode: false,

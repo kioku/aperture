@@ -489,7 +489,10 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum ConfigApiCommands {
-    /// Add a new API specification from a file or URL
+    /// Add or explicitly replace a specification from a file or URL
+    #[command(
+        long_about = "Register a file or URL; use --force to explicitly download a remote replacement. Fetch authentication is environment-only and independent of API-operation secrets. Authenticated downloads require HTTPS and bounded same-origin redirects. Omitted fetch flags reuse a saved reference only for its bound origin; --fetch-auth none clears it after success. Local-file replacement clears fetch metadata. Reinit is an offline cache rebuild."
+    )]
     Add {
         /// Name to identify this API specification (used as context in 'aperture api').
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
@@ -505,6 +508,8 @@ pub enum ConfigApiCommands {
             help = "Reject entire spec if any endpoints have unsupported content types (e.g., multipart/form-data, XML). Default behavior skips unsupported endpoints with warnings."
         )]
         strict: bool,
+        #[command(flatten)]
+        fetch: crate::config::fetch_auth::FetchAuthArgs,
     },
     /// List all registered API specifications
     List {
@@ -527,7 +532,7 @@ pub enum ConfigApiCommands {
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
         name: String,
     },
-    /// Re-initialize cached specifications
+    /// Rebuild caches from local registered files (offline; preserves fetch references)
     Reinit {
         /// Name of the API specification to reinitialize (omit for --all).
         /// Must start with a letter or digit; may contain letters, digits, dots, hyphens, or underscores (max 64 chars).
@@ -756,6 +761,8 @@ pub enum ConfigCommands {
             help = "Reject entire spec if any endpoints have unsupported content types (e.g., multipart/form-data, XML). Default behavior skips unsupported endpoints with warnings."
         )]
         strict: bool,
+        #[command(flatten)]
+        fetch: crate::config::fetch_auth::FetchAuthArgs,
     },
     #[command(hide = true)]
     /// List all registered API specifications
@@ -923,7 +930,7 @@ pub enum ConfigCommands {
         force: bool,
     },
     #[command(hide = true)]
-    /// Re-initialize cached specifications
+    /// Rebuild caches from local registered files (offline; preserves fetch references)
     #[command(
         long_about = "Regenerate binary cache files for API specifications.\n\n\
                       This is useful when cache files become corrupted or when upgrading\n\

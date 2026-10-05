@@ -149,6 +149,7 @@ fn create_global_config_with_secrets(
     api_configs.insert(
         api_name.to_string(),
         ApiConfig {
+            fetch_auth: None,
             base_url_override: None,
             environment_urls: HashMap::new(),
             strict_mode: false,
@@ -490,6 +491,7 @@ async fn test_partial_config_override() {
     api_configs.insert(
         "test-api".to_string(),
         ApiConfig {
+            fetch_auth: None,
             base_url_override: None,
             environment_urls: HashMap::new(),
             strict_mode: false,

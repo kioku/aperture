@@ -351,6 +351,7 @@ async fn test_execute_request_with_global_config_base_url() {
     api_configs.insert(
         "test-api".to_string(),
         ApiConfig {
+            fetch_auth: None,
             base_url_override: Some(mock_server.uri()),
             environment_urls: HashMap::new(),
             strict_mode: false,

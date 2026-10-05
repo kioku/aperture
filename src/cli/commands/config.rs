@@ -24,11 +24,12 @@ async fn handle_add_spec_command(
     file_or_url: String,
     force: bool,
     strict: bool,
+    fetch: crate::config::fetch_auth::FetchAuthArgs,
     output: &Output,
 ) -> Result<(), Error> {
     let name = validate_api_name(&name)?;
     manager
-        .add_spec_auto(&name, &file_or_url, force, strict)
+        .add_spec_auto_with_fetch(&name, &file_or_url, force, strict, &fetch)
         .await?;
     let style = DiscoveryStyle::for_stdout();
     output.success(style.success(format!("Spec '{name}' added successfully.")));
@@ -459,11 +460,13 @@ fn normalize_api_config_command(
             file_or_url,
             force,
             strict,
+            fetch,
         } => crate::cli::ConfigCommands::Add {
             name,
             file_or_url,
             force,
             strict,
+            fetch,
         },
         crate::cli::ConfigApiCommands::List { verbose, json } => {
             crate::cli::ConfigCommands::List { verbose, json }
@@ -672,7 +675,10 @@ async fn execute_specs_catalog_command(
             file_or_url,
             force,
             strict,
-        } => handle_add_spec_command(manager, name, file_or_url, force, strict, output).await,
+            fetch,
+        } => {
+            handle_add_spec_command(manager, name, file_or_url, force, strict, fetch, output).await
+        }
         crate::cli::ConfigCommands::List { verbose, json } => {
             handle_list_specs(manager, verbose, json, output)
         }
@@ -906,7 +912,7 @@ pub fn reinit_spec(
     let specs_dir = config_dir.join(constants::DIR_SPECS);
     let spec_path = specs_dir.join(format!("{spec_name}.yaml"));
     let strict = manager.get_strict_preference(spec_name).unwrap_or(false);
-    manager.add_spec(spec_name, &spec_path, true, strict)?;
+    manager.reinit_local_spec(spec_name, &spec_path, strict)?;
     output.success(format!(
         "Successfully reinitialized cache for '{spec_name}'"
     ));

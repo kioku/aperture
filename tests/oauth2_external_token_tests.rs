@@ -138,6 +138,7 @@ async fn oauth_executes_alternatives_combined_overrides_and_anonymous_without_to
     let (_, cache) = cached(&doc);
     let mut config = GlobalConfig::default();
     let mut api = ApiConfig {
+        fetch_auth: None,
         base_url_override: None,
         environment_urls: std::collections::HashMap::new(),
         secrets: std::collections::HashMap::new(),
