@@ -2,7 +2,7 @@ use crate::cache::fingerprint::{compute_content_hash, get_file_mtime_secs};
 use crate::cache::metadata::CacheMetadataManager;
 use crate::cache::models::CachedSecurityScheme;
 use crate::config::context_name::ApiContextName;
-use crate::config::fetch_auth::{FetchAuth, FetchAuthArgs};
+use crate::config::fetch_auth::{DownloadCredentials, FetchAuth, FetchAuthArgs};
 use crate::config::models::{ApertureSecret, ApiConfig, GlobalConfig, SecretSource};
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
@@ -350,15 +350,40 @@ impl<F: FileSystem> ConfigManager<F> {
         strict: bool,
         auth: Option<FetchAuth>,
     ) -> Result<(), Error> {
+        let authenticated = auth.is_some();
+        let result = self.register_fetched_spec_inner(name, content, strict, auth);
+        // Every response-derived diagnostic is untrusted, including transformation and
+        // mapping errors. Do not attempt substring redaction: servers can reflect
+        // decoded, encoded or otherwise transformed credentials in arbitrary fields.
+        if authenticated {
+            result.map_err(|_| Error::validation_error(
+                "Authenticated specification registration failed; response details withheld to protect download credentials",
+            ))
+        } else {
+            result
+        }
+    }
+
+    fn register_fetched_spec_inner(
+        &self,
+        name: &ApiContextName,
+        content: &str,
+        strict: bool,
+        auth: Option<FetchAuth>,
+    ) -> Result<(), Error> {
         let openapi_spec = crate::spec::parse_openapi(content)?;
         let validation_result = SpecValidator::new().validate_with_mode(&openapi_spec, strict);
         if !validation_result.is_valid() {
             return validation_result.into_result();
         }
-        Self::display_validation_warnings(
-            &validation_result.warnings,
-            Some(Self::count_total_operations(&openapi_spec)),
-        );
+        if auth.is_some() {
+            Self::display_private_warnings(!validation_result.warnings.is_empty());
+        } else {
+            Self::display_validation_warnings(
+                &validation_result.warnings,
+                Some(Self::count_total_operations(&openapi_spec)),
+            );
+        }
         self.add_spec_from_validated_openapi(
             name.as_str(),
             &openapi_spec,
@@ -367,6 +392,14 @@ impl<F: FileSystem> ConfigManager<F> {
             strict,
             auth,
         )
+    }
+
+    /// Report warning presence without rendering untrusted authenticated response fields.
+    fn display_private_warnings(has_warnings: bool) {
+        if has_warnings {
+            // ast-grep-ignore: no-println
+            eprintln!("{} Authenticated specification has warnings; details withheld to protect download credentials. Use --strict to reject unsupported features.", crate::constants::MSG_WARNING_PREFIX);
+        }
     }
 
     /// Adds a new `OpenAPI` specification from either a file path or URL.
@@ -1654,7 +1687,7 @@ impl<F: FileSystem> ConfigManager<F> {
             Self::transform_spec_to_cached(name, openapi_spec, validation_result)?;
 
         // Apply command mappings from config (if any)
-        self.apply_command_mapping_if_configured(name, &mut cached_spec)?;
+        self.apply_command_mapping_if_configured(name, &mut cached_spec, fetch_auth.is_some())?;
 
         // Create directories
         let (spec_path, cache_path) = self.create_spec_directories(name)?;
@@ -1708,6 +1741,7 @@ impl<F: FileSystem> ConfigManager<F> {
         &self,
         name: &str,
         cached_spec: &mut crate::cache::models::CachedSpec,
+        private_diagnostics: bool,
     ) -> Result<(), Error> {
         let config = self.load_global_config()?;
         let Some(api_config) = config.api_configs.get(name) else {
@@ -1720,6 +1754,10 @@ impl<F: FileSystem> ConfigManager<F> {
         let result =
             crate::config::mapping::apply_command_mapping(&mut cached_spec.commands, mapping)?;
 
+        if private_diagnostics {
+            Self::display_private_warnings(!result.warnings.is_empty());
+            return Ok(());
+        }
         for warning in &result.warnings {
             // ast-grep-ignore: no-println
             eprintln!("{} {warning}", crate::constants::MSG_WARNING_PREFIX);
@@ -2218,19 +2256,30 @@ async fn fetch_spec_with_builder(
     builder: reqwest::ClientBuilder,
 ) -> Result<String, Error> {
     let builder = fetch_client_builder(url, timeout, auth, builder)?;
-    let header = auth.map(FetchAuth::resolve).transpose()?;
+    let credentials = auth.map(FetchAuth::resolve_download).transpose()?;
     let client = builder
         .build()
         .map_err(|_| Error::network_request_failed("Failed to create specification HTTP client"))?;
     let mut request = client.get(url);
-    if let Some((name, value)) = header {
-        request = request.header(name, value);
+    if let Some(credentials) = &credentials {
+        request = request.header(credentials.header.0.clone(), credentials.header.1.clone());
     }
     let response = request
         .send()
         .await
         .map_err(|error| fetch_network_error(&error))?;
-    validate_spec_response(response).await
+    validate_authenticated_content(validate_spec_response(response).await?, credentials)
+}
+
+/// Keep response guarding ahead of parsing and all registration writes.
+fn validate_authenticated_content(
+    content: String,
+    credentials: Option<DownloadCredentials>,
+) -> Result<String, Error> {
+    if let Some(credentials) = credentials {
+        credentials.validate_response(&content)?;
+    }
+    Ok(content)
 }
 
 fn fetch_network_error(error: &reqwest::Error) -> Error {

@@ -25,6 +25,30 @@ pub struct FetchAuth {
     pub origin: String,
 }
 
+/// Request material is deliberately neither Debug nor serializable. Reject exact
+/// reflected credential forms before untrusted content can enter persisted specs.
+/// Diagnostic safety additionally requires generic errors: substring matching
+/// cannot recognize arbitrary server-side transformations of a credential.
+pub(super) struct DownloadCredentials {
+    pub(super) header: (HeaderName, HeaderValue),
+    reflected_values: Vec<String>,
+}
+
+impl DownloadCredentials {
+    pub(super) fn validate_response(&self, content: &str) -> Result<(), Error> {
+        if self
+            .reflected_values
+            .iter()
+            .any(|value| !value.is_empty() && content.contains(value))
+        {
+            return Err(invalid(
+                "downloaded specification contains reflected credentials",
+            ));
+        }
+        Ok(())
+    }
+}
+
 fn invalid(message: &str) -> Error {
     Error::invalid_config(format!("Specification fetch authentication: {message}"))
 }
@@ -115,10 +139,34 @@ impl FetchAuth {
     /// # Errors
     /// Rejects missing, non-UTF-8, empty or malformed environment credentials.
     pub fn resolve(&self) -> Result<(HeaderName, HeaderValue), Error> {
+        Ok(self.resolve_download()?.header)
+    }
+
+    /// Capture one credential resolution for both the request and response guard.
+    pub(super) fn resolve_download(&self) -> Result<DownloadCredentials, Error> {
         validate_env(&self.env_var)?;
         let value = std::env::var(&self.env_var)
             .map_err(|_| invalid("environment variable is missing or not UTF-8"))?;
-        self.header_for_value(&value)
+        let header = self.header_for_value(&value)?;
+        let mut reflected_values = vec![
+            value.clone(),
+            header.1.to_str().unwrap_or_default().to_owned(),
+        ];
+        if self.method == FetchMethod::Basic {
+            // The complete pair, password and encoded pair are all credentials.
+            reflected_values.push(
+                value
+                    .split_once(':')
+                    .expect("validated Basic pair")
+                    .1
+                    .to_owned(),
+            );
+            reflected_values.push(base64::engine::general_purpose::STANDARD.encode(&value));
+        }
+        Ok(DownloadCredentials {
+            header,
+            reflected_values,
+        })
     }
 
     /// Build a sensitive header from a synthetic or environment-supplied value.

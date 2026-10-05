@@ -665,7 +665,14 @@ rotation requires no configuration rewrite. Authenticated downloads require
 HTTPS and allow at most ten same-origin HTTPS redirects, retaining the effective
 port; cross-origin, downgrade and userinfo targets are rejected before forwarding
 credentials. Fetch authentication does not create or change operation secret
-mappings; configure those separately with `config secrets`.
+mappings; configure those separately with `config secret set`.
+
+Authenticated response diagnostics omit response-derived details to protect
+credentials, including parse/validation errors and warnings. Downloads containing
+raw or encoded credential values (including the Basic password) are rejected
+before registration, even if the document is otherwise valid. This conservative
+check can also reject a document that coincidentally contains a credential value.
+Public URL and local-file diagnostics retain their usual detail.
 
 To explicitly download a replacement, run `config api add NAME URL --force`.
 Omitting fetch flags reuses a saved reference only for its bound origin. For a

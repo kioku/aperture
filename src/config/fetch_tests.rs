@@ -234,7 +234,7 @@ async fn reject_redirect(target: &str) {
         .unwrap_err()
         .to_string();
     assert!(!error.contains("synthetic-private"));
-    assert!(server.requests.lock().unwrap().len() == 1);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
     std::env::remove_var("APERTURE_FETCH_UNSAFE");
 }
 
@@ -304,6 +304,15 @@ async fn register(
     server: &Server,
     args: &FetchAuthArgs,
 ) -> Result<(), Error> {
+    register_with_strict(manager, server, args, false).await
+}
+
+async fn register_with_strict(
+    manager: &ConfigManager<OsFileSystem>,
+    server: &Server,
+    args: &FetchAuthArgs,
+    strict: bool,
+) -> Result<(), Error> {
     let name = ApiContextName::new("protected").unwrap();
     let config = manager.load_global_config()?;
     let saved = config
@@ -318,7 +327,7 @@ async fn register(
         Server::builder(),
     )
     .await?;
-    manager.register_fetched_spec(&name, &content, false, auth)
+    manager.register_fetched_spec(&name, &content, strict, auth)
 }
 
 #[tokio::test]
@@ -585,4 +594,165 @@ fn removal_clears_fetch_reference_but_preserves_operation_settings() {
         .unwrap();
     assert!(api.fetch_auth.is_none());
     assert!(api.secrets.contains_key("operation"));
+}
+
+#[tokio::test]
+async fn reflected_authenticated_diagnostics_preserve_replacement() {
+    for (method, header, value, reflected) in [
+        (
+            FetchMethod::Basic,
+            None,
+            "user:synthetic-private",
+            "Basic dXNlcjpzeW50aGV0aWMtcHJpdmF0ZQ==",
+        ),
+        (
+            FetchMethod::Basic,
+            None,
+            "user:synthetic-private",
+            "user:synthetic-private",
+        ),
+        (
+            FetchMethod::Basic,
+            None,
+            "user:synthetic-private",
+            "synthetic-private",
+        ),
+        (
+            FetchMethod::Bearer,
+            None,
+            "synthetic-private",
+            "Bearer synthetic-private",
+        ),
+        (
+            FetchMethod::Header,
+            Some("X-Key"),
+            "synthetic-private",
+            "synthetic-private",
+        ),
+    ] {
+        check_reflected_diagnostic(method, header, value, reflected).await;
+    }
+}
+
+async fn check_reflected_diagnostic(
+    method: FetchMethod,
+    header: Option<&str>,
+    value: &str,
+    reflected: &str,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let manager = ConfigManager::with_fs(OsFileSystem, dir.path().into());
+    let name = ApiContextName::new("protected").unwrap();
+    manager
+        .register_fetched_spec(&name, SPEC, false, None)
+        .unwrap();
+    manager.set_secret(&name, "operation", "OP_TOKEN").unwrap();
+    let paths = [
+        "specs/protected.yaml",
+        ".cache/protected.bin",
+        ".cache/cache_metadata.json",
+        "config.toml",
+    ];
+    let before = paths.map(|path| std::fs::read(dir.path().join(path)).unwrap());
+    let bodies = [
+        serde_json::json!({"openapi":"3.0.3", "info":reflected, "paths":{}}).to_string(),
+        format!("{SPEC}components:\n  securitySchemes:\n    '{reflected}':\n      type: apiKey\n      in: header\n      name: X-Key\n      x-aperture-secret:\n        source: file\n"),
+        format!("openapi: 3.0.3\ninfo: {{title: Protected, version: '1'}}\npaths:\n  /test:\n    get:\n      operationId: test\n      parameters:\n        - $ref: '{reflected}'\n      responses: {{}}\n"),
+    ];
+    std::env::set_var("APERTURE_FETCH_REFLECTION", value);
+    for body in bodies {
+        let served_body = body.clone();
+        let server = Server::new(move |_| ok(&served_body));
+        let args = FetchAuthArgs {
+            fetch_auth: Some(method),
+            fetch_auth_env: Some("APERTURE_FETCH_REFLECTION".into()),
+            fetch_header_name: header.map(str::to_owned),
+        };
+        let error = register(&manager, &server, &args).await.unwrap_err();
+        assert!(!format!("{error:?} {error}").contains(reflected));
+        let auth = args.select(&server.url, None).unwrap();
+        let error = manager
+            .register_fetched_spec(&name, &body, false, auth)
+            .unwrap_err();
+        assert!(
+            !format!("{error:?} {error}").contains(reflected),
+            "reflected diagnostic: {error}"
+        );
+        let after = paths.map(|path| std::fs::read(dir.path().join(path)).unwrap());
+        assert_eq!(before, after);
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+    std::env::remove_var("APERTURE_FETCH_REFLECTION");
+}
+
+#[tokio::test]
+async fn authenticated_warning_is_safe_and_strict_rejection_preserves_files() {
+    let body = "openapi: 3.0.3\ninfo: {title: Protected, version: '1'}\npaths:\n  /synthetic-warning-private:\n    post:\n      operationId: test\n      requestBody:\n        content:\n          application/xml:\n            schema: {type: object}\n      responses: {}\n";
+    let server = Server::new(move |_| ok(body));
+    let dir = tempfile::tempdir().unwrap();
+    let manager = ConfigManager::with_fs(OsFileSystem, dir.path().into());
+    let args = FetchAuthArgs {
+        fetch_auth: Some(FetchMethod::Bearer),
+        fetch_auth_env: Some("APERTURE_FETCH_WARNING".into()),
+        fetch_header_name: None,
+    };
+    std::env::set_var("APERTURE_FETCH_WARNING", "synthetic-download-token");
+    register(&manager, &server, &args).await.unwrap();
+    let paths = [
+        "specs/protected.yaml",
+        ".cache/protected.bin",
+        ".cache/cache_metadata.json",
+        "config.toml",
+    ];
+    let before = paths.map(|path| std::fs::read(dir.path().join(path)).unwrap());
+    let error = register_with_strict(&manager, &server, &args, true)
+        .await
+        .unwrap_err();
+    assert!(!format!("{error:?} {error}").contains("synthetic-warning-private"));
+    let after = paths.map(|path| std::fs::read(dir.path().join(path)).unwrap());
+    assert_eq!(before, after);
+    std::env::remove_var("APERTURE_FETCH_WARNING");
+}
+
+#[test]
+fn public_and_local_parse_diagnostics_remain_detailed() {
+    let dir = tempfile::tempdir().unwrap();
+    let manager = ConfigManager::with_fs(OsFileSystem, dir.path().into());
+    let name = ApiContextName::new("public").unwrap();
+    let body = r#"{"openapi":"3.0.3","info":"public-invalid-info","paths":{}}"#;
+    let remote = manager
+        .register_fetched_spec(&name, body, false, None)
+        .unwrap_err();
+    assert!(remote.to_string().contains("public-invalid-info"));
+    let path = dir.path().join("input.json");
+    std::fs::write(&path, body).unwrap();
+    let local = manager.add_spec(&name, &path, false, false).unwrap_err();
+    assert!(local.to_string().contains("public-invalid-info"));
+}
+
+#[tokio::test]
+async fn valid_reflected_credentials_are_not_persisted() {
+    for reflected in [
+        "user:synthetic-storage-private",
+        "synthetic-storage-private",
+        "Basic dXNlcjpzeW50aGV0aWMtc3RvcmFnZS1wcml2YXRl",
+    ] {
+        let body = SPEC.replace("Protected", reflected);
+        let server = Server::new(move |_| ok(&body));
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ConfigManager::with_fs(OsFileSystem, dir.path().into());
+        let args = FetchAuthArgs {
+            fetch_auth: Some(FetchMethod::Basic),
+            fetch_auth_env: Some("APERTURE_FETCH_STORAGE_REFLECTION".into()),
+            fetch_header_name: None,
+        };
+        std::env::set_var(
+            "APERTURE_FETCH_STORAGE_REFLECTION",
+            "user:synthetic-storage-private",
+        );
+        assert!(register(&manager, &server, &args).await.is_err());
+        assert!(manager.list_specs().unwrap().is_empty());
+        assert!(!dir.path().join("config.toml").exists());
+    }
+    std::env::remove_var("APERTURE_FETCH_STORAGE_REFLECTION");
 }
