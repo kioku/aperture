@@ -1271,12 +1271,31 @@ fn build_http_authorization_value(scheme_str: &str, secret_value: &str) -> Strin
     }
 }
 
+/// RFC 6750 b64token syntax only; grants and expiry remain the provider's concern.
+fn valid_external_bearer_token(token: &str) -> bool {
+    let content = token.trim_end_matches('=');
+    !content.is_empty()
+        && content
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~+/".contains(&byte))
+}
+
+fn validate_external_bearer_token(token: &str) -> Result<(), Error> {
+    if valid_external_bearer_token(token) {
+        return Ok(());
+    }
+    Err(Error::validation_error(
+        "Invalid external OAuth2 bearer token syntax",
+    ))
+}
+
 fn insert_http_authorization_header(
     headers: &mut HeaderMap,
     security_scheme: &CachedSecurityScheme,
     secret_value: &str,
 ) -> Result<(), Error> {
     let scheme_str = if security_scheme.scheme_type == "oauth2" {
+        validate_external_bearer_token(secret_value)?;
         constants::AUTH_SCHEME_BEARER
     } else {
         let Some(scheme) = security_scheme.scheme.as_deref() else {
@@ -2020,8 +2039,8 @@ fn apply_security_headers(
         .unwrap_or_else(|| Error::validation_error("No satisfiable security alternative")))
 }
 
-/// Check only credential availability. Invalid values and other errors propagate;
-/// only absent environment variables make an alternative unavailable.
+/// Check credential availability, including `OAuth2` token syntax, before selection.
+/// Structural cache errors still propagate rather than weakening requirements.
 fn security_group_unavailable(
     group: &[String],
     spec: &CachedSpec,
@@ -2038,6 +2057,11 @@ fn security_group_unavailable(
             ))));
         };
         match std::env::var(env_name) {
+            Ok(value) if scheme.scheme_type == "oauth2" => {
+                if let Err(error) = validate_external_bearer_token(&value) {
+                    return Ok(Some(error));
+                }
+            }
             Ok(_) => {}
             Err(std::env::VarError::NotPresent) => {
                 return Ok(Some(Error::secret_not_set(name, env_name)))

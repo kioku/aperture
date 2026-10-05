@@ -560,20 +560,28 @@ fn overlay_cached_command_metadata(
     command_groups: HashMap<String, Vec<CommandInfo>>,
     cached_spec: &CachedSpec,
 ) -> HashMap<String, Vec<CommandInfo>> {
-    let mapping_index: HashMap<&str, &CachedCommand> = cached_spec
+    let mapping_index: HashMap<(&str, &str), &CachedCommand> = cached_spec
         .commands
         .iter()
-        .map(|c| (c.operation_id.as_str(), c))
+        .map(|c| ((c.method.as_str(), c.path.as_str()), c))
         .collect();
 
     let mut regrouped: HashMap<String, Vec<CommandInfo>> = HashMap::new();
     for (_group, commands) in command_groups {
         for mut cmd_info in commands {
-            if let Some(cached_cmd) = mapping_index.get(cmd_info.operation_id.as_str()) {
+            if let Some(cached_cmd) =
+                mapping_index.get(&(cmd_info.method.as_str(), cmd_info.path.as_str()))
+            {
                 cmd_info.display_group.clone_from(&cached_cmd.display_group);
                 cmd_info.display_name.clone_from(&cached_cmd.display_name);
                 cmd_info.aliases.clone_from(&cached_cmd.aliases);
                 cmd_info.hidden = cached_cmd.hidden;
+                cmd_info
+                    .security_requirements
+                    .clone_from(&cached_cmd.security_requirements);
+                cmd_info
+                    .security_scopes
+                    .clone_from(&cached_cmd.security_scopes);
                 cmd_info.pagination = PaginationManifestInfo::from_cached(&cached_cmd.pagination);
             }
 

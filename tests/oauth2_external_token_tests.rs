@@ -385,3 +385,122 @@ fn oauth_cli_registration_override_redaction_and_v9_cache_rebuild() {
     assert_eq!(cache.commands[0].security_scopes[0]["oauth"], vec!["read"]);
     assert!(cache.security_schemes["oauth"].oauth2_flows.is_some());
 }
+
+#[tokio::test]
+async fn oauth_token_syntax_and_unusable_alternatives() {
+    let server = MockServer::start().await;
+    let env = "OAUTH259_SYNTAX";
+    let mut doc = document(&server.uri(), env);
+    let (_, cache) = cached(&doc);
+    for token in [
+        "",
+        " ",
+        "contains spaces",
+        "\t",
+        "secret\n",
+        "secret\r",
+        "secret:bad",
+        "é",
+        "=",
+        "abc=def",
+    ] {
+        std::env::set_var(env, token);
+        for dry in [false, true] {
+            let error = invoke(&cache, None, dry).await.unwrap_err().to_string();
+            if !token.trim().is_empty() {
+                assert!(!error.contains(token));
+            }
+        }
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+    for token in ["opaque-._~+/123==", "eyJhbGci.eyJzdWI.signature"] {
+        std::env::set_var(env, token);
+        assert!(invoke(&cache, None, true).await.is_ok());
+    }
+    std::env::set_var(env, "bad token");
+    doc["security"] = json!([{"oauth":["read"]}, {}]);
+    let (_, cache) = cached(&doc);
+    assert!(invoke(&cache, None, true).await.is_ok());
+    std::env::remove_var(env);
+}
+
+#[tokio::test]
+async fn unsupported_complete_alternatives_preserve_security_and_scopes() {
+    let env = "OAUTH259_UNSUPPORTED";
+    std::env::set_var(env, "synthetic-valid");
+    for operation_override in [false, true] {
+        for groups in [
+            json!([{"oidc":[]},{"oauth":["read"]}]),
+            json!([{"oauth":["read"]},{"oidc":[]}]),
+            json!([{"oidc":[],"key":[]},{"oauth":["read"]}]),
+            json!([{"oidc":[]},{}]),
+        ] {
+            let mut doc = document("http://127.0.0.1:1", env);
+            doc["components"]["securitySchemes"]["oidc"] =
+                json!({"type":"openIdConnect","openIdConnectUrl":"http://127.0.0.1:1/discovery"});
+            if operation_override {
+                doc["paths"]["/records"]["get"]["security"] = groups.clone();
+            } else {
+                doc["security"] = groups.clone();
+            }
+            for raw in [doc.to_string(), serde_yaml::to_string(&doc).unwrap()] {
+                let spec = parse_openapi(&raw).unwrap();
+                assert!(SpecValidator::new()
+                    .validate_with_mode(&spec, false)
+                    .into_result()
+                    .is_ok());
+                assert!(SpecValidator::new()
+                    .validate_with_mode(&spec, true)
+                    .into_result()
+                    .is_err());
+                let cache = SpecTransformer::new()
+                    .transform("oauth-test", &spec)
+                    .unwrap();
+                assert!(invoke(&cache, None, true).await.is_ok());
+                assert_eq!(cache.commands[0].security_requirements.len(), 1);
+                assert_discovery_scopes_aligned(&spec, &cache);
+            }
+        }
+    }
+    std::env::remove_var(env);
+}
+
+fn assert_discovery_scopes_aligned(spec: &openapiv3::OpenAPI, cache: &CachedSpec) {
+    for output in [
+        generate_capability_manifest(cache, None).unwrap(),
+        generate_capability_manifest_from_openapi("oauth-test", spec, cache, None).unwrap(),
+    ] {
+        let manifest: Value = serde_json::from_str(&output).unwrap();
+        let scopes = &manifest["commands"]["records"][0]["security_scopes"];
+        assert_eq!(
+            scopes,
+            &serde_json::to_value(&cache.commands[0].security_scopes).unwrap()
+        );
+    }
+}
+
+#[test]
+fn discovery_aligns_security_without_operation_ids() {
+    let mut doc = document("http://127.0.0.1:1", "OAUTH259_NO_IDS");
+    doc["paths"]["/records"]["get"]
+        .as_object_mut()
+        .unwrap()
+        .remove("operationId");
+    doc["paths"]["/anonymous"]["get"] =
+        json!({"tags":["records"],"security":[{}],"responses":{"200":{"description":"OK"}}});
+    let (spec, cache) = cached(&doc);
+    for output in [
+        generate_capability_manifest(&cache, None).unwrap(),
+        generate_capability_manifest_from_openapi("oauth-test", &spec, &cache, None).unwrap(),
+    ] {
+        let manifest: Value = serde_json::from_str(&output).unwrap();
+        for command in manifest["commands"]["records"].as_array().unwrap() {
+            let expected = if command["path"] == "/records" {
+                json!([{"oauth":["read"]}])
+            } else {
+                json!([{}])
+            };
+            assert_eq!(command["security_scopes"], expected);
+        }
+    }
+}

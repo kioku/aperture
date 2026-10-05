@@ -367,3 +367,15 @@ With `--json-errors`:
   }
 }
 ```
+
+External OAuth2 tokens must satisfy RFC 6750 bearer-token syntax: nonempty ASCII
+letters, digits, `-._~+/`, optionally followed by `=` padding. Spaces and control
+characters are rejected before dry-run or network execution; this does not verify
+expiry or grants. An unusable OAuth2 credential makes its complete security
+alternative unavailable. In non-strict registration, complete alternatives that
+require unsupported OpenID Connect are omitted when another supported alternative
+exists; no member of an AND requirement is removed individually.
+If a specification was already registered with unsupported alternatives before
+this correction, run `aperture config reinit` to rebuild its parsed-spec cache.
+Unknown scheme references in cached commands remain errors rather than being
+silently treated as anonymous access.
