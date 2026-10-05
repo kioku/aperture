@@ -534,6 +534,14 @@ lists, and reject malformed or ambiguous next targets rather than silently
 reporting completion. Multiple Link header fields are treated as one list.
 One traversal reuses its HTTP connection pool.
 
+Ordinary API requests follow at most ten redirects within the original origin
+(scheme, host and effective port). Relative and absolute same-origin targets
+retain request headers. Cross-origin redirects, HTTPS downgrades and redirect
+URLs containing userinfo are rejected before delivery, including for anonymous
+operations. APIs that previously redirected to another origin must now be
+configured with the intended server URL directly. Redirect failures are not
+retried; diagnostics omit redirect destinations.
+
 Pagination uses shared, context-scoped HTTP clients keyed by transport settings
 and redirect policy. Strict pagination rejects all redirects, including
 same-origin redirects. Its response-cache identity is separate from ordinary
