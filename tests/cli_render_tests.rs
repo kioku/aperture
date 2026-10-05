@@ -10,6 +10,7 @@ fn render_result_to_string_formats_json_success() {
         body: "{\"id\":1,\"name\":\"Alice\"}".to_string(),
         status: 200,
         headers: HashMap::new(),
+        diagnostics_sensitive: false,
     };
 
     let output = render_result_to_string(&result, &OutputFormat::Json, None)
@@ -27,6 +28,7 @@ fn render_result_to_string_formats_yaml_success() {
         body: "{\"name\":\"Alice\",\"active\":true}".to_string(),
         status: 200,
         headers: HashMap::new(),
+        diagnostics_sensitive: false,
     };
 
     let output = render_result_to_string(&result, &OutputFormat::Yaml, None)
@@ -43,6 +45,7 @@ fn render_result_to_string_formats_table_success() {
         body: "{\"name\":\"Alice\",\"age\":30}".to_string(),
         status: 200,
         headers: HashMap::new(),
+        diagnostics_sensitive: false,
     };
 
     let output = render_result_to_string(&result, &OutputFormat::Table, None)
@@ -61,6 +64,7 @@ fn render_result_to_string_applies_jq_filter() {
         body: "{\"name\":\"Alice\",\"age\":30}".to_string(),
         status: 200,
         headers: HashMap::new(),
+        diagnostics_sensitive: false,
     };
 
     let output = render_result_to_string(&result, &OutputFormat::Json, Some(".name"))

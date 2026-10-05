@@ -1257,12 +1257,9 @@ async fn store_in_cache(
 pub use crate::cli::legacy_execute::execute_request;
 
 /// Validates that a header value doesn't contain control characters
-fn validate_header_value(name: &str, value: &str) -> Result<(), Error> {
+fn validate_header_value(_name: &str, value: &str) -> Result<(), Error> {
     if value.chars().any(|c| c == '\r' || c == '\n' || c == '\0') {
-        return Err(Error::invalid_header_value(
-            name,
-            "Header value contains invalid control characters (newline, carriage return, or null)",
-        ));
+        return Err(Error::invalid_header_control_characters());
     }
     Ok(())
 }
@@ -1298,7 +1295,6 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
 
 struct ResolvedAuthenticationSecret {
     value: String,
-    env_var_name: String,
     source: &'static str,
 }
 
@@ -1332,14 +1328,14 @@ fn resolve_secret_from_env(
     env_var_name: &str,
     source: &'static str,
 ) -> Result<ResolvedAuthenticationSecret, Error> {
-    let value = std::env::var(env_var_name)
-        .map_err(|_| Error::secret_not_set(scheme_name, env_var_name))?;
+    let value = std::env::var(env_var_name).map_err(|_| {
+        Error::secret_not_set(scheme_name, env_var_name).omit_diagnostic_inputs(
+            "Required authentication secret not set (environment variable unavailable)",
+            "Check the operation's credential mapping and environment variable availability.",
+        )
+    })?;
 
-    Ok(ResolvedAuthenticationSecret {
-        value,
-        env_var_name: env_var_name.to_string(),
-        source,
-    })
+    Ok(ResolvedAuthenticationSecret { value, source })
 }
 
 fn insert_api_key_header(
@@ -1416,7 +1412,7 @@ fn insert_http_authorization_header(
         .map_err(|e| Error::invalid_header_value(constants::HEADER_AUTHORIZATION, e.to_string()))?;
     headers.insert(constants::HEADER_AUTHORIZATION, header_value);
 
-    tracing::debug!(scheme = %scheme_str, "Added HTTP authentication header");
+    tracing::debug!("Added HTTP authentication header");
     Ok(())
 }
 
@@ -1427,11 +1423,7 @@ fn add_authentication_header(
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<(), Error> {
-    tracing::debug!(
-        scheme_name = %security_scheme.name,
-        scheme_type = %security_scheme.scheme_type,
-        "Adding authentication header"
-    );
+    tracing::debug!("Adding authentication header");
 
     let Some(resolved_secret) =
         resolve_authentication_secret(security_scheme, api_name, global_config)?
@@ -1439,12 +1431,7 @@ fn add_authentication_header(
         return Ok(());
     };
 
-    tracing::debug!(
-        source = resolved_secret.source,
-        scheme_name = %security_scheme.name,
-        env_var = %resolved_secret.env_var_name,
-        "Resolved secret"
-    );
+    tracing::debug!(source = resolved_secret.source, "Resolved secret");
 
     validate_header_value(constants::HEADER_AUTHORIZATION, &resolved_secret.value)?;
 
@@ -1498,12 +1485,14 @@ fn add_idempotency_key(
 
 async fn cached_execution_result(
     cache_context: Option<&(CacheKey, ResponseCache)>,
+    diagnostics_sensitive: bool,
 ) -> Result<Option<ExecutionResult>, Error> {
     if let Some(cached_response) = check_cache(cache_context).await? {
         return Ok(Some(ExecutionResult::Cached {
             body: cached_response.body,
             status: cached_response.status_code,
             headers: cached_response.headers,
+            diagnostics_sensitive,
         }));
     }
 
@@ -1618,6 +1607,7 @@ async fn finalize_execution_result(
             body: response_text,
             status: status.as_u16(),
             headers: response_headers,
+            diagnostics_sensitive: secret_ctx.is_authenticated(),
         })
     }
 }
@@ -1663,7 +1653,7 @@ async fn resolve_pre_execution_result(
     if dry_run.is_some() {
         return Ok(dry_run);
     }
-    cached_execution_result(input.cache_context).await
+    cached_execution_result(input.cache_context, input.secret_ctx.is_authenticated()).await
 }
 
 /// Executes an API operation using CLI-agnostic domain types.
@@ -1891,8 +1881,12 @@ fn prepare_request<'a>(
         ctx.global_config.as_ref(),
     )?;
     add_idempotency_key(&mut headers, ctx.idempotency_key.as_ref())?;
-    let method = Method::from_str(&operation.method)
-        .map_err(|_| Error::invalid_http_method(&operation.method))?;
+    let method = Method::from_str(&operation.method).map_err(|_| {
+        Error::invalid_http_method(&operation.method).omit_diagnostic_inputs(
+            "Invalid request HTTP method",
+            "Use a valid HTTP method in the operation definition.",
+        )
+    })?;
     let headers_clone = headers.clone();
 
     Ok(PreparedRequest {
@@ -1905,6 +1899,23 @@ fn prepare_request<'a>(
         headers_clone,
         body: call.body,
     })
+}
+
+/// Detect selected transport authentication without resolving credentials or
+/// emitting resolver errors. A userinfo delimiter in the authority is treated
+/// conservatively even when a template or malformed URL cannot yet be parsed.
+pub(crate) fn preparation_transport_is_sensitive(
+    spec: &CachedSpec,
+    ctx: &crate::invocation::ExecutionContext,
+) -> bool {
+    let base = resolve_base_url_resolver(spec, ctx.global_config.as_ref())
+        .resolve_basic(ctx.base_url.as_deref());
+    let userinfo = base.split_once("://").is_some_and(|(_, rest)| {
+        rest.split(['/', '?', '#'])
+            .next()
+            .is_some_and(|authority| authority.contains('@'))
+    });
+    userinfo || proxy_requires_cache_bypass(ctx)
 }
 
 fn execution_bypasses_cache(
@@ -2022,6 +2033,34 @@ pub(crate) fn pagination_request_url(
     ctx: &crate::invocation::ExecutionContext,
 ) -> Result<reqwest::Url, Error> {
     let operation = find_operation_by_id(spec, &call.operation_id)?;
+    let sensitive = preparation_transport_is_sensitive(spec, ctx)
+        || logging::operation_preparation_is_sensitive(
+            spec,
+            operation,
+            call.header_params.keys().map(String::as_str).chain(
+                call.custom_headers
+                    .iter()
+                    .filter_map(|header| header.split_once(':').map(|(name, _)| name.trim())),
+            ),
+        );
+    resolve_operation_request_url(spec, operation, call, ctx).map_err(|error| {
+        if sensitive {
+            error.omit_diagnostic_inputs(
+                "Invalid request URL or URL parameters (input omitted)",
+                "Check the base URL, path/query parameters, server variables and pagination origin.",
+            )
+        } else {
+            error
+        }
+    })
+}
+
+fn resolve_operation_request_url(
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+    call: &crate::invocation::OperationCall,
+    ctx: &crate::invocation::ExecutionContext,
+) -> Result<reqwest::Url, Error> {
     let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
     let base = resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
     let url = build_url_from_params(
@@ -2173,9 +2212,9 @@ fn security_group_unavailable(
         let scheme = &spec.security_schemes[name];
         let env_name = authentication_env_name(scheme, api_name, global_config);
         let Some(env_name) = env_name else {
-            return Ok(Some(Error::validation_error(format!(
-                "No credential configured for security scheme '{name}'"
-            ))));
+            return Ok(Some(Error::validation_error(
+                "No credential configured for security scheme (name omitted)",
+            )));
         };
         match std::env::var(env_name) {
             Ok(value) if scheme.scheme_type == "oauth2" => {
@@ -2185,14 +2224,17 @@ fn security_group_unavailable(
             }
             Ok(_) => {}
             Err(std::env::VarError::NotPresent) => {
-                return Ok(Some(Error::secret_not_set(name, env_name)))
+                return Ok(Some(Error::secret_not_set(name, env_name).omit_diagnostic_inputs(
+                    "Required authentication secret not set (environment variable unavailable)",
+                    "Check the operation's credential mapping and environment variable availability.",
+                )))
             }
             // VarError's Display includes the raw non-Unicode value, which is
             // a credential here. Report the configuration error without it.
             Err(std::env::VarError::NotUnicode(_)) => {
-                return Err(Error::validation_error(format!(
-                    "Credential for security scheme '{name}' is not valid unicode"
-                )))
+                return Err(Error::validation_error(
+                    "Credential for security scheme is not valid unicode",
+                ))
             }
         }
     }
@@ -2207,7 +2249,7 @@ fn validate_security_group(group: &[String], spec: &CachedSpec) -> Result<(), Er
         let scheme = spec
             .security_schemes
             .get(name)
-            .ok_or_else(|| Error::validation_error(format!("Unknown security scheme '{name}'")))?;
+            .ok_or_else(|| Error::validation_error("Unknown security scheme (name omitted)"))?;
         let destination = security_header_destination(scheme)?;
         if !destinations.insert(destination) {
             return Err(Error::validation_error(
@@ -2231,7 +2273,12 @@ fn security_header_destination(scheme: &CachedSecurityScheme) -> Result<HeaderNa
                 .map_err(|error| Error::invalid_header_name(name, error.to_string()))
         }
         "http" | "oauth2" => authorization_destination(scheme),
-        other => Err(Error::unsupported_security_scheme(other)),
+        other => Err(
+            Error::unsupported_security_scheme(other).omit_diagnostic_inputs(
+                "Unsupported security scheme type (input omitted)",
+                "Use header apiKey, HTTP or external OAuth2 authentication.",
+            ),
+        ),
     }
 }
 
@@ -2282,6 +2329,31 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
         .map_err(|e| Error::jq_filter_error(filter, format!("Response is not valid JSON: {e}")))?;
 
     apply_jq_filter_value(json_value, filter)
+}
+
+/// Filter caller-supplied text with an explicit diagnostic sensitivity policy.
+///
+/// Successful output stays exact; sensitive failures never retain input, filter
+/// source or parser/runtime errors. The context-free helper remains for owned
+/// anonymous data; operation renderers use this policy-aware boundary.
+///
+/// # Errors
+/// Returns a Validation error with a static JQ hint on sensitive failures.
+pub fn apply_jq_filter_with_diagnostics(
+    response_text: &str,
+    filter: &str,
+    diagnostics_sensitive: bool,
+) -> Result<String, Error> {
+    apply_jq_filter(response_text, filter).map_err(|error| {
+        if diagnostics_sensitive {
+            error.omit_diagnostic_inputs(
+                "JQ filter error (authenticated input omitted)",
+                "Check JQ filter syntax and data structure compatibility.",
+            )
+        } else {
+            error
+        }
+    })
 }
 
 #[cfg(feature = "jq")]

@@ -392,6 +392,21 @@ pub fn should_redact_operation_header(
             })
 }
 
+/// Conservative preparation sensitivity, without resolving environment values.
+/// Unused configured mappings do not make anonymous operations sensitive. This
+/// shares the existing declared/recognized-header boundary, not env provenance.
+pub(crate) fn operation_preparation_is_sensitive<'a>(
+    spec: &CachedSpec,
+    operation: &crate::cache::models::CachedCommand,
+    mut header_names: impl Iterator<Item = &'a str>,
+) -> bool {
+    operation
+        .security_requirements
+        .iter()
+        .any(|group| !group.is_empty())
+        || header_names.any(|name| should_redact_operation_header(name, spec, operation))
+}
+
 /// Checks if a query parameter name should be redacted
 #[must_use]
 fn should_redact_query_param(param_name: &str) -> bool {

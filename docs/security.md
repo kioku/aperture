@@ -382,6 +382,38 @@ silently treated as anonymous access.
 
 ### Authenticated operation diagnostics
 
+Header validation errors always omit supplied header strings, names, values and
+caller-provided reasons, even before authentication context exists. They retain
+HTTP-header error categories, static reasons and format hints. Operation
+authentication preparation also omits scheme names/types and credential mapping
+names from errors and traces. URL/parameter and CLI body-file preparation errors
+use bounded hints when declared/recognized operation authentication or selected
+transport authentication makes the request sensitive. Ordinary anonymous body
+and URL validation remains useful. These diagnostic projections do not change
+accepted HTTP bytes, header precedence or caller-requested successful data.
+Dynamic operation argument failures retain only clap's finite error category and
+safe placement/help hints; they never render raw values, argument names or
+suggestions from the parser. Retry-delay errors likewise omit supplied values.
+These early operation projections apply even before authentication is selected;
+offline configuration validation and requested help remain separate boundaries.
+
+Authenticated successful response data also remains sensitive when output
+processing fails. JQ parse/compile/runtime errors omit response text, filter source
+and parser error details while retaining Validation classification and a syntax/
+structure hint. CLI, legacy and batch operation renderers carry this policy through
+`ExecutionResult::Success` and `Cached` via `diagnostics_sensitive`; the body and
+headers themselves remain unchanged caller-requested data. SDK callers constructing
+these results must set the flag for sensitive data, and exhaustive destructuring
+must account for the new field. SDK callers filtering raw strings can use
+`apply_jq_filter_with_diagnostics`; the context-free `apply_jq_filter` cannot infer
+authentication from caller-owned text. Anonymous operation and cached-response JQ
+errors remain useful. Batch-summary filter errors follow the existing unconditional
+bounded batch-error policy. Successful filter output is never redacted.
+Binary output-write errors also omit destination paths and wrapped I/O text,
+retaining the finite I/O error kind and a permissions/destination hint. This
+omission is unconditional and changes neither destinations nor binary bytes or
+result metadata.
+
 Final recognized credential headers (including declared API-key headers and
 Authorization overrides), URL userinfo, and authenticated proxy configuration
 suppress request URLs, request/response body trace logging and all request/response

@@ -40,9 +40,6 @@ pub async fn execute_request(
         return Ok(None);
     }
 
-    // Translate ArgMatches → OperationCall
-    let call = translate::matches_to_operation_call(spec, matches)?;
-
     // Build ExecutionContext from the individual parameters
     let ctx = ExecutionContext {
         http_clients: crate::engine::executor::HttpClientPool::default(),
@@ -56,6 +53,8 @@ pub async fn execute_request(
         server_var_args: translate::extract_server_var_args(matches),
         auto_paginate: false,
     };
+
+    let call = translate::matches_to_operation_call_with_context(spec, matches, Some(&ctx))?;
 
     // Execute using the new domain-type API
     let result = crate::engine::executor::execute(spec, call, ctx).await?;
