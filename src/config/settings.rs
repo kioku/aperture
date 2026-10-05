@@ -33,6 +33,8 @@ use std::str::FromStr;
 /// 14. **Tests** - Add unit and integration tests for the new setting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SettingKey {
+    /// User workflow library, relative to the configuration directory.
+    SkillsDirectory,
     /// Default timeout for API requests in seconds (`default_timeout_secs`)
     DefaultTimeoutSecs,
     /// Whether to output errors as JSON by default (`agent_defaults.json_errors`)
@@ -58,6 +60,7 @@ pub enum SettingKey {
 impl SettingKey {
     /// All available setting keys for enumeration.
     pub const ALL: &'static [Self] = &[
+        Self::SkillsDirectory,
         Self::DefaultTimeoutSecs,
         Self::AgentDefaultsJsonErrors,
         Self::RetryDefaultsMaxAttempts,
@@ -92,6 +95,7 @@ impl SettingKey {
 
     const fn core_as_str(self) -> &'static str {
         match self {
+            Self::SkillsDirectory => "skills.directory",
             Self::DefaultTimeoutSecs => "default_timeout_secs",
             Self::AgentDefaultsJsonErrors => "agent_defaults.json_errors",
             Self::RetryDefaultsMaxAttempts => "retry_defaults.max_attempts",
@@ -112,7 +116,8 @@ impl SettingKey {
             Self::ProxyNoProxy => "proxy.no_proxy",
             Self::ProxyUsername => "proxy.username",
             Self::ProxyPasswordEnv => "proxy.password_env",
-            Self::DefaultTimeoutSecs
+            Self::SkillsDirectory
+            | Self::DefaultTimeoutSecs
             | Self::AgentDefaultsJsonErrors
             | Self::RetryDefaultsMaxAttempts
             | Self::RetryDefaultsInitialDelayMs
@@ -131,7 +136,7 @@ impl SettingKey {
             Self::AgentDefaultsJsonErrors => "boolean",
             Self::ProxyHttp | Self::ProxyHttps => "proxy URL",
             Self::ProxyNoProxy => "comma-separated list",
-            Self::ProxyUsername | Self::ProxyPasswordEnv => "string",
+            Self::SkillsDirectory | Self::ProxyUsername | Self::ProxyPasswordEnv => "string",
         }
     }
 
@@ -146,6 +151,9 @@ impl SettingKey {
 
     const fn core_description(self) -> &'static str {
         match self {
+            Self::SkillsDirectory => {
+                "User skill directory (relative to config directory; no tilde expansion)"
+            }
             Self::DefaultTimeoutSecs => "Default timeout for API requests in seconds",
             Self::AgentDefaultsJsonErrors => "Output errors as JSON by default",
             Self::RetryDefaultsMaxAttempts => "Maximum retry attempts (0 = disabled)",
@@ -166,7 +174,8 @@ impl SettingKey {
             Self::ProxyNoProxy => "Hosts or domains that bypass configured proxies",
             Self::ProxyUsername => "Proxy username for config-file proxy authentication",
             Self::ProxyPasswordEnv => "Environment variable containing the proxy password",
-            Self::DefaultTimeoutSecs
+            Self::SkillsDirectory
+            | Self::DefaultTimeoutSecs
             | Self::AgentDefaultsJsonErrors
             | Self::RetryDefaultsMaxAttempts
             | Self::RetryDefaultsInitialDelayMs
@@ -178,6 +187,7 @@ impl SettingKey {
     #[must_use]
     pub const fn default_value_str(&self) -> &'static str {
         match self {
+            Self::SkillsDirectory => "skills",
             Self::DefaultTimeoutSecs => "30",
             Self::AgentDefaultsJsonErrors => "false",
             Self::RetryDefaultsMaxAttempts => "0",
@@ -202,6 +212,7 @@ impl SettingKey {
 
     fn core_value_from_config(self, config: &super::models::GlobalConfig) -> SettingValue {
         match self {
+            Self::SkillsDirectory => SettingValue::String(config.skills.directory.clone()),
             Self::DefaultTimeoutSecs => SettingValue::U64(config.default_timeout_secs),
             Self::AgentDefaultsJsonErrors => SettingValue::Bool(config.agent_defaults.json_errors),
             Self::RetryDefaultsMaxAttempts => {
@@ -250,7 +261,8 @@ impl SettingKey {
                     .as_ref()
                     .map_or_else(String::new, Clone::clone),
             ),
-            Self::DefaultTimeoutSecs
+            Self::SkillsDirectory
+            | Self::DefaultTimeoutSecs
             | Self::AgentDefaultsJsonErrors
             | Self::RetryDefaultsMaxAttempts
             | Self::RetryDefaultsInitialDelayMs
@@ -278,6 +290,7 @@ impl FromStr for SettingKey {
 
 fn parse_core_setting_key(s: &str) -> Result<SettingKey, Error> {
     match s {
+        "skills.directory" => Ok(SettingKey::SkillsDirectory),
         "default_timeout_secs" => Ok(SettingKey::DefaultTimeoutSecs),
         "agent_defaults.json_errors" => Ok(SettingKey::AgentDefaultsJsonErrors),
         "retry_defaults.max_attempts" => Ok(SettingKey::RetryDefaultsMaxAttempts),
@@ -427,6 +440,13 @@ impl SettingValue {
     /// Returns an error if the value cannot be parsed as the expected type,
     /// or if the value is outside the allowed range for the setting.
     pub fn parse_for_key(key: SettingKey, value: &str) -> Result<Self, Error> {
+        if key == SettingKey::SkillsDirectory {
+            return parse_directory(value);
+        }
+        Self::parse_existing_key(key, value)
+    }
+
+    fn parse_existing_key(key: SettingKey, value: &str) -> Result<Self, Error> {
         match key {
             SettingKey::DefaultTimeoutSecs => parse_positive_u64_setting(
                 key,
@@ -458,9 +478,9 @@ impl SettingValue {
             ),
             SettingKey::ProxyHttp | SettingKey::ProxyHttps => Ok(Self::ProxyUrl(value.to_string())),
             SettingKey::ProxyNoProxy => Ok(parse_string_list_setting(value)),
-            SettingKey::ProxyUsername | SettingKey::ProxyPasswordEnv => {
-                Ok(Self::String(value.to_string()))
-            }
+            SettingKey::SkillsDirectory
+            | SettingKey::ProxyUsername
+            | SettingKey::ProxyPasswordEnv => Ok(Self::String(value.to_string())),
         }
     }
 
@@ -523,6 +543,22 @@ impl SettingInfo {
             default: key.default_value_str().to_string(),
         }
     }
+}
+
+fn parse_directory(value: &str) -> Result<SettingValue, Error> {
+    if value.trim().is_empty()
+        || value.contains('\0')
+        || value.starts_with('~')
+        || std::path::Path::new(value)
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err(Error::invalid_setting_value(
+            SettingKey::SkillsDirectory,
+            value,
+        ));
+    }
+    Ok(SettingValue::String(value.to_string()))
 }
 
 #[cfg(test)]

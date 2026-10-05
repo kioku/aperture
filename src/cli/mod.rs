@@ -258,6 +258,11 @@ impl Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Discover and manage local workflow instructions (never executes content)
+    Skills {
+        #[command(subcommand)]
+        command: Option<crate::skills::SkillsCommand>,
+    },
     /// Show embedded package version and source identity without loading configuration
     BuildInfo {
         /// Output machine-readable JSON
@@ -968,6 +973,7 @@ pub enum ConfigCommands {
                       Supports dot-notation for nested settings and type-safe validation.\n\
                       The configuration file comments and formatting are preserved.\n\n\
                       Available settings:\n  \
+                      skills.directory                  (string)   - User library, relative to config directory\n  \
                       default_timeout_secs              (integer)  - Default timeout for API requests\n  \
                       agent_defaults.json_errors        (boolean)  - Output errors as JSON by default\n  \
                       retry_defaults.max_attempts       (integer)  - Max retry attempts (0 = disabled)\n  \

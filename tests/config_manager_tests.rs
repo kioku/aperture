@@ -1414,11 +1414,12 @@ fn test_list_settings() {
 
     let settings = manager.list_settings().unwrap();
 
-    // Should have 10 settings (timeout, json_errors, 3 retry settings, and 5 proxy settings)
-    assert_eq!(settings.len(), 10);
+    // The skill directory joins timeout, JSON errors, retry, and proxy settings.
+    assert_eq!(settings.len(), 11);
 
     // Check setting keys are present
     let keys: Vec<_> = settings.iter().map(|s| s.key.as_str()).collect();
+    assert!(keys.contains(&"skills.directory"));
     assert!(keys.contains(&"default_timeout_secs"));
     assert!(keys.contains(&"agent_defaults.json_errors"));
     assert!(keys.contains(&"retry_defaults.max_attempts"));

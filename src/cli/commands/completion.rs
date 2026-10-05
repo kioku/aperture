@@ -17,6 +17,7 @@ const TOP_LEVEL_COMMANDS: &[&str] = &[
     "list-commands",
     "api",
     "search",
+    "skills",
     "run",
     "exec",
     "docs",
@@ -202,6 +203,7 @@ fn complete_primary_command(
             SHELL_NAMES.iter().map(ToString::to_string),
             &input.current,
         )),
+        "skills" => Some(complete_skills(args_after_command, &input.current)),
         "config" => Some(complete_config(args_after_command, &input.current, catalog)),
         "commands" | "list-commands" => Some(complete_single_context_argument(
             args_after_command,
@@ -211,6 +213,19 @@ fn complete_primary_command(
         "api" => Some(complete_api(args_after_command, &input.current, catalog)),
         _ => None,
     }
+}
+
+// Native skill completion never reads or executes installed workflow content.
+fn complete_skills(args: &[String], current: &str) -> Vec<String> {
+    let candidates: &[&str] = match args.first().map(String::as_str) {
+        None => &["list", "get", "install", "uninstall", "--help"],
+        Some("list" | "uninstall") => &["--json", "--help"],
+        Some("get") => &["--all", "--full", "--json", "--help"],
+        Some("install") if args.last().is_some_and(|arg| arg == "--name") => &[],
+        Some("install") => &["--name", "--replace", "--json", "--help"],
+        _ => &[],
+    };
+    filter_candidates(candidates.iter().map(ToString::to_string), current)
 }
 
 fn complete_secondary_command(

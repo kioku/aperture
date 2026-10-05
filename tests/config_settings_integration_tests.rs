@@ -79,8 +79,11 @@ fn test_config_settings_json_output() {
     assert!(parsed.is_array());
     let settings = parsed.as_array().unwrap();
 
-    // Should have 10 settings (timeout, json_errors, 3 retry defaults, and 5 proxy settings)
-    assert_eq!(settings.len(), 10);
+    // Includes the user skill directory alongside timeout, retry, and proxy settings.
+    assert_eq!(settings.len(), 11);
+    assert!(settings
+        .iter()
+        .any(|setting| setting["key"] == "skills.directory"));
 
     // Check structure of first setting
     let first = &settings[0];

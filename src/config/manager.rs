@@ -529,7 +529,13 @@ impl<F: FileSystem> ConfigManager<F> {
         key: crate::config::settings::SettingKey,
         value: &crate::config::settings::SettingValue,
     ) {
-        if Self::is_proxy_setting(key) {
+        if let (
+            crate::config::settings::SettingKey::SkillsDirectory,
+            crate::config::settings::SettingValue::String(value),
+        ) = (key, value)
+        {
+            Self::set_nested_string(doc, "skills", "directory", value);
+        } else if Self::is_proxy_setting(key) {
             Self::apply_proxy_setting_to_document(doc, key, value);
         } else {
             Self::apply_core_setting_to_document(doc, key, value);
