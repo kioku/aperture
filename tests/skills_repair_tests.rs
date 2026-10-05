@@ -282,8 +282,18 @@ fn every_embedded_example_command_executes() {
         include_str!("../skills/aperture/SKILL.md"),
         include_str!("../skills/examples/release.md"),
     ] {
-        for example in document.split('`').skip(1).step_by(2) {
-            if let Some(command) = example.strip_prefix("aperture ") {
+        let mut fenced = false;
+        for line in document.lines() {
+            if line.starts_with("```") {
+                fenced = !fenced;
+                continue;
+            }
+            // Tables label command families; fenced examples may require inputs
+            // or mutation approval. Only standalone inline discovery calls run here.
+            if fenced || line.starts_with('|') {
+                continue;
+            }
+            for command in inline_aperture_commands(line) {
                 let command = command
                     .replace("<api>", "source")
                     .replace("<name>", "workflow");
@@ -291,6 +301,15 @@ fn every_embedded_example_command_executes() {
             }
         }
     }
+}
+
+// Inline examples contain only discovery calls; tables and fences are handled
+// separately by the caller so illustrative request templates are never sent.
+fn inline_aperture_commands(line: &str) -> impl Iterator<Item = &str> {
+    line.split('`')
+        .skip(1)
+        .step_by(2)
+        .filter_map(|example| example.strip_prefix("aperture "))
 }
 
 #[test]
