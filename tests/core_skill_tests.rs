@@ -136,21 +136,9 @@ fn handbook_requests_and_batches_match_generated_capabilities() {
         "--body-file",
         "./payload.json",
     ]);
-    let independent = CORE
-        .split("```json\n")
-        .nth(1)
-        .unwrap()
-        .split("```")
-        .next()
-        .unwrap();
-    let dependent = CORE
-        .split("```yaml\n")
-        .nth(1)
-        .unwrap()
-        .split("```")
-        .next()
-        .unwrap();
-    let batch: aperture_cli::batch::BatchFile = serde_yaml::from_str(dependent).unwrap();
+    let independent = handbook_example(CORE, "json").unwrap();
+    let dependent = handbook_example(CORE, "yaml").unwrap();
+    let batch: aperture_cli::batch::BatchFile = serde_yaml::from_str(&dependent).unwrap();
     aperture_cli::batch::graph::resolve_execution_order(&batch.operations).unwrap();
     std::fs::write(root.path().join("operations.json"), independent).unwrap();
     let result = cli(&[
@@ -172,6 +160,38 @@ fn handbook_requests_and_batches_match_generated_capabilities() {
         summary["batch_execution_summary"]["successful_operations"],
         2
     );
+}
+
+// Checkouts can use LF or CRLF. Extract by lines rather than matching a
+// platform-specific newline sequence, and reject incomplete fenced examples.
+fn handbook_example(document: &str, language: &str) -> Option<String> {
+    let marker = format!("```{language}");
+    let mut lines = document.lines().skip_while(|line| *line != marker);
+    lines.next()?;
+    let mut body = Vec::new();
+    for line in lines {
+        if line == "```" {
+            return Some(body.join("\n"));
+        }
+        body.push(line);
+    }
+    None
+}
+
+#[test]
+fn handbook_examples_support_lf_crlf_and_reject_incomplete_fences() {
+    let lf = CORE.replace("\r\n", "\n");
+    let crlf = lf.replace('\n', "\r\n");
+    for language in ["json", "yaml"] {
+        let expected = handbook_example(&lf, language).unwrap();
+        assert_eq!(handbook_example(&crlf, language).unwrap(), expected);
+        let batch: aperture_cli::batch::BatchFile = serde_yaml::from_str(&expected).unwrap();
+        assert_eq!(batch.operations.len(), 2);
+        aperture_cli::batch::graph::resolve_execution_order(&batch.operations).unwrap();
+    }
+    for malformed in ["", "{}", "```yaml\n{}\n```", "```json\n{}"] {
+        assert!(handbook_example(malformed, "json").is_none());
+    }
 }
 
 #[test]
