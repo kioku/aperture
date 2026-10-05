@@ -199,7 +199,7 @@ impl SpecValidator {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The spec contains unsupported security schemes (`OAuth2`, `OpenID` Connect)
+    /// - The spec contains unsupported security schemes (`OpenID` Connect)
     /// - The spec uses $ref references in security schemes, parameters, or request bodies
     /// - Required x-aperture-secret extensions are missing
     /// - Parameters use content-based serialization
@@ -280,7 +280,7 @@ impl SpecValidator {
     /// Validates a single security scheme and returns the scheme type for tracking
     fn unsupported_security_scheme_reason(scheme: &SecurityScheme) -> Option<String> {
         match scheme {
-            SecurityScheme::APIKey { .. } => None, // API Key schemes are supported
+            SecurityScheme::APIKey { .. } | SecurityScheme::OAuth2 { .. } => None,
             SecurityScheme::HTTP {
                 scheme: http_scheme,
                 ..
@@ -295,9 +295,6 @@ impl SpecValidator {
                 } else {
                     None // Any other HTTP scheme (bearer, basic, token, apikey, custom, etc.) is allowed
                 }
-            }
-            SecurityScheme::OAuth2 { .. } => {
-                Some("OAuth2 authentication is not supported".to_string())
             }
             SecurityScheme::OpenIDConnect { .. } => {
                 Some("OpenID Connect authentication is not supported".to_string())
@@ -355,10 +352,10 @@ impl SpecValidator {
         scheme: &SecurityScheme,
     ) -> Option<&indexmap::IndexMap<String, serde_json::Value>> {
         match scheme {
-            SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. } => {
-                Some(extensions)
-            }
-            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+            SecurityScheme::APIKey { extensions, .. }
+            | SecurityScheme::HTTP { extensions, .. }
+            | SecurityScheme::OAuth2 { extensions, .. } => Some(extensions),
+            SecurityScheme::OpenIDConnect { .. } => None,
         }
     }
 
@@ -539,18 +536,44 @@ impl SpecValidator {
         }
     }
 
-    /// Check if operation should be skipped because all its auth schemes are unsupported
+    /// Skip only when every alternative includes an unsupported scheme.
+    /// An anonymous object is always a supported alternative.
     fn should_skip_due_to_auth(
         security_reqs: &[openapiv3::SecurityRequirement],
         unsupported_schemes: &HashMap<String, String>,
     ) -> bool {
         security_reqs.iter().all(|req| {
-            req.keys()
-                .all(|scheme| unsupported_schemes.contains_key(scheme))
+            !req.is_empty()
+                && req
+                    .keys()
+                    .any(|scheme| unsupported_schemes.contains_key(scheme))
         })
     }
 
-    /// Validates an operation against Aperture's supported features
+    /// Reject dangling names even when an anonymous alternative exists.
+    fn validate_security_references(
+        operation: &Operation,
+        spec: &OpenAPI,
+        result: &mut ValidationResult,
+    ) {
+        let requirements = operation.security.as_ref().or(spec.security.as_ref());
+        for name in requirements
+            .into_iter()
+            .flatten()
+            .flat_map(|group| group.keys())
+        {
+            let exists = spec
+                .components
+                .as_ref()
+                .is_some_and(|components| components.security_schemes.contains_key(name));
+            if !exists {
+                result.add_error(Error::validation_error(format!(
+                    "Unknown security scheme '{name}'",
+                )));
+            }
+        }
+    }
+
     fn validate_operation(
         path: &str,
         method: &str,
@@ -560,6 +583,8 @@ impl SpecValidator {
         unsupported_schemes: &HashMap<String, String>,
         spec: &OpenAPI,
     ) {
+        Self::validate_security_references(operation, spec, result);
+
         // Check if operation should be skipped due to unsupported authentication
         if Self::should_skip_operation_for_auth(
             path,
@@ -774,7 +799,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_oauth2_scheme_rejected() {
+    fn test_validate_oauth2_scheme_supported() {
         let validator = SpecValidator::new();
         let mut spec = create_test_spec();
         let mut components = Components::default();
@@ -788,19 +813,10 @@ mod tests {
         );
         spec.components = Some(components);
 
-        let result = validator.validate_with_mode(&spec, true).into_result();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            Error::Internal {
-                kind: ErrorKind::Validation,
-                message,
-                ..
-            } => {
-                assert!(message.contains("OAuth2"));
-                assert!(message.contains("not supported"));
-            }
-            _ => panic!("Expected Validation error"),
-        }
+        assert!(validator
+            .validate_with_mode(&spec, true)
+            .into_result()
+            .is_ok());
     }
 
     #[test]

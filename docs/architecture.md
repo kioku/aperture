@@ -233,7 +233,7 @@ Aperture's v1.0 implementation will support a well-defined subset of the OpenAPI
 | `parameters` (`style`)       | **Unsupported**         | Default styles are assumed. Complex serialization is not supported.                                                       |
 | `requestBody`                | **Partially Supported** | JSON media types and explicitly modeled single-part `string`/`binary` media (including octet-stream, image, and PDF) are supported. Multipart, form, XML, and text bodies are skipped with warnings in non-strict mode. |
 | `responses`                  | **Supported**           | Used to validate successful response bodies.                                                                              |
-| `securitySchemes`            | **Partially Supported** | See §6 for the detailed security model. `apiKey` and `http` (bearer, basic, and custom schemes) are supported. `oauth2` and `openIdConnect` are skipped with warnings in non-strict mode. |
+| `securitySchemes`            | **Partially Supported** | See §6 for the detailed security model. `apiKey`, `http` (bearer, basic, and custom schemes), and `oauth2` (externally supplied bearer tokens) are supported. `openIdConnect` is skipped with warnings in non-strict mode. |
 
 Any unsupported keyword or feature encountered during `config add` will result in a clear validation error, preventing the spec from being registered.
 
@@ -265,7 +265,7 @@ Warning: Skipping 2 endpoints with unsupported content types (8 of 10 endpoints 
   - POST /upload (multipart/form-data (file uploads are not supported)) - endpoint has no supported content types
 
 Warning: Skipping 1 endpoints with unsupported authentication (7 of 8 endpoints will be available):
-  - GET /admin - endpoint requires unsupported authentication schemes: oauth2
+  - GET /admin - endpoint requires unsupported authentication schemes: openIdConnect
 
 Use --strict to reject specs with unsupported features.
 ```
@@ -308,12 +308,13 @@ This configuration instructs Aperture to use `SENTRY_AUTH_TOKEN` for an operatio
 1. **API Key** (`type: apiKey`): Supports header placement. Query and cookie placement fail explicitly; automatic credential injection in those locations is not supported.
 2. **HTTP Bearer** (`type: http`, `scheme: bearer`): Standard Bearer token authentication
 3. **HTTP Basic** (`type: http`, `scheme: basic`): Basic authentication with base64 encoding
-4. **Custom HTTP Schemes** (`type: http`, `scheme: <custom>`): Any scheme not explicitly rejected (e.g., Token, DSN, ApiKey)
+4. **OAuth2** (`type: oauth2`): Externally acquired access tokens, sent as Bearer headers. Declared flows/scopes remain discovery metadata; no acquisition, refresh, expiry or grant verification.
+5. **Custom HTTP Schemes** (`type: http`, `scheme: <custom>`): Any scheme not explicitly rejected (e.g., Token, DSN, ApiKey)
 
 Custom HTTP schemes are treated as bearer-like tokens, resulting in `Authorization: <scheme> <token>` headers.
 
 **Explicitly Unsupported:**
-- OAuth2 (all flows)
+- OAuth2 token acquisition and refresh
 - OpenID Connect
 - HTTP Negotiate (Kerberos/NTLM)
 - HTTP OAuth

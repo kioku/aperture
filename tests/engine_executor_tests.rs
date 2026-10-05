@@ -42,6 +42,7 @@ macro_rules! cached_command {
             parameters: $params,
             request_body: None,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec![$name.to_string()],
             deprecated: false,

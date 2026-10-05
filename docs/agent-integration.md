@@ -704,9 +704,13 @@ example, `[["tokenA"], ["tokenB", "apiKey"]]` accepts tokenA or both tokenB and
 apiKey. An empty inner array permits anonymous access. An empty outer array means
 no authentication requirement. Operation-level security replaces global security,
 including an explicitly empty array. OAuth scopes are not enforced.
+`security_scopes` preserves each alternative's scheme-to-required-scope mapping.
+OAuth2 discovery details preserve `flows` and identify external bearer execution
+with `execution_mode: "externalBearerToken"` and `token_grants_verified: false`.
+These are declared requirements, never evidence of actual token grants.
 
 SDK consumers must update the field type from `string[]` to `string[][]`. Parsed
-spec cache format 9 invalidates earlier flattened representations; rebuild stale
+spec cache format 10 invalidates earlier representations without OAuth2 metadata; rebuild stale
 caches from their original specs. Execution selects the first alternative whose
 credentials are configured and available, and applies only that group's headers.
 Malformed configuration or header values still fail rather than silently choosing

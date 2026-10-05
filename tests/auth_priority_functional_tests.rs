@@ -50,6 +50,7 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
             location: Some("header".to_string()),
             parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
             description: None,
+            oauth2_flows: None,
             bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),
@@ -67,6 +68,7 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
             location: Some("header".to_string()),
             parameter_name: Some("X-API-Key".to_string()),
             description: None,
+            oauth2_flows: None,
             bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),
@@ -101,6 +103,7 @@ fn create_test_spec_with_auth(bearer_env_var: &str, api_key_env_var: &str) -> Ca
             }],
             request_body: None,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![vec!["bearerAuth".to_string(), "apiKeyAuth".to_string()]],
             tags: vec!["users".to_string()],
             deprecated: false,
@@ -585,6 +588,7 @@ async fn test_no_authentication_configured() {
             }],
             request_body: None,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![], // No security requirements
             tags: vec!["users".to_string()],
             deprecated: false,

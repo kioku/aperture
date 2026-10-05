@@ -43,6 +43,7 @@ macro_rules! cached_command {
             parameters: $params,
             request_body: None,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: $security,
             tags: vec![$name.to_string()],
             deprecated: false,
@@ -70,6 +71,7 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
             location: Some("header".to_string()),
             parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
             description: None,
+            oauth2_flows: None,
             bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),
@@ -88,6 +90,7 @@ fn create_secure_test_spec(bearer_env_var: &str, api_key_env_var: &str) -> Cache
             location: Some("header".to_string()),
             parameter_name: Some("X-API-Key".to_string()),
             description: None,
+            oauth2_flows: None,
             bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: "env".to_string(),

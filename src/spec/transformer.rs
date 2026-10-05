@@ -375,8 +375,10 @@ impl SpecTransformer {
             .as_ref()
             .and_then(Self::transform_request_body);
         let responses = Self::collect_operation_responses(spec, &operation.responses);
-        let security_requirements =
+        let mut security_requirements =
             Self::resolve_security_requirements(operation, global_security_requirements);
+        let mut security_scopes = Self::resolve_security_scopes(operation, spec);
+        Self::retain_supported_alternatives(spec, &mut security_requirements, &mut security_scopes);
         let examples = Self::generate_command_examples(
             &name,
             &operation_id,
@@ -398,6 +400,7 @@ impl SpecTransformer {
             request_body,
             responses,
             security_requirements,
+            security_scopes,
             tags: operation.tags.clone(),
             deprecated: operation.deprecated,
             external_docs_url: operation
@@ -443,6 +446,68 @@ impl SpecTransformer {
                 Self::transform_response(spec, status, response.as_ref())
             })
             .collect()
+    }
+
+    fn resolve_security_scopes(
+        operation: &Operation,
+        spec: &OpenAPI,
+    ) -> Vec<HashMap<String, Vec<String>>> {
+        operation
+            .security
+            .as_ref()
+            .or(spec.security.as_ref())
+            .map(|groups| {
+                groups
+                    .iter()
+                    .map(|group| {
+                        group
+                            .iter()
+                            .map(|(name, scopes)| (name.clone(), scopes.clone()))
+                            .collect()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Remove whole unsupported alternatives, keeping scope groups aligned.
+    /// Preserve unsatisfiable requirements if there is no supported alternative.
+    fn retain_supported_alternatives(
+        spec: &OpenAPI,
+        requirements: &mut Vec<Vec<String>>,
+        scopes: &mut Vec<HashMap<String, Vec<String>>>,
+    ) {
+        let available: Vec<bool> = requirements
+            .iter()
+            .map(|group| !group.iter().any(|name| Self::is_openid_connect(spec, name)))
+            .collect();
+        if !available.iter().any(|value| *value) {
+            return;
+        }
+        let mut index = 0;
+        requirements.retain(|_| {
+            let keep = available[index];
+            index += 1;
+            keep
+        });
+        index = 0;
+        scopes.retain(|_| {
+            let keep = available[index];
+            index += 1;
+            keep
+        });
+    }
+
+    fn is_openid_connect(spec: &OpenAPI, name: &str) -> bool {
+        spec.components
+            .as_ref()
+            .and_then(|components| components.security_schemes.get(name))
+            .is_some_and(|scheme| {
+                matches!(
+                    scheme,
+                    ReferenceOr::Item(SecurityScheme::OpenIDConnect { .. })
+                )
+            })
     }
 
     fn resolve_security_requirements(
@@ -826,6 +891,7 @@ impl SpecTransformer {
                     location: Some(location_str.to_string()),
                     parameter_name: Some(param_name.clone()),
                     description: description.clone(),
+                    oauth2_flows: None,
                     bearer_format: None,
                     aperture_secret,
                 })
@@ -844,12 +910,27 @@ impl SpecTransformer {
                     location: Some(constants::LOCATION_HEADER.to_string()),
                     parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
                     description: description.clone(),
+                    oauth2_flows: None,
                     bearer_format: bearer_format.clone(),
                     aperture_secret,
                 })
             }
-            // OAuth2 and OpenID Connect should be rejected in validation
-            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+            SecurityScheme::OAuth2 {
+                flows, description, ..
+            } => Some(CachedSecurityScheme {
+                name: name.to_string(),
+                scheme_type: "oauth2".to_string(),
+                scheme: None,
+                location: Some(constants::LOCATION_HEADER.to_string()),
+                parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
+                description: description.clone(),
+                bearer_format: None,
+                oauth2_flows: Some(
+                    serde_json::to_string(flows).expect("OAuth2 flows are serializable"),
+                ),
+                aperture_secret: Self::extract_aperture_secret(scheme),
+            }),
+            SecurityScheme::OpenIDConnect { .. } => None,
         }
     }
 
@@ -864,10 +945,10 @@ impl SpecTransformer {
         scheme: &SecurityScheme,
     ) -> Option<&indexmap::IndexMap<String, serde_json::Value>> {
         match scheme {
-            SecurityScheme::APIKey { extensions, .. } | SecurityScheme::HTTP { extensions, .. } => {
-                Some(extensions)
-            }
-            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => None,
+            SecurityScheme::APIKey { extensions, .. }
+            | SecurityScheme::HTTP { extensions, .. }
+            | SecurityScheme::OAuth2 { extensions, .. } => Some(extensions),
+            SecurityScheme::OpenIDConnect { .. } => None,
         }
     }
 
