@@ -504,3 +504,56 @@ fn discovery_aligns_security_without_operation_ids() {
         }
     }
 }
+
+#[cfg(feature = "openapi31")]
+#[tokio::test]
+async fn anonymous_operation_override_survives_all_parser_and_cache_paths() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/records"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(8)
+        .mount(&server)
+        .await;
+    for version in ["3.0.3", "3.1.0"] {
+        for yaml in [false, true] {
+            let mut doc = document(&server.uri(), "OAUTH259_ANONYMOUS");
+            doc["openapi"] = json!(version);
+            doc["paths"]["/records"]["get"]["security"] = json!([]);
+            let source = if yaml {
+                serde_yaml::to_string(&doc).unwrap()
+            } else {
+                doc.to_string()
+            };
+            let spec = parse_openapi(&source).unwrap();
+            let cache = SpecTransformer::new()
+                .transform("oauth-test", &spec)
+                .unwrap();
+            let bytes = postcard::to_allocvec(&cache).unwrap();
+            let restored: CachedSpec = postcard::from_bytes(&bytes).unwrap();
+            assert!(restored.commands[0].security_requirements.is_empty());
+            assert!(restored.commands[0].security_scopes.is_empty());
+            for output in [
+                generate_capability_manifest(&restored, None).unwrap(),
+                generate_capability_manifest_from_openapi("oauth-test", &spec, &restored, None)
+                    .unwrap(),
+            ] {
+                let manifest: Value = serde_json::from_str(&output).unwrap();
+                let command = &manifest["commands"]["records"][0];
+                assert!(command.get("security_requirements").is_none());
+                assert!(command.get("security_scopes").is_none());
+            }
+            std::env::remove_var("OAUTH259_ANONYMOUS");
+            invoke(&restored, None, false).await.unwrap();
+            std::env::set_var("OAUTH259_ANONYMOUS", "synthetic-anonymous-token");
+            invoke(&restored, None, false).await.unwrap();
+            std::env::remove_var("OAUTH259_ANONYMOUS");
+        }
+    }
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 8);
+    for request in requests {
+        assert!(!request.headers.contains_key("authorization"));
+        assert_eq!(request.url.path(), "/records");
+    }
+}

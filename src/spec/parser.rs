@@ -168,18 +168,61 @@ fn parse_with_oas3_direct_with_original(
 
     // Parse the JSON as OpenAPI 3.0.x
     // This may fail if there are incompatible 3.1 features
-    let mut spec = serde_json::from_str::<OpenAPI>(&json).map_err(|e| {
-        Error::validation_error(format!(
-            "OpenAPI 3.1 spec contains features incompatible with 3.0: {e}. \
-            Consider converting the spec to OpenAPI 3.0 format."
-        ))
-    })?;
+    let mut spec = decode_converted_spec(&json, preprocessed)?;
 
     // WORKAROUND: The oas3 conversion loses security schemes, so restore them
     // from the original content that we extracted earlier
     restore_security_schemes(&mut spec, security_schemes_from_yaml);
 
     Ok(spec)
+}
+
+/// Decode the restored conversion with the existing compatibility error category.
+#[cfg(feature = "openapi31")]
+fn decode_converted_spec(json: &str, source: &str) -> Result<OpenAPI, Error> {
+    let converted = converted_with_operation_security(json, source)?;
+    serde_json::from_value(converted).map_err(|e| {
+        Error::validation_error(format!(
+            "OpenAPI 3.1 spec contains features incompatible with 3.0: {e}. \
+            Consider converting the spec to OpenAPI 3.0 format."
+        ))
+    })
+}
+
+/// Restore source-level presence before typed deserialization validates values.
+#[cfg(feature = "openapi31")]
+fn converted_with_operation_security(json: &str, source: &str) -> Result<serde_json::Value, Error> {
+    let mut converted = serde_json::from_str(json)?;
+    let source = serde_json::from_str(source)?;
+    restore_operation_security(&mut converted, &source);
+    Ok(converted)
+}
+
+/// Preserve explicit operation overrides, including empty arrays that `oas3`
+/// omits when serializing. Only HTTP operation keys are visited; path metadata
+/// and extension payloads must not become operations. Missing security inherits.
+#[cfg(feature = "openapi31")]
+fn restore_operation_security(converted: &mut serde_json::Value, source: &serde_json::Value) {
+    let Some(paths) = source.get("paths").and_then(serde_json::Value::as_object) else {
+        return;
+    };
+    for (path, item) in paths {
+        for method in [
+            "get", "put", "post", "delete", "options", "head", "patch", "trace",
+        ] {
+            let security = item
+                .get(method)
+                .and_then(|operation| operation.get("security"));
+            let target = converted
+                .get_mut("paths")
+                .and_then(|paths| paths.get_mut(path))
+                .and_then(|item| item.get_mut(method))
+                .and_then(serde_json::Value::as_object_mut);
+            if let (Some(security), Some(target)) = (security, target) {
+                target.insert("security".to_owned(), security.clone());
+            }
+        }
+    }
 }
 
 /// Restore security schemes to the `OpenAPI` spec if they were lost during conversion
@@ -252,6 +295,61 @@ fn parse_with_oas3_direct_with_original(
 mod tests {
     use super::*;
     use std::fmt::Write;
+
+    #[cfg(feature = "openapi31")]
+    #[test]
+    fn operation_security_presence_and_values_survive_conversion() {
+        for (version, yaml) in [
+            ("3.0.3", false),
+            ("3.0.3", true),
+            ("3.1.0", false),
+            ("3.1.0", true),
+        ] {
+            let mut item =
+                serde_json::json!({"summary": "metadata", "x-security": {"security": []}});
+            let requirements = [
+                serde_json::json!([]),
+                serde_json::json!([{}]),
+                serde_json::json!([{"oauth": ["write"]}]),
+                serde_json::json!([{"oauth": ["read"], "key": []}, {}]),
+            ];
+            for (index, method) in [
+                "get", "put", "post", "delete", "options", "head", "patch", "trace",
+            ]
+            .iter()
+            .enumerate()
+            {
+                item[method] = serde_json::json!({"security": requirements[index % 4],
+                        "responses": {"200": {"description": "ok"}}});
+            }
+            let doc = serde_json::json!({"openapi": version, "info": {"title": "Overrides", "version": "1"},
+                    "security": [{"oauth": ["read"]}], "paths": {"/overrides": item,
+                    "/inherited": {"get": {"responses": {"200": {"description": "ok"}}}}}});
+            let source = if yaml {
+                serde_yaml::to_string(&doc).unwrap()
+            } else {
+                doc.to_string()
+            };
+            let parsed = parse_openapi(&source).unwrap();
+            let output = serde_json::to_value(parsed).unwrap();
+            assert_eq!(output["security"], doc["security"]);
+            for method in [
+                "get", "put", "post", "delete", "options", "head", "patch", "trace",
+            ] {
+                // Typed serialization may omit empty arrays; inspect the model instead below.
+                let expected: Option<Vec<openapiv3::SecurityRequirement>> =
+                    serde_json::from_value(doc["paths"]["/overrides"][method]["security"].clone())
+                        .unwrap();
+                let spec = parse_openapi(&source).unwrap();
+                let path = spec.paths.paths["/overrides"].as_item().unwrap();
+                let operation = path.iter().find(|(name, _)| *name == method).unwrap().1;
+                assert_eq!(operation.security, expected);
+            }
+            assert!(output["paths"]["/inherited"]["get"]
+                .get("security")
+                .is_none());
+        }
+    }
 
     #[test]
     fn test_parse_openapi_30() {
