@@ -881,17 +881,16 @@ async fn warmed_redirect_cache_cannot_bypass_strict_pagination_boundary() {
     use aperture_cli::engine::executor::execute;
     use aperture_cli::invocation::ExecutionResult;
     let server = MockServer::start().await;
-    let other = MockServer::start().await;
     Mock::given(path("/items"))
         .respond_with(
             ResponseTemplate::new(302)
-                .insert_header("location", format!("{}/landing", other.uri())),
+                .insert_header("location", format!("{}/landing", server.uri())),
         )
         .mount(&server)
         .await;
     Mock::given(path("/landing"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([1])))
-        .mount(&other)
+        .mount(&server)
         .await;
     let cached =
         make_spec_with_pagination(&server.uri(), strategy_info(PaginationStrategy::LinkHeader));
@@ -930,8 +929,7 @@ async fn warmed_redirect_cache_cannot_bypass_strict_pagination_boundary() {
     override_call.pagination_url =
         Some(reqwest::Url::parse(&format!("{}/items", server.uri())).unwrap());
     assert!(execute(&cached, override_call, ctx.clone()).await.is_err());
-    assert_eq!(server.received_requests().await.unwrap().len(), 3);
-    assert_eq!(other.received_requests().await.unwrap().len(), 1);
+    assert_eq!(server.received_requests().await.unwrap().len(), 4);
     server.reset().await;
     Mock::given(path("/items"))
         .respond_with(

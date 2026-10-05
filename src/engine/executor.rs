@@ -472,7 +472,10 @@ fn build_http_client(
 ) -> Result<ProxyBuildResult, Error> {
     ensure_tls_provider();
     let (builder, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
-    let key = format!("{}:{pagination}", transport_key(ctx, &diagnostics));
+    let key = format!(
+        "{}:origin-bound-v1:{pagination}",
+        transport_key(ctx, &diagnostics)
+    );
     let mut clients = ctx
         .http_clients
         .0
@@ -489,7 +492,7 @@ fn build_http_client(
     let builder = if pagination {
         builder.redirect(reqwest::redirect::Policy::none())
     } else {
-        builder
+        builder.redirect(operation_redirect_policy())
     };
     let client = builder
         .timeout(std::time::Duration::from_secs(effective_timeout_secs(ctx)))
@@ -507,6 +510,27 @@ fn build_http_client(
     Ok(ProxyBuildResult {
         client,
         diagnostics,
+    })
+}
+
+/// Bind every hop to the original request origin, independent of header names.
+/// Generic errors deliberately omit attacker-controlled redirect destinations.
+fn operation_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 10 {
+            return attempt.error("Operation redirect limit exceeded");
+        }
+        let target = attempt.url();
+        let Some(original) = attempt.previous().first() else {
+            return attempt.error("Unsafe operation redirect");
+        };
+        if !target.username().is_empty()
+            || target.password().is_some()
+            || target.origin() != original.origin()
+        {
+            return attempt.error("Unsafe operation redirect");
+        }
+        attempt.follow()
     })
 }
 
@@ -1830,7 +1854,7 @@ fn prepare_runtime_context<'a>(
         },
         &spec.name,
         &format!(
-            "{}:redirects={}:proxy-auth-bypass=v2",
+            "{}:redirects={}:origin-bound=v1:proxy-auth-bypass=v2",
             operation.operation_id, !strict_pagination
         ),
         method,
@@ -2351,6 +2375,10 @@ fn parse_bracket_index(part: &str) -> Option<usize> {
         None
     }
 }
+
+#[cfg(test)]
+#[path = "operation_redirect_tests.rs"]
+mod operation_redirect_tests;
 
 #[cfg(test)]
 mod tests {
