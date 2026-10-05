@@ -490,6 +490,7 @@ mod allocation_tests {
             parameters: vec![],
             request_body: None,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec!["pets".to_string()],
             deprecated: false,

@@ -4,7 +4,7 @@ use crate::config::fetch_auth::FetchMethod;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
 const CERT: &[u8] = include_bytes!("../../tests/fixtures/fetch-auth/cert.pem");
@@ -84,9 +84,7 @@ fn serve(
             std::thread::sleep(std::time::Duration::from_millis(5));
             continue;
         };
-        socket
-            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
-            .unwrap();
+        prepare_socket(&socket);
         let mut stream = rustls::StreamOwned::new(
             rustls::ServerConnection::new(config.clone()).unwrap(),
             socket,
@@ -98,6 +96,42 @@ fn serve(
         let _ = stream.write_all(response(&request).as_bytes());
         let _ = stream.flush();
     }
+}
+
+// Accepted sockets can inherit the polling listener's nonblocking mode on BSD/Windows.
+// rustls and read_exact below require blocking I/O, bounded in both directions.
+fn prepare_socket(socket: &TcpStream) {
+    socket.set_nonblocking(false).unwrap();
+    socket
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
+    socket
+        .set_write_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
+}
+
+#[test]
+fn accepted_socket_resets_inherited_nonblocking_mode() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut socket, _) = listener.accept().unwrap();
+    // Simulate inheritance even on Linux, where accepted sockets normally block.
+    socket.set_nonblocking(true).unwrap();
+    let mut byte = [0];
+    assert_eq!(
+        socket.read_exact(&mut byte).unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    prepare_socket(&socket);
+    let sender = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        client.write_all(b"x").unwrap();
+    });
+    let result = socket.read_exact(&mut byte);
+    sender.join().unwrap();
+    result.unwrap();
+    assert_eq!(byte, *b"x");
 }
 
 fn read_request(stream: &mut impl Read) -> Option<String> {
@@ -998,4 +1032,176 @@ fn escape_fixture(value: &str, yaml: bool) -> String {
         }
     }
     escaped
+}
+
+#[tokio::test]
+async fn authenticated_oauth_download_preserves_anonymous_overrides_offline() {
+    let operations = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .mount(&operations)
+        .await;
+    for yaml in [false, true] {
+        combined_auth_registration(&operations.uri(), yaml).await;
+    }
+    let requests = operations.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 8);
+    for request in requests {
+        match request.url.path() {
+            "/anonymous" => assert!(!request.headers.contains_key("authorization")),
+            "/protected" => assert_eq!(
+                request.headers["authorization"],
+                "Bearer synthetic-independent-operation-token"
+            ),
+            other => panic!("unexpected operation/flow URL: {other}"),
+        }
+    }
+}
+
+async fn combined_auth_registration(operation_url: &str, yaml: bool) {
+    let version = if cfg!(feature = "openapi31") {
+        "3.1.0"
+    } else {
+        "3.0.3"
+    };
+    let document = serde_json::json!({
+        "openapi": version, "info": {"title": "Combined auth", "version": "1"},
+        "servers": [{"url": operation_url}],
+        "components": {"securitySchemes": {"oauth": {
+            "type": "oauth2", "flows": {"clientCredentials": {
+                "tokenUrl": format!("{operation_url}/token"), "scopes": {"read": "Read"}
+            }}, "x-aperture-secret": {"source": "env", "name": "APERTURE_COMBINED_UNUSED"}
+        }}},
+        "security": [{"oauth": ["read"]}],
+        "paths": {
+            "/anonymous": {"get": {"operationId": "getAnonymous", "tags": ["records"],
+                "security": [], "responses": {"200": {"description": "OK"}}}},
+            "/protected": {"get": {"operationId": "getProtected", "tags": ["records"],
+                "responses": {"200": {"description": "OK"}}}}
+        }
+    });
+    let content = if yaml {
+        serde_yaml::to_string(&document).unwrap()
+    } else {
+        document.to_string()
+    };
+    let server = Server::new(move |_| ok(&content));
+    let dir = tempfile::tempdir().unwrap();
+    let manager = ConfigManager::with_fs(OsFileSystem, dir.path().into());
+    let name = ApiContextName::new("protected").unwrap();
+    std::env::set_var(
+        "APERTURE_COMBINED_FETCH",
+        "synthetic-independent-fetch-token",
+    );
+    let args = FetchAuthArgs {
+        fetch_auth: Some(FetchMethod::Bearer),
+        fetch_auth_env: Some("APERTURE_COMBINED_FETCH".into()),
+        fetch_header_name: None,
+    };
+    register(&manager, &server, &args).await.unwrap();
+    manager
+        .set_secret(&name, "oauth", "APERTURE_COMBINED_OPERATION")
+        .unwrap();
+    std::env::remove_var("APERTURE_COMBINED_FETCH");
+    for rebuilt in [false, true] {
+        if rebuilt {
+            manager
+                .reinit_local_spec(&name, &dir.path().join("specs/protected.yaml"), false)
+                .unwrap();
+        }
+        assert_combined_discovery_and_execution(&manager, dir.path()).await;
+    }
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].contains("authorization: Bearer synthetic-independent-fetch-token"));
+    assert!(!requests[0].contains("synthetic-independent-operation-token"));
+    drop(requests);
+    assert!(
+        manager.load_global_config().unwrap().api_configs["protected"]
+            .fetch_auth
+            .is_some()
+    );
+}
+
+async fn assert_combined_discovery_and_execution(
+    manager: &ConfigManager<OsFileSystem>,
+    dir: &Path,
+) {
+    let cache = loader::load_cached_spec(dir.join(".cache"), "protected").unwrap();
+    let spec = crate::spec::parser::parse_openapi(
+        &std::fs::read_to_string(dir.join("specs/protected.yaml")).unwrap(),
+    )
+    .unwrap();
+    for output in [
+        crate::agent::generate_capability_manifest(&cache, None).unwrap(),
+        crate::agent::generate_capability_manifest_from_openapi("protected", &spec, &cache, None)
+            .unwrap(),
+    ] {
+        let manifest: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let commands = manifest["commands"]["records"].as_array().unwrap();
+        let anonymous = commands
+            .iter()
+            .find(|command| command["name"] == "get-anonymous")
+            .unwrap();
+        assert!(anonymous.get("security_requirements").is_none());
+        assert!(anonymous.get("security_scopes").is_none());
+        assert_eq!(manifest["security_schemes"]["oauth"]["type"], "oauth2");
+        let protected = commands
+            .iter()
+            .find(|command| command["name"] == "get-protected")
+            .unwrap();
+        assert_eq!(
+            protected["security_scopes"][0]["oauth"],
+            serde_json::json!(["read"])
+        );
+    }
+    for path in [
+        "config.toml",
+        "specs/protected.yaml",
+        ".cache/protected.bin",
+    ] {
+        let bytes = std::fs::read(dir.join(path)).unwrap();
+        for secret in [
+            "synthetic-independent-fetch-token",
+            "synthetic-independent-operation-token",
+        ] {
+            assert!(!bytes
+                .windows(secret.len())
+                .any(|part| part == secret.as_bytes()));
+        }
+    }
+    let config = manager.load_global_config().unwrap();
+    std::env::remove_var("APERTURE_COMBINED_OPERATION");
+    invoke_combined_command(&cache, &config, "get-anonymous").await;
+    std::env::set_var(
+        "APERTURE_COMBINED_OPERATION",
+        "synthetic-independent-operation-token",
+    );
+    invoke_combined_command(&cache, &config, "get-protected").await;
+    std::env::remove_var("APERTURE_COMBINED_OPERATION");
+}
+
+async fn invoke_combined_command(
+    cache: &crate::cache::models::CachedSpec,
+    config: &GlobalConfig,
+    command: &'static str,
+) {
+    let matches = clap::Command::new("api")
+        .subcommand(clap::Command::new("records").subcommand(clap::Command::new(command)))
+        .get_matches_from(["api", "records", command]);
+    crate::engine::executor::execute_request(
+        cache,
+        &matches,
+        None,
+        false,
+        None,
+        Some(config),
+        &crate::cli::OutputFormat::Json,
+        None,
+        None,
+        false,
+        None,
+    )
+    .await
+    .unwrap();
 }

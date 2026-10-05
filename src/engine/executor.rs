@@ -1271,13 +1271,37 @@ fn build_http_authorization_value(scheme_str: &str, secret_value: &str) -> Strin
     }
 }
 
+/// RFC 6750 b64token syntax only; grants and expiry remain the provider's concern.
+fn valid_external_bearer_token(token: &str) -> bool {
+    let content = token.trim_end_matches('=');
+    !content.is_empty()
+        && content
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~+/".contains(&byte))
+}
+
+fn validate_external_bearer_token(token: &str) -> Result<(), Error> {
+    if valid_external_bearer_token(token) {
+        return Ok(());
+    }
+    Err(Error::validation_error(
+        "Invalid external OAuth2 bearer token syntax",
+    ))
+}
+
 fn insert_http_authorization_header(
     headers: &mut HeaderMap,
     security_scheme: &CachedSecurityScheme,
     secret_value: &str,
 ) -> Result<(), Error> {
-    let Some(scheme_str) = &security_scheme.scheme else {
-        return Ok(());
+    let scheme_str = if security_scheme.scheme_type == "oauth2" {
+        validate_external_bearer_token(secret_value)?;
+        constants::AUTH_SCHEME_BEARER
+    } else {
+        let Some(scheme) = security_scheme.scheme.as_deref() else {
+            return Ok(());
+        };
+        scheme
     };
 
     let auth_value = build_http_authorization_value(scheme_str, secret_value);
@@ -1321,7 +1345,7 @@ fn add_authentication_header(
         constants::AUTH_SCHEME_APIKEY => {
             insert_api_key_header(headers, security_scheme, &resolved_secret.value)?;
         }
-        "http" => {
+        "http" | "oauth2" => {
             insert_http_authorization_header(headers, security_scheme, &resolved_secret.value)?;
         }
         _ => {
@@ -2015,8 +2039,8 @@ fn apply_security_headers(
         .unwrap_or_else(|| Error::validation_error("No satisfiable security alternative")))
 }
 
-/// Check only credential availability. Invalid values and other errors propagate;
-/// only absent environment variables make an alternative unavailable.
+/// Check credential availability, including `OAuth2` token syntax, before selection.
+/// Structural cache errors still propagate rather than weakening requirements.
 fn security_group_unavailable(
     group: &[String],
     spec: &CachedSpec,
@@ -2033,6 +2057,11 @@ fn security_group_unavailable(
             ))));
         };
         match std::env::var(env_name) {
+            Ok(value) if scheme.scheme_type == "oauth2" => {
+                if let Err(error) = validate_external_bearer_token(&value) {
+                    return Ok(Some(error));
+                }
+            }
             Ok(_) => {}
             Err(std::env::VarError::NotPresent) => {
                 return Ok(Some(Error::secret_not_set(name, env_name)))
@@ -2080,16 +2109,18 @@ fn security_header_destination(scheme: &CachedSecurityScheme) -> Result<HeaderNa
             HeaderName::from_str(name)
                 .map_err(|error| Error::invalid_header_name(name, error.to_string()))
         }
-        "http" => {
-            if scheme.scheme.as_deref().is_none_or(str::is_empty) {
-                return Err(Error::validation_error(
-                    "HTTP security scheme has no authentication scheme",
-                ));
-            }
-            Ok(HeaderName::from_static("authorization"))
-        }
+        "http" | "oauth2" => authorization_destination(scheme),
         other => Err(Error::unsupported_security_scheme(other)),
     }
+}
+
+fn authorization_destination(scheme: &CachedSecurityScheme) -> Result<HeaderName, Error> {
+    if scheme.scheme_type == "http" && scheme.scheme.as_deref().is_none_or(str::is_empty) {
+        return Err(Error::validation_error(
+            "HTTP security scheme has no authentication scheme",
+        ));
+    }
+    Ok(HeaderName::from_static("authorization"))
 }
 
 /// Configured secrets take precedence over specification extensions.
@@ -2542,6 +2573,7 @@ mod tests {
             parameters: vec![],
             request_body,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec![],
             deprecated: false,

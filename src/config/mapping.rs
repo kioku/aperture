@@ -207,6 +207,7 @@ mod tests {
             parameters: vec![],
             request_body: None,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec![tag.to_string()],
             deprecated: false,

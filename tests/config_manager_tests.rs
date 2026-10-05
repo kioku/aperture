@@ -546,7 +546,7 @@ paths:
 }
 
 #[test]
-fn test_add_spec_rejects_oauth2_security() {
+fn test_add_spec_supports_oauth2_security() {
     let (manager, fs) = setup_manager();
     let spec_name = "oauth2-api";
     let spec_content = r"
@@ -576,23 +576,7 @@ paths:
     fs.add_file(&temp_spec_path, spec_content);
 
     let result = manager.add_spec(&name(spec_name), &temp_spec_path, false, true);
-    assert!(result.is_err());
-    if let Err(Error::Internal {
-        kind: ErrorKind::Validation,
-        message: msg,
-        ..
-    }) = result
-    {
-        // The error message has changed due to our refactoring
-        assert!(
-            msg.contains("oauth2")
-                || msg.contains("OAuth2")
-                || msg.contains("unsupported authentication"),
-            "Got validation message: {msg}"
-        );
-    } else {
-        panic!("Unexpected error type: {result:?}");
-    }
+    assert!(result.is_ok(), "OAuth2 registration failed: {result:?}");
 }
 
 #[test]
@@ -1294,7 +1278,7 @@ async fn test_remote_spec_same_validation_as_local() {
     // Test that remote specs go through the same validation as local files
     let mock_server = wiremock::MockServer::start().await;
 
-    // Spec with unsupported OAuth2 (should be rejected)
+    // OAuth2 must be supported for remote registration too.
     let invalid_spec = r"
 openapi: 3.0.0
 info:
@@ -1332,21 +1316,10 @@ paths:
     let result = manager
         .add_spec_from_url(&name("oauth2-api"), &spec_url, false, true)
         .await;
-    assert!(result.is_err());
-    if let Err(Error::Internal {
-        kind: ErrorKind::Validation,
-        message: msg,
-        ..
-    }) = result
-    {
-        // Check for any OAuth2-related validation error
-        assert!(
-            msg.contains("oauth2") || msg.contains("OAuth2"),
-            "Got validation message: {msg}"
-        );
-    } else {
-        panic!("Expected Validation error for OAuth2, got: {result:?}");
-    }
+    assert!(
+        result.is_ok(),
+        "OAuth2 remote registration failed: {result:?}"
+    );
 }
 
 // ============================================================================

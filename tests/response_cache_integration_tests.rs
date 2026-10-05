@@ -42,6 +42,7 @@ fn create_test_spec() -> CachedSpec {
             }],
             request_body: None,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec!["users".to_string()],
             deprecated: false,
@@ -417,6 +418,7 @@ fn create_authenticated_test_spec() -> CachedSpec {
             location: Some(constants::LOCATION_HEADER.to_string()),
             parameter_name: Some(constants::HEADER_AUTHORIZATION.to_string()),
             description: None,
+            oauth2_flows: None,
             bearer_format: None,
             aperture_secret: Some(CachedApertureSecret {
                 source: constants::SOURCE_ENV.to_string(),
@@ -439,6 +441,7 @@ fn create_authenticated_test_spec() -> CachedSpec {
             parameters: vec![],
             request_body: None,
             responses: vec![],
+            security_scopes: Vec::new(),
             security_requirements: vec![vec!["bearerAuth".to_string()]],
             tags: vec!["secure".to_string()],
             deprecated: false,

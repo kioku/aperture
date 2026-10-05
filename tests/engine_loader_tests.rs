@@ -1,6 +1,6 @@
 use aperture_cli::cache::models::{
     CachedCommand, CachedParameter, CachedResponse, CachedSpec, PaginationInfo,
-    ParameterSerialization,
+    ParameterSerialization, CACHE_FORMAT_VERSION,
 };
 use aperture_cli::constants;
 use aperture_cli::engine::loader::load_cached_spec;
@@ -42,6 +42,7 @@ fn create_test_cached_spec() -> CachedSpec {
                 schema: Some(r#"{"type": "array"}"#.to_string()),
                 example: None,
             }],
+            security_scopes: Vec::new(),
             security_requirements: vec![],
             tags: vec!["users".to_string()],
             deprecated: false,
@@ -237,7 +238,7 @@ fn cache_adversarial_layouts() {
             .to_string()
             .contains("corrupt"));
     }
-    for version in [7, 8, 10] {
+    for version in [7, 8, 9, CACHE_FORMAT_VERSION + 1] {
         spec.cache_format_version = version;
         fs::write(
             cache.path().join("version.bin"),
@@ -260,7 +261,7 @@ fn metadata_does_not_override_embedded_cache_version() {
         .update_spec_metadata(cache.path(), "mixed", 0)
         .unwrap();
     let mut spec = create_test_cached_spec();
-    spec.cache_format_version = 10;
+    spec.cache_format_version = CACHE_FORMAT_VERSION + 1;
     fs::write(
         cache.path().join("mixed.bin"),
         postcard::to_allocvec(&spec).unwrap(),
@@ -306,6 +307,11 @@ fn actual_prior_spec_layout8_is_rejected_before_field_decoding() {
             .unwrap();
         let error = load_cached_spec(cache.path(), "prior8").unwrap_err();
         assert!(error.to_string().contains("found v8"), "{error}");
-        assert!(error.to_string().contains("expected v9"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("expected v{CACHE_FORMAT_VERSION}")),
+            "{error}"
+        );
     }
 }

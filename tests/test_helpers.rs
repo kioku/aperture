@@ -67,6 +67,7 @@ pub fn test_command(name: &str, operation_id: &str, method: &str, path: &str) ->
         parameters: vec![],
         request_body: None,
         responses: vec![test_response("200")],
+        security_scopes: Vec::new(),
         security_requirements: vec![],
         tags: vec![name.to_string()],
         deprecated: false,
