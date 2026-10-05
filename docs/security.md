@@ -396,9 +396,21 @@ spaces and tabs are collected without changing outgoing HTTP grammar. Basic
 password extraction does not depend on username UTF-8 validity. Non-UTF8
 credentials remain accepted by the SDK header boundary; diagnostic omission, not
 lossy string matching, protects that path. Literal form collection does not
-recognize arbitrary transformations. Selected proxy
-raw, percent-encoded and Basic credential forms are included without changing proxy
-precedence, bypass rules, rotation or transport/cache isolation. Binary
+recognize arbitrary transformations. Proxy URL and `NO_PROXY` diagnostic fields
+are always omitted, including before operation authentication is resolved; invalid
+proxy errors never reflect supplied values or malformed tails. Logs retain static
+source, configured-route flags and bypass counts. Dry-run retains URL omission
+markers, an empty bypass list and its count. Private transport fingerprints remain
+separate from this safe output projection, and cached-client Debug is opaque.
+The CLI excludes dependency tracing events, which do not apply the operation's
+omission policy and can expose proxy/origin hosts or protocol data. Explicit
+`APERTURE_LOG` target directives cannot override this boundary. An SDK application's
+own subscriber is caller-controlled; enabling dependency HTTP tracing can expose
+sensitive transport data. Requested configuration inspection and
+serialization remain caller-owned setting data, not sanitized request diagnostics;
+userinfo removal alone cannot protect arbitrary URL or bypass-list content.
+Selected proxy raw, percent-encoded and Basic credential forms are included without
+changing proxy precedence, bypass rules, rotation or transport/cache isolation. Binary
 handling and successful requested response output remain unchanged.
 
 Anonymous diagnostics retain useful bodies with best-effort literal redaction.

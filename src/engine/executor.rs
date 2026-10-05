@@ -110,7 +110,12 @@ impl RetryContext {
 
 // Helper functions
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Private routing identity and its bounded diagnostic projection.
+///
+/// Route strings are retained only for the legacy transport fingerprint. Even
+/// userinfo-free URLs and bypass entries can contain transformed credentials;
+/// neither output nor Debug may expose them, including before auth is resolved.
+#[derive(Clone, Default, PartialEq, Eq)]
 struct ProxyDiagnostics {
     source: &'static str,
     disabled: bool,
@@ -120,14 +125,34 @@ struct ProxyDiagnostics {
     no_proxy: Vec<String>,
 }
 
+impl std::fmt::Debug for ProxyDiagnostics {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_json().fmt(formatter)
+    }
+}
+
 impl ProxyDiagnostics {
     fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "source": self.source,
             "disabled": self.disabled,
-            "all": self.all,
-            "http": self.http,
-            "https": self.https,
+            "all": self.all.as_ref().map(|_| "[PROXY URL OMITTED]"),
+            "http": self.http.as_ref().map(|_| "[PROXY URL OMITTED]"),
+            "https": self.https.as_ref().map(|_| "[PROXY URL OMITTED]"),
+            "no_proxy": [],
+            "no_proxy_count": self.no_proxy.len(),
+        })
+    }
+
+    /// Preserve the pre-omission transport identity bytes. This value must only
+    /// feed the private digest, never diagnostics or persisted response data.
+    fn transport_identity_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "source": self.source,
+            "disabled": self.disabled,
+            "all": self.all.as_deref().map(crate::config::settings::sanitize_proxy_url),
+            "http": self.http.as_deref().map(crate::config::settings::sanitize_proxy_url),
+            "https": self.https.as_deref().map(crate::config::settings::sanitize_proxy_url),
             "no_proxy": self.no_proxy,
         })
     }
@@ -138,15 +163,25 @@ impl ProxyDiagnostics {
 /// Resolved proxy settings, effective timeout and redirect policy form the key
 /// so configuration changes cannot reuse a client with different transport rules.
 /// No process-global client is retained.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct HttpClientPool(std::sync::Arc<std::sync::Mutex<HashMap<String, reqwest::Client>>>);
+
+impl std::fmt::Debug for HttpClientPool {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // reqwest client Debug includes proxy URIs and arbitrary bypass domains.
+        // Do not delegate or lock: cached transport state is never diagnostic data.
+        formatter
+            .debug_struct("HttpClientPool")
+            .finish_non_exhaustive()
+    }
+}
 
 fn transport_key(
     ctx: &crate::invocation::ExecutionContext,
     diagnostics: &ProxyDiagnostics,
 ) -> String {
     let mut digest = Sha256::new();
-    digest.update(diagnostics.to_json().to_string());
+    digest.update(diagnostics.transport_identity_json().to_string());
     digest.update(effective_timeout_secs(ctx).to_be_bytes());
     digest.update(format!("{:?}", ctx.proxy_override));
     digest.update(format!(
@@ -217,7 +252,7 @@ fn configure_cli_proxy(
     let proxy = proxy_all(url, "CLI")?;
     let diagnostics = ProxyDiagnostics {
         source: "cli",
-        all: Some(crate::config::settings::sanitize_proxy_url(url)),
+        all: Some(url.to_string()),
         ..ProxyDiagnostics::default()
     };
     Ok((builder.no_proxy().proxy(proxy), diagnostics))
@@ -249,9 +284,9 @@ fn env_proxy_diagnostics() -> Option<ProxyDiagnostics> {
 
     Some(ProxyDiagnostics {
         source: "environment",
-        all: all.map(|value| crate::config::settings::sanitize_proxy_url(&value)),
-        http: http.map(|value| crate::config::settings::sanitize_proxy_url(&value)),
-        https: https.map(|value| crate::config::settings::sanitize_proxy_url(&value)),
+        all,
+        http,
+        https,
         no_proxy: no_proxy.map_or_else(Vec::new, |value| parse_no_proxy_entries(&value)),
         ..ProxyDiagnostics::default()
     })
@@ -410,10 +445,7 @@ fn add_config_http_proxy(
     };
     let proxy = proxy_http(url, "config HTTP")?.no_proxy(no_proxy);
     let builder = builder.proxy(apply_config_proxy_auth(proxy, config)?);
-    Ok((
-        builder,
-        Some(crate::config::settings::sanitize_proxy_url(url)),
-    ))
+    Ok((builder, Some(url.to_string())))
 }
 
 fn add_config_https_proxy(
@@ -426,10 +458,7 @@ fn add_config_https_proxy(
     };
     let proxy = proxy_https(url, "config HTTPS")?.no_proxy(no_proxy);
     let builder = builder.proxy(apply_config_proxy_auth(proxy, config)?);
-    Ok((
-        builder,
-        Some(crate::config::settings::sanitize_proxy_url(url)),
-    ))
+    Ok((builder, Some(url.to_string())))
 }
 
 fn config_no_proxy(config: &ProxyConfig, env_no_proxy: Option<&str>) -> Option<reqwest::NoProxy> {
@@ -452,9 +481,7 @@ fn apply_config_proxy_auth(
     ) {
         (Some(username), Some(password_env)) => {
             let password = std::env::var(password_env).map_err(|_| {
-                Error::invalid_config(format!(
-                    "Proxy password environment variable '{password_env}' is not set"
-                ))
+                Error::invalid_config("Proxy password environment variable is unavailable")
             })?;
             Ok(proxy.basic_auth(username, &password))
         }
@@ -465,23 +492,22 @@ fn apply_config_proxy_auth(
     }
 }
 
-fn proxy_http(url: &str, label: &str) -> Result<reqwest::Proxy, Error> {
+fn proxy_http(url: &str, label: &'static str) -> Result<reqwest::Proxy, Error> {
     reqwest::Proxy::http(url).map_err(|_| invalid_proxy_url(label, url))
 }
 
-fn proxy_https(url: &str, label: &str) -> Result<reqwest::Proxy, Error> {
+fn proxy_https(url: &str, label: &'static str) -> Result<reqwest::Proxy, Error> {
     reqwest::Proxy::https(url).map_err(|_| invalid_proxy_url(label, url))
 }
 
-fn proxy_all(url: &str, label: &str) -> Result<reqwest::Proxy, Error> {
+fn proxy_all(url: &str, label: &'static str) -> Result<reqwest::Proxy, Error> {
     reqwest::Proxy::all(url).map_err(|_| invalid_proxy_url(label, url))
 }
 
-fn invalid_proxy_url(label: &str, url: &str) -> Error {
-    Error::invalid_config(format!(
-        "Invalid {label} proxy URL: {}",
-        crate::config::settings::sanitize_proxy_url(url)
-    ))
+fn invalid_proxy_url(label: &'static str, _url: &str) -> Error {
+    // Parsing fails before operation sensitivity exists. Arbitrary URL components
+    // and malformed tails cannot be made safe by removing guessed userinfo.
+    Error::invalid_config(format!("Invalid {label} proxy URL (value omitted)"))
 }
 
 fn parse_no_proxy_entries(value: &str) -> Vec<String> {
@@ -507,10 +533,10 @@ fn log_proxy_diagnostics(diagnostics: &ProxyDiagnostics) {
     tracing::debug!(
         target: "aperture::executor",
         source = diagnostics.source,
-        all = diagnostics.all.as_deref().unwrap_or(""),
-        http = diagnostics.http.as_deref().unwrap_or(""),
-        https = diagnostics.https.as_deref().unwrap_or(""),
-        no_proxy = diagnostics.no_proxy.join(","),
+        all_configured = diagnostics.all.is_some(),
+        http_configured = diagnostics.http.is_some(),
+        https_configured = diagnostics.https.is_some(),
+        no_proxy_count = diagnostics.no_proxy.len(),
         "Proxy configuration selected"
     );
 }
@@ -2660,6 +2686,115 @@ mod tests {
     }
 
     #[test]
+    fn proxy_metadata_omits_untrusted_routes_before_auth_context() {
+        let diagnostics = ProxyDiagnostics {
+            source: "environment",
+            all: Some("http://u:proxy-fresh-264@proxy/proxy-fresh-264?echo=462-hserf-yxorp".into()),
+            http: Some("http://café-secret.example/%63af%C3%A9?echo=Y2Fmw6k=#secret".into()),
+            https: Some("unknown://u:secret@[bad/secret".into()),
+            no_proxy: vec!["secret.example".into(), "462-hserf-yxorp".into()],
+            ..Default::default()
+        };
+        let output = diagnostics.to_json();
+        assert_eq!(output["all"], "[PROXY URL OMITTED]");
+        assert_eq!(output["http"], "[PROXY URL OMITTED]");
+        assert_eq!(output["https"], "[PROXY URL OMITTED]");
+        assert_eq!(output["no_proxy"], serde_json::json!([]));
+        assert_eq!(output["no_proxy_count"], 2);
+        let debug = format!("{diagnostics:?}");
+        assert!(!debug.contains("secret"));
+        assert!(!debug.contains("proxy-fresh-264"));
+        assert!(!debug.contains("462-hserf-yxorp"));
+    }
+
+    #[test]
+    fn invalid_proxy_errors_omit_all_input_not_only_userinfo() {
+        for url in [
+            "http://u:invalid-proxy-secret-264@[bad/invalid-proxy-secret-264",
+            "unknown://u:secret@host/terces?echo=c2VjcmV0#secret",
+            "secret",
+            "",
+            " ",
+            "none",
+            "http://secret@[bad",
+            "http://host/\nsecret",
+        ] {
+            let error = invalid_proxy_url("CLI", url);
+            assert_eq!(
+                error.to_string(),
+                "Validation: Invalid configuration: Invalid CLI proxy URL (value omitted)"
+            );
+            assert!(!format!("{error:?}").contains("secret"));
+        }
+    }
+
+    #[test]
+    fn proxy_client_pool_debug_does_not_delegate_untrusted_routes() {
+        ensure_tls_provider();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .proxy(
+                reqwest::Proxy::all("http://u:secret@localhost:8080/terces")
+                    .unwrap()
+                    .no_proxy(reqwest::NoProxy::from_string(
+                        "secret.example,terces.example",
+                    )),
+            )
+            .build()
+            .unwrap();
+        let pool = HttpClientPool::default();
+        pool.0
+            .lock()
+            .unwrap()
+            .insert("opaque-digest".into(), client);
+        let rendered = format!("{pool:?}");
+        assert!(!rendered.contains("secret"), "{rendered}");
+        assert!(!rendered.contains("terces"), "{rendered}");
+        assert!(!rendered.contains("localhost"), "{rendered}");
+    }
+
+    #[test]
+    fn proxy_missing_password_errors_do_not_reflect_configured_names() {
+        let config = ProxyConfig {
+            username: Some("proxy-secret-264".into()),
+            password_env: Some("APERTURE264_MISSING_PROXY_SECRET_ENV_NAME".into()),
+            ..Default::default()
+        };
+        let proxy = reqwest::Proxy::all("http://localhost:8080").unwrap();
+        let error = apply_config_proxy_auth(proxy, &config).unwrap_err();
+        let rendered = format!("{error} {error:?}");
+        assert!(!rendered.contains("proxy-secret-264"));
+        assert!(!rendered.contains("APERTURE264_MISSING_PROXY_SECRET_ENV_NAME"));
+        assert!(rendered.contains("Proxy password environment variable is unavailable"));
+    }
+
+    #[test]
+    fn proxy_safe_projection_does_not_replace_transport_identity() {
+        let ctx = crate::invocation::ExecutionContext::default();
+        let first = ProxyDiagnostics {
+            source: "config",
+            http: Some("http://u:first@localhost:8080/first?echo=tsrif#first".into()),
+            no_proxy: vec!["first.example".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            first.transport_identity_json(),
+            serde_json::json!({
+                "source": "config", "disabled": false, "all": null,
+                "http": "http://localhost:8080/first?echo=tsrif#first",
+                "https": null, "no_proxy": ["first.example"]
+            })
+        );
+        let mut second = first.clone();
+        second.http = Some("http://u:second@localhost:8080/second?echo=dnoces#second".into());
+        second.no_proxy = vec!["second.example".into()];
+        assert_eq!(first.to_json(), second.to_json());
+        assert_ne!(transport_key(&ctx, &first), transport_key(&ctx, &second));
+        assert!(!format!("{first:?}").contains("first"));
+        assert!(!format!("{second:?}").contains("second"));
+    }
+
+    #[test]
     fn transport_keys_distinguish_rotated_proxy_passwords() {
         let password_env = "APERTURE_REVIEW_PROXY_PASSWORD";
         let mut config = GlobalConfig::default();
@@ -2687,7 +2822,7 @@ mod tests {
         let first_key = transport_key(&ctx, &first_diagnostics);
         ctx.proxy_override = ProxyOverride::Use("http://bob:other@localhost:8080".into());
         let (_, second_diagnostics) = configure_proxy(reqwest::Client::builder(), &ctx).unwrap();
-        assert_eq!(first_diagnostics, second_diagnostics);
+        assert_eq!(first_diagnostics.to_json(), second_diagnostics.to_json());
         assert_ne!(first_key, transport_key(&ctx, &second_diagnostics));
         assert!(!first_key.contains("secret"));
     }

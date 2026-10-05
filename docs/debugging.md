@@ -219,7 +219,7 @@ The `← 200 OK (XXms)` line shows how long the request took.
 
 ### Debugging Proxy Configuration
 
-Use `-v` to see which proxy source was selected. Proxy URLs are logged with credentials removed.
+Use `-v` to see which proxy source was selected, which routes are configured, and the number of bypass entries. Request diagnostics omit all proxy URLs and `NO_PROXY` entries, even for anonymous operations: hosts, paths, query strings and malformed values can contain credentials or transformed copies. Invalid proxy errors report the source without reflecting the value.
 
 ```bash
 # Environment-variable proxy
@@ -237,11 +237,13 @@ aperture -v api myapi --proxy "http://other-proxy.example:8080" users list
 aperture -v api myapi --no-proxy users list
 ```
 
-`--dry-run` also includes sanitized proxy diagnostics:
+`--dry-run` uses `[PROXY URL OMITTED]` for configured proxy URLs, `null` for absent routes, and an empty `no_proxy` list with `no_proxy_count`. It preserves `source` and `disabled`:
 
 ```bash
 aperture api myapi --dry-run users list
 ```
+
+This diagnostic projection does not alter routing or client identity. The CLI emits only Aperture-owned diagnostics; dependency transport events can expose raw routes and are excluded even when explicitly enabled in `APERTURE_LOG`. SDK applications control their own subscribers and should avoid dependency HTTP tracing with sensitive routes or credentials. Explicit configuration inspection still returns requested setting data with userinfo redaction, not this omission policy.
 
 If a request unexpectedly uses or bypasses a proxy, check the priority order:
 
