@@ -695,7 +695,6 @@ fn render_batch_json_summary(
             "total_duration_seconds": result.total_duration.as_secs_f64(),
             "operations": result.results.iter().map(|r| serde_json::json!({
                 "operation_id": r.operation.id,
-                "args": r.operation.args,
                 "success": r.success,
                 "duration_seconds": r.duration.as_secs_f64(),
                 "error": r.error
@@ -743,7 +742,7 @@ fn render_batch_text_summary(
         write_stdout_line(&format!(
             "  {} - {}: {}",
             i + 1,
-            op_result.operation.args.join(" "),
+            op_result.operation.id.as_deref().unwrap_or("<unnamed>"),
             op_result.error.as_deref().unwrap_or("Unknown error")
         ))?;
     }

@@ -280,3 +280,101 @@ async fn implicit_url_and_proxy_credentials_suppress_diagnostic_bodies() {
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 }
+
+#[test]
+fn authenticated_response_header_names_and_values_are_omitted() {
+    use aperture_cli::logging::{log_operation_response, SecretContext};
+    let spec = cached("http://127.0.0.1:1", None);
+    let operation = &spec.commands[0];
+    let mut request = reqwest::header::HeaderMap::new();
+    request.insert("authorization", "Bearer abcde-secret-264".parse().unwrap());
+    let ctx = SecretContext::empty().with_active_operation_headers(&spec, operation, &request);
+    let mut response = reqwest::header::HeaderMap::new();
+    response.insert("x-462-terces-edcba", "462-terces-edcba".parse().unwrap());
+    for authenticated in [true, false] {
+        let sink = TraceSink(std::sync::Arc::default());
+        let writer = sink.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            log_operation_response(
+                401,
+                7,
+                Some(&response),
+                None,
+                1000,
+                authenticated.then_some(&ctx),
+                (&spec, operation),
+            );
+        });
+        let logs = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains("401"));
+        assert_eq!(logs.contains("462-terces-edcba"), !authenticated);
+    }
+    assert!(!format!("{ctx:?}").contains("abcde-secret-264"));
+}
+
+#[tokio::test]
+async fn proxy_forms_are_redacted_from_dry_run_request_metadata() {
+    let spec = cached("http://127.0.0.1:1", None);
+    let call = OperationCall {
+        operation_id: "getRecords".into(),
+        custom_headers: vec!["X-Echo: proxy-secret-264 cHJveHk6cHJveHktc2VjcmV0LTI2NA==".into()],
+        pagination_url: None,
+        path_params: HashMap::default(),
+        query_params: HashMap::default(),
+        header_params: HashMap::default(),
+        body: None,
+    };
+    let result = execute(
+        &spec,
+        call,
+        ExecutionContext {
+            dry_run: true,
+            proxy_override: ProxyOverride::Use("http://proxy:proxy-secret-264@127.0.0.1:2".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let rendered = format!("{result:?}");
+    assert!(!rendered.contains("proxy-secret-264"), "{rendered}");
+    assert!(
+        !rendered.contains("cHJveHk6cHJveHktc2VjcmV0LTI2NA=="),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn selected_proxy_context_tracks_raw_encoded_and_basic_forms_without_debug_disclosure() {
+    use aperture_cli::logging::SecretContext;
+    for url in [
+        "http://proxy:proxy%2Dsecret%2D264@localhost:8080",
+        "proxy:proxy-secret-264@localhost:8080",
+        "socks5://proxy:proxy-secret-264@localhost:1080",
+    ] {
+        let ctx = SecretContext::empty().with_proxy_url(url);
+        assert!(ctx.is_authenticated());
+        for value in [
+            "proxy-secret-264",
+            "proxy:proxy-secret-264",
+            "cHJveHk6cHJveHktc2VjcmV0LTI2NA==",
+        ] {
+            assert!(ctx.is_secret(value));
+            assert!(!ctx.redact_secrets_in_text(value).contains(value));
+            assert!(!format!("{ctx:?}").contains(value));
+        }
+    }
+    let encoded =
+        SecretContext::empty().with_proxy_url("http://proxy:proxy%2Dsecret%2D264@localhost:8080");
+    assert!(encoded.is_secret("proxy%2Dsecret%2D264"));
+    let explicit = SecretContext::empty().with_proxy_basic_auth("proxy", "proxy-secret-264");
+    assert!(explicit.is_secret("proxy-secret-264"));
+    assert!(!SecretContext::empty()
+        .with_proxy_url("localhost:8080")
+        .is_authenticated());
+}

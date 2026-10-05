@@ -17,6 +17,32 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
+/// Batch arguments, parser messages, and captured values can contain arbitrary
+/// secrets. Retain only a locally defined category and numeric HTTP status.
+fn safe_batch_error(error: &Error) -> String {
+    match error {
+        Error::Internal { kind, context, .. } => {
+            let status = batch_http_status(context.as_ref());
+            status.map_or_else(
+                || format!("Batch operation failed ({kind})"),
+                |status| format!("Batch operation failed ({kind}, HTTP {status})"),
+            )
+        }
+        Error::Network(error) => error.status().map_or_else(
+            || "Batch network operation failed".to_string(),
+            |status| format!("Batch network operation failed (HTTP {})", status.as_u16()),
+        ),
+        _ => "Batch operation failed".to_string(),
+    }
+}
+
+fn batch_http_status(context: Option<&crate::error::ErrorContext>) -> Option<u64> {
+    context
+        .and_then(|context| context.details.as_ref())
+        .and_then(|details| details.get("status").or_else(|| details.get("status_code")))
+        .and_then(serde_json::Value::as_u64)
+}
+
 /// Configuration for batch processing operations
 #[derive(Debug, Clone)]
 pub struct BatchConfig {
@@ -408,7 +434,7 @@ impl BatchProcessor {
             Err(e) => {
                 return Self::failed_batch_operation_result(
                     operation.clone(),
-                    e.to_string(),
+                    safe_batch_error(&e),
                     None,
                     std::time::Duration::ZERO,
                 );
@@ -430,8 +456,15 @@ impl BatchProcessor {
             Ok(resp) => resp,
             Err(e) => {
                 let duration = operation_start.elapsed();
-                Self::log_progress(show_progress, || format!("Operation '{op_id}' failed: {e}"));
-                return Self::failed_batch_operation_result(exec_op, e.to_string(), None, duration);
+                Self::log_progress(show_progress, || {
+                    format!("Operation '{op_id}' failed: {}", safe_batch_error(&e))
+                });
+                return Self::failed_batch_operation_result(
+                    exec_op,
+                    safe_batch_error(&e),
+                    None,
+                    duration,
+                );
             }
         };
 
@@ -482,22 +515,19 @@ impl BatchProcessor {
         op_id: &str,
         show_progress: bool,
     ) -> BatchOperationResult {
-        match capture::extract_captures(operation, &response, store) {
-            Ok(()) => {
-                Self::log_progress(show_progress, || format!("Operation '{op_id}' completed"));
-                Self::successful_batch_operation_result(exec_op, response, duration)
-            }
-            Err(capture_err) => {
-                Self::log_progress(show_progress, || {
-                    format!("Operation '{op_id}' capture failed: {capture_err}")
-                });
-                Self::failed_batch_operation_result(
-                    exec_op,
-                    capture_err.to_string(),
-                    Some(response),
-                    duration,
-                )
-            }
+        if capture::extract_captures(operation, &response, store).is_ok() {
+            Self::log_progress(show_progress, || format!("Operation '{op_id}' completed"));
+            Self::successful_batch_operation_result(exec_op, response, duration)
+        } else {
+            Self::log_progress(show_progress, || {
+                format!("Operation '{op_id}' capture failed")
+            });
+            Self::failed_batch_operation_result(
+                exec_op,
+                "Batch capture failed".to_string(),
+                Some(response),
+                duration,
+            )
         }
     }
 
@@ -724,9 +754,9 @@ impl BatchProcessor {
             Err(e) => {
                 if show_progress {
                     // ast-grep-ignore: no-println
-                    crate::stdoutln!("Operation {} failed: {}", index + 1, e);
+                    crate::stdoutln!("Operation {} failed: {}", index + 1, safe_batch_error(&e));
                 }
-                (false, Some(e.to_string()), None)
+                (false, Some(safe_batch_error(&e)), None)
             }
         };
 
@@ -836,8 +866,11 @@ impl BatchProcessor {
                     .chain(operation.args.clone())
                     .chain(extra_body_file),
             )
-            .map_err(|error| {
-                Error::invalid_command(crate::constants::CONTEXT_BATCH, error.to_string())
+            .map_err(|_| {
+                Error::invalid_command(
+                    crate::constants::CONTEXT_BATCH,
+                    "Invalid batch operation arguments",
+                )
             })?;
         let call = crate::cli::translate::matches_to_operation_call(spec, &matches)?;
         Self::validate_batch_response_type(spec, &call.operation_id)?;

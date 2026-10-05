@@ -384,12 +384,15 @@ silently treated as anonymous access.
 
 Final recognized credential headers (including declared API-key headers and
 Authorization overrides), URL userinfo, and authenticated proxy configuration
-suppress request/response body trace logging. Text API
+suppress request/response body trace logging and all server-controlled response-header
+diagnostics, including header names. Text API
 errors retain status, operation identity and safe hints, but omit authenticated
 response bodies, since servers can transform credentials in arbitrary ways.
 Dry-run omits authenticated JSON request bodies and redacts final credential
 forms in headers and URLs. Basic password/pair/encoded-pair and bare bearer tokens
-are tracked independently of the configured-secret minimum length. Binary
+are tracked independently of the configured-secret minimum length. Selected proxy
+raw, percent-encoded and Basic credential forms are included without changing proxy
+precedence, bypass rules, rotation or transport/cache isolation. Binary
 handling and successful requested response output remain unchanged.
 
 Anonymous diagnostics retain useful bodies with best-effort literal redaction.
@@ -397,3 +400,8 @@ An undeclared environment-expanded custom credential header is not yet recognize
 by this boundary; declare its API-key security scheme/mapping and avoid diagnostic
 logging or caching for that override path. Successful output can itself contain
 sensitive API data; protect it as you would the response from the API directly.
+
+Batch diagnostic summaries omit argument metadata in both JSON (`args` is no longer
+present) and text. Failure/progress diagnostics retain only safe categories and numeric
+HTTP status, not arbitrary parser, response or capture error text. Operation IDs,
+counts, success flags, durations and intentionally requested successful API data remain.

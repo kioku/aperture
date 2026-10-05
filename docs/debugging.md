@@ -48,7 +48,7 @@ Output example:
 ```
 
 ### Debug
-Includes request and response headers in addition to info-level logging.
+Includes redacted request headers and anonymous response headers in addition to info-level logging. Authenticated response-header names and values are omitted because both are server-controlled.
 
 ```bash
 APERTURE_LOG=debug aperture api myapi users get-user --id 123
@@ -169,6 +169,7 @@ Sensitive query parameters in URLs are automatically redacted:
 In addition to the static header and query parameter lists above, Aperture dynamically redacts secrets configured via `x-aperture-secret` extensions in your OpenAPI spec or config-based secrets. These values are:
 
 - **Redacted in header values**: If any header value exactly matches a configured secret
+- **Authenticated response headers omitted**: Header names and values can encode arbitrary credential transformations; status and timing remain available. Selected proxy credentials also participate in request-header and URL redaction.
 - **Authenticated body diagnostics omitted**: When final request headers or transport configuration carry recognized credentials, request/response bodies are not logged and error bodies are replaced with a safe placeholder. This also covers Authorization overrides, short tokens and transformed server reflections. Successful requested response output is unchanged.
 - **Anonymous body redaction is best effort**: Literal configured secrets of 8+ characters are redacted; arbitrary transformations cannot be recognized. Review diagnostics before sharing them.
 
@@ -259,7 +260,7 @@ To inspect all headers being sent and received:
 aperture -v api myapi users get-user --id 123
 ```
 
-The debug output will show all request and response headers.
+The debug output shows redacted request headers and anonymous response headers. Authenticated response headers are omitted; use deliberately requested successful header output when needed.
 
 ## Log Output Destination
 

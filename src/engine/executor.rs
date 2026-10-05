@@ -303,6 +303,63 @@ fn default_proxy_has_credentials(config: Option<&GlobalConfig>) -> bool {
                 .any(proxy_url_has_credentials))
 }
 
+/// Collect only the selected proxy setup; mirror transport precedence without
+/// changing routing, `NO_PROXY`, or client/cache identity.
+fn with_selected_proxy_secrets(
+    mut secrets: logging::SecretContext,
+    ctx: &crate::invocation::ExecutionContext,
+) -> logging::SecretContext {
+    match &ctx.proxy_override {
+        ProxyOverride::Disable => secrets,
+        ProxyOverride::Use(url) => secrets.with_proxy_url(url),
+        ProxyOverride::Default => {
+            let environment: Vec<String> = [
+                ["HTTP_PROXY", "http_proxy"],
+                ["HTTPS_PROXY", "https_proxy"],
+                ["ALL_PROXY", "all_proxy"],
+            ]
+            .iter()
+            .filter_map(|names| first_env_value(names))
+            .collect();
+            if !environment.is_empty() {
+                for url in environment {
+                    secrets = secrets.with_proxy_url(&url);
+                }
+                return secrets;
+            }
+            with_config_proxy_secrets(secrets, ctx.global_config.as_ref())
+        }
+    }
+}
+
+fn with_config_proxy_secrets(
+    mut secrets: logging::SecretContext,
+    config: Option<&GlobalConfig>,
+) -> logging::SecretContext {
+    let Some(proxy) = config
+        .map(|config| &config.proxy)
+        .filter(|proxy| has_config_proxy(proxy))
+    else {
+        return secrets;
+    };
+    for url in [proxy.http.as_deref(), proxy.https.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        secrets = secrets.with_proxy_url(url);
+    }
+    let (Some(username), Some(password_env)) = (
+        non_empty(proxy.username.as_deref()),
+        non_empty(proxy.password_env.as_deref()),
+    ) else {
+        return secrets;
+    };
+    let Ok(password) = std::env::var(password_env) else {
+        return secrets;
+    };
+    secrets.with_proxy_basic_auth(username, &password)
+}
+
 fn first_env_value(names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| {
         std::env::var(name)
@@ -472,7 +529,10 @@ fn build_http_client(
 ) -> Result<ProxyBuildResult, Error> {
     ensure_tls_provider();
     let (builder, diagnostics) = configure_proxy(reqwest::Client::builder(), ctx)?;
-    let key = format!("{}:{pagination}", transport_key(ctx, &diagnostics));
+    let key = format!(
+        "{}:origin-bound-v1:{pagination}",
+        transport_key(ctx, &diagnostics)
+    );
     let mut clients = ctx
         .http_clients
         .0
@@ -489,7 +549,7 @@ fn build_http_client(
     let builder = if pagination {
         builder.redirect(reqwest::redirect::Policy::none())
     } else {
-        builder
+        builder.redirect(operation_redirect_policy())
     };
     let client = builder
         .timeout(std::time::Duration::from_secs(effective_timeout_secs(ctx)))
@@ -507,6 +567,27 @@ fn build_http_client(
     Ok(ProxyBuildResult {
         client,
         diagnostics,
+    })
+}
+
+/// Bind every hop to the original request origin, independent of header names.
+/// Generic errors deliberately omit attacker-controlled redirect destinations.
+fn operation_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 10 {
+            return attempt.error("Operation redirect limit exceeded");
+        }
+        let target = attempt.url();
+        let Some(original) = attempt.previous().first() else {
+            return attempt.error("Unsafe operation redirect");
+        };
+        if !target.username().is_empty()
+            || target.password().is_some()
+            || target.origin() != original.origin()
+        {
+            return attempt.error("Unsafe operation redirect");
+        }
+        attempt.follow()
     })
 }
 
@@ -1838,7 +1919,7 @@ fn prepare_runtime_context<'a>(
         },
         &spec.name,
         &format!(
-            "{}:redirects={}:proxy-auth-bypass=v2",
+            "{}:redirects={}:origin-bound=v1:proxy-auth-bypass=v2",
             operation.operation_id, !strict_pagination
         ),
         method,
@@ -1860,6 +1941,8 @@ fn prepare_runtime_context<'a>(
             .with_active_operation_headers(spec, operation, headers)
             .with_request_url(url)
             .with_authenticated_transport(proxy_requires_cache_bypass(ctx));
+
+    let secret_ctx = with_selected_proxy_secrets(secret_ctx, ctx);
 
     Ok(PreparedRuntimeContext {
         cache_context,
@@ -2363,6 +2446,10 @@ fn parse_bracket_index(part: &str) -> Option<usize> {
 }
 
 #[cfg(test)]
+#[path = "operation_redirect_tests.rs"]
+mod operation_redirect_tests;
+
+#[cfg(test)]
 mod tests {
     fn security_test_spec() -> CachedSpec {
         let document = serde_json::json!({
@@ -2535,6 +2622,39 @@ mod tests {
         for value in ["http://localhost:8080", "localhost:8080", "", " "] {
             assert!(!proxy_url_has_credentials(value), "{value}");
         }
+    }
+
+    #[test]
+    fn selected_proxy_forms_follow_overrides_and_config_rotation() {
+        let password_env = "APERTURE_REPAIR264_PROXY_PASSWORD";
+        let mut config = GlobalConfig::default();
+        config.proxy.http = Some("http://localhost:8080".into());
+        config.proxy.username = Some("proxy".into());
+        config.proxy.password_env = Some(password_env.into());
+        std::env::set_var(password_env, "first-secret-264");
+        let first = with_config_proxy_secrets(logging::SecretContext::empty(), Some(&config));
+        std::env::set_var(password_env, "second-secret-264");
+        let second = with_config_proxy_secrets(logging::SecretContext::empty(), Some(&config));
+        std::env::remove_var(password_env);
+        assert!(first.is_secret("first-secret-264"));
+        assert!(!second.is_secret("first-secret-264"));
+        assert!(second.is_secret("second-secret-264"));
+        let context = crate::invocation::ExecutionContext {
+            global_config: Some(config),
+            proxy_override: ProxyOverride::Disable,
+            ..Default::default()
+        };
+        assert!(
+            !with_selected_proxy_secrets(logging::SecretContext::empty(), &context)
+                .is_authenticated()
+        );
+        let context = crate::invocation::ExecutionContext {
+            proxy_override: ProxyOverride::Use("proxy:selected-secret-264@localhost:8080".into()),
+            ..context
+        };
+        let selected = with_selected_proxy_secrets(logging::SecretContext::empty(), &context);
+        assert!(selected.is_secret("selected-secret-264"));
+        assert!(!selected.is_secret("second-secret-264"));
     }
 
     #[test]

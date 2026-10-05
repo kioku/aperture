@@ -20,7 +20,7 @@ const MIN_SECRET_LENGTH_FOR_BODY_REDACTION: usize = 8;
 /// This struct collects actual secret values from environment variables
 /// referenced by `x-aperture-secret` extensions and config-based secrets,
 /// allowing them to be redacted from logs wherever they appear.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct SecretContext {
     /// Resolved configured secret values that should be redacted.
     secrets: Vec<String>,
@@ -28,6 +28,16 @@ pub struct SecretContext {
     active_secrets: Vec<String>,
     /// Final request carries credentials; untrusted bodies must not be diagnosed.
     authenticated: bool,
+}
+
+// Never expose resolved credentials through SDK/debug diagnostics.
+impl std::fmt::Debug for SecretContext {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SecretContext")
+            .field("authenticated", &self.authenticated)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Collects non-empty secret values from spec's security schemes.
@@ -146,12 +156,42 @@ impl SecretContext {
             return self;
         }
         self.authenticated = true;
+        self.add_active_credential(url.username());
+        self.add_active_credential(url.password().unwrap_or_default());
         let username =
             urlencoding::decode(url.username()).unwrap_or_else(|_| url.username().into());
         let password = url.password().unwrap_or_default();
         let password = urlencoding::decode(password).unwrap_or_else(|_| password.into());
         let pair = format!("{username}:{password}");
         let authorization = format!("Basic {}", STANDARD.encode(pair));
+        self.add_active_credential(&authorization);
+        self.add_authorization_forms(&authorization);
+        self
+    }
+
+    /// Includes raw and encoded Basic credentials from a selected proxy URL.
+    /// Scheme-less authorities follow reqwest's local URL normalization.
+    #[must_use]
+    pub fn with_proxy_url(self, url: &str) -> Self {
+        let parsed = reqwest::Url::parse(url)
+            .ok()
+            .filter(reqwest::Url::has_host)
+            .or_else(|| reqwest::Url::parse(&format!("http://{url}")).ok());
+        match parsed {
+            Some(url) => self.with_request_url(url.as_str()),
+            None => self,
+        }
+    }
+
+    /// Includes explicit selected config-proxy Basic authentication, without persisting it.
+    #[must_use]
+    pub fn with_proxy_basic_auth(mut self, username: &str, password: &str) -> Self {
+        self.authenticated = true;
+        self.add_active_credential(username);
+        let authorization = format!(
+            "Basic {}",
+            STANDARD.encode(format!("{username}:{password}"))
+        );
         self.add_active_credential(&authorization);
         self.add_authorization_forms(&authorization);
         self
@@ -686,7 +726,15 @@ fn log_response_with_operation(
         duration_ms
     );
 
-    // Log headers at debug level
+    // Header names and values are server-controlled and can encode credentials
+    // using arbitrary transformations. Only locally derived metadata is safe.
+    if secret_ctx.is_some_and(SecretContext::is_authenticated) {
+        debug!(target: "aperture::executor", "Response headers omitted (authenticated request)");
+        log_response_body(body, max_body_len, secret_ctx);
+        return;
+    }
+
+    // Log anonymous headers at debug level.
     let Some(header_map) =
         headers.filter(|_| tracing::enabled!(target: "aperture::executor", tracing::Level::DEBUG))
     else {
