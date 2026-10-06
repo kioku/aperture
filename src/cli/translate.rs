@@ -20,6 +20,28 @@ use std::io::Read as _;
 use std::path::PathBuf;
 use std::time::Duration;
 
+fn operation_translation_is_sensitive(
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+    ctx: Option<&ExecutionContext>,
+    header_params: &HashMap<String, String>,
+    custom_headers: &[String],
+) -> bool {
+    crate::logging::custom_headers_reference_environment(custom_headers)
+        || ctx.is_some_and(|ctx| {
+            crate::engine::executor::preparation_transport_is_sensitive(spec, ctx)
+        })
+        || crate::logging::operation_preparation_is_sensitive(
+            spec,
+            operation,
+            header_params.keys().map(String::as_str).chain(
+                custom_headers.iter().filter_map(|header: &String| {
+                    header.split_once(':').map(|(name, _)| name.trim())
+                }),
+            ),
+        )
+}
+
 /// Converts clap `ArgMatches` (from a dynamically generated command tree)
 /// into a CLI-agnostic [`OperationCall`].
 ///
@@ -69,17 +91,8 @@ pub(crate) fn matches_to_operation_call_with_context(
         .map(|values| values.cloned().collect())
         .unwrap_or_default();
 
-    let sensitive = ctx
-        .is_some_and(|ctx| crate::engine::executor::preparation_transport_is_sensitive(spec, ctx))
-        || crate::logging::operation_preparation_is_sensitive(
-            spec,
-            operation,
-            header_params.keys().map(String::as_str).chain(
-                custom_headers.iter().filter_map(|header: &String| {
-                    header.split_once(':').map(|(name, _)| name.trim())
-                }),
-            ),
-        );
+    let sensitive =
+        operation_translation_is_sensitive(spec, operation, ctx, &header_params, &custom_headers);
     let body = extract_operation_body(operation, current_matches, sensitive)?;
 
     Ok(OperationCall {

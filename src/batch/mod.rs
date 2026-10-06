@@ -283,7 +283,7 @@ impl BatchProcessor {
     pub async fn execute_batch(
         &self,
         spec: &CachedSpec,
-        batch_file: BatchFile,
+        mut batch_file: BatchFile,
         global_config: Option<&GlobalConfig>,
         base_url: Option<&str>,
         dry_run: bool,
@@ -300,6 +300,7 @@ impl BatchProcessor {
                 "Batch concurrency exceeds the supported maximum",
             ));
         }
+        apply_batch_header_defaults(&mut batch_file);
         if graph::has_dependencies(&batch_file.operations) {
             self.execute_dependent_batch(
                 spec,
@@ -538,6 +539,14 @@ impl BatchProcessor {
     ) -> Result<BatchOperation, Error> {
         let mut exec_op = operation.clone();
         exec_op.args = interpolation::interpolate_args(&operation.args, store, op_id)?;
+        exec_op.headers = operation
+            .headers
+            .iter()
+            .map(|(name, value)| {
+                interpolation::interpolate_string(value, store, op_id)
+                    .map(|value| (name.clone(), value))
+            })
+            .collect::<Result<_, _>>()?;
         exec_op.body_file = operation
             .body_file
             .as_deref()
@@ -860,11 +869,13 @@ impl BatchProcessor {
             .as_deref()
             .map(|path| vec!["--body-file".to_string(), path.to_string()])
             .unwrap_or_default();
+        let extra_headers = batch_header_arguments(&operation.headers)?;
         let matches = command
             .try_get_matches_from(
                 std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
                     .chain(operation.args.clone())
-                    .chain(extra_body_file),
+                    .chain(extra_body_file)
+                    .chain(extra_headers),
             )
             .map_err(|_| {
                 Error::invalid_command(
@@ -872,7 +883,10 @@ impl BatchProcessor {
                     "Invalid batch operation arguments",
                 )
             })?;
-        let call = crate::cli::translate::matches_to_operation_call(spec, &matches)?;
+        let mut call = crate::cli::translate::matches_to_operation_call(spec, &matches)?;
+        // Map headers precede explicit argument headers; translation sees both
+        // before body preparation and the final overlay follows actual values.
+        call.custom_headers.rotate_right(operation.headers.len());
         Self::validate_batch_response_type(spec, &call.operation_id)?;
         let server_vars = crate::cli::translate::extract_server_var_args(&matches);
         Ok((call, server_vars))
@@ -924,8 +938,56 @@ impl BatchProcessor {
     }
 }
 
+/// Validate map names and emit a stable overlay order before CLI translation.
+fn batch_header_arguments(
+    headers: &std::collections::HashMap<String, String>,
+) -> Result<Vec<String>, Error> {
+    let mut sorted: Vec<_> = headers.iter().collect();
+    sorted.sort_by_key(|(name, _)| *name);
+    let mut arguments = Vec::new();
+    for (name, value) in sorted {
+        reqwest::header::HeaderName::from_bytes(name.as_bytes())
+            .map_err(|error| Error::invalid_header_name(name, error.to_string()))?;
+        arguments.extend(["--header".to_string(), format!("{name}: {value}")]);
+    }
+    Ok(arguments)
+}
+
+/// Apply metadata defaults before graph resolution/interpolation. Operation maps
+/// override defaults case-insensitively; explicit header arguments overlay both.
+fn apply_batch_header_defaults(batch: &mut BatchFile) {
+    let Some(defaults) = batch
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.defaults.as_ref())
+    else {
+        return;
+    };
+    let mut headers: Vec<_> = defaults.headers.iter().collect();
+    headers.sort_by_key(|(name, _)| *name);
+    for operation in &mut batch.operations {
+        apply_operation_header_defaults(operation, &headers, defaults.use_cache);
+    }
+}
+
+fn apply_operation_header_defaults(
+    operation: &mut BatchOperation,
+    headers: &[(&String, &String)],
+    use_cache: Option<bool>,
+) {
+    for (name, value) in headers {
+        if !operation
+            .headers
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case(name))
+        {
+            operation.headers.insert((*name).clone(), (*value).clone());
+        }
+    }
+    operation.use_cache = operation.use_cache.or(use_cache);
+}
+
 /// Builds a `RetryContext` from batch operation settings and global configuration.
-///
 /// Operation-level settings take precedence over global config defaults.
 #[allow(clippy::cast_possible_truncation)]
 fn build_batch_retry_context(
@@ -974,6 +1036,38 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn batch_environment_header_defaults_and_capture_precedence() {
+        let mut batch: BatchFile = serde_json::from_value(serde_json::json!({
+            "metadata": {"defaults": {"headers": {"X-Unknown": "${DEFAULT}", "X-Default": "${OTHER}"}, "use_cache": true}},
+            "operations": [{"id": "consumer", "args": ["users", "list"], "headers": {"x-unknown": "{{reference}}"}}]
+        })).unwrap();
+        apply_batch_header_defaults(&mut batch);
+        let operation = &batch.operations[0];
+        assert_eq!(operation.headers.len(), 2);
+        assert_eq!(operation.headers["x-unknown"], "{{reference}}");
+        assert_eq!(operation.use_cache, Some(true));
+        let mut store = interpolation::VariableStore::default();
+        store
+            .scalars
+            .insert("reference".into(), "${CAPTURED}".into());
+        let resolved =
+            BatchProcessor::interpolate_batch_operation(operation, &store, "consumer").unwrap();
+        assert_eq!(resolved.headers["x-unknown"], "${CAPTURED}");
+    }
+
+    #[test]
+    fn batch_header_map_names_are_validated_without_inputs() {
+        for name in ["", "X:Injected", "X\nName", "X Name"] {
+            let headers = std::collections::HashMap::from([(
+                name.to_string(),
+                "synthetic-private".to_string(),
+            )]);
+            let error = batch_header_arguments(&headers).unwrap_err();
+            assert!(!format!("{error:?} {error}").contains("synthetic-private"));
+        }
+    }
 
     #[tokio::test]
     async fn test_parse_batch_file_json() {

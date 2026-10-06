@@ -446,10 +446,28 @@ changing proxy precedence, bypass rules, rotation or transport/cache isolation. 
 handling and successful requested response output remain unchanged.
 
 Anonymous diagnostics retain useful bodies with best-effort literal redaction.
-An undeclared environment-expanded custom credential header is not yet recognized
-by this boundary; declare its API-key security scheme/mapping and avoid diagnostic
-logging or caching for that override path. Successful output can itself contain
-sensitive API data; protect it as you would the response from the API directly.
+Environment-expanded custom headers enter this boundary even for unknown header
+names and anonymous operations. Both response-cache reads and writes are disabled
+for final sensitive headers, including with the legacy authenticated-cache opt-in.
+Sensitivity is invocation-only and follows the final value: a later literal override
+replaces it. Header cloning retains sensitivity without storing provenance.
+
+Custom header values expand explicit `${NAME}` references anywhere in the value,
+including multiple references. Names must match `[A-Za-z_][A-Za-z0-9_]*`; empty,
+missing, non-Unicode or empty-valued variables and malformed references fail before
+delivery without displaying input or intermediate expansions. Expansion is single
+pass: environment values are not interpreted as more references. Other syntax,
+such as `$NAME` and ordinary braces, remains literal. This extends the previous
+whole-value-only expansion grammar and replaces unresolved-literal fallback.
+Successful output can itself contain sensitive API data; protect it as you would
+the response from the API directly.
+
+Batch metadata header defaults and per-operation header maps use the same pipeline
+as CLI and SDK custom headers, including captured `{{variable}}` values. Defaults
+have lower precedence than operation maps, and explicit `--header` arguments overlay
+both. Metadata's cache default applies only when an operation has no cache override;
+sensitive final headers still bypass caching. Header names are validated before
+map values are converted into request headers.
 
 Batch diagnostic summaries omit argument metadata in both JSON (`args` is no longer
 present) and text. Failure/progress diagnostics retain only safe categories and numeric
