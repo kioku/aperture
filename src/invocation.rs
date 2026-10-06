@@ -119,6 +119,9 @@ pub enum ExecutionResult {
         status: u16,
         /// Response headers.
         headers: HashMap<String, String>,
+        /// Omit untrusted output-processing errors while preserving requested data.
+        /// SDK callers constructing results must set this for sensitive responses.
+        diagnostics_sensitive: bool,
     },
 
     /// Successful declared binary response.
@@ -145,6 +148,8 @@ pub enum ExecutionResult {
         status: u16,
         /// Original response headers, excluding credentials and session cookies.
         headers: HashMap<String, String>,
+        /// Sensitivity follows the active invocation, never cached response text.
+        diagnostics_sensitive: bool,
     },
 
     /// The operation completed but produced no response body.

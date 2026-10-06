@@ -235,6 +235,7 @@ async fn execute_returns_success_for_http_200() {
             body,
             status,
             headers,
+            ..
         } => {
             assert_eq!(status, 200);
             let parsed: serde_json::Value =

@@ -248,9 +248,10 @@ async fn execute_api_runtime(
         .map(String::as_str)
         .or(execution.jq.as_deref());
     let output_format = resolve_output_format(matches, &execution.format);
-    let call = crate::cli::translate::matches_to_operation_call(spec, matches)?;
     let mut ctx = crate::cli::translate::cli_to_execution_context(execution, global_config)?;
     ctx.server_var_args = crate::cli::translate::extract_server_var_args(matches);
+    let call =
+        crate::cli::translate::matches_to_operation_call_with_context(spec, matches, Some(&ctx))?;
 
     let operation = spec
         .commands
@@ -520,7 +521,17 @@ fn build_misplaced_execution_flag_hint(context: &str, args: &[String]) -> Option
 
 fn invalid_dynamic_parse_error(context: &str, args: &[String], parse_error: &clap::Error) -> Error {
     let parse_error_text = parse_error.to_string();
-    let base_error = Error::invalid_command(context, parse_error_text.clone());
+    // clap renders untrusted values, argument names and suggestions. Before
+    // operation selection there is no credential context, so retain only its
+    // finite error category, plus our existing static placement guidance.
+    let reason = match parse_error.kind() {
+        clap::error::ErrorKind::ArgumentConflict => {
+            "Operation arguments conflict or cannot be used multiple times (input omitted)"
+                .to_string()
+        }
+        kind => format!("Invalid operation arguments ({kind:?}; input omitted)"),
+    };
+    let base_error = Error::invalid_command(context, reason);
 
     if parse_error.kind() != clap::error::ErrorKind::UnknownArgument {
         return base_error;
@@ -582,7 +593,7 @@ fn handle_parse_error_with_examples_fallback(
     }
 
     let relaxed_matches = parse_dynamic_matches_relaxed(context, spec, args, use_positional_args)
-        .map_err(|e| Error::invalid_command(context, e.to_string()))?;
+        .map_err(|e| invalid_dynamic_parse_error(context, args, &e))?;
 
     if crate::cli::translate::has_show_examples_flag(&relaxed_matches) {
         return Ok(Some(relaxed_matches));
@@ -695,7 +706,6 @@ fn render_batch_json_summary(
             "total_duration_seconds": result.total_duration.as_secs_f64(),
             "operations": result.results.iter().map(|r| serde_json::json!({
                 "operation_id": r.operation.id,
-                "args": r.operation.args,
                 "success": r.success,
                 "duration_seconds": r.duration.as_secs_f64(),
                 "error": r.error
@@ -706,7 +716,8 @@ fn render_batch_json_summary(
         Some(jq_filter) => {
             let summary_json = serde_json::to_string(&summary)
                 .expect("JSON serialization of valid structure cannot fail");
-            executor::apply_jq_filter(&summary_json, jq_filter)?
+            // Batch diagnostics already omit arbitrary errors independently of auth.
+            executor::apply_jq_filter_with_diagnostics(&summary_json, jq_filter, true)?
         }
         None => serde_json::to_string_pretty(&summary)
             .expect("JSON serialization of valid structure cannot fail"),
@@ -743,7 +754,7 @@ fn render_batch_text_summary(
         write_stdout_line(&format!(
             "  {} - {}: {}",
             i + 1,
-            op_result.operation.args.join(" "),
+            op_result.operation.id.as_deref().unwrap_or("<unnamed>"),
             op_result.error.as_deref().unwrap_or("Unknown error")
         ))?;
     }
@@ -857,11 +868,31 @@ mod tests {
     use super::{
         build_misplaced_execution_flag_hint,
         find_misplaced_execution_flag_after_operation_path_started,
-        has_explicit_landing_incompatible_global_flags, resolve_output_format,
-        should_render_api_context_landing, LANDING_INCOMPATIBLE_GLOBAL_FLAGS,
+        has_explicit_landing_incompatible_global_flags, invalid_dynamic_parse_error,
+        resolve_output_format, should_render_api_context_landing,
+        LANDING_INCOMPATIBLE_GLOBAL_FLAGS,
     };
     use crate::cli::OutputFormat;
     use clap::{Arg, Command};
+
+    #[test]
+    fn dynamic_parse_errors_omit_untrusted_values_and_names() {
+        for args in [
+            vec!["sdk", "--462-terces-kds-4c"],
+            vec!["sdk", "--format", "c4-sdk-secret-264"],
+        ] {
+            let error = Command::new("sdk")
+                .arg(Arg::new("format").long("format").value_parser(["json"]))
+                .try_get_matches_from(args.clone())
+                .unwrap_err();
+            let projected = invalid_dynamic_parse_error("sdk", &[], &error);
+            let output = format!("{projected} {projected:?} {:?}", projected.to_json());
+            assert!(!output.contains("c4-sdk-secret-264"), "{output}");
+            assert!(!output.contains("462-terces-kds-4c"), "{output}");
+            assert_eq!(projected.to_json().error_type, "Validation");
+            assert!(projected.to_json().context.is_some());
+        }
+    }
 
     fn matches_from(args: &[&str]) -> clap::ArgMatches {
         Command::new("api")

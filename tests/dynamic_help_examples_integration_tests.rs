@@ -178,7 +178,7 @@ fn api_show_examples_rejects_unknown_extra_flags() {
 
     assert_failure_with_validation_framing(&output);
     assert!(
-        combined_output(&output).contains("--bogus"),
+        combined_output(&output).contains("UnknownArgument"),
         "expected malformed flag details in output"
     );
 }
@@ -227,7 +227,7 @@ fn api_show_examples_rejects_invalid_flag_value() {
 
     assert_failure_with_validation_framing(&output);
     assert!(
-        combined_output(&output).contains("unexpected value 'foo'"),
+        combined_output(&output).contains("input omitted"),
         "expected invalid value details in output"
     );
 }
@@ -242,7 +242,7 @@ fn api_show_examples_rejects_missing_operation_target() {
 
     assert_failure_with_validation_framing(&output);
     assert!(
-        combined_output(&output).contains("unexpected argument '--show-examples'"),
+        combined_output(&output).contains("UnknownArgument"),
         "expected missing operation parse failure details in output"
     );
 }
@@ -260,8 +260,8 @@ fn api_show_examples_rejects_whitespace_operation_name() {
 
     assert_failure_with_validation_framing(&output);
     assert!(
-        combined_output(&output).contains("unrecognized subcommand ' '"),
-        "expected whitespace operation parse failure details in output"
+        combined_output(&output).contains("input omitted"),
+        "expected bounded whitespace operation parse failure"
     );
 }
 

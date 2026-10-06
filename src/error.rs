@@ -600,15 +600,16 @@ impl Error {
 
     // ---- Header Errors ----
 
-    /// Create an invalid header name error
-    pub fn invalid_header_name(name: impl Into<String>, reason: impl Into<String>) -> Self {
-        let name = name.into();
-        let reason = reason.into();
+    /// Create a header-name diagnostic without retaining caller input.
+    ///
+    /// Names and parser reasons can carry credentials before request context exists.
+    /// Keep the arguments for API compatibility, but expose only a static reason.
+    pub fn invalid_header_name(_name: impl Into<String>, _reason: impl Into<String>) -> Self {
         Self::Internal {
             kind: ErrorKind::Headers,
-            message: Cow::Owned(format!("Invalid header name '{name}': {reason}")),
+            message: Cow::Borrowed("Invalid header name: invalid HTTP header name"),
             context: Some(ErrorContext::new(
-                Some(json!({ "header_name": name, "reason": reason })),
+                Some(json!({ "reason": "invalid HTTP header name" })),
                 Some(Cow::Borrowed(
                     "Header names must contain only valid HTTP header characters.",
                 )),
@@ -616,15 +617,13 @@ impl Error {
         }
     }
 
-    /// Create an invalid header value error
-    pub fn invalid_header_value(name: impl Into<String>, reason: impl Into<String>) -> Self {
-        let name = name.into();
-        let reason = reason.into();
+    /// Create a header-value diagnostic with a static reason, never caller data.
+    pub fn invalid_header_value(_name: impl Into<String>, _reason: impl Into<String>) -> Self {
         Self::Internal {
             kind: ErrorKind::Headers,
-            message: Cow::Owned(format!("Invalid header value for '{name}': {reason}")),
+            message: Cow::Borrowed("Invalid header value: invalid HTTP header value"),
             context: Some(ErrorContext::new(
-                Some(json!({ "header_name": name, "reason": reason })),
+                Some(json!({ "reason": "invalid HTTP header value" })),
                 Some(Cow::Borrowed(
                     "Header values must contain only valid HTTP header characters.",
                 )),
@@ -632,18 +631,43 @@ impl Error {
         }
     }
 
-    /// Create an invalid header format error
-    pub fn invalid_header_format(header: impl Into<String>) -> Self {
-        let header = header.into();
+    /// A finite control-character reason for operation validators, without input.
+    pub(crate) fn invalid_header_control_characters() -> Self {
         Self::Internal {
             kind: ErrorKind::Headers,
-            message: Cow::Owned(format!(
-                "Invalid header format '{header}'. Expected 'Name: Value'"
-            )),
+            message: Cow::Borrowed("Invalid header value: invalid control characters"),
             context: Some(ErrorContext::new(
-                Some(json!({ "header": header })),
+                Some(json!({ "reason": "invalid control characters" })),
+                Some(Cow::Borrowed(
+                    "Header values must not contain newline, carriage return or null.",
+                )),
+            )),
+        }
+    }
+
+    /// Create a header-format diagnostic without retaining the malformed header.
+    pub fn invalid_header_format(_header: impl Into<String>) -> Self {
+        Self::Internal {
+            kind: ErrorKind::Headers,
+            message: Cow::Borrowed("Invalid header format. Expected 'Name: Value'"),
+            context: Some(ErrorContext::new(
+                Some(json!({ "expected_format": "Name: Value" })),
                 Some(Cow::Borrowed("Headers must be in 'Name: Value' format.")),
             )),
+        }
+    }
+
+    /// Project a diagnostic failure without retaining untrusted input or wrapped errors.
+    /// The stage and hint must be static; do not retain the original error or details.
+    pub(crate) fn omit_diagnostic_inputs(self, stage: &'static str, hint: &'static str) -> Self {
+        let kind = match self {
+            Self::Internal { kind, .. } => kind,
+            _ => ErrorKind::Validation,
+        };
+        Self::Internal {
+            kind,
+            message: Cow::Borrowed(stage),
+            context: Some(ErrorContext::with_suggestion(Cow::Borrowed(hint))),
         }
     }
 

@@ -400,7 +400,11 @@ fn parse_string_list_setting(value: &str) -> SettingValue {
     SettingValue::StringList(values)
 }
 
-/// Returns a URL with proxy credentials removed for display or diagnostics.
+/// Removes URL userinfo for explicitly requested configuration display.
+///
+/// Other URL components and malformed tails remain caller-owned setting data.
+/// This is not a safe diagnostic projection: request diagnostics must omit the
+/// entire value. The executor also uses this only in its private legacy digest.
 #[must_use]
 pub fn sanitize_proxy_url(value: &str) -> String {
     if !value.contains("://") && value.contains('@') {

@@ -734,10 +734,9 @@ async fn test_body_file_field_conflicts_with_body_file_in_args() {
 
     assert_eq!(result.failure_count, 1, "conflict should produce a failure");
     let err = result.results[0].error.as_deref().unwrap_or("");
-    assert!(
-        err.contains("conflicts"),
-        "error should mention the conflict; got: {err}"
-    );
+    assert_eq!(err, "Batch operation failed (Validation)");
+    assert!(!err.contains("/other.json"));
+    assert!(!err.contains(tmp.path().to_str().unwrap()));
 }
 
 #[tokio::test]

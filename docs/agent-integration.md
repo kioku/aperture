@@ -201,20 +201,23 @@ aperture api my-api -q users list | jq '.users[].id'
 
 ## Dry Run Mode
 
-The `--dry-run` flag shows the HTTP request that would be made without executing it. Useful for validation and debugging.
+The `--dry-run` flag describes the HTTP request without executing it. Anonymous request details remain useful for validation; authenticated URLs, headers and JSON bodies are omitted.
 
 ```bash
 aperture api my-api --dry-run users create --name "Test User"
 ```
 
-**Output:**
+**Authenticated output (selected fields):**
 
-```
-POST https://api.example.com/users
-Authorization: Bearer <redacted>
-Content-Type: application/json
-
-{"name": "Test User"}
+```json
+{
+  "dry_run": true,
+  "method": "POST",
+  "url": "<authenticated request URL omitted>",
+  "headers": {},
+  "body": "<authenticated request body omitted>",
+  "operation_id": "createUser"
+}
 ```
 
 ## Automatic Pagination
@@ -310,6 +313,12 @@ aperture api my-api --batch-file operations.json --batch-rate-limit 10
 aperture api my-api --batch-file operations.json --json-errors
 ```
 
+Batch summaries omit operation `args` in JSON and text: literal, environment-expanded,
+body and captured arguments may contain secrets. Failures report a safe category and
+numeric HTTP status when available, rather than parser/server/capture error text.
+IDs, counts, success flags and durations remain available. Progress output uses the
+same bounded diagnostics; intentionally requested successful API output is unchanged.
+
 **Batch result structure:**
 
 ```json
@@ -320,9 +329,9 @@ aperture api my-api --batch-file operations.json --json-errors
     "failed_operations": 1,
     "total_duration_seconds": 0.45,
     "operations": [
-      {"operation_id": "user-1", "args": ["users", "get-user-by-id", "--id", "123"], "success": true, "duration_seconds": 0.12, "error": null},
-      {"operation_id": "user-2", "args": ["users", "get-user-by-id", "--id", "456"], "success": true, "duration_seconds": 0.15, "error": null},
-      {"operation_id": "user-3", "args": ["users", "get-user-by-id", "--id", "789"], "success": false, "duration_seconds": 0.18, "error": "HTTP 404: User not found"}
+      {"operation_id": "user-1", "success": true, "duration_seconds": 0.12, "error": null},
+      {"operation_id": "user-2", "success": true, "duration_seconds": 0.15, "error": null},
+      {"operation_id": "user-3", "success": false, "duration_seconds": 0.18, "error": "Batch operation failed (HttpError, HTTP 404)"}
     ]
   }
 }
@@ -447,7 +456,7 @@ In dependent mode, execution halts immediately on the first failure. Subsequent 
 ```
 Starting dependent batch execution: 3 operations
 Operation 'create' completed
-Operation 'get-user' failed: HttpError: HTTP 404 error for 'myapi': (empty response)
+Operation 'get-user' failed: Batch operation failed (HttpError, HTTP 404)
 Dependent batch completed: 1/3 operations successful in 0.11s
 ```
 
