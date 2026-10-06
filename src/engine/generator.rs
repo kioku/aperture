@@ -161,6 +161,19 @@ fn select_invocation_command<'a>(
 }
 
 /// Parse one command level, leaving operation arguments untouched for execution.
+/// Locate the leaf command's argv using the same global grammar as selection.
+pub(crate) fn batch_operation_argument_offset(
+    args: &[String],
+) -> Result<usize, crate::error::Error> {
+    let (group, remaining) = parse_batch_subcommand(
+        std::iter::once(std::ffi::OsString::from(constants::CLI_ROOT_COMMAND))
+            .chain(args.iter().map(std::ffi::OsString::from)),
+    )?;
+    let (_, remaining) =
+        parse_batch_subcommand(std::iter::once(std::ffi::OsString::from(group)).chain(remaining))?;
+    Ok(args.len() - remaining.len())
+}
+
 fn parse_batch_subcommand(
     args: impl IntoIterator<Item = std::ffi::OsString>,
 ) -> Result<(String, Vec<std::ffi::OsString>), crate::error::Error> {

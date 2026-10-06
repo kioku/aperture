@@ -466,8 +466,13 @@ whole-value-only expansion grammar and replaces unresolved-literal fallback.
 Successful output can itself contain sensitive API data; protect it as you would
 the response from the API directly.
 
-Batch metadata header defaults and per-operation header maps use the same pipeline
-as CLI and SDK custom headers, including captured `{{variable}}` values. Defaults
+Batch metadata header defaults and per-operation header maps preserve the origin
+of interpolated values. Only caller-authored `${NAME}` segments select environment
+variables. Captured scalar/list strings, including `${NAME}`, `${}`, and malformed
+reference syntax, remain literal data. Mixed templates expand authored environment
+references once and insert captures without interpreting either expansion again.
+This also applies when interpolated arguments become custom headers; ordinary
+argument and JSON-list interpolation remain supported. Defaults
 have lower precedence than operation maps, and explicit `--header` arguments overlay
 both. Metadata's cache default applies only when an operation has no cache override;
 sensitive final headers still bypass caching. Header names are validated before
@@ -477,3 +482,14 @@ Batch diagnostic summaries omit argument metadata in both JSON (`args` is no lon
 present) and text. Failure/progress diagnostics retain only safe categories and numeric
 HTTP status, not arbitrary parser, response or capture error text. Operation IDs,
 counts, success flags, durations and intentionally requested successful API data remain.
+
+### Retry duration range
+
+Retry delays accept milliseconds (including plain numbers), seconds, or minutes.
+Unit multiplication is checked. Retry scheduling additionally requires the delay
+in milliseconds to fit in an unsigned 64-bit integer; initial and maximum delays
+use the same check. Invalid or out-of-range input returns an ordinary preparation
+error before delivery, and a batch records that operation's failure and continues
+according to its normal policy. The SDK's general `parse_duration` function retains
+`std::time::Duration`'s larger seconds range; only retry conversion imposes the
+millisecond representation boundary.
