@@ -21,3 +21,15 @@ alone retains ordinary single-word discovery behavior.
 Empty or whitespace-only input returns no results. `--api` restricts the API.
 Explicit `regex:` queries retain Rust regex syntax, case sensitivity unless
 requested by the pattern, and Unicode semantics; intent rules do not apply.
+
+## Structured results
+
+`aperture search 'public model catalog' --format json` returns one object with
+`query`, nullable `api_filter`, and a ranked `results` array. Each result contains
+`api_context`, `operation_id`, relative executable `command_path`, `method`,
+`path`, nullable `summary`, integer `score`, and string-array `highlights`.
+Results use the same matching and ordering as text search. Empty successful
+searches return `results: []`; errors still fail the command.
+
+The default remains `--format text`. `--verbose` affects text only; `--quiet`
+and `--json-errors` do not suppress requested JSON. Warnings go to stderr.

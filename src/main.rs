@@ -136,14 +136,16 @@ fn run_search_command(
     query: &str,
     api: Option<&str>,
     verbose: bool,
+    format: &aperture_cli::cli::DiscoveryFormat,
     output: &Output,
 ) -> Result<(), Error> {
     let validated_api = api.map(validate_api_name).transpose()?;
-    aperture_cli::cli::commands::search::execute_search_command(
+    aperture_cli::cli::commands::search::execute_search_command_with_format(
         manager,
         query,
         validated_api.as_deref(),
         verbose,
+        format,
         output,
     )
 }
@@ -232,7 +234,8 @@ async fn run_user_command(
             query,
             api,
             verbose,
-        } => run_search_command(manager, query, api.as_deref(), *verbose, output),
+            format,
+        } => run_search_command(manager, query, api.as_deref(), *verbose, format, output),
         Commands::Exec { api, args, .. } => {
             run_shortcut_command(manager, args, api.as_deref(), cli).await
         }

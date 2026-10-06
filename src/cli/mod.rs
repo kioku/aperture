@@ -205,7 +205,7 @@ pub struct ExecutionFlags {
 #[derive(Parser, Debug)]
 #[command(
     author,
-    version,
+    version = crate::build_info::cli_version(),
     about = "Aperture: Dynamic CLI generator for OpenAPI specifications",
     long_about = "Aperture dynamically generates commands from OpenAPI 3.x specifications.\n\
                   It serves as a bridge between autonomous AI agents and APIs by consuming\n\
@@ -390,6 +390,9 @@ pub enum Commands {
         /// Show detailed results including paths and parameters
         #[arg(long, help = "Show detailed information for each result")]
         verbose: bool,
+        /// Output format for discovery results
+        #[arg(long, value_enum, default_value = "text")]
+        format: DiscoveryFormat,
     },
     /// Execute API operations using shortcuts or direct operation IDs
     #[command(

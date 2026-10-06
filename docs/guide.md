@@ -715,3 +715,8 @@ specification and concurrency 1 (the ignored
 These measurements include retained results, use synthetic operations, and ran
 while compilation was active. They demonstrate allocation scaling within this
 setup; timings are not release-build or cross-platform performance guarantees.
+
+Shortcut execution (`run`, or its legacy alias `exec`) writes resolution
+information to stderr. Stdout contains only requested operation data, so JSON
+can be piped directly to a parser. `--quiet` and `--json-errors` suppress the
+resolution diagnostic.

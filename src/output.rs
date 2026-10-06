@@ -102,6 +102,17 @@ impl Output {
         }
     }
 
+    /// Write an informational diagnostic to stderr, preserving requested stdout data.
+    ///
+    /// # Errors
+    /// Returns non-broken-pipe write errors; quiet and JSON-error modes suppress it.
+    pub fn diagnostic(&self, msg: impl std::fmt::Display) -> Result<(), Error> {
+        if !self.quiet {
+            write_line(&mut io::stderr().lock(), &msg.to_string())?;
+        }
+        Ok(())
+    }
+
     /// Print success message (suppressed in quiet mode).
     ///
     /// Use for confirmation messages like "Spec 'foo' added successfully".
