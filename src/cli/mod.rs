@@ -120,6 +120,11 @@ pub struct ExecutionFlags {
         value_parser = clap::value_parser!(u64).range(1..=crate::config::settings::MAX_TIMEOUT_SECS))]
     pub timeout_secs: Option<u64>,
 
+    /// Maximum ordinary API response bytes (overrides configured default).
+    #[arg(long, global = true, value_name = "BYTES",
+        value_parser = clap::value_parser!(u64).range(1..=crate::response_limit::MAX_RESPONSE_BYTES))]
+    pub max_response_bytes: Option<u64>,
+
     /// Rate limit for batch operations (requests per second)
     #[arg(
         long,
@@ -985,6 +990,7 @@ pub enum ConfigCommands {
                       The configuration file comments and formatting are preserved.\n\n\
                       Available settings:\n  \
                       skills.directory                  (string)   - User library, relative to config directory\n  \
+                      max_response_bytes                (integer)  - Maximum ordinary API response bytes\n  \
                       default_timeout_secs              (integer)  - Default timeout for API requests\n  \
                       agent_defaults.json_errors        (boolean)  - Output errors as JSON by default\n  \
                       retry_defaults.max_attempts       (integer)  - Max retry attempts (0 = disabled)\n  \

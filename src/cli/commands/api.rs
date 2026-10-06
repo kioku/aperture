@@ -427,6 +427,7 @@ const RESERVED_EXECUTION_FLAGS: &[(&str, bool)] = &[
     ("--batch-file", true),
     ("--batch-concurrency", true),
     ("--timeout-secs", true),
+    ("--max-response-bytes", true),
     ("--batch-rate-limit", true),
     ("--cache", false),
     ("--no-cache", false),

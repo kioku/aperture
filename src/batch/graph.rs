@@ -201,6 +201,7 @@ fn implicit_dependencies<'a>(
     operation
         .args
         .iter()
+        .chain(operation.headers.values())
         .flat_map(|arg| extract_variable_references(arg))
         .filter_map(|var| capture_var_to_op.get(var))
         .flat_map(|indices| indices.iter().copied())

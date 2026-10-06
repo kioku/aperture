@@ -657,6 +657,37 @@ accepts 1 through 31,536,000 seconds, matching the configuration setting's range
 `agent_defaults.json_errors` applies to command-usage, argument-parsing, and
 missing-API errors. `--json-errors` forces JSON; `--json-errors=false` forces text.
 Help and version output retain their normal text format.
+
+Ordinary API responses have a **64 MiB (67,108,864 byte) per-response limit**.
+Set `max_response_bytes` with `aperture config set max_response_bytes BYTES`,
+or override it for a request or batch with `--max-response-bytes BYTES`.
+SDK callers use `ExecutionContext.max_response_bytes`; precedence is the per-call
+value, then `GlobalConfig.max_response_bytes`, then 64 MiB. Values must be positive
+integers within the platform's checked allocation/envelope range; zero, `none`,
+`unlimited`, negative values and overflow are errors, not ways to disable the bound.
+Direct SDK values are checked before requests, including cache hits and dry runs.
+
+The limit counts actual HTTP body bytes, including binary, error and pagination
+responses. An advertised oversized length fails early; missing/chunked or misleading
+lengths do not replace incremental checks on the body delivered by HTTP framing.
+An oversized response fails before body diagnostics, parsing, cache writes or binary
+output-file creation. Size failures never trigger retries, even for mutations with
+idempotency keys. Increase the limit explicitly when larger successful data is needed.
+Existing spec (10 MiB) and skill (1 MiB/8 MiB) limits are unchanged.
+
+Response-cache reads use the effective limit. Oversized decoded bodies or cache files
+are safe misses, so ordinary execution may fetch the response again. The checked
+JSON-file allowance is six times the body limit plus 1 MiB for metadata and formatting;
+this accommodates JSON escaping but unusually large metadata can also produce a miss.
+Reads are bounded even if a file grows after its size is inspected. Cache-only stats
+and low-level cache reads use the default 64 MiB policy. Invalid UTF-8 text retains
+existing replacement-character behavior; its larger decoded cache representation may
+miss a smaller byte limit. Malformed bounded cache JSON still reports a safe parse error.
+
+This is not a global process-memory cap: batch concurrency multiplies per-response
+buffering, pagination/output can retain additional data, and decoding/JSON parsing,
+cache envelopes and copies add overhead. Choose limits and concurrency together.
+
 Query/header boolean arguments accept `--enabled true` or `--enabled false`.
 A bare `--enabled` means true; an omitted optional parameter is not sent.
 

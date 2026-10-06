@@ -128,7 +128,9 @@ impl SecretContext {
         headers: &reqwest::header::HeaderMap,
     ) -> Self {
         for (name, value) in headers {
-            if !should_redact_operation_header(name.as_str(), spec, operation) {
+            if !value.is_sensitive()
+                && !should_redact_operation_header(name.as_str(), spec, operation)
+            {
                 continue;
             }
             // Sensitivity does not depend on UTF-8 decoding or credential length.
@@ -392,9 +394,17 @@ pub fn should_redact_operation_header(
             })
 }
 
-/// Conservative preparation sensitivity, without resolving environment values.
-/// Unused configured mappings do not make anonymous operations sensitive. This
-/// shares the existing declared/recognized-header boundary, not env provenance.
+/// Conservative pre-resolution policy; no environment values are read here.
+pub(crate) fn custom_headers_reference_environment(headers: &[String]) -> bool {
+    headers.iter().any(|header| {
+        header
+            .split_once(':')
+            .is_some_and(|(_, value)| value.contains("${"))
+    })
+}
+
+/// Conservative declared/recognized-header preparation policy, without resolving
+/// environment values. Unused configured mappings alone do not imply sensitivity.
 pub(crate) fn operation_preparation_is_sensitive<'a>(
     spec: &CachedSpec,
     operation: &crate::cache::models::CachedCommand,

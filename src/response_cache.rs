@@ -285,6 +285,21 @@ impl ResponseCache {
     /// - The cache file cannot be read
     /// - JSON deserialization fails
     pub async fn get(&self, key: &CacheKey) -> Result<Option<CachedResponse>, Error> {
+        self.get_with_limit(key, crate::response_limit::DEFAULT_MAX_RESPONSE_BYTES)
+            .await
+    }
+
+    /// Read with the invocation's limit. Oversized envelopes or decoded bodies are
+    /// safe misses, including legacy entries. No full file read precedes validation.
+    ///
+    /// # Errors
+    /// Rejects invalid limits and reports ordinary I/O or malformed JSON errors.
+    pub async fn get_with_limit(
+        &self,
+        key: &CacheKey,
+        max_response_bytes: u64,
+    ) -> Result<Option<CachedResponse>, Error> {
+        crate::response_limit::validate(max_response_bytes)?;
         if !self.config.enabled {
             return Ok(None);
         }
@@ -294,7 +309,11 @@ impl ResponseCache {
             return Ok(None);
         }
 
-        let cached_response = Self::read_cached_response(&cache_file).await?;
+        let Some(cached_response) =
+            Self::read_cached_response(&cache_file, max_response_bytes).await?
+        else {
+            return Ok(None);
+        };
         if Self::is_expired(&cached_response)? {
             // Cache entry has expired — don't eagerly delete here because
             // deletion is a mutating operation that should be coordinated
@@ -306,19 +325,53 @@ impl ResponseCache {
         Ok(Some(cached_response))
     }
 
-    async fn read_cached_response(cache_file: &std::path::Path) -> Result<CachedResponse, Error> {
-        let json_content = tokio::fs::read_to_string(cache_file)
+    async fn read_cached_response(
+        cache_file: &std::path::Path,
+        limit: u64,
+    ) -> Result<Option<CachedResponse>, Error> {
+        let allowance = crate::response_limit::cache_envelope(limit)?;
+        let file = tokio::fs::File::open(cache_file)
             .await
             .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
+        if file.metadata().await?.len() > allowance {
+            return Ok(None);
+        }
+        let Some(bytes) = Self::read_cache_envelope(file, allowance).await? else {
+            return Ok(None);
+        };
+        Self::decode_readable_response(&bytes, limit)
+    }
 
-        serde_json::from_str(&json_content).map_err(|e| {
-            Error::serialization_error(format!("Failed to deserialize cached response: {e}"))
-        })
+    /// Apply decoded-body policy consistently to reads and cache inspection.
+    fn decode_readable_response(bytes: &[u8], limit: u64) -> Result<Option<CachedResponse>, Error> {
+        let cached_response: CachedResponse = serde_json::from_slice(bytes)
+            .map_err(|_| Error::serialization_error("Failed to deserialize cached response"))?;
+        // Inspection uses the default; explicit reads retain their caller's policy.
+        let readable = cached_response.body.len() <= crate::response_limit::validate(limit)?;
+        Ok(readable.then_some(cached_response))
+    }
+
+    /// Read at most the checked envelope plus one byte, even after concurrent growth.
+    async fn read_cache_envelope(
+        file: tokio::fs::File,
+        allowance: u64,
+    ) -> Result<Option<Vec<u8>>, Error> {
+        use tokio::io::AsyncReadExt;
+        let mut bytes = Vec::new();
+        file.take(allowance + 1)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|e| Error::io_error(format!("Failed to read cache file: {e}")))?;
+        let allowance = usize::try_from(allowance)
+            .map_err(|_| Error::invalid_config("Cache envelope overflow"))?;
+        Ok((bytes.len() <= allowance).then_some(bytes))
     }
 
     fn is_expired(cached_response: &CachedResponse) -> Result<bool, Error> {
         Ok(Self::current_unix_timestamp()?
-            > cached_response.cached_at + cached_response.ttl_seconds)
+            > cached_response
+                .cached_at
+                .saturating_add(cached_response.ttl_seconds))
     }
 
     /// Check if a response is cached and valid for the given key
@@ -441,11 +494,12 @@ impl ResponseCache {
     }
 
     async fn inspect_stats_entry(entry: &tokio::fs::DirEntry) -> Result<Option<bool>, Error> {
-        let Ok(json_content) = tokio::fs::read_to_string(entry.path()).await else {
-            return Ok(None);
-        };
-
-        let Ok(cached_response) = serde_json::from_str::<CachedResponse>(&json_content) else {
+        let Ok(Some(cached_response)) = Self::read_cached_response(
+            &entry.path(),
+            crate::response_limit::DEFAULT_MAX_RESPONSE_BYTES,
+        )
+        .await
+        else {
             return Ok(None);
         };
 
@@ -455,7 +509,9 @@ impl ResponseCache {
             .as_secs();
 
         Ok(Some(
-            now > cached_response.cached_at + cached_response.ttl_seconds,
+            now > cached_response
+                .cached_at
+                .saturating_add(cached_response.ttl_seconds),
         ))
     }
 
@@ -1189,6 +1245,37 @@ mod tests {
         assert_eq!(stats.valid_entries, 1);
     }
 
+    #[tokio::test]
+    async fn test_get_stats_rejects_body_over_default_but_explicit_larger_read_succeeds() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+        store_entry(&cache, "api_a", "large").await;
+        let key = CacheKey {
+            api_name: "api_a".to_string(),
+            operation_id: "large".to_string(),
+            request_hash: "api_a_large".to_string(),
+        };
+        let path = cache.config.cache_dir.join(key.to_filename());
+        let mut entry: CachedResponse =
+            serde_json::from_slice(&tokio::fs::read(&path).await.unwrap()).unwrap();
+        let larger_limit = crate::response_limit::DEFAULT_MAX_RESPONSE_BYTES + 1;
+        entry.body = "x".repeat(usize::try_from(larger_limit).unwrap());
+        tokio::fs::write(&path, serde_json::to_vec(&entry).unwrap())
+            .await
+            .unwrap();
+        assert!(cache.get(&key).await.unwrap().is_none());
+        assert!(!cache.is_cached(&key).await.unwrap());
+        assert!(cache
+            .get_with_limit(&key, larger_limit)
+            .await
+            .unwrap()
+            .is_some());
+        let stats = cache.get_stats(None).await.unwrap();
+        assert_eq!(stats.total_entries, 1);
+        assert_eq!(stats.valid_entries, 0);
+        assert_eq!(stats.expired_entries, 0);
+    }
+
     // ---- cleanup_old_entries temp-file sweep ----
 
     /// Verify that a stale `.*.tmp` file left by a crashed atomic write is removed
@@ -1220,6 +1307,35 @@ mod tests {
         assert!(
             !tmp_path.exists(),
             "stale temp file must be removed by cleanup_old_entries"
+        );
+    }
+}
+
+#[cfg(test)]
+mod bounded_read_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn envelope_reader_rejects_growth_and_accepts_exact_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("growing.json");
+        tokio::fs::write(&path, b"12345678").await.unwrap();
+        let file = tokio::fs::File::open(&path).await.unwrap();
+        assert_eq!(file.metadata().await.unwrap().len(), 8);
+        // Simulate growth between stat and read without racing the test itself.
+        tokio::fs::write(&path, b"123456789").await.unwrap();
+        assert!(ResponseCache::read_cache_envelope(file, 8)
+            .await
+            .unwrap()
+            .is_none());
+        tokio::fs::write(&path, b"12345678").await.unwrap();
+        let file = tokio::fs::File::open(&path).await.unwrap();
+        assert_eq!(
+            ResponseCache::read_cache_envelope(file, 8)
+                .await
+                .unwrap()
+                .unwrap(),
+            b"12345678"
         );
     }
 }

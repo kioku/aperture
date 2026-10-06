@@ -548,6 +548,16 @@ fn effective_timeout_secs(ctx: &crate::invocation::ExecutionContext) -> u64 {
         .map_or(30, |config| config.default_timeout_secs)
 }
 
+fn effective_max_response_bytes(ctx: &crate::invocation::ExecutionContext) -> Result<usize, Error> {
+    let value = ctx.max_response_bytes.unwrap_or_else(|| {
+        ctx.global_config.as_ref().map_or(
+            crate::response_limit::DEFAULT_MAX_RESPONSE_BYTES,
+            |config| config.max_response_bytes,
+        )
+    });
+    crate::response_limit::validate(value)
+}
+
 /// Build HTTP client with effective timeout and resolved proxy behavior.
 fn build_http_client(
     ctx: &crate::invocation::ExecutionContext,
@@ -647,10 +657,11 @@ async fn send_request(
     spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
+    max_response_bytes: usize,
 ) -> Result<HttpResponseBytes, Error> {
     let start_time = std::time::Instant::now();
     // Remove only the URL: native error classification and typed causes survive.
-    let response = request
+    let mut response = request
         .send()
         .await
         .map_err(|error| Error::Network(error.without_url()))?;
@@ -661,11 +672,7 @@ async fn send_request(
         response_headers_map.insert(name.clone(), value.clone());
     }
     let response_headers = collect_response_headers(response.headers())?;
-    let response_bytes = response
-        .bytes()
-        .await
-        .map_err(|error| Error::Network(error.without_url()))?
-        .to_vec();
+    let response_bytes = read_response_bounded(&mut response, max_response_bytes).await?;
 
     if operation.has_binary_response() {
         tracing::debug!(
@@ -690,6 +697,31 @@ async fn send_request(
     Ok((status, response_headers, response_bytes))
 }
 
+/// Enforce advertised and actual sizes before decoding, logging or retaining output.
+async fn read_response_bounded(
+    response: &mut reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, Error> {
+    if response
+        .content_length()
+        .is_some_and(|length| usize::try_from(length).map_or(true, |length| length > limit))
+    {
+        return Err(crate::response_limit::exceeded(limit));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| Error::Network(error.without_url()))?
+    {
+        if chunk.len() > limit - bytes.len() {
+            return Err(crate::response_limit::exceeded(limit));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
 /// Send HTTP request with retry logic
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
@@ -703,6 +735,7 @@ async fn send_request_with_retry(
     spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
+    max_response_bytes: usize,
 ) -> Result<HttpResponseBytes, Error> {
     use crate::resilience::RetryConfig;
 
@@ -739,7 +772,15 @@ async fn send_request_with_retry(
 
     let Some(ctx) = retry_context.filter(|ctx| ctx.is_enabled()) else {
         return send_request_once(
-            client, method, url, headers, body, spec, operation, secret_ctx,
+            client,
+            method,
+            url,
+            headers,
+            body,
+            spec,
+            operation,
+            secret_ctx,
+            max_response_bytes,
         )
         .await;
     };
@@ -760,6 +801,7 @@ async fn send_request_with_retry(
             spec,
             operation,
             secret_ctx,
+            max_response_bytes,
         )
         .await;
     }
@@ -783,6 +825,7 @@ async fn send_request_with_retry(
         spec,
         operation,
         secret_ctx,
+        max_response_bytes,
     )
     .await
 }
@@ -799,6 +842,7 @@ async fn retry_request_with_backoff(
     spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
+    max_response_bytes: usize,
 ) -> Result<HttpResponseBytes, Error> {
     let max_attempts = ctx.max_attempts;
     let mut attempt: u32 = 0;
@@ -811,7 +855,7 @@ async fn retry_request_with_backoff(
         attempt += 1;
 
         let request = build_request(client, method.clone(), url, headers.clone(), body.clone());
-        match send_request(request, spec, operation, secret_ctx).await {
+        match send_request(request, spec, operation, secret_ctx, max_response_bytes).await {
             Ok((status, response_headers, response_text)) => {
                 match handle_retryable_http_response(
                     retry_config,
@@ -1078,9 +1122,10 @@ async fn send_request_once(
     spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
+    max_response_bytes: usize,
 ) -> Result<HttpResponseBytes, Error> {
     let request = build_request(client, method, url, headers, body);
-    send_request(request, spec, operation, secret_ctx).await
+    send_request(request, spec, operation, secret_ctx, max_response_bytes).await
 }
 
 /// Handle HTTP error responses
@@ -1123,7 +1168,7 @@ fn request_requires_cache_bypass(headers: &HeaderMap, url: &str) -> bool {
     // Skip these requests rather than discard a value from the request identity.
     if headers
         .iter()
-        .any(|(name, _)| is_auth_header(name.as_str()))
+        .any(|(name, value)| value.is_sensitive() || is_auth_header(name.as_str()))
         || headers
             .keys()
             .any(|name| headers.get_all(name).iter().count() > 1)
@@ -1178,9 +1223,16 @@ fn prepare_cache_context(
 /// Check cache for existing response
 async fn check_cache(
     cache_context: Option<&(CacheKey, ResponseCache)>,
+    max_response_bytes: usize,
 ) -> Result<Option<CachedResponse>, Error> {
     if let Some((cache_key, response_cache)) = cache_context {
-        response_cache.get(cache_key).await
+        response_cache
+            .get_with_limit(
+                cache_key,
+                u64::try_from(max_response_bytes)
+                    .map_err(|_| Error::invalid_config("max_response_bytes overflow"))?,
+            )
+            .await
     } else {
         Ok(None)
     }
@@ -1264,33 +1316,69 @@ fn validate_header_value(_name: &str, value: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Parses a custom header string in the format "Name: Value" or "Name:Value"
-fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
-    // Find the colon separator
-    let colon_pos = header_str
-        .find(':')
+/// Parse and resolve invocation-only headers. Sensitivity belongs to the final
+/// value, so normal `HeaderMap` replacement and cloning preserve its policy.
+fn parse_custom_header(header_str: &str) -> Result<(HeaderName, HeaderValue), Error> {
+    let (name, value) = header_str
+        .split_once(':')
         .ok_or_else(|| Error::invalid_header_format(header_str))?;
+    let name = name.trim();
+    let header_name = parse_custom_header_name(name)?;
+    let (expanded, sensitive) = expand_header_environment(value.trim())?;
+    validate_header_value(name, &expanded)?;
+    let mut value = HeaderValue::from_str(&expanded)
+        .map_err(|e| Error::invalid_header_value(name, e.to_string()))?;
+    value.set_sensitive(sensitive);
+    Ok((header_name, value))
+}
 
-    let name = header_str[..colon_pos].trim();
-    let value = header_str[colon_pos + 1..].trim();
-
+fn parse_custom_header_name(name: &str) -> Result<HeaderName, Error> {
     if name.is_empty() {
         return Err(Error::empty_header_name());
     }
+    HeaderName::from_str(name).map_err(|e| Error::invalid_header_name(name, e.to_string()))
+}
 
-    // Support environment variable expansion in header values
-    let expanded_value = if value.starts_with("${") && value.ends_with('}') {
-        // Extract environment variable name
-        let var_name = &value[2..value.len() - 1];
-        std::env::var(var_name).unwrap_or_else(|_| value.to_string())
-    } else {
-        value.to_string()
-    };
+fn header_environment_error() -> Error {
+    Error::validation_error(
+        "Invalid header environment reference: use ${NAME} with a nonempty Unicode environment value (input omitted)",
+    )
+}
 
-    // Validate the header value
-    validate_header_value(name, &expanded_value)?;
+/// Expand only explicit ${NAME} references, once; retain other dollar/braces
+/// literally. Never include a name, value, or partial expansion in errors.
+fn expand_header_environment(value: &str) -> Result<(String, bool), Error> {
+    let mut remaining = value;
+    let mut expanded = String::new();
+    let mut sensitive = false;
+    while let Some(start) = remaining.find("${") {
+        expanded.push_str(&remaining[..start]);
+        let reference = &remaining[start + 2..];
+        let end = reference.find('}').ok_or_else(header_environment_error)?;
+        let name = &reference[..end];
+        validate_header_environment_name(name)?;
+        let resolved = std::env::var(name).map_err(|_| header_environment_error())?;
+        if resolved.is_empty() {
+            return Err(header_environment_error());
+        }
+        expanded.push_str(&resolved);
+        sensitive = true;
+        remaining = &reference[end + 1..];
+    }
+    expanded.push_str(remaining);
+    Ok((expanded, sensitive))
+}
 
-    Ok((name.to_string(), expanded_value))
+fn validate_header_environment_name(name: &str) -> Result<(), Error> {
+    let mut bytes = name.bytes();
+    if !bytes
+        .next()
+        .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return Err(header_environment_error());
+    }
+    Ok(())
 }
 
 struct ResolvedAuthenticationSecret {
@@ -1485,9 +1573,10 @@ fn add_idempotency_key(
 
 async fn cached_execution_result(
     cache_context: Option<&(CacheKey, ResponseCache)>,
+    max_response_bytes: usize,
     diagnostics_sensitive: bool,
 ) -> Result<Option<ExecutionResult>, Error> {
-    if let Some(cached_response) = check_cache(cache_context).await? {
+    if let Some(cached_response) = check_cache(cache_context, max_response_bytes).await? {
         return Ok(Some(ExecutionResult::Cached {
             body: cached_response.body,
             status: cached_response.status_code,
@@ -1624,6 +1713,7 @@ async fn finalize_execution_result(
 /// Returns errors for authentication failures, network issues, or response
 /// validation problems.
 struct PreExecutionInput<'a> {
+    max_response_bytes: usize,
     cache_context: Option<&'a (CacheKey, ResponseCache)>,
     dry_run: bool,
     method: &'a Method,
@@ -1653,7 +1743,12 @@ async fn resolve_pre_execution_result(
     if dry_run.is_some() {
         return Ok(dry_run);
     }
-    cached_execution_result(input.cache_context, input.secret_ctx.is_authenticated()).await
+    cached_execution_result(
+        input.cache_context,
+        input.max_response_bytes,
+        input.secret_ctx.is_authenticated(),
+    )
+    .await
 }
 
 /// Executes an API operation using CLI-agnostic domain types.
@@ -1667,6 +1762,7 @@ pub async fn execute(
     call: crate::invocation::OperationCall,
     ctx: crate::invocation::ExecutionContext,
 ) -> Result<crate::invocation::ExecutionResult, Error> {
+    let max_response_bytes = effective_max_response_bytes(&ctx)?;
     let prepared = prepare_execution(spec, call, &ctx)?;
 
     if let Some(result) = resolve_pre_execution_result(PreExecutionInput {
@@ -1679,6 +1775,7 @@ pub async fn execute(
         spec,
         operation: prepared.operation,
         proxy: &prepared.proxy_diagnostics,
+        max_response_bytes,
         secret_ctx: &prepared.secret_ctx,
     })
     .await?
@@ -1699,6 +1796,7 @@ pub async fn execute(
         spec,
         prepared.operation,
         Some(&prepared.secret_ctx),
+        max_response_bytes,
     )
     .await?;
 
@@ -2033,7 +2131,8 @@ pub(crate) fn pagination_request_url(
     ctx: &crate::invocation::ExecutionContext,
 ) -> Result<reqwest::Url, Error> {
     let operation = find_operation_by_id(spec, &call.operation_id)?;
-    let sensitive = preparation_transport_is_sensitive(spec, ctx)
+    let sensitive = logging::custom_headers_reference_environment(&call.custom_headers)
+        || preparation_transport_is_sensitive(spec, ctx)
         || logging::operation_preparation_is_sensitive(
             spec,
             operation,
@@ -2307,11 +2406,7 @@ fn authentication_env_name<'a>(
 fn apply_custom_headers(headers: &mut HeaderMap, custom_headers: &[String]) -> Result<(), Error> {
     for header_str in custom_headers {
         let (name, value) = parse_custom_header(header_str)?;
-        let header_name = HeaderName::from_str(&name)
-            .map_err(|e| Error::invalid_header_name(&name, e.to_string()))?;
-        let header_value = HeaderValue::from_str(&value)
-            .map_err(|e| Error::invalid_header_value(&name, e.to_string()))?;
-        headers.insert(header_name, header_value);
+        headers.insert(name, value);
     }
     Ok(())
 }
@@ -2551,6 +2646,124 @@ mod operation_redirect_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn environment_header_provenance_survives_clone_and_final_overrides() {
+        let variable = "APERTURE_265_PROVENANCE_TEST";
+        std::env::set_var(variable, "synthetic-265");
+        let mut headers = HeaderMap::new();
+        apply_custom_headers(&mut headers, &[format!("X-Unknown: ${{{variable}}}")]).unwrap();
+        std::env::remove_var(variable);
+        assert!(headers["X-Unknown"].is_sensitive());
+        assert!(headers.clone()["X-Unknown"].is_sensitive());
+        assert!(request_requires_cache_bypass(
+            &headers,
+            "http://localhost/test"
+        ));
+        let spec = security_test_spec();
+        let context = logging::SecretContext::empty().with_active_operation_headers(
+            &spec,
+            &spec.commands[0],
+            &headers,
+        );
+        assert!(context.is_authenticated());
+        apply_custom_headers(&mut headers, &["X-Unknown: public".into()]).unwrap();
+        assert!(!headers["X-Unknown"].is_sensitive());
+        assert!(!request_requires_cache_bypass(
+            &headers,
+            "http://localhost/test"
+        ));
+    }
+
+    #[test]
+    fn environment_header_references_fail_closed() {
+        for value in [
+            "${}",
+            "${APERTURE_265_MISSING}",
+            "${UNCLOSED",
+            "${BAD NAME}",
+        ] {
+            assert!(
+                apply_custom_headers(&mut HeaderMap::new(), &[format!("X-Unknown: {value}")])
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn environment_header_multiple_unicode_and_literal_compatibility() {
+        let first = "APERTURE_265_MULTIPLE_FIRST";
+        let second = "APERTURE_265_MULTIPLE_SECOND";
+        std::env::set_var(first, "synthetic-é");
+        std::env::set_var(second, "second");
+        let (name, value) = parse_custom_header(&format!(
+            "X-Unknown: prefix ${{{first}}}/${{{second}}} suffix"
+        ))
+        .unwrap();
+        std::env::remove_var(first);
+        std::env::remove_var(second);
+        assert_eq!(name, "x-unknown");
+        assert_eq!(
+            value.as_bytes(),
+            "prefix synthetic-é/second suffix".as_bytes()
+        );
+        assert!(value.is_sensitive());
+        for literal in ["", "$NAME", "{NAME}", "dollar$", "none", "foo:bar"] {
+            let (_, value) = parse_custom_header(&format!("X-Literal: {literal}")).unwrap();
+            assert_eq!(value.as_bytes(), literal.as_bytes());
+            assert!(!value.is_sensitive());
+        }
+    }
+
+    #[test]
+    fn environment_header_empty_and_control_values_are_input_free() {
+        let variable = "APERTURE_265_INVALID_VALUE";
+        for value in [
+            "",
+            "synthetic-secret\r",
+            "synthetic-secret\n",
+            "synthetic-secret\u{1}",
+        ] {
+            std::env::set_var(variable, value);
+            let error = parse_custom_header(&format!("X-Unknown: ${{{variable}}}")).unwrap_err();
+            let diagnostic = format!("{error:?} {error}");
+            assert!(!diagnostic.contains("synthetic-secret"));
+            assert!(!diagnostic.contains(variable));
+        }
+        std::env::remove_var(variable);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn environment_header_non_unicode_value_is_input_free() {
+        use std::os::unix::ffi::OsStringExt;
+        let variable = "APERTURE_265_NON_UNICODE_VALUE";
+        std::env::set_var(
+            variable,
+            std::ffi::OsString::from_vec(b"synthetic-secret-\xff".to_vec()),
+        );
+        let error = parse_custom_header(&format!("X-Unknown: ${{{variable}}}")).unwrap_err();
+        std::env::remove_var(variable);
+        let diagnostic = format!("{error:?} {error}");
+        assert!(!diagnostic.contains("synthetic-secret"));
+        assert!(!diagnostic.contains(variable));
+    }
+
+    #[test]
+    fn environment_header_explicit_metadata_without_ascii_conversion() {
+        let mut value = HeaderValue::from_bytes(b"\xff").unwrap();
+        value.set_sensitive(true);
+        let mut headers = HeaderMap::new();
+        headers.insert("x-unknown", value);
+        let spec = security_test_spec();
+        assert!(logging::SecretContext::empty()
+            .with_active_operation_headers(&spec, &spec.commands[0], &headers)
+            .is_authenticated());
+        assert!(request_requires_cache_bypass(
+            &headers,
+            "http://localhost/test"
+        ));
+    }
+
     fn security_test_spec() -> CachedSpec {
         let document = serde_json::json!({
             "openapi":"3.0.3", "info":{"title":"Security", "version":"1"},

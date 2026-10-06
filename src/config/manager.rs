@@ -742,6 +742,9 @@ impl<F: FileSystem> ConfigManager<F> {
 
         // Type mismatches are programming errors - parse_for_key guarantees correct types.
         match (key, value) {
+            (SettingKey::MaxResponseBytes, SettingValue::U64(v)) => {
+                Self::set_root_u64(doc, "max_response_bytes", *v);
+            }
             (SettingKey::DefaultTimeoutSecs, SettingValue::U64(v)) => {
                 Self::set_root_u64(doc, "default_timeout_secs", *v);
             }
