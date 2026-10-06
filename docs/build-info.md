@@ -1,6 +1,9 @@
 # Build identity
 
-`aperture --version` retains the package-version output. Use `aperture build-info`
+`aperture --version` (or `-V`) reports the package version followed by the
+seven-character source revision and state, for example
+`aperture-cli 0.1.9 (bb5ef54, clean)`. Archives without source metadata report
+`(unknown, unknown)`. Use `aperture build-info`
 or `aperture build-info --json` for the embedded version, full source revision,
 and `source_state` (`clean`, `dirty`, or `unknown`). This command does not load
 configuration or contact services. Metadata contains no time, host path, or

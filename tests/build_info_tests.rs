@@ -72,7 +72,10 @@ fn cli_build_info_and_version() {
     assert_eq!(version.kind(), clap::error::ErrorKind::DisplayVersion);
     assert_eq!(
         version.to_string(),
-        format!("aperture-cli {}\n", env!("CARGO_PKG_VERSION"))
+        format!(
+            "aperture-cli {}\n",
+            aperture_cli::build_info::current().version_label()
+        )
     );
     for json in [false, true] {
         let mut args = vec!["aperture", "build-info"];
@@ -166,6 +169,37 @@ fn binary_reports_identity_without_configuration() {
     assert!(version.status.success());
     assert_eq!(
         String::from_utf8(version.stdout).unwrap(),
-        format!("aperture-cli {}\n", env!("CARGO_PKG_VERSION"))
+        format!(
+            "aperture-cli {}\n",
+            aperture_cli::build_info::current().version_label()
+        )
     );
+}
+
+#[test]
+fn version_reports_embedded_identity_before_configuration() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("invalid-config");
+    std::fs::write(&config, "not a directory").unwrap();
+    let info = aperture_cli::build_info::current();
+    let short = if info.revision == "unknown" {
+        "unknown"
+    } else {
+        &info.revision[..7]
+    };
+    let expected = format!(
+        "aperture-cli {} ({short}, {})\n",
+        info.version, info.source_state
+    );
+    for flag in ["-V", "--version"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_aperture"))
+            .env("APERTURE_CONFIG_DIR", &config)
+            .env_remove("RUST_LOG")
+            .args(["--quiet", "--json-errors", flag])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, expected.as_bytes());
+        assert!(output.stderr.is_empty());
+    }
 }
