@@ -831,10 +831,10 @@ async fn handle_shortcut_resolution(
 ) -> Result<(), Error> {
     match resolver.resolve_shortcut(&args) {
         ResolutionResult::Resolved(shortcut) => {
-            output.info(format!(
+            output.diagnostic(format!(
                 "Resolved shortcut to: aperture {}",
                 shortcut.full_command.join(" ")
-            ));
+            ))?;
             let context = &shortcut.full_command[1];
             let operation_args = shortcut.full_command[2..].to_vec();
             let user_args = if args.len() > count_shortcut_args(&args) {

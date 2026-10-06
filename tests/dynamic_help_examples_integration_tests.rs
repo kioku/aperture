@@ -479,3 +479,28 @@ fn run_misplaced_api_filter_emits_targeted_placement_hint() {
         "expected corrected aperture run placement example; got {combined}"
     );
 }
+
+#[test]
+fn shortcut_dry_run_stdout_is_complete_json() {
+    let temp_dir = TempDir::new().unwrap();
+    let spec_file = create_required_param_spec(&temp_dir);
+    add_spec(&temp_dir, &spec_file);
+    for verb in ["run", "exec"] {
+        for scope in [false, true] {
+            let mut args = vec![verb, "--dry-run"];
+            if scope {
+                args.extend(["--api", "test-api"]);
+            }
+            args.extend(["getUserById", "--id", "123"]);
+            let result = run_with_config_dir(&temp_dir, &args);
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+            assert_eq!(value["dry_run"], true);
+            assert!(!result.stderr.is_empty());
+        }
+    }
+}
