@@ -16,6 +16,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Accept only numeric parser metadata: TOML messages can contain credentials from
+/// source lines or deserialized values, including before operation context exists.
+fn configuration_parse_error(span: Option<std::ops::Range<usize>>) -> Error {
+    let location = span.map_or_else(String::new, |span| {
+        format!(" at byte range {}..{}", span.start, span.end)
+    });
+    Error::invalid_config(format!("TOML parse error{location} (input omitted)"))
+}
+
 /// Registration keeps the persisted reference separate from ephemeral download material.
 /// Offline rebuilds carry only the reference and never resolve credentials.
 #[derive(Default)]
@@ -632,7 +641,8 @@ impl<F: FileSystem> ConfigManager<F> {
         let config_path = self.config_dir.join(crate::constants::CONFIG_FILENAME);
         if self.fs.exists(&config_path) {
             let content = self.fs.read_to_string(&config_path)?;
-            toml::from_str(&content).map_err(|e| Error::invalid_config(e.to_string()))
+            toml::from_str(&content)
+                .map_err(|error: toml::de::Error| configuration_parse_error(error.span()))
         } else {
             Ok(GlobalConfig::default())
         }
@@ -831,9 +841,9 @@ impl<F: FileSystem> ConfigManager<F> {
             String::new()
         };
 
-        let mut doc: DocumentMut = content
-            .parse()
-            .map_err(|e| Error::invalid_config(format!("Failed to parse config: {e}")))?;
+        let mut doc = content
+            .parse::<DocumentMut>()
+            .map_err(|error| configuration_parse_error(error.span()))?;
 
         Self::apply_setting_to_document(&mut doc, *key, value);
 

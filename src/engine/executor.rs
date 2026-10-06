@@ -1166,12 +1166,12 @@ fn handle_http_error(
 fn request_requires_cache_bypass(headers: &HeaderMap, url: &str) -> bool {
     // The cache's single-value header map cannot represent repeated fields.
     // Skip these requests rather than discard a value from the request identity.
-    if headers
-        .iter()
-        .any(|(name, value)| value.is_sensitive() || is_auth_header(name.as_str()))
-        || headers
-            .keys()
-            .any(|name| headers.get_all(name).iter().count() > 1)
+    // Non-ASCII values cannot be represented by the cache's string header input.
+    if headers.iter().any(|(name, value)| {
+        value.is_sensitive() || value.to_str().is_err() || is_auth_header(name.as_str())
+    }) || headers
+        .keys()
+        .any(|name| headers.get_all(name).iter().count() > 1)
     {
         return true;
     }
@@ -1202,10 +1202,17 @@ fn prepare_cache_context(
         return Ok(None);
     }
 
-    let header_map: HashMap<String, String> = headers
+    let header_map = headers
         .iter()
-        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
-        .collect();
+        .map(|(name, value)| {
+            value
+                .to_str()
+                .map(|value| (name.as_str().to_string(), value.to_string()))
+        })
+        .collect::<Result<HashMap<_, _>, _>>();
+    let Ok(header_map) = header_map else {
+        return Ok(None);
+    };
 
     let cache_key = CacheKey::from_request(
         spec_name,
@@ -2047,7 +2054,9 @@ fn prepare_runtime_context<'a>(
     // Strict pagination cannot read bodies/Link headers from ordinary requests
     // that may have followed a redirect under the original URL. Partition both
     // policies. The proxy policy revision also misses entries that older
-    // executors may have populated with authenticated proxy responses.
+    // executors may have populated with authenticated proxy responses. The header
+    // identity revision also misses old Unicode projections, including entries
+    // that an empty ASCII header could otherwise match.
     let cache_context = prepare_cache_context(
         if execution_bypasses_cache(operation, ctx) {
             None
@@ -2056,7 +2065,7 @@ fn prepare_runtime_context<'a>(
         },
         &spec.name,
         &format!(
-            "{}:redirects={}:origin-bound=v1:proxy-auth-bypass=v2",
+            "{}:redirects={}:origin-bound=v1:proxy-auth-bypass=v2:header-identity=v2",
             operation.operation_id, !strict_pagination
         ),
         method,
@@ -2646,6 +2655,31 @@ mod operation_redirect_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn non_ascii_header_values_bypass_cache_without_losing_wire_bytes() {
+        for bytes in ["é".as_bytes(), "ø".as_bytes(), &[0xff]] {
+            let value = HeaderValue::from_bytes(bytes).unwrap();
+            assert!(!value.is_sensitive());
+            let mut headers = HeaderMap::new();
+            headers.insert("x-unknown", value);
+            assert!(request_requires_cache_bypass(
+                &headers,
+                "http://localhost/test"
+            ));
+            let mut cloned = headers.clone();
+            assert!(request_requires_cache_bypass(
+                &cloned,
+                "http://localhost/test"
+            ));
+            assert_eq!(cloned["x-unknown"].as_bytes(), bytes);
+            cloned.insert("x-unknown", HeaderValue::from_static("public"));
+            assert!(!request_requires_cache_bypass(
+                &cloned,
+                "http://localhost/test"
+            ));
+        }
+    }
+
     #[test]
     fn environment_header_provenance_survives_clone_and_final_overrides() {
         let variable = "APERTURE_265_PROVENANCE_TEST";
