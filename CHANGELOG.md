@@ -2,6 +2,233 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-10-06
+
+### Bug Fixes
+
+- Restore doc comment and #[must_use] on format_search_results
+- **deps:** Bump aws-lc-sys to 0.39.0 and rustls-webpki to 0.103.10
+- Count corrupt entries in cache stats
+- Preserve empty selection retry behavior
+- Bump rustls-webpki to 0.103.12 (#157)
+- Treat dynamic help and examples as control flow
+- Update auth hints to current secret commands
+- Deduplicate shortcut candidates for deterministic resolution
+- Prefer nested reinit guidance for config mapping
+- Prefer nested config guidance in user-facing hints
+- Expand discovery tips for overview and commands
+- Preserve api no-op error semantics for machine flags
+- Render search parameter flags in kebab case
+- Use executable default values in canonical examples
+- Include all required flags in request-body examples
+- Accept documented powershell completion shell (#139)
+- Keep completion working after global flags (#139)
+- Tolerate server-var completion values (#139)
+- Recover completion after unknown flag prefixes (#139)
+- Recover config completion after unknown flags (#139)
+- Preserve fish and powershell completion cursor state (#139)
+- Resolve clippy violations blocking integration jobs
+- Address rust 1.95 duration lint regressions
+- Derive user agent from package version
+- Only emit hints for matching unknown flags
+- Remove remaining glyphs from archived future improvements doc
+- Remove glyphs from pre-commit hook output
+- Add fallible stdout line helper
+- Handle broken pipe in api command output
+- Route discovery stdout through pipe-safe writes
+- Make remaining stdout status writes pipe-safe
+- Propagate prompt stdout write errors
+- Handle broken pipe in paginated NDJSON output
+- Preserve default proxy handling without config proxies
+- Include proxy flags in execution flag handling
+- Redact malformed proxy credentials
+- Ignore empty proxy environment values
+- Apply proxy overrides to batch requests
+- Repair cargo deny audit
+- Harden binary operation boundaries
+- Classify schema-less response variants safely
+- Close binary response classification gaps
+- Repair current Rust gates
+- Make Nix crate fetches reliable
+- Retry transport failures and preserve pagination targets
+- Honor declared OpenAPI URL parameter serialization
+- Enforce retry and pagination boundaries
+- Preserve OpenAPI security groups and example payloads
+- Address spec review parsing and authentication gaps
+- Preserve cache semantics and safely reuse SDK clients
+- Close cache and transport credential isolation gaps
+- Satisfy current clippy result predicate lint
+- Make keyword search deterministic and regex explicit
+- Bound batch allocations and honor execution defaults and booleans
+- Validate execution limits and parse batch command positions
+- Prevent alias counts from dominating exact search matches
+- Apply JSON error defaults to usage and parsing failures
+- Bound batches and honor CLI defaults, booleans, search, and MSRV
+- Isolate shared transport clients by effective timeout
+- Secure response caching and reuse SDK HTTP clients
+- Integrate grouped security with cache safeguards
+- Redact non-unicode authentication errors
+- Integrate request transport and schema boundaries
+- Bound CLI dispatcher stack use
+- Bypass response caching for authenticated proxies
+- Recognize scheme-less proxy credentials
+- Scope single-api discovery to requested cache
+- Match multiword search intent with method qualifiers
+- Repair workflow skill roots and agent interfaces
+- Validate skill settings and portable filesystem checks
+- Protect authenticated specification response diagnostics
+- Guard decoded specification credentials and rollback errors
+- Validate oauth2 tokens and preserve supported alternatives
+- Preserve explicit operation security in openapi 3.1
+- Integrate oauth2 support and repair HTTPS fixture sockets
+- Bind operation redirects to the original origin
+- Bound ordinary api response buffering
+- Suppress authenticated operation body diagnostics
+- Close authenticated diagnostic reflection paths
+- Omit authenticated outgoing diagnostic metadata
+- Omit untrusted proxy diagnostic metadata
+- Omit credential-bearing operation diagnostics
+- Integrate safe diagnostics with bounded response reads
+- Preserve sensitivity of environment-backed headers
+- Isolate header caches and omit TOML diagnostic inputs
+- Reject retry duration overflow before execution
+- Keep captured batch headers out of environment expansion
+- Preserve header origins around implicit boolean arguments
+- Keep shortcut resolution diagnostics off stdout
+
+### Documentation
+
+- Update changelog for v0.1.9
+- Define canonical cli naming and aliases
+- Document nested config taxonomy and migration
+- Clarify discovery command roles in help text
+- Define orient-find-inspect-execute discovery flow
+- Describe api context landing behavior
+- Describe command-scoped execution flags
+- Document structured discovery output schemas
+- Add shell completion usage guide
+- Remove decorative glyphs from guides
+- Normalize archived docs and ADR status
+- Document proxy configuration
+- Align response discovery limitations
+- Keep request guidance compatible with current main
+- Record final startup benchmark comparison
+- Align benchmark summary with final measurements
+- Teach complete Aperture workflows in bundled core skill
+- Surface agent skills in help and clarify core activation
+
+### Features
+
+- Make exec ambiguity output actionable
+- Add api-scoped shortcut resolution for exec
+- Add canonical names for commands and run
+- Add nested config command domains
+- Make docs api output a reference index
+- Add discovery next-step guidance in command output
+- Add landing output for api context command
+- Add onboarding next steps after config add
+- Summarize partial spec acceptance on config add
+- Add discovery structured-output flags
+- Add json output for discovery commands
+- Add json mode to config api list
+- Generate canonical docs usage and examples
+- Align runtime help and examples with api context
+- Add completion command scaffolding
+- Implement dynamic shell completion engine
+- Add nushell completion support (#139)
+- Add targeted hints for misplaced execution flags
+- Add centralized discovery style primitives
+- Add styled discovery formatters
+- Apply semantic styling to discovery command output
+- Add proxy configuration settings
+- Add per-request proxy flags
+- Resolve proxy configuration for requests
+- Support byte-safe binary body I/O
+- Preserve OpenAPI parameter serialization metadata
+- Expose reproducible source build identity
+- Host bundled and user workflow skills
+- Add environment-backed specification authentication
+- Support externally supplied oauth2 bearer tokens
+- Include embedded source identity in version output
+- Add structured JSON search results
+
+### Miscellaneous Tasks
+
+- Add video demonstration to the readme
+- Change asset link in README.md
+- Replace pre-commit framework with bash hooks and update ast-grep rules
+- Add SKIP_ASTGREP escape hatch to pre-commit hook
+- Run compl scan in pre-commit when available
+- Fail compl gate and emit jsonl in pre-commit
+- Serialize Nix dependency fetches
+- Validate the actual Rust 1.91 minimum with locked features
+- Integrate current main into cache changes
+- Integrate base64 upgrade with reqwest update
+- Integrate clap upgrade with serde update
+- Integrate dirs upgrade with dependency updates
+
+### Performance
+
+- Skip disabled request and response logging work
+- Avoid full command trees for targeted invocations
+- Share spec snapshots across shortcut index entries
+
+### Refactor
+
+- Resolve all max-nesting-depth violations
+- Simplify config and api dispatch
+- Reduce complexity hotspots
+- Reduce complexity hotspots
+- Reduce complexity violations
+- Reduce cyclomatic complexity hotspots
+- Eliminate complexity hotspots at threshold 10
+- Reduce api command complexity for compl gate
+- Add centralized command guidance helpers
+- Route error hints through command guidance
+- Normalize built-in command examples
+- Scope execution flags to api and run
+- Remove decorative glyphs from docs output
+- Split jq result formatting to satisfy complexity gate
+- Split jq result formatting to satisfy complexity gate
+- Split jq result formatting to satisfy complexity gate
+- Split jq result formatting to satisfy complexity gate
+
+### Testing
+
+- Simplify empty selection continue coverage
+- Add adversarial parser coverage for server vars and openapi 3.1 json
+- Cover dynamic help and examples control flow
+- Update hidden flag help expectations
+- Cover malformed --show-examples parser inputs
+- Cover malformed exec --api inputs (#138)
+- Cover canonical and legacy cli command names
+- Cover nested config command compatibility
+- Cover malformed input for nested config parser
+- Cover api context landing behavior
+- Cover config add onboarding and partial summaries
+- Verify scoped flag help and parsing behavior
+- Cover structured discovery output modes
+- Add shell completion coverage
+- Cover completion parser edge cases (#139)
+- Cover zsh completion script generation (#139)
+- Cover misplaced execution flag hint detection
+- Cover misplaced api and run flag placement errors
+- Cover deprecated command help metadata
+- Cover discovery color gating and machine output safety
+- Add adversarial coverage for discovery style token handling
+- Cover proxy resolution behavior
+- Cover retried binary response output
+- Make retry server sockets blocking across platforms
+- Exercise unicode case folding across differing case
+- Replace emoji fixtures with non-emoji unicode
+- Support filesystem filename capabilities in skill fixtures
+- Read embedded handbook examples with portable line endings
+- Cover skills machinery without testing instruction text
+
+### Build
+
+- Narrow chrono and governor dependency features
+
 ## [0.1.9] - 2026-03-04
 
 ### Miscellaneous Tasks
