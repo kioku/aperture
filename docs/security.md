@@ -477,3 +477,14 @@ Batch diagnostic summaries omit argument metadata in both JSON (`args` is no lon
 present) and text. Failure/progress diagnostics retain only safe categories and numeric
 HTTP status, not arbitrary parser, response or capture error text. Operation IDs,
 counts, success flags, durations and intentionally requested successful API data remain.
+
+### Retry duration range
+
+Retry delays accept milliseconds (including plain numbers), seconds, or minutes.
+Unit multiplication is checked. Retry scheduling additionally requires the delay
+in milliseconds to fit in an unsigned 64-bit integer; initial and maximum delays
+use the same check. Invalid or out-of-range input returns an ordinary preparation
+error before delivery, and a batch records that operation's failure and continues
+according to its normal policy. The SDK's general `parse_duration` function retains
+`std::time::Duration`'s larger seconds range; only retry conversion imposes the
+millisecond representation boundary.

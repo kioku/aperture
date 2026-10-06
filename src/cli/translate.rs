@@ -8,7 +8,7 @@ use crate::cache::models::{CachedCommand, CachedParameter, CachedSpec};
 use crate::cli::ExecutionFlags;
 use crate::config::models::GlobalConfig;
 use crate::constants;
-use crate::duration::parse_duration;
+use crate::duration::parse_retry_delay_ms;
 use crate::engine::executor::RetryContext;
 use crate::error::Error;
 use crate::invocation::{ExecutionContext, OperationCall, ProxyOverride, RequestBody};
@@ -486,19 +486,18 @@ fn resolve_retry_attempts(explicit: Option<u32>, default: Option<u32>) -> u32 {
     explicit.or(default).unwrap_or(0)
 }
 
-#[allow(clippy::cast_possible_truncation)]
 fn resolve_retry_delay_ms(delay: Option<&str>, default_ms: u64) -> Result<u64, Error> {
-    match delay {
-        Some(delay_str) => Ok(parse_duration(delay_str)
-            .map_err(|error| {
+    delay.map_or_else(
+        || Ok(default_ms),
+        |delay_str| {
+            parse_retry_delay_ms(delay_str).map_err(|error| {
                 error.omit_diagnostic_inputs(
                     "Invalid retry delay (input omitted)",
                     "Use a duration such as 500ms, 1s, 30s or 1m.",
                 )
-            })?
-            .as_millis() as u64),
-        None => Ok(default_ms),
-    }
+            })
+        },
+    )
 }
 
 /// Explicit execution flags take precedence over persisted defaults.
@@ -559,5 +558,21 @@ mod response_limit_tests {
             9
         );
         assert!(resolve_execution_defaults(&flags(None), None).is_none());
+    }
+}
+
+#[cfg(test)]
+mod retry_duration_tests {
+    use super::*;
+
+    #[test]
+    fn retry_delay_rejects_millisecond_overflow() {
+        assert!(resolve_retry_delay_ms(Some("18446744073709552s"), 500).is_err());
+        assert!(resolve_retry_delay_ms(Some("307445734561826m"), 30_000).is_err());
+        assert_eq!(
+            resolve_retry_delay_ms(Some("18446744073709551615ms"), 500).unwrap(),
+            u64::MAX
+        );
+        assert_eq!(resolve_retry_delay_ms(None, 500).unwrap(), 500);
     }
 }

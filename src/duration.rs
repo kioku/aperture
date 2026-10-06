@@ -46,26 +46,31 @@ pub fn parse_duration(s: &str) -> Result<Duration, Error> {
 }
 
 fn parse_duration_with_suffixes(value: &str) -> Result<Option<Duration>, Error> {
-    if let Some(duration) =
-        parse_duration_suffix(value, "ms", "milliseconds", Duration::from_millis)?
-    {
-        return Ok(Some(duration));
-    }
-
-    if let Some(duration) = parse_duration_suffix(value, "m", "minutes", |minutes| {
-        Duration::from_secs(minutes * 60)
+    if let Some(duration) = parse_duration_suffix(value, "ms", "milliseconds", |amount| {
+        Ok(Duration::from_millis(amount))
     })? {
         return Ok(Some(duration));
     }
 
-    parse_duration_suffix(value, "s", "seconds", Duration::from_secs)
+    if let Some(duration) = parse_duration_suffix(value, "m", "minutes", |minutes| {
+        minutes
+            .checked_mul(60)
+            .map(Duration::from_secs)
+            .ok_or_else(|| Error::invalid_config("Duration minutes exceed the supported range"))
+    })? {
+        return Ok(Some(duration));
+    }
+
+    parse_duration_suffix(value, "s", "seconds", |amount| {
+        Ok(Duration::from_secs(amount))
+    })
 }
 
 fn parse_duration_suffix(
     value: &str,
     suffix: &str,
     label: &str,
-    build: impl Fn(u64) -> Duration,
+    build: impl Fn(u64) -> Result<Duration, Error>,
 ) -> Result<Option<Duration>, Error> {
     let Some(raw) = value.strip_suffix(suffix) else {
         return Ok(None);
@@ -75,7 +80,15 @@ fn parse_duration_suffix(
         .trim()
         .parse()
         .map_err(|_| Error::invalid_config(format!("Invalid {label} value: {raw}")))?;
-    Ok(Some(build(amount)))
+    build(amount).map(Some)
+}
+
+/// Parse a retry delay without narrowing the public duration parser's range.
+/// Retry scheduling stores milliseconds in a `u64`, unlike `Duration` itself.
+pub(crate) fn parse_retry_delay_ms(value: &str) -> Result<u64, Error> {
+    let duration = parse_duration(value)?;
+    u64::try_from(duration.as_millis())
+        .map_err(|_| Error::invalid_config("Retry delay exceeds the supported millisecond range"))
 }
 
 fn parse_plain_millis(value: &str) -> Result<u64, Error> {
@@ -89,6 +102,54 @@ fn parse_plain_millis(value: &str) -> Result<u64, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minute_overflow_is_an_error() {
+        assert!(parse_duration("18446744073709551615m").is_err());
+        let boundary = u64::MAX / 60;
+        assert_eq!(
+            parse_duration(&format!("{boundary}m")).unwrap().as_secs(),
+            boundary * 60
+        );
+        assert!(parse_duration(&format!("{}m", boundary + 1)).is_err());
+    }
+
+    #[test]
+    fn retry_millisecond_boundaries_and_tokens() {
+        for (suffix, divisor) in [("", 1), ("ms", 1), ("s", 1_000), ("m", 60_000)] {
+            let boundary = u64::MAX / divisor;
+            assert_eq!(
+                parse_retry_delay_ms(&format!("{boundary}{suffix}")).unwrap(),
+                boundary * divisor
+            );
+            if divisor > 1 {
+                assert!(parse_retry_delay_ms(&format!("{}{suffix}", boundary + 1)).is_err());
+            }
+            assert_eq!(parse_retry_delay_ms(&format!(" 0{suffix} ")).unwrap(), 0);
+        }
+        for token in [
+            "",
+            " ",
+            "ms",
+            "s",
+            "m",
+            "-1",
+            "1h",
+            "1.5s",
+            "1ss",
+            "1s extra",
+            "none",
+            "infinite",
+            "18446744073709551616ms",
+        ] {
+            assert!(parse_retry_delay_ms(token).is_err(), "{token}");
+        }
+        // The SDK parser retains Duration's larger seconds range.
+        assert_eq!(
+            parse_duration("18446744073709551615s").unwrap().as_secs(),
+            u64::MAX
+        );
+    }
 
     #[test]
     fn test_parse_duration_milliseconds() {

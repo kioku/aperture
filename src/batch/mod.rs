@@ -4,7 +4,7 @@ pub mod interpolation;
 
 use crate::cache::models::CachedSpec;
 use crate::config::models::GlobalConfig;
-use crate::duration::parse_duration;
+use crate::duration::parse_retry_delay_ms;
 use crate::engine::executor::RetryContext;
 use crate::engine::generator;
 use crate::error::Error;
@@ -1023,17 +1023,25 @@ fn build_batch_retry_context(
     }))
 }
 
-#[allow(clippy::cast_possible_truncation)]
 fn resolve_retry_delay_ms(delay: Option<&str>, default_ms: u64) -> Result<u64, Error> {
-    match delay {
-        Some(delay_str) => Ok(parse_duration(delay_str)?.as_millis() as u64),
-        None => Ok(default_ms),
-    }
+    delay.map_or_else(|| Ok(default_ms), parse_retry_delay_ms)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_delay_rejects_millisecond_overflow() {
+        assert!(resolve_retry_delay_ms(Some("18446744073709552s"), 500).is_err());
+        assert!(resolve_retry_delay_ms(Some("307445734561826m"), 30_000).is_err());
+        assert_eq!(
+            resolve_retry_delay_ms(Some("18446744073709551615ms"), 500).unwrap(),
+            u64::MAX
+        );
+        assert_eq!(resolve_retry_delay_ms(None, 500).unwrap(), 500);
+    }
+
     use std::io::Write;
     use tempfile::NamedTempFile;
 
