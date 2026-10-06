@@ -28,7 +28,7 @@
             // {
               curlOptsList = (args.curlOptsList or [ ]) ++ [
                 "--user-agent"
-                "aperture-nix/0.1.9"
+                "aperture-nix/0.2.0"
               ];
             }
           );
