@@ -53,8 +53,8 @@ fn suffix(segments: &Segments, start: usize) -> Segments {
 }
 
 fn attached_value_start(value: &str) -> Option<usize> {
-    if value.starts_with("--") {
-        return value.find('=').map(|position| position + 1);
+    if value.starts_with("--header=") {
+        return Some("--header=".len());
     }
     if value.starts_with("-H") && value.len() > 2 {
         return Some(if value.as_bytes()[2] == b'=' { 3 } else { 2 });
@@ -71,23 +71,28 @@ pub(super) fn overlay_map_headers(
     }
 }
 
-/// Clap indexes tokens after splitting `--option=value` and attached `-Hvalue`.
-/// Verify the selected bytes too: a mapping mismatch fails before delivery.
-fn indexed_arguments(args: &[Segments]) -> std::collections::HashMap<usize, Segments> {
-    let mut indexed = std::collections::HashMap::new();
-    let mut index = 1;
-    for segments in args {
+/// Select header values from physical argv, rather than reconstructing clap's
+/// virtual indices (which also count implicit boolean values). Operation options
+/// do not consume hyphen-leading values, and `--` ends option interpretation.
+/// The complete selected sequence is verified against clap before execution.
+fn header_arguments(args: &[Segments]) -> Result<Vec<Segments>, Error> {
+    let mut headers = Vec::new();
+    let mut args = args.iter();
+    while let Some(segments) = args.next() {
         let value = text(segments);
-        let split = attached_value_start(&value);
-        if let Some(start) = split {
-            index += 1;
-            indexed.insert(index, suffix(segments, start));
-        } else {
-            indexed.insert(index, segments.clone());
+        match value.as_str() {
+            "--" => break,
+            "--header" | "-H" => {
+                headers.push(args.next().cloned().ok_or_else(provenance_error)?);
+            }
+            _ => {
+                if let Some(start) = attached_value_start(&value) {
+                    headers.push(suffix(segments, start));
+                }
+            }
         }
-        index += 1;
     }
-    indexed
+    Ok(headers)
 }
 
 pub(super) fn resolve_headers(
@@ -99,26 +104,66 @@ pub(super) fn resolve_headers(
     let args = argument_segments(operation, store, extra_body_file)?;
     let raw: Vec<_> = args.iter().map(text).collect();
     let offset = crate::engine::generator::batch_operation_argument_offset(&raw)?;
-    let indexed = indexed_arguments(&args[offset..]);
+    let headers = header_arguments(&args[offset..])?;
     let mut leaf = matches;
     while let Some((_, child)) = leaf.subcommand() {
         leaf = child;
     }
-    let values = leaf
+    let values: Vec<_> = leaf
         .try_get_many::<String>("header")
         .ok()
         .flatten()
         .into_iter()
-        .flatten();
-    let indices = leaf.indices_of("header").into_iter().flatten();
+        .flatten()
+        .collect();
+    if values.len() != headers.len() {
+        return Err(provenance_error());
+    }
     values
-        .zip(indices)
-        .map(|(value, index)| {
-            let segments = indexed.get(&index).ok_or_else(provenance_error)?;
-            if text(segments) != *value {
+        .into_iter()
+        .zip(headers)
+        .map(|(value, segments)| {
+            if text(&segments) != *value {
                 return Err(provenance_error());
             }
-            crate::engine::executor::parse_custom_header_segments(segments)
+            crate::engine::executor::parse_custom_header_segments(&segments)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_selection_retains_origins_without_virtual_indices() {
+        let args = vec![
+            vec![("--flag".into(), true)],
+            vec![("--label=X-Data: ${TOKEN}".into(), true)],
+            vec![("-H".into(), true)],
+            vec![("X-Data: ${TOKEN}".into(), false)],
+            vec![("--header=X-Other: ".into(), true), ("é".into(), false)],
+            vec![("-H=X-Last: literal".into(), true)],
+        ];
+        let selected = header_arguments(&args).unwrap();
+        assert_eq!(selected.len(), 3);
+        assert_eq!(selected[0], vec![("X-Data: ${TOKEN}".into(), false)]);
+        assert_eq!(
+            selected[1],
+            vec![("X-Other: ".into(), true), ("é".into(), false)]
+        );
+        assert_eq!(text(&selected[2]), "X-Last: literal");
+    }
+
+    #[test]
+    fn delimiter_and_missing_header_value_are_fail_closed() {
+        let args = vec![
+            vec![("--label=-Hfake".into(), true)],
+            vec![("--".into(), true)],
+            vec![("--header=X-Data: ${TOKEN}".into(), false)],
+        ];
+        assert!(header_arguments(&args).unwrap().is_empty());
+        assert!(header_arguments(&[vec![("-H".into(), true)]]).is_err());
+        assert!(header_arguments(&[vec![("--header".into(), true)]]).is_err());
+    }
 }

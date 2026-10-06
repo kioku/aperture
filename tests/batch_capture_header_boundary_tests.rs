@@ -70,7 +70,10 @@ async fn captured_environment_reference_is_literal_on_wire() {
         "servers": [{"url": server.uri()}],
         "paths": {
             "/seed": {"get": {"operationId": "seed", "tags": ["probe"], "responses": {"200": {"description": "ok"}}}},
-            "/consumer": {"get": {"operationId": "consumer", "tags": ["probe"], "responses": {"200": {"description": "ok"}}}}
+            "/consumer": {"get": {"operationId": "consumer", "tags": ["probe"], "parameters": [
+                {"name": "flag", "in": "query", "schema": {"type": "boolean"}},
+                {"name": "label", "in": "query", "schema": {"type": "string"}}
+            ], "responses": {"200": {"description": "ok"}}}}
         }
     }).to_string()).unwrap();
     assert!(cli(
@@ -133,7 +136,10 @@ async fn exercise_header_case(
         "servers": [{"url": server.uri()}],
         "paths": {
             "/seed": {"get": {"operationId": "seed", "tags": ["probe"], "responses": {"200": {"description": "ok"}}}},
-            "/consumer": {"get": {"operationId": "consumer", "tags": ["probe"], "responses": {"200": {"description": "ok"}}}}
+            "/consumer": {"get": {"operationId": "consumer", "tags": ["probe"], "parameters": [
+                {"name": "flag", "in": "query", "schema": {"type": "boolean"}},
+                {"name": "label", "in": "query", "schema": {"type": "string"}}
+            ], "responses": {"200": {"description": "ok"}}}}
         }
     }).to_string()).unwrap();
     assert!(cli(
@@ -251,4 +257,113 @@ async fn header_sources_mixed_segments_and_cache_directions() {
     ] {
         exercise_header_case("CAPTURE273_SECRET", json!({"id": "consumer", "args": ["probe", "consumer"], "headers": {"X-Data": reference}, "use_cache": true}), None, false, json!({})).await;
     }
+}
+
+#[tokio::test]
+async fn implicit_booleans_and_global_flags_preserve_header_origin() {
+    for args in [
+        json!(["probe", "consumer", "--flag", "-H", "X-Data: {{value}}"]),
+        json!([
+            "probe",
+            "consumer",
+            "--flag=true",
+            "-H",
+            "X-Data: {{value}}"
+        ]),
+        json!([
+            "probe",
+            "consumer",
+            "--flag",
+            "false",
+            "--header=X-Data: {{value}}"
+        ]),
+        json!([
+            "probe",
+            "consumer",
+            "--header",
+            "X-Data: {{value}}",
+            "--flag"
+        ]),
+        json!([
+            "--format=json",
+            "probe",
+            "consumer",
+            "--flag",
+            "-HX-Data: {{value}}"
+        ]),
+        json!([
+            "probe",
+            "--format=json",
+            "consumer",
+            "--flag",
+            "-H=X-Data: {{value}}"
+        ]),
+        json!([
+            "probe",
+            "consumer",
+            "--format=json",
+            "--flag",
+            "--header",
+            "X-Data: {{value}}"
+        ]),
+        json!([
+            "probe",
+            "consumer",
+            "--flag",
+            "--label=X-Data: ${CAPTURE273_SECRET}",
+            "--header",
+            "X-Data: {{value}}"
+        ]),
+        json!([
+            "probe",
+            "consumer",
+            "--flag",
+            "--label=-HX-Fake: ${CAPTURE273_SECRET}",
+            "--header",
+            "X-Data: {{value}}"
+        ]),
+        json!([
+            "probe",
+            "consumer",
+            "--flag",
+            "--label=--header=X-Fake: ${CAPTURE273_SECRET}",
+            "--header",
+            "X-Data: {{value}}"
+        ]),
+    ] {
+        exercise_header_case(
+            "${CAPTURE273_SECRET}",
+            json!({"id": "consumer", "args": args, "use_cache": true}),
+            Some("${CAPTURE273_SECRET}"),
+            false,
+            json!({}),
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn implicit_boolean_map_default_and_authored_headers_keep_cache_policy() {
+    exercise_header_case(
+        "${CAPTURE273_SECRET}",
+        json!({"id": "consumer", "args": ["probe", "consumer", "--flag"], "headers": {"X-Data": "{{value}}"}, "use_cache": true}),
+        Some("${CAPTURE273_SECRET}"),
+        false,
+        json!({}),
+    ).await;
+    exercise_header_case(
+        "${CAPTURE273_SECRET}",
+        json!({"id": "consumer", "args": ["probe", "consumer", "--flag"], "use_cache": true}),
+        Some("${CAPTURE273_SECRET}"),
+        false,
+        json!({"headers": {"X-Data": "{{value}}"}}),
+    )
+    .await;
+    exercise_header_case(
+        "${CAPTURE273_SECRET}",
+        json!({"id": "consumer", "args": ["probe", "consumer", "--flag", "-H", "X-Data: ${CAPTURE273_SECRET}-{{value}}"], "use_cache": true}),
+        Some("synthetic-private-273-${CAPTURE273_SECRET}"),
+        true,
+        json!({}),
+    ).await;
 }
