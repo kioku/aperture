@@ -409,6 +409,7 @@ pub fn cli_to_execution_context(
     let proxy_override = proxy_override_from_execution_flags(execution);
 
     Ok(ExecutionContext {
+        max_response_bytes: None,
         http_clients: crate::engine::executor::HttpClientPool::default(),
         dry_run: execution.dry_run,
         idempotency_key: execution.idempotency_key.clone(),
@@ -492,11 +493,58 @@ pub(crate) fn resolve_execution_defaults(
     execution: &ExecutionFlags,
     global_config: Option<GlobalConfig>,
 ) -> Option<GlobalConfig> {
-    if let Some(timeout) = execution.timeout_secs {
-        let mut config = global_config.unwrap_or_default();
-        config.default_timeout_secs = timeout;
-        Some(config)
-    } else {
-        global_config
+    if execution.timeout_secs.is_none() && execution.max_response_bytes.is_none() {
+        return global_config;
+    }
+    let mut config = global_config.unwrap_or_default();
+    config.default_timeout_secs = execution
+        .timeout_secs
+        .unwrap_or(config.default_timeout_secs);
+    config.max_response_bytes = execution
+        .max_response_bytes
+        .unwrap_or(config.max_response_bytes);
+    Some(config)
+}
+
+#[cfg(test)]
+mod response_limit_tests {
+    use super::*;
+    use clap::Parser;
+
+    fn flags(limit: Option<&str>) -> ExecutionFlags {
+        let mut args = vec!["aperture", "api", "test"];
+        if let Some(limit) = limit {
+            args.extend(["--max-response-bytes", limit]);
+        }
+        let crate::cli::Commands::Api { execution, .. } = crate::cli::Cli::parse_from(args).command
+        else {
+            panic!("expected API command")
+        };
+        execution
+    }
+
+    #[test]
+    fn response_limit_override_preserves_other_defaults() {
+        let config = GlobalConfig {
+            max_response_bytes: 8,
+            default_timeout_secs: 71,
+            ..Default::default()
+        };
+        let resolved = resolve_execution_defaults(&flags(Some("9")), Some(config.clone())).unwrap();
+        assert_eq!(resolved.max_response_bytes, 9);
+        assert_eq!(resolved.default_timeout_secs, 71);
+        assert_eq!(
+            resolve_execution_defaults(&flags(None), Some(config))
+                .unwrap()
+                .max_response_bytes,
+            8
+        );
+        assert_eq!(
+            resolve_execution_defaults(&flags(Some("9")), None)
+                .unwrap()
+                .max_response_bytes,
+            9
+        );
+        assert!(resolve_execution_defaults(&flags(None), None).is_none());
     }
 }

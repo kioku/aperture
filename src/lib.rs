@@ -20,6 +20,7 @@ pub mod output;
 pub mod pagination;
 pub mod resilience;
 pub mod response_cache;
+pub mod response_limit;
 pub mod search;
 pub mod shortcuts;
 pub mod spec;

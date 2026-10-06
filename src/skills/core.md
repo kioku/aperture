@@ -126,6 +126,15 @@ For declared single-part binary request bodies, use `--body-file` to preserve by
 
 ## Read output and errors
 
+Ordinary API bodies are bounded to 64 MiB per response, including errors, binary and
+pagination. `--max-response-bytes BYTES` overrides the native `max_response_bytes`
+setting; use a positive finite integer, not `none`, zero or `unlimited`. A size failure
+is not retryable and produces no partial binary output. Increase the limit only when
+the requested data needs it. Oversized response-cache entries are safe misses and can
+cause a fresh request. Batch concurrency multiplies buffers, and parsing/copies add
+memory overhead; the setting is not a global process-memory cap. Spec and skill limits
+are independent and unchanged.
+
 JSON is the default normal response format. Use `--format yaml` or `--format table` for presentation, not when another tool expects JSON. Native discovery uses `--format json`; API listing and skills use `--json`. There is no universal `--json` flag for every command.
 
 Use `--quiet` to suppress informational output and `--json-errors` for machine-readable failures. Check the process exit status, stdout data, and stderr errors separately. A successful process does not by itself prove that the intended remote state was reached.

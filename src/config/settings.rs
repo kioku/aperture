@@ -37,6 +37,8 @@ pub enum SettingKey {
     SkillsDirectory,
     /// Default timeout for API requests in seconds (`default_timeout_secs`)
     DefaultTimeoutSecs,
+    /// Maximum ordinary API response bytes (`max_response_bytes`).
+    MaxResponseBytes,
     /// Whether to output errors as JSON by default (`agent_defaults.json_errors`)
     AgentDefaultsJsonErrors,
     /// Maximum number of retry attempts (`retry_defaults.max_attempts`)
@@ -62,6 +64,7 @@ impl SettingKey {
     pub const ALL: &'static [Self] = &[
         Self::SkillsDirectory,
         Self::DefaultTimeoutSecs,
+        Self::MaxResponseBytes,
         Self::AgentDefaultsJsonErrors,
         Self::RetryDefaultsMaxAttempts,
         Self::RetryDefaultsInitialDelayMs,
@@ -97,6 +100,7 @@ impl SettingKey {
         match self {
             Self::SkillsDirectory => "skills.directory",
             Self::DefaultTimeoutSecs => "default_timeout_secs",
+            Self::MaxResponseBytes => "max_response_bytes",
             Self::AgentDefaultsJsonErrors => "agent_defaults.json_errors",
             Self::RetryDefaultsMaxAttempts => "retry_defaults.max_attempts",
             Self::RetryDefaultsInitialDelayMs => "retry_defaults.initial_delay_ms",
@@ -118,6 +122,7 @@ impl SettingKey {
             Self::ProxyPasswordEnv => "proxy.password_env",
             Self::SkillsDirectory
             | Self::DefaultTimeoutSecs
+            | Self::MaxResponseBytes
             | Self::AgentDefaultsJsonErrors
             | Self::RetryDefaultsMaxAttempts
             | Self::RetryDefaultsInitialDelayMs
@@ -130,6 +135,7 @@ impl SettingKey {
     pub const fn type_name(&self) -> &'static str {
         match self {
             Self::DefaultTimeoutSecs
+            | Self::MaxResponseBytes
             | Self::RetryDefaultsMaxAttempts
             | Self::RetryDefaultsInitialDelayMs
             | Self::RetryDefaultsMaxDelayMs => "integer",
@@ -155,6 +161,7 @@ impl SettingKey {
                 "User skill directory (relative to config directory; no tilde expansion)"
             }
             Self::DefaultTimeoutSecs => "Default timeout for API requests in seconds",
+            Self::MaxResponseBytes => "Maximum ordinary API response bytes",
             Self::AgentDefaultsJsonErrors => "Output errors as JSON by default",
             Self::RetryDefaultsMaxAttempts => "Maximum retry attempts (0 = disabled)",
             Self::RetryDefaultsInitialDelayMs => "Initial delay between retries in milliseconds",
@@ -176,6 +183,7 @@ impl SettingKey {
             Self::ProxyPasswordEnv => "Environment variable containing the proxy password",
             Self::SkillsDirectory
             | Self::DefaultTimeoutSecs
+            | Self::MaxResponseBytes
             | Self::AgentDefaultsJsonErrors
             | Self::RetryDefaultsMaxAttempts
             | Self::RetryDefaultsInitialDelayMs
@@ -189,6 +197,7 @@ impl SettingKey {
         match self {
             Self::SkillsDirectory => "skills",
             Self::DefaultTimeoutSecs => "30",
+            Self::MaxResponseBytes => "67108864",
             Self::AgentDefaultsJsonErrors => "false",
             Self::RetryDefaultsMaxAttempts => "0",
             Self::RetryDefaultsInitialDelayMs => "500",
@@ -214,6 +223,7 @@ impl SettingKey {
         match self {
             Self::SkillsDirectory => SettingValue::String(config.skills.directory.clone()),
             Self::DefaultTimeoutSecs => SettingValue::U64(config.default_timeout_secs),
+            Self::MaxResponseBytes => SettingValue::U64(config.max_response_bytes),
             Self::AgentDefaultsJsonErrors => SettingValue::Bool(config.agent_defaults.json_errors),
             Self::RetryDefaultsMaxAttempts => {
                 SettingValue::U64(u64::from(config.retry_defaults.max_attempts))
@@ -263,6 +273,7 @@ impl SettingKey {
             ),
             Self::SkillsDirectory
             | Self::DefaultTimeoutSecs
+            | Self::MaxResponseBytes
             | Self::AgentDefaultsJsonErrors
             | Self::RetryDefaultsMaxAttempts
             | Self::RetryDefaultsInitialDelayMs
@@ -292,6 +303,7 @@ fn parse_core_setting_key(s: &str) -> Result<SettingKey, Error> {
     match s {
         "skills.directory" => Ok(SettingKey::SkillsDirectory),
         "default_timeout_secs" => Ok(SettingKey::DefaultTimeoutSecs),
+        "max_response_bytes" => Ok(SettingKey::MaxResponseBytes),
         "agent_defaults.json_errors" => Ok(SettingKey::AgentDefaultsJsonErrors),
         "retry_defaults.max_attempts" => Ok(SettingKey::RetryDefaultsMaxAttempts),
         "retry_defaults.initial_delay_ms" => Ok(SettingKey::RetryDefaultsInitialDelayMs),
@@ -450,15 +462,28 @@ impl SettingValue {
         Self::parse_existing_key(key, value)
     }
 
+    fn parse_byte_or_timeout_limit(key: SettingKey, value: &str) -> Result<Self, Error> {
+        if key == SettingKey::MaxResponseBytes {
+            let parsed = value.parse::<u64>().map_err(|_| {
+                Error::invalid_config("max_response_bytes requires a positive byte count")
+            })?;
+            crate::response_limit::validate(parsed)?;
+            return Ok(Self::U64(parsed));
+        }
+        parse_positive_u64_setting(
+            key,
+            value,
+            "timeout must be greater than 0",
+            MAX_TIMEOUT_SECS,
+            &format!("timeout cannot exceed {MAX_TIMEOUT_SECS} seconds (1 year)"),
+        )
+    }
+
     fn parse_existing_key(key: SettingKey, value: &str) -> Result<Self, Error> {
         match key {
-            SettingKey::DefaultTimeoutSecs => parse_positive_u64_setting(
-                key,
-                value,
-                "timeout must be greater than 0",
-                MAX_TIMEOUT_SECS,
-                &format!("timeout cannot exceed {MAX_TIMEOUT_SECS} seconds (1 year)"),
-            ),
+            SettingKey::MaxResponseBytes | SettingKey::DefaultTimeoutSecs => {
+                Self::parse_byte_or_timeout_limit(key, value)
+            }
             SettingKey::AgentDefaultsJsonErrors => parse_bool_setting(key, value),
             SettingKey::RetryDefaultsMaxAttempts => parse_non_negative_u64_setting(
                 key,

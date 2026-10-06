@@ -691,3 +691,12 @@ or response content.
 `config api reinit NAME` and `config api reinit --all` rebuild caches from local
 registered files. They never download or resolve fetch credentials and preserve
 the saved fetch reference, even when its environment variable is absent.
+
+### Ordinary response size
+
+`max_response_bytes` defaults to 67,108,864 (64 MiB). Set it with
+`aperture config set max_response_bytes BYTES`; `--max-response-bytes BYTES`
+overrides it for CLI requests and batches. SDK contexts can override it with
+`ExecutionContext.max_response_bytes`. Only positive integers within the checked
+platform allocation range are accepted; there is no unlimited sentinel. See the
+guide's execution defaults for cache handling and concurrency memory overhead.

@@ -7,6 +7,9 @@ pub struct GlobalConfig {
     pub skills: SkillsConfig,
     #[serde(default = "default_timeout_secs_value")]
     pub default_timeout_secs: u64,
+    /// Maximum ordinary API response bytes, before parsing or diagnostics.
+    #[serde(default = "default_max_response_bytes_value")]
+    pub max_response_bytes: u64,
     #[serde(default)]
     pub agent_defaults: AgentDefaults,
     /// Default retry configuration for transient failures
@@ -18,6 +21,10 @@ pub struct GlobalConfig {
     /// Per-API configuration overrides
     #[serde(default)]
     pub api_configs: HashMap<String, ApiConfig>,
+}
+
+const fn default_max_response_bytes_value() -> u64 {
+    crate::response_limit::DEFAULT_MAX_RESPONSE_BYTES
 }
 
 const fn default_timeout_secs_value() -> u64 {
@@ -92,6 +99,7 @@ impl Default for GlobalConfig {
         Self {
             skills: SkillsConfig::default(),
             default_timeout_secs: 30,
+            max_response_bytes: default_max_response_bytes_value(),
             agent_defaults: AgentDefaults::default(),
             retry_defaults: RetryDefaults::default(),
             proxy: ProxyConfig::default(),

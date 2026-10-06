@@ -548,6 +548,16 @@ fn effective_timeout_secs(ctx: &crate::invocation::ExecutionContext) -> u64 {
         .map_or(30, |config| config.default_timeout_secs)
 }
 
+fn effective_max_response_bytes(ctx: &crate::invocation::ExecutionContext) -> Result<usize, Error> {
+    let value = ctx.max_response_bytes.unwrap_or_else(|| {
+        ctx.global_config.as_ref().map_or(
+            crate::response_limit::DEFAULT_MAX_RESPONSE_BYTES,
+            |config| config.max_response_bytes,
+        )
+    });
+    crate::response_limit::validate(value)
+}
+
 /// Build HTTP client with effective timeout and resolved proxy behavior.
 fn build_http_client(
     ctx: &crate::invocation::ExecutionContext,
@@ -647,10 +657,11 @@ async fn send_request(
     spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
+    max_response_bytes: usize,
 ) -> Result<HttpResponseBytes, Error> {
     let start_time = std::time::Instant::now();
     // Remove only the URL: native error classification and typed causes survive.
-    let response = request
+    let mut response = request
         .send()
         .await
         .map_err(|error| Error::Network(error.without_url()))?;
@@ -661,11 +672,7 @@ async fn send_request(
         response_headers_map.insert(name.clone(), value.clone());
     }
     let response_headers = collect_response_headers(response.headers())?;
-    let response_bytes = response
-        .bytes()
-        .await
-        .map_err(|error| Error::Network(error.without_url()))?
-        .to_vec();
+    let response_bytes = read_response_bounded(&mut response, max_response_bytes).await?;
 
     if operation.has_binary_response() {
         tracing::debug!(
@@ -690,6 +697,31 @@ async fn send_request(
     Ok((status, response_headers, response_bytes))
 }
 
+/// Enforce advertised and actual sizes before decoding, logging or retaining output.
+async fn read_response_bounded(
+    response: &mut reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, Error> {
+    if response
+        .content_length()
+        .is_some_and(|length| usize::try_from(length).map_or(true, |length| length > limit))
+    {
+        return Err(crate::response_limit::exceeded(limit));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| Error::Network(error.without_url()))?
+    {
+        if chunk.len() > limit - bytes.len() {
+            return Err(crate::response_limit::exceeded(limit));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
 /// Send HTTP request with retry logic
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
@@ -703,6 +735,7 @@ async fn send_request_with_retry(
     spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
+    max_response_bytes: usize,
 ) -> Result<HttpResponseBytes, Error> {
     use crate::resilience::RetryConfig;
 
@@ -739,7 +772,15 @@ async fn send_request_with_retry(
 
     let Some(ctx) = retry_context.filter(|ctx| ctx.is_enabled()) else {
         return send_request_once(
-            client, method, url, headers, body, spec, operation, secret_ctx,
+            client,
+            method,
+            url,
+            headers,
+            body,
+            spec,
+            operation,
+            secret_ctx,
+            max_response_bytes,
         )
         .await;
     };
@@ -760,6 +801,7 @@ async fn send_request_with_retry(
             spec,
             operation,
             secret_ctx,
+            max_response_bytes,
         )
         .await;
     }
@@ -783,6 +825,7 @@ async fn send_request_with_retry(
         spec,
         operation,
         secret_ctx,
+        max_response_bytes,
     )
     .await
 }
@@ -799,6 +842,7 @@ async fn retry_request_with_backoff(
     spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
+    max_response_bytes: usize,
 ) -> Result<HttpResponseBytes, Error> {
     let max_attempts = ctx.max_attempts;
     let mut attempt: u32 = 0;
@@ -811,7 +855,7 @@ async fn retry_request_with_backoff(
         attempt += 1;
 
         let request = build_request(client, method.clone(), url, headers.clone(), body.clone());
-        match send_request(request, spec, operation, secret_ctx).await {
+        match send_request(request, spec, operation, secret_ctx, max_response_bytes).await {
             Ok((status, response_headers, response_text)) => {
                 match handle_retryable_http_response(
                     retry_config,
@@ -1078,9 +1122,10 @@ async fn send_request_once(
     spec: &CachedSpec,
     operation: &CachedCommand,
     secret_ctx: Option<&logging::SecretContext>,
+    max_response_bytes: usize,
 ) -> Result<HttpResponseBytes, Error> {
     let request = build_request(client, method, url, headers, body);
-    send_request(request, spec, operation, secret_ctx).await
+    send_request(request, spec, operation, secret_ctx, max_response_bytes).await
 }
 
 /// Handle HTTP error responses
@@ -1178,9 +1223,16 @@ fn prepare_cache_context(
 /// Check cache for existing response
 async fn check_cache(
     cache_context: Option<&(CacheKey, ResponseCache)>,
+    max_response_bytes: usize,
 ) -> Result<Option<CachedResponse>, Error> {
     if let Some((cache_key, response_cache)) = cache_context {
-        response_cache.get(cache_key).await
+        response_cache
+            .get_with_limit(
+                cache_key,
+                u64::try_from(max_response_bytes)
+                    .map_err(|_| Error::invalid_config("max_response_bytes overflow"))?,
+            )
+            .await
     } else {
         Ok(None)
     }
@@ -1485,9 +1537,10 @@ fn add_idempotency_key(
 
 async fn cached_execution_result(
     cache_context: Option<&(CacheKey, ResponseCache)>,
+    max_response_bytes: usize,
     diagnostics_sensitive: bool,
 ) -> Result<Option<ExecutionResult>, Error> {
-    if let Some(cached_response) = check_cache(cache_context).await? {
+    if let Some(cached_response) = check_cache(cache_context, max_response_bytes).await? {
         return Ok(Some(ExecutionResult::Cached {
             body: cached_response.body,
             status: cached_response.status_code,
@@ -1624,6 +1677,7 @@ async fn finalize_execution_result(
 /// Returns errors for authentication failures, network issues, or response
 /// validation problems.
 struct PreExecutionInput<'a> {
+    max_response_bytes: usize,
     cache_context: Option<&'a (CacheKey, ResponseCache)>,
     dry_run: bool,
     method: &'a Method,
@@ -1653,7 +1707,12 @@ async fn resolve_pre_execution_result(
     if dry_run.is_some() {
         return Ok(dry_run);
     }
-    cached_execution_result(input.cache_context, input.secret_ctx.is_authenticated()).await
+    cached_execution_result(
+        input.cache_context,
+        input.max_response_bytes,
+        input.secret_ctx.is_authenticated(),
+    )
+    .await
 }
 
 /// Executes an API operation using CLI-agnostic domain types.
@@ -1667,6 +1726,7 @@ pub async fn execute(
     call: crate::invocation::OperationCall,
     ctx: crate::invocation::ExecutionContext,
 ) -> Result<crate::invocation::ExecutionResult, Error> {
+    let max_response_bytes = effective_max_response_bytes(&ctx)?;
     let prepared = prepare_execution(spec, call, &ctx)?;
 
     if let Some(result) = resolve_pre_execution_result(PreExecutionInput {
@@ -1679,6 +1739,7 @@ pub async fn execute(
         spec,
         operation: prepared.operation,
         proxy: &prepared.proxy_diagnostics,
+        max_response_bytes,
         secret_ctx: &prepared.secret_ctx,
     })
     .await?
@@ -1699,6 +1760,7 @@ pub async fn execute(
         spec,
         prepared.operation,
         Some(&prepared.secret_ctx),
+        max_response_bytes,
     )
     .await?;
 
