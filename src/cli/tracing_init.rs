@@ -57,6 +57,23 @@ fn resolve_writer() -> FileOrStderr {
     )
 }
 
+fn diagnostic_registry(
+    env_filter: EnvFilter,
+) -> impl tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> {
+    use tracing_subscriber::layer::SubscriberExt;
+    // Dependency transport events expose raw proxy/origin hosts, bypass lists
+    // and protocol data outside the executor's omission boundary. Apply this
+    // independently of user level directives, including explicit target levels.
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::filter::filter_fn(|metadata| {
+            matches!(
+                metadata.target().split("::").next(),
+                Some("aperture" | "aperture_cli")
+            )
+        }))
+}
+
 fn init_json_subscriber(env_filter: EnvFilter, writer: FileOrStderr) {
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
@@ -68,10 +85,7 @@ fn init_json_subscriber(env_filter: EnvFilter, writer: FileOrStderr) {
         .with_thread_ids(false)
         .with_line_number(true)
         .with_writer(writer);
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(json_layer)
-        .init();
+    diagnostic_registry(env_filter).with(json_layer).init();
 }
 
 fn init_text_subscriber(env_filter: EnvFilter, writer: FileOrStderr) {
@@ -86,10 +100,7 @@ fn init_text_subscriber(env_filter: EnvFilter, writer: FileOrStderr) {
         .with_thread_ids(false)
         .with_line_number(false)
         .with_writer(writer);
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(fmt_layer)
-        .init();
+    diagnostic_registry(env_filter).with(fmt_layer).init();
 }
 
 /// Initialize tracing-subscriber for request/response logging.
@@ -113,5 +124,56 @@ pub fn init_tracing(verbosity: u8) {
     match log_format.as_str() {
         "json" => init_json_subscriber(env_filter, writer),
         _ => init_text_subscriber(env_filter, writer),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::layer::SubscriberExt;
+
+    #[derive(Clone, Default)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
+        type Writer = Self;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[test]
+    fn cli_trace_omits_dependency_routes_even_with_explicit_directives() {
+        let capture = Capture::default();
+        let subscriber =
+            diagnostic_registry(EnvFilter::new("trace,reqwest=trace,hyper_util=trace")).with(
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_writer(capture.clone()),
+            );
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug!(target: "reqwest::connect", "proxy http://localhost:8080/secret");
+            tracing::trace!(target: "hyper_util::client::pool", "route secret.example");
+            tracing::warn!(target: "rustls::connection", "reflected-secret");
+            tracing::debug!(target: "aperture_rogue::transport", "prefix-secret");
+            tracing::debug!(target: "aperture::executor", source = "cli", "Proxy configuration selected");
+            tracing::info!(target: "aperture_cli::spec", "spec parsed");
+        });
+        let output = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+        assert!(!output.contains("localhost"), "{output}");
+        assert!(!output.contains("secret"), "{output}");
+        assert!(output.contains("Proxy configuration selected"));
+        assert!(output.contains("spec parsed"));
     }
 }

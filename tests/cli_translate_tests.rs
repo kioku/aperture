@@ -600,3 +600,17 @@ fn body_file_trims_trailing_newline() {
         "body should have trailing whitespace stripped"
     );
 }
+
+#[test]
+fn retry_delay_errors_omit_untrusted_input() {
+    let mut execution = base_execution_flags();
+    execution.retry = Some(1);
+    for value in ["c4-sdk-secret-264", "462-terces-kds-4c", "none", "", " "] {
+        execution.retry_delay = Some(value.into());
+        let error = cli_to_execution_context(&execution, None).unwrap_err();
+        let output = format!("{error} {error:?} {:?}", error.to_json());
+        assert!(!output.contains("c4-sdk-secret-264"));
+        assert!(!output.contains("462-terces-kds-4c"));
+        assert!(error.to_json().context.is_some());
+    }
+}

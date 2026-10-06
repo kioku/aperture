@@ -299,7 +299,7 @@ impl ResponseCache {
         key: &CacheKey,
         max_response_bytes: u64,
     ) -> Result<Option<CachedResponse>, Error> {
-        let limit = crate::response_limit::validate(max_response_bytes)?;
+        crate::response_limit::validate(max_response_bytes)?;
         if !self.config.enabled {
             return Ok(None);
         }
@@ -314,9 +314,6 @@ impl ResponseCache {
         else {
             return Ok(None);
         };
-        if cached_response.body.len() > limit {
-            return Ok(None);
-        }
         if Self::is_expired(&cached_response)? {
             // Cache entry has expired — don't eagerly delete here because
             // deletion is a mutating operation that should be coordinated
@@ -342,9 +339,16 @@ impl ResponseCache {
         let Some(bytes) = Self::read_cache_envelope(file, allowance).await? else {
             return Ok(None);
         };
-        serde_json::from_slice(&bytes)
-            .map(Some)
-            .map_err(|_| Error::serialization_error("Failed to deserialize cached response"))
+        Self::decode_readable_response(&bytes, limit)
+    }
+
+    /// Apply decoded-body policy consistently to reads and cache inspection.
+    fn decode_readable_response(bytes: &[u8], limit: u64) -> Result<Option<CachedResponse>, Error> {
+        let cached_response: CachedResponse = serde_json::from_slice(bytes)
+            .map_err(|_| Error::serialization_error("Failed to deserialize cached response"))?;
+        // Inspection uses the default; explicit reads retain their caller's policy.
+        let readable = cached_response.body.len() <= crate::response_limit::validate(limit)?;
+        Ok(readable.then_some(cached_response))
     }
 
     /// Read at most the checked envelope plus one byte, even after concurrent growth.
@@ -1239,6 +1243,37 @@ mod tests {
         assert_eq!(stats.total_entries, 2);
         assert_eq!(stats.expired_entries, 1);
         assert_eq!(stats.valid_entries, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_rejects_body_over_default_but_explicit_larger_read_succeeds() {
+        let (config, _temp_dir) = create_test_cache_config();
+        let cache = ResponseCache::new(config).unwrap();
+        store_entry(&cache, "api_a", "large").await;
+        let key = CacheKey {
+            api_name: "api_a".to_string(),
+            operation_id: "large".to_string(),
+            request_hash: "api_a_large".to_string(),
+        };
+        let path = cache.config.cache_dir.join(key.to_filename());
+        let mut entry: CachedResponse =
+            serde_json::from_slice(&tokio::fs::read(&path).await.unwrap()).unwrap();
+        let larger_limit = crate::response_limit::DEFAULT_MAX_RESPONSE_BYTES + 1;
+        entry.body = "x".repeat(usize::try_from(larger_limit).unwrap());
+        tokio::fs::write(&path, serde_json::to_vec(&entry).unwrap())
+            .await
+            .unwrap();
+        assert!(cache.get(&key).await.unwrap().is_none());
+        assert!(!cache.is_cached(&key).await.unwrap());
+        assert!(cache
+            .get_with_limit(&key, larger_limit)
+            .await
+            .unwrap()
+            .is_some());
+        let stats = cache.get_stats(None).await.unwrap();
+        assert_eq!(stats.total_entries, 1);
+        assert_eq!(stats.valid_entries, 0);
+        assert_eq!(stats.expired_entries, 0);
     }
 
     // ---- cleanup_old_entries temp-file sweep ----

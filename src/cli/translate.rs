@@ -34,6 +34,16 @@ pub fn matches_to_operation_call(
     spec: &CachedSpec,
     matches: &ArgMatches,
 ) -> Result<OperationCall, Error> {
+    matches_to_operation_call_with_context(spec, matches, None)
+}
+
+/// Operation adapter with selected transport sensitivity for early body errors.
+/// The public context-free adapter remains compatible for SDK/legacy callers.
+pub(crate) fn matches_to_operation_call_with_context(
+    spec: &CachedSpec,
+    matches: &ArgMatches,
+    ctx: Option<&ExecutionContext>,
+) -> Result<OperationCall, Error> {
     let (operation, current_matches) = find_operation_from_matches(spec, matches)?;
 
     // Extract parameters by location
@@ -51,16 +61,26 @@ pub fn matches_to_operation_call(
         );
     }
 
-    // Extract request body
-    let body = extract_body(operation.request_body.as_ref(), current_matches)?;
-
     // Extract custom headers from --header/-H flags
-    let custom_headers = current_matches
+    let custom_headers: Vec<String> = current_matches
         .try_get_many::<String>("header")
         .ok()
         .flatten()
         .map(|values| values.cloned().collect())
         .unwrap_or_default();
+
+    let sensitive = ctx
+        .is_some_and(|ctx| crate::engine::executor::preparation_transport_is_sensitive(spec, ctx))
+        || crate::logging::operation_preparation_is_sensitive(
+            spec,
+            operation,
+            header_params.keys().map(String::as_str).chain(
+                custom_headers.iter().filter_map(|header: &String| {
+                    header.split_once(':').map(|(name, _)| name.trim())
+                }),
+            ),
+        );
+    let body = extract_operation_body(operation, current_matches, sensitive)?;
 
     Ok(OperationCall {
         pagination_url: None,
@@ -232,6 +252,25 @@ fn extract_param(
     } else if let Some(value) = matches.get_one::<bool>(&param.name) {
         target.insert(param.name.clone(), value.to_string());
     }
+}
+
+/// Keep anonymous body diagnostics useful, but bound errors that precede active
+/// operation/transport authentication. File paths and parser text are untrusted.
+fn extract_operation_body(
+    operation: &CachedCommand,
+    matches: &ArgMatches,
+    sensitive: bool,
+) -> Result<Option<RequestBody>, Error> {
+    extract_body(operation.request_body.as_ref(), matches).map_err(|error| {
+        if sensitive {
+            error.omit_diagnostic_inputs(
+                "Request body preparation failed (input omitted)",
+                "Check the body format and that the body file or stdin is readable.",
+            )
+        } else {
+            error
+        }
+    })
 }
 
 /// Extracts a JSON or binary request body without changing its wire representation.
@@ -437,7 +476,14 @@ fn resolve_retry_attempts(explicit: Option<u32>, default: Option<u32>) -> u32 {
 #[allow(clippy::cast_possible_truncation)]
 fn resolve_retry_delay_ms(delay: Option<&str>, default_ms: u64) -> Result<u64, Error> {
     match delay {
-        Some(delay_str) => Ok(parse_duration(delay_str)?.as_millis() as u64),
+        Some(delay_str) => Ok(parse_duration(delay_str)
+            .map_err(|error| {
+                error.omit_diagnostic_inputs(
+                    "Invalid retry delay (input omitted)",
+                    "Use a duration such as 500ms, 1s, 30s or 1m.",
+                )
+            })?
+            .as_millis() as u64),
         None => Ok(default_ms),
     }
 }

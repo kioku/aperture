@@ -608,9 +608,9 @@ async fn response_logging_redacts_active_overridden_security_header() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Request headers:"))
-        .stderr(predicate::str::contains("Response headers:"))
-        .stderr(predicate::str::contains("x-private-credential: [REDACTED]"))
+        .stderr(predicate::str::contains("Request headers:").not())
+        .stderr(predicate::str::contains("Response headers:").not())
+        .stderr(predicate::str::contains("x-private-credential").not())
         .stderr(predicate::str::contains(configured_value).not())
         .stderr(predicate::str::contains(override_value).not());
 }
@@ -688,7 +688,7 @@ async fn binary_download_is_exact_and_destinations_fail_closed() {
         ])
         .assert()
         .success()
-        .stderr(predicate::str::contains("x-private-credential: [REDACTED]"))
+        .stderr(predicate::str::contains("x-private-credential").not())
         .stderr(predicate::str::contains(override_value).not());
 
     aperture_cmd()
@@ -752,9 +752,7 @@ async fn binary_download_is_exact_and_destinations_fail_closed() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "\"x-private-credential\": \"[REDACTED]\"",
-        ))
+        .stdout(predicate::str::contains("\"headers\": {}"))
         .stdout(predicate::str::contains(token).not());
     assert!(!dry_output.exists());
     assert_eq!(
@@ -895,7 +893,7 @@ async fn binary_cache_and_response_batch_are_rejected_before_network() {
         .failure()
         .stdout(predicate::str::contains("0/1 operations successful"))
         .stdout(predicate::str::contains(
-            "Binary response operations are not supported in batch mode",
+            "Batch operation failed (Validation)",
         ));
     assert!(server.received_requests().await.unwrap().is_empty());
 
@@ -915,7 +913,7 @@ async fn binary_cache_and_response_batch_are_rejected_before_network() {
         .assert()
         .failure()
         .stdout(predicate::str::contains(
-            "Binary response operations are not supported in batch mode",
+            "Batch operation failed (Validation)",
         ));
     assert!(server.received_requests().await.unwrap().is_empty());
 
@@ -935,7 +933,7 @@ async fn binary_cache_and_response_batch_are_rejected_before_network() {
         .assert()
         .failure()
         .stdout(predicate::str::contains(
-            "Binary response operations are not supported in batch mode",
+            "Batch operation failed (Validation)",
         ));
     assert!(server.received_requests().await.unwrap().is_empty());
 }

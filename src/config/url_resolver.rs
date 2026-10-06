@@ -118,7 +118,7 @@ impl<'a> BaseUrlResolver<'a> {
     }
 
     /// Basic URL resolution without server variable processing (internal helper)
-    fn resolve_basic(&self, explicit_url: Option<&str>) -> String {
+    pub(crate) fn resolve_basic(&self, explicit_url: Option<&str>) -> String {
         // Priority 1: Explicit parameter (for testing)
         if let Some(url) = explicit_url {
             return url.to_string();

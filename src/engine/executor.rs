@@ -110,7 +110,12 @@ impl RetryContext {
 
 // Helper functions
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Private routing identity and its bounded diagnostic projection.
+///
+/// Route strings are retained only for the legacy transport fingerprint. Even
+/// userinfo-free URLs and bypass entries can contain transformed credentials;
+/// neither output nor Debug may expose them, including before auth is resolved.
+#[derive(Clone, Default, PartialEq, Eq)]
 struct ProxyDiagnostics {
     source: &'static str,
     disabled: bool,
@@ -120,14 +125,34 @@ struct ProxyDiagnostics {
     no_proxy: Vec<String>,
 }
 
+impl std::fmt::Debug for ProxyDiagnostics {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_json().fmt(formatter)
+    }
+}
+
 impl ProxyDiagnostics {
     fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "source": self.source,
             "disabled": self.disabled,
-            "all": self.all,
-            "http": self.http,
-            "https": self.https,
+            "all": self.all.as_ref().map(|_| "[PROXY URL OMITTED]"),
+            "http": self.http.as_ref().map(|_| "[PROXY URL OMITTED]"),
+            "https": self.https.as_ref().map(|_| "[PROXY URL OMITTED]"),
+            "no_proxy": [],
+            "no_proxy_count": self.no_proxy.len(),
+        })
+    }
+
+    /// Preserve the pre-omission transport identity bytes. This value must only
+    /// feed the private digest, never diagnostics or persisted response data.
+    fn transport_identity_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "source": self.source,
+            "disabled": self.disabled,
+            "all": self.all.as_deref().map(crate::config::settings::sanitize_proxy_url),
+            "http": self.http.as_deref().map(crate::config::settings::sanitize_proxy_url),
+            "https": self.https.as_deref().map(crate::config::settings::sanitize_proxy_url),
             "no_proxy": self.no_proxy,
         })
     }
@@ -138,15 +163,25 @@ impl ProxyDiagnostics {
 /// Resolved proxy settings, effective timeout and redirect policy form the key
 /// so configuration changes cannot reuse a client with different transport rules.
 /// No process-global client is retained.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct HttpClientPool(std::sync::Arc<std::sync::Mutex<HashMap<String, reqwest::Client>>>);
+
+impl std::fmt::Debug for HttpClientPool {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // reqwest client Debug includes proxy URIs and arbitrary bypass domains.
+        // Do not delegate or lock: cached transport state is never diagnostic data.
+        formatter
+            .debug_struct("HttpClientPool")
+            .finish_non_exhaustive()
+    }
+}
 
 fn transport_key(
     ctx: &crate::invocation::ExecutionContext,
     diagnostics: &ProxyDiagnostics,
 ) -> String {
     let mut digest = Sha256::new();
-    digest.update(diagnostics.to_json().to_string());
+    digest.update(diagnostics.transport_identity_json().to_string());
     digest.update(effective_timeout_secs(ctx).to_be_bytes());
     digest.update(format!("{:?}", ctx.proxy_override));
     digest.update(format!(
@@ -217,7 +252,7 @@ fn configure_cli_proxy(
     let proxy = proxy_all(url, "CLI")?;
     let diagnostics = ProxyDiagnostics {
         source: "cli",
-        all: Some(crate::config::settings::sanitize_proxy_url(url)),
+        all: Some(url.to_string()),
         ..ProxyDiagnostics::default()
     };
     Ok((builder.no_proxy().proxy(proxy), diagnostics))
@@ -249,9 +284,9 @@ fn env_proxy_diagnostics() -> Option<ProxyDiagnostics> {
 
     Some(ProxyDiagnostics {
         source: "environment",
-        all: all.map(|value| crate::config::settings::sanitize_proxy_url(&value)),
-        http: http.map(|value| crate::config::settings::sanitize_proxy_url(&value)),
-        https: https.map(|value| crate::config::settings::sanitize_proxy_url(&value)),
+        all,
+        http,
+        https,
         no_proxy: no_proxy.map_or_else(Vec::new, |value| parse_no_proxy_entries(&value)),
         ..ProxyDiagnostics::default()
     })
@@ -301,6 +336,63 @@ fn default_proxy_has_credentials(config: Option<&GlobalConfig>) -> bool {
                 .into_iter()
                 .flatten()
                 .any(proxy_url_has_credentials))
+}
+
+/// Collect only the selected proxy setup; mirror transport precedence without
+/// changing routing, `NO_PROXY`, or client/cache identity.
+fn with_selected_proxy_secrets(
+    mut secrets: logging::SecretContext,
+    ctx: &crate::invocation::ExecutionContext,
+) -> logging::SecretContext {
+    match &ctx.proxy_override {
+        ProxyOverride::Disable => secrets,
+        ProxyOverride::Use(url) => secrets.with_proxy_url(url),
+        ProxyOverride::Default => {
+            let environment: Vec<String> = [
+                ["HTTP_PROXY", "http_proxy"],
+                ["HTTPS_PROXY", "https_proxy"],
+                ["ALL_PROXY", "all_proxy"],
+            ]
+            .iter()
+            .filter_map(|names| first_env_value(names))
+            .collect();
+            if !environment.is_empty() {
+                for url in environment {
+                    secrets = secrets.with_proxy_url(&url);
+                }
+                return secrets;
+            }
+            with_config_proxy_secrets(secrets, ctx.global_config.as_ref())
+        }
+    }
+}
+
+fn with_config_proxy_secrets(
+    mut secrets: logging::SecretContext,
+    config: Option<&GlobalConfig>,
+) -> logging::SecretContext {
+    let Some(proxy) = config
+        .map(|config| &config.proxy)
+        .filter(|proxy| has_config_proxy(proxy))
+    else {
+        return secrets;
+    };
+    for url in [proxy.http.as_deref(), proxy.https.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        secrets = secrets.with_proxy_url(url);
+    }
+    let (Some(username), Some(password_env)) = (
+        non_empty(proxy.username.as_deref()),
+        non_empty(proxy.password_env.as_deref()),
+    ) else {
+        return secrets;
+    };
+    let Ok(password) = std::env::var(password_env) else {
+        return secrets;
+    };
+    secrets.with_proxy_basic_auth(username, &password)
 }
 
 fn first_env_value(names: &[&str]) -> Option<String> {
@@ -353,10 +445,7 @@ fn add_config_http_proxy(
     };
     let proxy = proxy_http(url, "config HTTP")?.no_proxy(no_proxy);
     let builder = builder.proxy(apply_config_proxy_auth(proxy, config)?);
-    Ok((
-        builder,
-        Some(crate::config::settings::sanitize_proxy_url(url)),
-    ))
+    Ok((builder, Some(url.to_string())))
 }
 
 fn add_config_https_proxy(
@@ -369,10 +458,7 @@ fn add_config_https_proxy(
     };
     let proxy = proxy_https(url, "config HTTPS")?.no_proxy(no_proxy);
     let builder = builder.proxy(apply_config_proxy_auth(proxy, config)?);
-    Ok((
-        builder,
-        Some(crate::config::settings::sanitize_proxy_url(url)),
-    ))
+    Ok((builder, Some(url.to_string())))
 }
 
 fn config_no_proxy(config: &ProxyConfig, env_no_proxy: Option<&str>) -> Option<reqwest::NoProxy> {
@@ -395,9 +481,7 @@ fn apply_config_proxy_auth(
     ) {
         (Some(username), Some(password_env)) => {
             let password = std::env::var(password_env).map_err(|_| {
-                Error::invalid_config(format!(
-                    "Proxy password environment variable '{password_env}' is not set"
-                ))
+                Error::invalid_config("Proxy password environment variable is unavailable")
             })?;
             Ok(proxy.basic_auth(username, &password))
         }
@@ -408,23 +492,22 @@ fn apply_config_proxy_auth(
     }
 }
 
-fn proxy_http(url: &str, label: &str) -> Result<reqwest::Proxy, Error> {
+fn proxy_http(url: &str, label: &'static str) -> Result<reqwest::Proxy, Error> {
     reqwest::Proxy::http(url).map_err(|_| invalid_proxy_url(label, url))
 }
 
-fn proxy_https(url: &str, label: &str) -> Result<reqwest::Proxy, Error> {
+fn proxy_https(url: &str, label: &'static str) -> Result<reqwest::Proxy, Error> {
     reqwest::Proxy::https(url).map_err(|_| invalid_proxy_url(label, url))
 }
 
-fn proxy_all(url: &str, label: &str) -> Result<reqwest::Proxy, Error> {
+fn proxy_all(url: &str, label: &'static str) -> Result<reqwest::Proxy, Error> {
     reqwest::Proxy::all(url).map_err(|_| invalid_proxy_url(label, url))
 }
 
-fn invalid_proxy_url(label: &str, url: &str) -> Error {
-    Error::invalid_config(format!(
-        "Invalid {label} proxy URL: {}",
-        crate::config::settings::sanitize_proxy_url(url)
-    ))
+fn invalid_proxy_url(label: &'static str, _url: &str) -> Error {
+    // Parsing fails before operation sensitivity exists. Arbitrary URL components
+    // and malformed tails cannot be made safe by removing guessed userinfo.
+    Error::invalid_config(format!("Invalid {label} proxy URL (value omitted)"))
 }
 
 fn parse_no_proxy_entries(value: &str) -> Vec<String> {
@@ -450,10 +533,10 @@ fn log_proxy_diagnostics(diagnostics: &ProxyDiagnostics) {
     tracing::debug!(
         target: "aperture::executor",
         source = diagnostics.source,
-        all = diagnostics.all.as_deref().unwrap_or(""),
-        http = diagnostics.http.as_deref().unwrap_or(""),
-        https = diagnostics.https.as_deref().unwrap_or(""),
-        no_proxy = diagnostics.no_proxy.join(","),
+        all_configured = diagnostics.all.is_some(),
+        http_configured = diagnostics.http.is_some(),
+        https_configured = diagnostics.https.is_some(),
+        no_proxy_count = diagnostics.no_proxy.len(),
         "Proxy configuration selected"
     );
 }
@@ -1226,12 +1309,9 @@ async fn store_in_cache(
 pub use crate::cli::legacy_execute::execute_request;
 
 /// Validates that a header value doesn't contain control characters
-fn validate_header_value(name: &str, value: &str) -> Result<(), Error> {
+fn validate_header_value(_name: &str, value: &str) -> Result<(), Error> {
     if value.chars().any(|c| c == '\r' || c == '\n' || c == '\0') {
-        return Err(Error::invalid_header_value(
-            name,
-            "Header value contains invalid control characters (newline, carriage return, or null)",
-        ));
+        return Err(Error::invalid_header_control_characters());
     }
     Ok(())
 }
@@ -1267,7 +1347,6 @@ fn parse_custom_header(header_str: &str) -> Result<(String, String), Error> {
 
 struct ResolvedAuthenticationSecret {
     value: String,
-    env_var_name: String,
     source: &'static str,
 }
 
@@ -1301,14 +1380,14 @@ fn resolve_secret_from_env(
     env_var_name: &str,
     source: &'static str,
 ) -> Result<ResolvedAuthenticationSecret, Error> {
-    let value = std::env::var(env_var_name)
-        .map_err(|_| Error::secret_not_set(scheme_name, env_var_name))?;
+    let value = std::env::var(env_var_name).map_err(|_| {
+        Error::secret_not_set(scheme_name, env_var_name).omit_diagnostic_inputs(
+            "Required authentication secret not set (environment variable unavailable)",
+            "Check the operation's credential mapping and environment variable availability.",
+        )
+    })?;
 
-    Ok(ResolvedAuthenticationSecret {
-        value,
-        env_var_name: env_var_name.to_string(),
-        source,
-    })
+    Ok(ResolvedAuthenticationSecret { value, source })
 }
 
 fn insert_api_key_header(
@@ -1385,7 +1464,7 @@ fn insert_http_authorization_header(
         .map_err(|e| Error::invalid_header_value(constants::HEADER_AUTHORIZATION, e.to_string()))?;
     headers.insert(constants::HEADER_AUTHORIZATION, header_value);
 
-    tracing::debug!(scheme = %scheme_str, "Added HTTP authentication header");
+    tracing::debug!("Added HTTP authentication header");
     Ok(())
 }
 
@@ -1396,11 +1475,7 @@ fn add_authentication_header(
     api_name: &str,
     global_config: Option<&GlobalConfig>,
 ) -> Result<(), Error> {
-    tracing::debug!(
-        scheme_name = %security_scheme.name,
-        scheme_type = %security_scheme.scheme_type,
-        "Adding authentication header"
-    );
+    tracing::debug!("Adding authentication header");
 
     let Some(resolved_secret) =
         resolve_authentication_secret(security_scheme, api_name, global_config)?
@@ -1408,12 +1483,7 @@ fn add_authentication_header(
         return Ok(());
     };
 
-    tracing::debug!(
-        source = resolved_secret.source,
-        scheme_name = %security_scheme.name,
-        env_var = %resolved_secret.env_var_name,
-        "Resolved secret"
-    );
+    tracing::debug!(source = resolved_secret.source, "Resolved secret");
 
     validate_header_value(constants::HEADER_AUTHORIZATION, &resolved_secret.value)?;
 
@@ -1468,12 +1538,14 @@ fn add_idempotency_key(
 async fn cached_execution_result(
     cache_context: Option<&(CacheKey, ResponseCache)>,
     max_response_bytes: usize,
+    diagnostics_sensitive: bool,
 ) -> Result<Option<ExecutionResult>, Error> {
     if let Some(cached_response) = check_cache(cache_context, max_response_bytes).await? {
         return Ok(Some(ExecutionResult::Cached {
             body: cached_response.body,
             status: cached_response.status_code,
             headers: cached_response.headers,
+            diagnostics_sensitive,
         }));
     }
 
@@ -1490,24 +1562,31 @@ fn build_dry_run_result(
     spec: &CachedSpec,
     operation: &CachedCommand,
     proxy: &ProxyDiagnostics,
+    secret_ctx: &logging::SecretContext,
 ) -> Option<ExecutionResult> {
     if !dry_run {
         return None;
     }
 
+    // Omit names and values: outgoing metadata can contain transformed secrets.
     let headers_map: HashMap<String, String> = headers
         .iter()
+        .filter(|_| !secret_ctx.is_authenticated())
         .map(|(k, v)| {
-            let value = if logging::should_redact_operation_header(k.as_str(), spec, operation) {
-                "[REDACTED]".to_string()
-            } else {
-                v.to_str().unwrap_or("<binary>").to_string()
-            };
+            let value = logging::redact_operation_header_value(
+                k.as_str(),
+                v.to_str().unwrap_or("<binary>"),
+                Some(secret_ctx),
+                Some((spec, operation)),
+            );
             (k.as_str().to_string(), value)
         })
         .collect();
 
     let body_info = match body {
+        Some(RequestBody::Json(_)) if secret_ctx.is_authenticated() => {
+            serde_json::Value::String("<authenticated request body omitted>".to_string())
+        }
         Some(RequestBody::Json(source)) => serde_json::Value::String(source.clone()),
         Some(RequestBody::Binary(bytes)) => serde_json::json!({
             "binary": true,
@@ -1518,7 +1597,7 @@ fn build_dry_run_result(
     let request_info = serde_json::json!({
         "dry_run": true,
         "method": method.to_string(),
-        "url": url,
+        "url": secret_ctx.diagnostic_url(url, Some((spec, operation))),
         "headers": headers_map,
         "body": body_info,
         "operation_id": operation.operation_id,
@@ -1547,7 +1626,7 @@ async fn finalize_execution_result(
         let error_body = if operation.has_binary_response() {
             format!("<{} binary response bytes>", response_bytes.len())
         } else {
-            secret_ctx.redact_secrets_in_text(&String::from_utf8_lossy(&response_bytes))
+            secret_ctx.diagnostic_body(&String::from_utf8_lossy(&response_bytes))
         };
         return Err(handle_http_error(status, error_body, spec, operation));
     }
@@ -1581,6 +1660,7 @@ async fn finalize_execution_result(
             body: response_text,
             status: status.as_u16(),
             headers: response_headers,
+            diagnostics_sensitive: secret_ctx.is_authenticated(),
         })
     }
 }
@@ -1607,6 +1687,7 @@ struct PreExecutionInput<'a> {
     spec: &'a CachedSpec,
     operation: &'a CachedCommand,
     proxy: &'a ProxyDiagnostics,
+    secret_ctx: &'a logging::SecretContext,
 }
 
 async fn resolve_pre_execution_result(
@@ -1621,11 +1702,17 @@ async fn resolve_pre_execution_result(
         input.spec,
         input.operation,
         input.proxy,
+        input.secret_ctx,
     );
     if dry_run.is_some() {
         return Ok(dry_run);
     }
-    cached_execution_result(input.cache_context, input.max_response_bytes).await
+    cached_execution_result(
+        input.cache_context,
+        input.max_response_bytes,
+        input.secret_ctx.is_authenticated(),
+    )
+    .await
 }
 
 /// Executes an API operation using CLI-agnostic domain types.
@@ -1653,6 +1740,7 @@ pub async fn execute(
         operation: prepared.operation,
         proxy: &prepared.proxy_diagnostics,
         max_response_bytes,
+        secret_ctx: &prepared.secret_ctx,
     })
     .await?
     {
@@ -1855,8 +1943,12 @@ fn prepare_request<'a>(
         ctx.global_config.as_ref(),
     )?;
     add_idempotency_key(&mut headers, ctx.idempotency_key.as_ref())?;
-    let method = Method::from_str(&operation.method)
-        .map_err(|_| Error::invalid_http_method(&operation.method))?;
+    let method = Method::from_str(&operation.method).map_err(|_| {
+        Error::invalid_http_method(&operation.method).omit_diagnostic_inputs(
+            "Invalid request HTTP method",
+            "Use a valid HTTP method in the operation definition.",
+        )
+    })?;
     let headers_clone = headers.clone();
 
     Ok(PreparedRequest {
@@ -1869,6 +1961,23 @@ fn prepare_request<'a>(
         headers_clone,
         body: call.body,
     })
+}
+
+/// Detect selected transport authentication without resolving credentials or
+/// emitting resolver errors. A userinfo delimiter in the authority is treated
+/// conservatively even when a template or malformed URL cannot yet be parsed.
+pub(crate) fn preparation_transport_is_sensitive(
+    spec: &CachedSpec,
+    ctx: &crate::invocation::ExecutionContext,
+) -> bool {
+    let base = resolve_base_url_resolver(spec, ctx.global_config.as_ref())
+        .resolve_basic(ctx.base_url.as_deref());
+    let userinfo = base.split_once("://").is_some_and(|(_, rest)| {
+        rest.split(['/', '?', '#'])
+            .next()
+            .is_some_and(|authority| authority.contains('@'))
+    });
+    userinfo || proxy_requires_cache_bypass(ctx)
 }
 
 fn execution_bypasses_cache(
@@ -1930,7 +2039,11 @@ fn prepare_runtime_context<'a>(
     });
     let secret_ctx =
         logging::SecretContext::from_spec_and_config(spec, &spec.name, ctx.global_config.as_ref())
-            .with_active_operation_headers(spec, operation, headers);
+            .with_active_operation_headers(spec, operation, headers)
+            .with_request_url(url)
+            .with_authenticated_transport(proxy_requires_cache_bypass(ctx));
+
+    let secret_ctx = with_selected_proxy_secrets(secret_ctx, ctx);
 
     Ok(PreparedRuntimeContext {
         cache_context,
@@ -1982,6 +2095,34 @@ pub(crate) fn pagination_request_url(
     ctx: &crate::invocation::ExecutionContext,
 ) -> Result<reqwest::Url, Error> {
     let operation = find_operation_by_id(spec, &call.operation_id)?;
+    let sensitive = preparation_transport_is_sensitive(spec, ctx)
+        || logging::operation_preparation_is_sensitive(
+            spec,
+            operation,
+            call.header_params.keys().map(String::as_str).chain(
+                call.custom_headers
+                    .iter()
+                    .filter_map(|header| header.split_once(':').map(|(name, _)| name.trim())),
+            ),
+        );
+    resolve_operation_request_url(spec, operation, call, ctx).map_err(|error| {
+        if sensitive {
+            error.omit_diagnostic_inputs(
+                "Invalid request URL or URL parameters (input omitted)",
+                "Check the base URL, path/query parameters, server variables and pagination origin.",
+            )
+        } else {
+            error
+        }
+    })
+}
+
+fn resolve_operation_request_url(
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+    call: &crate::invocation::OperationCall,
+    ctx: &crate::invocation::ExecutionContext,
+) -> Result<reqwest::Url, Error> {
     let resolver = resolve_base_url_resolver(spec, ctx.global_config.as_ref());
     let base = resolver.resolve_with_variables(ctx.base_url.as_deref(), &ctx.server_var_args)?;
     let url = build_url_from_params(
@@ -2133,9 +2274,9 @@ fn security_group_unavailable(
         let scheme = &spec.security_schemes[name];
         let env_name = authentication_env_name(scheme, api_name, global_config);
         let Some(env_name) = env_name else {
-            return Ok(Some(Error::validation_error(format!(
-                "No credential configured for security scheme '{name}'"
-            ))));
+            return Ok(Some(Error::validation_error(
+                "No credential configured for security scheme (name omitted)",
+            )));
         };
         match std::env::var(env_name) {
             Ok(value) if scheme.scheme_type == "oauth2" => {
@@ -2145,14 +2286,17 @@ fn security_group_unavailable(
             }
             Ok(_) => {}
             Err(std::env::VarError::NotPresent) => {
-                return Ok(Some(Error::secret_not_set(name, env_name)))
+                return Ok(Some(Error::secret_not_set(name, env_name).omit_diagnostic_inputs(
+                    "Required authentication secret not set (environment variable unavailable)",
+                    "Check the operation's credential mapping and environment variable availability.",
+                )))
             }
             // VarError's Display includes the raw non-Unicode value, which is
             // a credential here. Report the configuration error without it.
             Err(std::env::VarError::NotUnicode(_)) => {
-                return Err(Error::validation_error(format!(
-                    "Credential for security scheme '{name}' is not valid unicode"
-                )))
+                return Err(Error::validation_error(
+                    "Credential for security scheme is not valid unicode",
+                ))
             }
         }
     }
@@ -2167,7 +2311,7 @@ fn validate_security_group(group: &[String], spec: &CachedSpec) -> Result<(), Er
         let scheme = spec
             .security_schemes
             .get(name)
-            .ok_or_else(|| Error::validation_error(format!("Unknown security scheme '{name}'")))?;
+            .ok_or_else(|| Error::validation_error("Unknown security scheme (name omitted)"))?;
         let destination = security_header_destination(scheme)?;
         if !destinations.insert(destination) {
             return Err(Error::validation_error(
@@ -2191,7 +2335,12 @@ fn security_header_destination(scheme: &CachedSecurityScheme) -> Result<HeaderNa
                 .map_err(|error| Error::invalid_header_name(name, error.to_string()))
         }
         "http" | "oauth2" => authorization_destination(scheme),
-        other => Err(Error::unsupported_security_scheme(other)),
+        other => Err(
+            Error::unsupported_security_scheme(other).omit_diagnostic_inputs(
+                "Unsupported security scheme type (input omitted)",
+                "Use header apiKey, HTTP or external OAuth2 authentication.",
+            ),
+        ),
     }
 }
 
@@ -2242,6 +2391,31 @@ pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Erro
         .map_err(|e| Error::jq_filter_error(filter, format!("Response is not valid JSON: {e}")))?;
 
     apply_jq_filter_value(json_value, filter)
+}
+
+/// Filter caller-supplied text with an explicit diagnostic sensitivity policy.
+///
+/// Successful output stays exact; sensitive failures never retain input, filter
+/// source or parser/runtime errors. The context-free helper remains for owned
+/// anonymous data; operation renderers use this policy-aware boundary.
+///
+/// # Errors
+/// Returns a Validation error with a static JQ hint on sensitive failures.
+pub fn apply_jq_filter_with_diagnostics(
+    response_text: &str,
+    filter: &str,
+    diagnostics_sensitive: bool,
+) -> Result<String, Error> {
+    apply_jq_filter(response_text, filter).map_err(|error| {
+        if diagnostics_sensitive {
+            error.omit_diagnostic_inputs(
+                "JQ filter error (authenticated input omitted)",
+                "Check JQ filter syntax and data structure compatibility.",
+            )
+        } else {
+            error
+        }
+    })
 }
 
 #[cfg(feature = "jq")]
@@ -2613,6 +2787,148 @@ mod tests {
     }
 
     #[test]
+    fn selected_proxy_forms_follow_overrides_and_config_rotation() {
+        let password_env = "APERTURE_REPAIR264_PROXY_PASSWORD";
+        let mut config = GlobalConfig::default();
+        config.proxy.http = Some("http://localhost:8080".into());
+        config.proxy.username = Some("proxy".into());
+        config.proxy.password_env = Some(password_env.into());
+        std::env::set_var(password_env, "first-secret-264");
+        let first = with_config_proxy_secrets(logging::SecretContext::empty(), Some(&config));
+        std::env::set_var(password_env, "second-secret-264");
+        let second = with_config_proxy_secrets(logging::SecretContext::empty(), Some(&config));
+        std::env::remove_var(password_env);
+        assert!(first.is_secret("first-secret-264"));
+        assert!(!second.is_secret("first-secret-264"));
+        assert!(second.is_secret("second-secret-264"));
+        let context = crate::invocation::ExecutionContext {
+            global_config: Some(config),
+            proxy_override: ProxyOverride::Disable,
+            ..Default::default()
+        };
+        assert!(
+            !with_selected_proxy_secrets(logging::SecretContext::empty(), &context)
+                .is_authenticated()
+        );
+        let context = crate::invocation::ExecutionContext {
+            proxy_override: ProxyOverride::Use("proxy:selected-secret-264@localhost:8080".into()),
+            ..context
+        };
+        let selected = with_selected_proxy_secrets(logging::SecretContext::empty(), &context);
+        assert!(selected.is_secret("selected-secret-264"));
+        assert!(!selected.is_secret("second-secret-264"));
+    }
+
+    #[test]
+    fn proxy_metadata_omits_untrusted_routes_before_auth_context() {
+        let diagnostics = ProxyDiagnostics {
+            source: "environment",
+            all: Some("http://u:proxy-fresh-264@proxy/proxy-fresh-264?echo=462-hserf-yxorp".into()),
+            http: Some("http://café-secret.example/%63af%C3%A9?echo=Y2Fmw6k=#secret".into()),
+            https: Some("unknown://u:secret@[bad/secret".into()),
+            no_proxy: vec!["secret.example".into(), "462-hserf-yxorp".into()],
+            ..Default::default()
+        };
+        let output = diagnostics.to_json();
+        assert_eq!(output["all"], "[PROXY URL OMITTED]");
+        assert_eq!(output["http"], "[PROXY URL OMITTED]");
+        assert_eq!(output["https"], "[PROXY URL OMITTED]");
+        assert_eq!(output["no_proxy"], serde_json::json!([]));
+        assert_eq!(output["no_proxy_count"], 2);
+        let debug = format!("{diagnostics:?}");
+        assert!(!debug.contains("secret"));
+        assert!(!debug.contains("proxy-fresh-264"));
+        assert!(!debug.contains("462-hserf-yxorp"));
+    }
+
+    #[test]
+    fn invalid_proxy_errors_omit_all_input_not_only_userinfo() {
+        for url in [
+            "http://u:invalid-proxy-secret-264@[bad/invalid-proxy-secret-264",
+            "unknown://u:secret@host/terces?echo=c2VjcmV0#secret",
+            "secret",
+            "",
+            " ",
+            "none",
+            "http://secret@[bad",
+            "http://host/\nsecret",
+        ] {
+            let error = invalid_proxy_url("CLI", url);
+            assert_eq!(
+                error.to_string(),
+                "Validation: Invalid configuration: Invalid CLI proxy URL (value omitted)"
+            );
+            assert!(!format!("{error:?}").contains("secret"));
+        }
+    }
+
+    #[test]
+    fn proxy_client_pool_debug_does_not_delegate_untrusted_routes() {
+        ensure_tls_provider();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .proxy(
+                reqwest::Proxy::all("http://u:secret@localhost:8080/terces")
+                    .unwrap()
+                    .no_proxy(reqwest::NoProxy::from_string(
+                        "secret.example,terces.example",
+                    )),
+            )
+            .build()
+            .unwrap();
+        let pool = HttpClientPool::default();
+        pool.0
+            .lock()
+            .unwrap()
+            .insert("opaque-digest".into(), client);
+        let rendered = format!("{pool:?}");
+        assert!(!rendered.contains("secret"), "{rendered}");
+        assert!(!rendered.contains("terces"), "{rendered}");
+        assert!(!rendered.contains("localhost"), "{rendered}");
+    }
+
+    #[test]
+    fn proxy_missing_password_errors_do_not_reflect_configured_names() {
+        let config = ProxyConfig {
+            username: Some("proxy-secret-264".into()),
+            password_env: Some("APERTURE264_MISSING_PROXY_SECRET_ENV_NAME".into()),
+            ..Default::default()
+        };
+        let proxy = reqwest::Proxy::all("http://localhost:8080").unwrap();
+        let error = apply_config_proxy_auth(proxy, &config).unwrap_err();
+        let rendered = format!("{error} {error:?}");
+        assert!(!rendered.contains("proxy-secret-264"));
+        assert!(!rendered.contains("APERTURE264_MISSING_PROXY_SECRET_ENV_NAME"));
+        assert!(rendered.contains("Proxy password environment variable is unavailable"));
+    }
+
+    #[test]
+    fn proxy_safe_projection_does_not_replace_transport_identity() {
+        let ctx = crate::invocation::ExecutionContext::default();
+        let first = ProxyDiagnostics {
+            source: "config",
+            http: Some("http://u:first@localhost:8080/first?echo=tsrif#first".into()),
+            no_proxy: vec!["first.example".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            first.transport_identity_json(),
+            serde_json::json!({
+                "source": "config", "disabled": false, "all": null,
+                "http": "http://localhost:8080/first?echo=tsrif#first",
+                "https": null, "no_proxy": ["first.example"]
+            })
+        );
+        let mut second = first.clone();
+        second.http = Some("http://u:second@localhost:8080/second?echo=dnoces#second".into());
+        second.no_proxy = vec!["second.example".into()];
+        assert_eq!(first.to_json(), second.to_json());
+        assert_ne!(transport_key(&ctx, &first), transport_key(&ctx, &second));
+        assert!(!format!("{first:?}").contains("first"));
+        assert!(!format!("{second:?}").contains("second"));
+    }
+
+    #[test]
     fn transport_keys_distinguish_rotated_proxy_passwords() {
         let password_env = "APERTURE_REVIEW_PROXY_PASSWORD";
         let mut config = GlobalConfig::default();
@@ -2640,7 +2956,7 @@ mod tests {
         let first_key = transport_key(&ctx, &first_diagnostics);
         ctx.proxy_override = ProxyOverride::Use("http://bob:other@localhost:8080".into());
         let (_, second_diagnostics) = configure_proxy(reqwest::Client::builder(), &ctx).unwrap();
-        assert_eq!(first_diagnostics, second_diagnostics);
+        assert_eq!(first_diagnostics.to_json(), second_diagnostics.to_json());
         assert_ne!(first_key, transport_key(&ctx, &second_diagnostics));
         assert!(!first_key.contains("secret"));
     }

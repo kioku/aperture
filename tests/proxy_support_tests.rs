@@ -470,7 +470,7 @@ async fn dry_run_proxy_diagnostics_redact_credentials() {
     assert!(!rendered.contains("secret"));
     assert_eq!(
         request_info["proxy"]["http"].as_str(),
-        Some("http://proxy.example:8080/")
+        Some("[PROXY URL OMITTED]")
     );
 }
 
@@ -615,24 +615,32 @@ async fn authenticated_proxy_no_proxy_boundary_is_conservative() {
     let origin = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true})))
-        .expect(3)
+        .expect(6)
         .mount(&origin)
         .await;
     env::set_var("HTTP_PROXY", "http://alice:synthetic@127.0.0.1:1");
-    env::set_var("NO_PROXY", "127.0.0.1");
-    let directory = tempfile::TempDir::new().unwrap();
-    let spec = test_spec(&origin.uri());
-    let mut ctx = cache_context(&directory);
-    assert_uncached_twice(&spec, ctx.clone()).await;
-    ctx.proxy_override = ProxyOverride::Disable;
-    assert!(matches!(
-        execute(&spec, test_call(), ctx.clone()).await.unwrap(),
-        ExecutionResult::Success { .. }
-    ));
-    assert!(matches!(
-        execute(&spec, test_call(), ctx).await.unwrap(),
-        ExecutionResult::Cached { .. }
-    ));
+    for bypass in ["127.0.0.1", "*"] {
+        env::set_var("NO_PROXY", bypass);
+        let directory = tempfile::TempDir::new().unwrap();
+        // The locked proxy matcher applies `*` to hostnames, not IP literals.
+        let origin_url = if bypass == "*" {
+            origin.uri().replace("127.0.0.1", "localhost")
+        } else {
+            origin.uri()
+        };
+        let spec = test_spec(&origin_url);
+        let mut ctx = cache_context(&directory);
+        assert_uncached_twice(&spec, ctx.clone()).await;
+        ctx.proxy_override = ProxyOverride::Disable;
+        assert!(matches!(
+            execute(&spec, test_call(), ctx.clone()).await.unwrap(),
+            ExecutionResult::Success { .. }
+        ));
+        assert!(matches!(
+            execute(&spec, test_call(), ctx).await.unwrap(),
+            ExecutionResult::Cached { .. }
+        ));
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -771,4 +779,158 @@ async fn schemeless_authenticated_proxy_accounts_never_cache() {
     }
     assert_eq!(proxy.received_requests().await.unwrap().len(), 24);
     assert!(!directory.path().join("responses").exists());
+}
+
+/// SDK dry-run must suppress proxy routes before any operation auth context exists.
+#[tokio::test(flavor = "current_thread")]
+async fn proxy_metadata_sdk_sources_omit_reflected_credentials() {
+    let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let _env = EnvGuard::clear_proxy_env();
+    let url = "http://u:proxy-fresh-264@127.0.0.1:9/proxy-fresh-264?echo=462-hserf-yxorp#c2VjcmV0";
+    for mode in ["cli", "environment", "config", "config-basic"] {
+        env::remove_var("HTTP_PROXY");
+        let mut ctx = ExecutionContext {
+            dry_run: true,
+            ..Default::default()
+        };
+        match mode {
+            "cli" => ctx.proxy_override = ProxyOverride::Use(url.into()),
+            "environment" => {
+                env::set_var("HTTP_PROXY", url);
+                env::set_var("NO_PROXY", "proxy-fresh-264,462-hserf-yxorp");
+            }
+            _ => {
+                let mut proxy = ProxyConfig {
+                    http: Some(url.into()),
+                    no_proxy: vec!["proxy-fresh-264".into()],
+                    ..Default::default()
+                };
+                if mode == "config-basic" {
+                    proxy.http =
+                        Some("http://127.0.0.1:9/proxy-fresh-264?echo=462-hserf-yxorp".into());
+                    proxy.username = Some("u".into());
+                    proxy.password_env = Some("APERTURE_PROXY_TEST_PASSWORD".into());
+                    env::set_var("APERTURE_PROXY_TEST_PASSWORD", "proxy-fresh-264");
+                }
+                ctx.global_config = Some(GlobalConfig {
+                    proxy,
+                    ..Default::default()
+                });
+            }
+        }
+        let ExecutionResult::DryRun { request_info } =
+            execute(&test_spec("http://example.test"), test_call(), ctx)
+                .await
+                .unwrap()
+        else {
+            panic!("expected dry-run");
+        };
+        let output = request_info.to_string();
+        assert!(!output.contains("proxy-fresh-264"), "{mode}: {output}");
+        assert!(!output.contains("462-hserf-yxorp"), "{mode}: {output}");
+        assert!(!output.contains("c2VjcmV0"), "{mode}: {output}");
+        assert_eq!(
+            request_info["proxy"]["source"],
+            if mode == "config-basic" {
+                "config"
+            } else {
+                mode
+            }
+        );
+        env::remove_var("NO_PROXY");
+    }
+}
+
+/// A shared pool must deliver each rotated account to the same proxy authority.
+#[tokio::test(flavor = "current_thread")]
+async fn proxy_metadata_omission_preserves_shared_pool_rotation_and_request_bytes() {
+    let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let _env = EnvGuard::clear_proxy_env();
+    let proxy = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok":true})))
+        .mount(&proxy)
+        .await;
+    let spec = test_spec("http://example.test");
+    let mut ctx = ExecutionContext::default();
+    for mode in ["cli", "environment", "config", "config-basic"] {
+        for password in ["first-password", "rotated-password"] {
+            env::remove_var("HTTP_PROXY");
+            ctx.proxy_override = ProxyOverride::Default;
+            ctx.global_config = None;
+            let authority = proxy
+                .uri()
+                .replace("http://", &format!("http://u:{password}@"));
+            let url = format!("{authority}/{password}?echo={password}#fragment");
+            match mode {
+                "cli" => ctx.proxy_override = ProxyOverride::Use(url),
+                "environment" => env::set_var("HTTP_PROXY", url),
+                "config" => {
+                    ctx.global_config = Some(GlobalConfig {
+                        proxy: ProxyConfig {
+                            http: Some(url),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    });
+                }
+                _ => {
+                    env::set_var("APERTURE_PROXY_TEST_PASSWORD", password);
+                    ctx.global_config = Some(GlobalConfig {
+                        proxy: ProxyConfig {
+                            http: Some(format!("{}/{password}?echo={password}", proxy.uri())),
+                            username: Some("u".into()),
+                            password_env: Some("APERTURE_PROXY_TEST_PASSWORD".into()),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    });
+                }
+            }
+            execute_ok(spec.clone(), ctx.clone()).await;
+            let requests = proxy.received_requests().await.unwrap();
+            let request = requests.last().unwrap();
+            let expected = format!(
+                "Basic {}",
+                general_purpose::STANDARD.encode(format!("u:{password}"))
+            );
+            assert_eq!(request.headers["proxy-authorization"], expected);
+            assert_eq!(request.url.path(), "/resource");
+            assert_eq!(request.headers["host"], "example.test");
+        }
+    }
+    assert_eq!(proxy.received_requests().await.unwrap().len(), 8);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn malformed_proxy_sdk_errors_omit_fallback_tails() {
+    let _lock = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let _env = EnvGuard::clear_proxy_env();
+    for url in [
+        "http://u:invalid-proxy-secret-264@[bad/invalid-proxy-secret-264",
+        "http://invalid-proxy-secret-264@[bad",
+    ] {
+        for config in [false, true] {
+            let mut ctx = ExecutionContext {
+                dry_run: true,
+                ..Default::default()
+            };
+            if config {
+                ctx.global_config = Some(GlobalConfig {
+                    proxy: ProxyConfig {
+                        http: Some(url.into()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                });
+            } else {
+                ctx.proxy_override = ProxyOverride::Use(url.into());
+            }
+            let error = execute(&test_spec("http://example.test"), test_call(), ctx)
+                .await
+                .unwrap_err();
+            assert!(!format!("{error:?} {error}").contains("invalid-proxy-secret-264"));
+            assert!(error.to_string().contains("proxy URL (value omitted)"));
+        }
+    }
 }

@@ -286,8 +286,9 @@ async fn test_missing_authentication_environment_variable() {
         Ok(_) => panic!("Expected error but got success"),
         Err(e) => {
             let error_msg = e.to_string();
-            assert!(error_msg.contains(&format!("Environment variable '{bearer_env}'")));
-            assert!(error_msg.contains("is not set"));
+            assert!(error_msg.contains("secret not set"));
+            assert!(error_msg.contains("environment variable unavailable"));
+            assert!(!error_msg.contains(bearer_env));
         }
     }
 }

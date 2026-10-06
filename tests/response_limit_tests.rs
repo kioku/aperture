@@ -284,7 +284,7 @@ async fn batch_uses_global_per_response_limit() {
     assert_eq!(result.failure_count, 2);
     for entry in result.results {
         let error = entry.error.unwrap();
-        assert!(error.contains("max_response_bytes"), "{error}");
+        assert_eq!(error, "Batch operation failed (Validation)");
         assert!(!error.contains("private-fragment"));
     }
     assert_eq!(server.received_requests().await.unwrap().len(), 2);

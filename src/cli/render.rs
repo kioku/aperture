@@ -7,7 +7,7 @@
 use crate::cache::models::CachedCommand;
 use crate::cli::OutputFormat;
 use crate::constants;
-use crate::engine::executor::apply_jq_filter;
+use crate::engine::executor::apply_jq_filter_with_diagnostics;
 use crate::error::Error;
 use crate::invocation::ExecutionResult;
 use crate::output::write_stdout_line;
@@ -82,8 +82,17 @@ pub fn render_result_with_binary_destination(
     output_file: Option<&str>,
 ) -> Result<(), Error> {
     match result {
-        ExecutionResult::Success { body, .. } | ExecutionResult::Cached { body, .. } => {
-            render_text_body(body, format, jq_filter)?;
+        ExecutionResult::Success {
+            body,
+            diagnostics_sensitive,
+            ..
+        }
+        | ExecutionResult::Cached {
+            body,
+            diagnostics_sensitive,
+            ..
+        } => {
+            render_text_body(body, format, jq_filter, *diagnostics_sensitive)?;
         }
         ExecutionResult::Binary { body, .. } => {
             write_binary_response(body, output_file)?;
@@ -100,11 +109,12 @@ fn render_text_body(
     body: &str,
     format: &OutputFormat,
     jq_filter: Option<&str>,
+    diagnostics_sensitive: bool,
 ) -> Result<(), Error> {
     if body.is_empty() {
         return Ok(());
     }
-    format_and_print(body, format, jq_filter, false).map(|_| ())
+    format_and_print(body, format, jq_filter, false, diagnostics_sensitive).map(|_| ())
 }
 
 fn render_dry_run(request_info: &Value) -> Result<(), Error> {
@@ -123,16 +133,21 @@ fn write_binary_response(body: &[u8], output_file: Option<&str>) -> Result<(), E
         return stdout
             .write_all(body)
             .and_then(|()| stdout.flush())
-            .map_err(|e| {
-                Error::io_error(format!("Failed to write binary response to stdout: {e}"))
-            });
+            .map_err(|error| binary_output_error(&error, "stdout"));
     }
 
-    crate::atomic::atomic_write_sync(std::path::Path::new(destination), body).map_err(|e| {
-        Error::io_error(format!(
-            "Failed to write binary response to '{destination}': {e}"
-        ))
-    })
+    crate::atomic::atomic_write_sync(std::path::Path::new(destination), body)
+        .map_err(|error| binary_output_error(&error, "output file"))
+}
+
+/// Destinations and wrapped I/O displays are untrusted operation diagnostics.
+/// Preserve the finite OS error category, not a filename or arbitrary error text.
+fn binary_output_error(error: &std::io::Error, target: &'static str) -> Error {
+    Error::io_error(format!(
+        "Failed to write binary response to {target} ({:?}; destination omitted)",
+        error.kind()
+    ))
+    .with_suggestion("Check the output destination, parent directory and write permissions.")
 }
 
 /// Renders an [`ExecutionResult`] to a `String` instead of stdout.
@@ -148,11 +163,20 @@ pub fn render_result_to_string(
     jq_filter: Option<&str>,
 ) -> Result<Option<String>, Error> {
     match result {
-        ExecutionResult::Success { body, .. } | ExecutionResult::Cached { body, .. } => {
+        ExecutionResult::Success {
+            body,
+            diagnostics_sensitive,
+            ..
+        }
+        | ExecutionResult::Cached {
+            body,
+            diagnostics_sensitive,
+            ..
+        } => {
             if body.is_empty() {
                 return Ok(None);
             }
-            format_and_print(body, format, jq_filter, true)
+            format_and_print(body, format, jq_filter, true, *diagnostics_sensitive)
         }
         ExecutionResult::Binary { .. } => Err(Error::validation_error(
             "Binary responses cannot be rendered or captured as text",
@@ -285,9 +309,10 @@ fn format_and_print(
     output_format: &OutputFormat,
     jq_filter: Option<&str>,
     capture_output: bool,
+    diagnostics_sensitive: bool,
 ) -> Result<Option<String>, Error> {
     let processed_text = if let Some(filter) = jq_filter {
-        apply_jq_filter(response_text, filter)?
+        apply_jq_filter_with_diagnostics(response_text, filter, diagnostics_sensitive)?
     } else {
         response_text.to_string()
     };

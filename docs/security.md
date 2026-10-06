@@ -262,7 +262,7 @@ As an additional defense-in-depth measure, authentication headers are scrubbed f
 
 Executor requests with repeated header fields bypass caching because the cache key input cannot represent multiple values for one header. New cache entries omit all request-header metadata and strip URL userinfo, query strings, and fragments. The low-level SDK cache API has no OpenAPI security context: its request keys include every supplied header in a length-framed SHA-256 digest to separate credential identities. Callers must supply the complete request when generating keys and must not put secrets in response bodies or unrecognized response headers. Both executor and low-level cache storage skip responses with `Set-Cookie` and unsafe request methods.
 
-Enabled request logging redacts URL userinfo and sensitive query parameters, including percent-encoded parameter names and custom query API keys declared by the operation. Disabled logging still avoids URL, header, and body redaction work.
+Enabled anonymous request logging redacts URL userinfo and sensitive query parameters, including percent-encoded parameter names and custom query API keys declared by the operation. Authenticated request URLs and all request header diagnostics are omitted. Disabled logging still avoids URL, header, and body redaction work.
 
 Cache filenames escape caller-supplied components, including path separators and Unicode. The new key encoding intentionally invalidates previous request-key matches; existing files remain on disk until cleared or expired.
 
@@ -379,3 +379,79 @@ If a specification was already registered with unsupported alternatives before
 this correction, run `aperture config reinit` to rebuild its parsed-spec cache.
 Unknown scheme references in cached commands remain errors rather than being
 silently treated as anonymous access.
+
+### Authenticated operation diagnostics
+
+Header validation errors always omit supplied header strings, names, values and
+caller-provided reasons, even before authentication context exists. They retain
+HTTP-header error categories, static reasons and format hints. Operation
+authentication preparation also omits scheme names/types and credential mapping
+names from errors and traces. URL/parameter and CLI body-file preparation errors
+use bounded hints when declared/recognized operation authentication or selected
+transport authentication makes the request sensitive. Ordinary anonymous body
+and URL validation remains useful. These diagnostic projections do not change
+accepted HTTP bytes, header precedence or caller-requested successful data.
+Dynamic operation argument failures retain only clap's finite error category and
+safe placement/help hints; they never render raw values, argument names or
+suggestions from the parser. Retry-delay errors likewise omit supplied values.
+These early operation projections apply even before authentication is selected;
+offline configuration validation and requested help remain separate boundaries.
+
+Authenticated successful response data also remains sensitive when output
+processing fails. JQ parse/compile/runtime errors omit response text, filter source
+and parser error details while retaining Validation classification and a syntax/
+structure hint. CLI, legacy and batch operation renderers carry this policy through
+`ExecutionResult::Success` and `Cached` via `diagnostics_sensitive`; the body and
+headers themselves remain unchanged caller-requested data. SDK callers constructing
+these results must set the flag for sensitive data, and exhaustive destructuring
+must account for the new field. SDK callers filtering raw strings can use
+`apply_jq_filter_with_diagnostics`; the context-free `apply_jq_filter` cannot infer
+authentication from caller-owned text. Anonymous operation and cached-response JQ
+errors remain useful. Batch-summary filter errors follow the existing unconditional
+bounded batch-error policy. Successful filter output is never redacted.
+Binary output-write errors also omit destination paths and wrapped I/O text,
+retaining the finite I/O error kind and a permissions/destination hint. This
+omission is unconditional and changes neither destinations nor binary bytes or
+result metadata.
+
+Final recognized credential headers (including declared API-key headers and
+Authorization overrides), URL userinfo, and authenticated proxy configuration
+suppress request URLs, request/response body trace logging and all request/response
+header diagnostics, including header names. Text API
+errors retain status, operation identity and safe hints, but omit authenticated
+response bodies, since servers can transform credentials in arbitrary ways.
+Dry-run omits authenticated JSON request bodies and all request headers (an empty
+header object), and replaces the URL with an omission marker. Basic
+password/pair/encoded-pair and bare bearer tokens are tracked independently of the
+configured-secret minimum length. Compatible UTF-8 header bytes, repeated ASCII
+spaces and tabs are collected without changing outgoing HTTP grammar. Basic
+password extraction does not depend on username UTF-8 validity. Non-UTF8
+credentials remain accepted by the SDK header boundary; diagnostic omission, not
+lossy string matching, protects that path. Literal form collection does not
+recognize arbitrary transformations. Proxy URL and `NO_PROXY` diagnostic fields
+are always omitted, including before operation authentication is resolved; invalid
+proxy errors never reflect supplied values or malformed tails. Logs retain static
+source, configured-route flags and bypass counts. Dry-run retains URL omission
+markers, an empty bypass list and its count. Private transport fingerprints remain
+separate from this safe output projection, and cached-client Debug is opaque.
+The CLI excludes dependency tracing events, which do not apply the operation's
+omission policy and can expose proxy/origin hosts or protocol data. Explicit
+`APERTURE_LOG` target directives cannot override this boundary. An SDK application's
+own subscriber is caller-controlled; enabling dependency HTTP tracing can expose
+sensitive transport data. Requested configuration inspection and
+serialization remain caller-owned setting data, not sanitized request diagnostics;
+userinfo removal alone cannot protect arbitrary URL or bypass-list content.
+Selected proxy raw, percent-encoded and Basic credential forms are included without
+changing proxy precedence, bypass rules, rotation or transport/cache isolation. Binary
+handling and successful requested response output remain unchanged.
+
+Anonymous diagnostics retain useful bodies with best-effort literal redaction.
+An undeclared environment-expanded custom credential header is not yet recognized
+by this boundary; declare its API-key security scheme/mapping and avoid diagnostic
+logging or caching for that override path. Successful output can itself contain
+sensitive API data; protect it as you would the response from the API directly.
+
+Batch diagnostic summaries omit argument metadata in both JSON (`args` is no longer
+present) and text. Failure/progress diagnostics retain only safe categories and numeric
+HTTP status, not arbitrary parser, response or capture error text. Operation IDs,
+counts, success flags, durations and intentionally requested successful API data remain.

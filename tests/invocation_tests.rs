@@ -62,6 +62,7 @@ fn execution_result_success_preserves_status_and_headers() {
         body: "{\"ok\":true}".to_string(),
         status: 201,
         headers,
+        diagnostics_sensitive: false,
     };
 
     match result {
@@ -69,7 +70,9 @@ fn execution_result_success_preserves_status_and_headers() {
             body,
             status,
             headers,
+            diagnostics_sensitive,
         } => {
+            assert!(!diagnostics_sensitive);
             assert_eq!(status, 201);
             assert_eq!(body, "{\"ok\":true}");
             assert_eq!(

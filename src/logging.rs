@@ -8,6 +8,7 @@
 
 use crate::cache::models::CachedSpec;
 use crate::config::models::GlobalConfig;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use tracing::{debug, info, trace};
 
 /// Minimum length for a secret to be redacted in body content.
@@ -19,12 +20,24 @@ const MIN_SECRET_LENGTH_FOR_BODY_REDACTION: usize = 8;
 /// This struct collects actual secret values from environment variables
 /// referenced by `x-aperture-secret` extensions and config-based secrets,
 /// allowing them to be redacted from logs wherever they appear.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct SecretContext {
     /// Resolved configured secret values that should be redacted.
     secrets: Vec<String>,
     /// Final active credential values, including per-invocation overrides.
     active_secrets: Vec<String>,
+    /// Final request carries credentials; untrusted bodies must not be diagnosed.
+    authenticated: bool,
+}
+
+// Never expose resolved credentials through SDK/debug diagnostics.
+impl std::fmt::Debug for SecretContext {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SecretContext")
+            .field("authenticated", &self.authenticated)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Collects non-empty secret values from spec's security schemes.
@@ -102,6 +115,7 @@ impl SecretContext {
         Self {
             secrets,
             active_secrets: Vec::new(),
+            authenticated: false,
         }
     }
 
@@ -113,17 +127,148 @@ impl SecretContext {
         operation: &crate::cache::models::CachedCommand,
         headers: &reqwest::header::HeaderMap,
     ) -> Self {
-        self.active_secrets
-            .extend(headers.iter().filter_map(|(name, value)| {
-                should_redact_operation_header(name.as_str(), spec, operation)
-                    .then(|| value.to_str().ok())
-                    .flatten()
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string)
-            }));
+        for (name, value) in headers {
+            if !should_redact_operation_header(name.as_str(), spec, operation) {
+                continue;
+            }
+            // Sensitivity does not depend on UTF-8 decoding or credential length.
+            self.authenticated = true;
+            let Ok(value) = std::str::from_utf8(value.as_bytes()) else {
+                continue;
+            };
+            self.add_active_credential(value);
+            if name == reqwest::header::AUTHORIZATION {
+                self.add_authorization_forms(value);
+            }
+        }
         self.active_secrets.sort();
         self.active_secrets.dedup();
         self
+    }
+
+    /// Includes Basic credentials that reqwest derives implicitly from URL userinfo.
+    #[must_use]
+    pub fn with_request_url(mut self, url: &str) -> Self {
+        let Ok(url) = reqwest::Url::parse(url) else {
+            return self;
+        };
+        if url.username().is_empty() && url.password().is_none() {
+            return self;
+        }
+        self.authenticated = true;
+        self.add_active_credential(url.username());
+        self.add_active_credential(url.password().unwrap_or_default());
+        let username =
+            urlencoding::decode(url.username()).unwrap_or_else(|_| url.username().into());
+        let password = url.password().unwrap_or_default();
+        let password = urlencoding::decode(password).unwrap_or_else(|_| password.into());
+        let pair = format!("{username}:{password}");
+        let authorization = format!("Basic {}", STANDARD.encode(pair));
+        self.add_active_credential(&authorization);
+        self.add_authorization_forms(&authorization);
+        self
+    }
+
+    /// Includes raw and encoded Basic credentials from a selected proxy URL.
+    /// Scheme-less authorities follow reqwest's local URL normalization.
+    #[must_use]
+    pub fn with_proxy_url(self, url: &str) -> Self {
+        let parsed = reqwest::Url::parse(url)
+            .ok()
+            .filter(reqwest::Url::has_host)
+            .or_else(|| reqwest::Url::parse(&format!("http://{url}")).ok());
+        match parsed {
+            Some(url) => self.with_request_url(url.as_str()),
+            None => self,
+        }
+    }
+
+    /// Includes explicit selected config-proxy Basic authentication, without persisting it.
+    #[must_use]
+    pub fn with_proxy_basic_auth(mut self, username: &str, password: &str) -> Self {
+        self.authenticated = true;
+        self.add_active_credential(username);
+        let authorization = format!(
+            "Basic {}",
+            STANDARD.encode(format!("{username}:{password}"))
+        );
+        self.add_active_credential(&authorization);
+        self.add_authorization_forms(&authorization);
+        self
+    }
+
+    /// Marks transport authentication that is attached outside the operation headers.
+    /// This is conservative for authenticated proxies excluded by `NO_PROXY`.
+    #[must_use]
+    pub const fn with_authenticated_transport(mut self, authenticated: bool) -> Self {
+        self.authenticated |= authenticated;
+        self
+    }
+
+    fn add_active_credential(&mut self, value: &str) {
+        if !value.is_empty() {
+            self.active_secrets.push(value.to_string());
+        }
+    }
+
+    fn add_authorization_forms(&mut self, value: &str) {
+        // Header grammar allows HTAB and repeated spaces. This is diagnostic
+        // extraction only: it never normalizes or rejects the outgoing value.
+        let Some((scheme, credential)) = value.split_once([' ', '\t']) else {
+            return;
+        };
+        let credential = credential.trim_matches([' ', '\t']);
+        self.add_active_credential(credential);
+        if !scheme.eq_ignore_ascii_case("basic") {
+            return;
+        }
+        let Ok(pair) = STANDARD.decode(credential) else {
+            return;
+        };
+        self.add_utf8_credential(&pair);
+        if let Some(colon) = pair.iter().position(|byte| *byte == b':') {
+            // Invalid username bytes must not hide a compatible password.
+            self.add_utf8_credential(&pair[colon + 1..]);
+        }
+    }
+
+    fn add_utf8_credential(&mut self, bytes: &[u8]) {
+        if let Ok(value) = std::str::from_utf8(bytes) {
+            self.add_active_credential(value);
+        }
+    }
+
+    /// Authenticated outgoing metadata may contain transformed credentials or
+    /// non-UTF8 bytes. Omission avoids a false guarantee from literal/lossy matching.
+    #[must_use]
+    pub fn diagnostic_url(
+        &self,
+        url: &str,
+        operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
+    ) -> String {
+        if self.is_authenticated() {
+            "<authenticated request URL omitted>".to_string()
+        } else {
+            self.redact_secrets_in_text(&redact_operation_url(url, operation_context))
+        }
+    }
+
+    /// Whether active operation or transport credentials make body diagnostics unsafe.
+    /// Configured but unused secrets alone do not make an anonymous request authenticated.
+    #[must_use]
+    pub const fn is_authenticated(&self) -> bool {
+        self.authenticated
+    }
+
+    /// Renders an error diagnostic, never an authenticated server-controlled body.
+    /// Literal redaction is only a best-effort aid for anonymous diagnostics.
+    #[must_use]
+    pub fn diagnostic_body(&self, body: &str) -> String {
+        if self.is_authenticated() {
+            "<authenticated response body omitted>".to_string()
+        } else {
+            self.redact_secrets_in_text(body)
+        }
     }
 
     /// Checks if a value exactly matches any configured or active secret.
@@ -137,8 +282,10 @@ impl SecretContext {
 
     /// Redacts all occurrences of secrets in the given text.
     ///
-    /// Only redacts secrets that are at least `MIN_SECRET_LENGTH_FOR_BODY_REDACTION`
-    /// characters long to avoid false positives with short values.
+    /// Configured values use `MIN_SECRET_LENGTH_FOR_BODY_REDACTION` to limit false
+    /// positives. Final active credential forms are redacted regardless of length.
+    /// This cannot recognize arbitrary transformations; use `diagnostic_body`
+    /// for untrusted error bodies.
     #[must_use]
     pub fn redact_secrets_in_text(&self, text: &str) -> String {
         let mut result = text.to_string();
@@ -245,6 +392,21 @@ pub fn should_redact_operation_header(
             })
 }
 
+/// Conservative preparation sensitivity, without resolving environment values.
+/// Unused configured mappings do not make anonymous operations sensitive. This
+/// shares the existing declared/recognized-header boundary, not env provenance.
+pub(crate) fn operation_preparation_is_sensitive<'a>(
+    spec: &CachedSpec,
+    operation: &crate::cache::models::CachedCommand,
+    mut header_names: impl Iterator<Item = &'a str>,
+) -> bool {
+    operation
+        .security_requirements
+        .iter()
+        .any(|group| !group.is_empty())
+        || header_names.any(|name| should_redact_operation_header(name, spec, operation))
+}
+
 /// Checks if a query parameter name should be redacted
 #[must_use]
 fn should_redact_query_param(param_name: &str) -> bool {
@@ -328,7 +490,9 @@ fn sensitive_operation_query(
         })
 }
 
-fn redact_operation_url(
+/// Redacts URL credentials and declared operation query security parameters.
+#[must_use]
+pub fn redact_operation_url(
     url: &str,
     operation_context: Option<(&CachedSpec, &crate::cache::models::CachedCommand)>,
 ) -> String {
@@ -417,7 +581,9 @@ pub fn log_operation_request(
     );
 }
 
-fn redact_operation_header_value(
+/// Redacts standard, declared, and final credential forms from a header value.
+#[must_use]
+pub fn redact_operation_header_value(
     header_name: &str,
     value: &str,
     secret_ctx: Option<&SecretContext>,
@@ -442,11 +608,10 @@ fn log_request_with_operation(
 ) {
     // Redact sensitive query parameters from URL before logging
     let redacted_url = if tracing::enabled!(target: "aperture::executor", tracing::Level::INFO) {
-        let redacted = redact_operation_url(url, operation_context);
-        match secret_ctx {
-            Some(ctx) => ctx.redact_secrets_in_text(&redacted),
-            None => redacted,
-        }
+        secret_ctx.map_or_else(
+            || redact_operation_url(url, operation_context),
+            |ctx| ctx.diagnostic_url(url, operation_context),
+        )
     } else {
         String::new()
     };
@@ -458,6 +623,12 @@ fn log_request_with_operation(
         method.to_uppercase(),
         redacted_url
     );
+
+    // Names as well as values are caller-controlled. Never render authenticated
+    // metadata, even when a credential cannot be represented as UTF-8.
+    if secret_ctx.is_some_and(SecretContext::is_authenticated) {
+        return;
+    }
 
     // Log headers at debug level
     let Some(header_map) =
@@ -491,6 +662,9 @@ fn log_request_body(body: Option<&str>, secret_ctx: Option<&SecretContext>) {
     if !tracing::enabled!(target: "aperture::executor", tracing::Level::TRACE) {
         return;
     }
+    if secret_ctx.is_some_and(SecretContext::is_authenticated) {
+        return;
+    }
     let Some(body_content) = body else {
         return;
     };
@@ -518,7 +692,10 @@ fn redact_header_value(
         return "[REDACTED]".to_string();
     }
 
-    value.to_string()
+    secret_ctx.map_or_else(
+        || value.to_string(),
+        |ctx| ctx.redact_secrets_in_text(value),
+    )
 }
 
 /// Logs an HTTP response with optional headers and body
@@ -590,7 +767,15 @@ fn log_response_with_operation(
         duration_ms
     );
 
-    // Log headers at debug level
+    // Header names and values are server-controlled and can encode credentials
+    // using arbitrary transformations. Only locally derived metadata is safe.
+    if secret_ctx.is_some_and(SecretContext::is_authenticated) {
+        debug!(target: "aperture::executor", "Response headers omitted (authenticated request)");
+        log_response_body(body, max_body_len, secret_ctx);
+        return;
+    }
+
+    // Log anonymous headers at debug level.
     let Some(header_map) =
         headers.filter(|_| tracing::enabled!(target: "aperture::executor", tracing::Level::DEBUG))
     else {
@@ -631,6 +816,9 @@ fn truncate_string(s: &str, max_chars: usize) -> &str {
 /// Helper function to log response body with truncation
 fn log_response_body(body: Option<&str>, max_body_len: usize, secret_ctx: Option<&SecretContext>) {
     if !tracing::enabled!(target: "aperture::executor", tracing::Level::TRACE) {
+        return;
+    }
+    if secret_ctx.is_some_and(SecretContext::is_authenticated) {
         return;
     }
     let Some(body_content) = body else {
