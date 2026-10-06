@@ -59,7 +59,7 @@ async fn seed_literal_cache(
     let url = format!("{base}/items");
     let key = CacheKey::from_request(
         "env",
-        "items:redirects=true:origin-bound=v1:proxy-auth-bypass=v2",
+        "items:redirects=true:origin-bound=v1:proxy-auth-bypass=v2:header-identity=v2",
         "GET",
         &url,
         &headers,

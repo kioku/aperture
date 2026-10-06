@@ -260,7 +260,7 @@ As an additional defense-in-depth measure, authentication headers are scrubbed f
 - `Cookie` and response `Set-Cookie`
 - `X-API-Key` / `X-API-Token` / `API-Key`
 
-Executor requests with repeated header fields bypass caching because the cache key input cannot represent multiple values for one header. New cache entries omit all request-header metadata and strip URL userinfo, query strings, and fragments. The low-level SDK cache API has no OpenAPI security context: its request keys include every supplied header in a length-framed SHA-256 digest to separate credential identities. Callers must supply the complete request when generating keys and must not put secrets in response bodies or unrecognized response headers. Both executor and low-level cache storage skip responses with `Set-Cookie` and unsafe request methods.
+Executor requests with repeated header fields or values that cannot be represented losslessly as ASCII strings bypass both cache reads and writes. Actual request bytes remain unchanged. The executor's header-identity cache revision also prevents reuse of older entries that collapsed non-ASCII values to empty strings; existing files are not rewritten or deleted. New cache entries omit all request-header metadata and strip URL userinfo, query strings, and fragments. The low-level SDK cache API has no OpenAPI security context: its request keys include every supplied header in a length-framed SHA-256 digest to separate credential identities. Callers must supply the complete request when generating keys and must not put secrets in response bodies or unrecognized response headers. Both executor and low-level cache storage skip responses with `Set-Cookie` and unsafe request methods.
 
 Enabled anonymous request logging redacts URL userinfo and sensitive query parameters, including percent-encoded parameter names and custom query API keys declared by the operation. Authenticated request URLs and all request header diagnostics are omitted. Disabled logging still avoids URL, header, and body redaction work.
 
@@ -441,6 +441,10 @@ own subscriber is caller-controlled; enabling dependency HTTP tracing can expose
 sensitive transport data. Requested configuration inspection and
 serialization remain caller-owned setting data, not sanitized request diagnostics;
 userinfo removal alone cannot protect arbitrary URL or bypass-list content.
+Global configuration parse failures omit TOML source lines and parser values in text,
+JSON and SDK errors. They retain only a static parse category, a numeric byte range
+when available, and a local-file syntax hint. Valid configuration parsing and
+requested successful inspection keep their existing behavior.
 Selected proxy raw, percent-encoded and Basic credential forms are included without
 changing proxy precedence, bypass rules, rotation or transport/cache isolation. Binary
 handling and successful requested response output remain unchanged.
