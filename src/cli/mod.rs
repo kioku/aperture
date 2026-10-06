@@ -390,6 +390,9 @@ pub enum Commands {
         /// Show detailed results including paths and parameters
         #[arg(long, help = "Show detailed information for each result")]
         verbose: bool,
+        /// Output format for discovery results
+        #[arg(long, value_enum, default_value = "text")]
+        format: DiscoveryFormat,
     },
     /// Execute API operations using shortcuts or direct operation IDs
     #[command(
