@@ -40,31 +40,38 @@ impl VariableStore {
 /// Returns the string with all placeholders replaced, or an error if any
 /// referenced variable is undefined.
 fn interpolate_arg(arg: &str, store: &VariableStore, operation_id: &str) -> Result<String, Error> {
-    let mut result = String::with_capacity(arg.len());
+    Ok(interpolate_segments(arg, store, operation_id)?
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect())
+}
+
+/// Preserve authored chunks independently of response data. Neither interpreter
+/// may recursively interpret the output produced by the other interpreter.
+pub(crate) fn interpolate_segments(
+    arg: &str,
+    store: &VariableStore,
+    operation_id: &str,
+) -> Result<Vec<(String, bool)>, Error> {
+    let mut segments = Vec::new();
     let mut remaining = arg;
-
     while let Some(start) = remaining.find("{{") {
-        result.push_str(&remaining[..start]);
+        segments.push((remaining[..start].to_string(), true));
         let after_open = &remaining[start + 2..];
-
         let Some(end) = after_open.find("}}") else {
-            // Unclosed brace — treat as literal
-            result.push_str("{{");
+            segments.push(("{{".to_string(), true));
             remaining = after_open;
             continue;
         };
-
-        let var_name = &after_open[..end];
+        let name = &after_open[..end];
         let value = store
-            .resolve(var_name)
-            .ok_or_else(|| Error::batch_undefined_variable(operation_id, var_name))?;
-
-        result.push_str(&value);
+            .resolve(name)
+            .ok_or_else(|| Error::batch_undefined_variable(operation_id, name))?;
+        segments.push((value, false));
         remaining = &after_open[end + 2..];
     }
-
-    result.push_str(remaining);
-    Ok(result)
+    segments.push((remaining.to_string(), true));
+    Ok(segments)
 }
 
 /// Interpolates `{{variable}}` references in a single string.

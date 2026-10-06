@@ -1,5 +1,6 @@
 pub mod capture;
 pub mod graph;
+mod header_provenance;
 pub mod interpolation;
 
 use crate::cache::models::CachedSpec;
@@ -16,6 +17,20 @@ use std::num::NonZeroU32;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
+
+/// Keep the execution values and their original capture provenance together.
+/// References remain private to dependent execution; SDK input structs are unchanged.
+struct DependentInvocation<'a> {
+    operation: &'a BatchOperation,
+    authored: &'a BatchOperation,
+    store: &'a interpolation::VariableStore,
+}
+
+struct BatchCall {
+    call: crate::invocation::OperationCall,
+    server_var_args: Vec<String>,
+    resolved_headers: Option<Vec<(reqwest::header::HeaderName, reqwest::header::HeaderValue)>>,
+}
 
 /// Batch arguments, parser messages, and captured values can contain arbitrary
 /// secrets. Retain only a locally defined category and numeric HTTP status.
@@ -445,7 +460,11 @@ impl BatchProcessor {
         let operation_start = std::time::Instant::now();
         let response = match Self::execute_dependent_operation(
             spec,
-            &exec_op,
+            DependentInvocation {
+                operation: &exec_op,
+                authored: operation,
+                store,
+            },
             global_config,
             base_url,
             dry_run,
@@ -483,7 +502,7 @@ impl BatchProcessor {
 
     async fn execute_dependent_operation(
         spec: &CachedSpec,
-        exec_op: &BatchOperation,
+        invocation: DependentInvocation<'_>,
         global_config: Option<&GlobalConfig>,
         base_url: Option<&str>,
         dry_run: bool,
@@ -494,7 +513,7 @@ impl BatchProcessor {
         // preserves the raw response structure regardless of caller formatting.
         Self::execute_single_operation(
             spec,
-            exec_op,
+            invocation.operation,
             global_config,
             base_url,
             dry_run,
@@ -503,6 +522,7 @@ impl BatchProcessor {
             true,
             proxy_override,
             http_clients,
+            Some((invocation.authored, invocation.store)),
         )
         .await
     }
@@ -748,6 +768,7 @@ impl BatchProcessor {
             suppress_output,
             proxy_override,
             http_clients,
+            None,
         )
         .await;
         let duration = operation_start.elapsed();
@@ -861,35 +882,28 @@ impl BatchProcessor {
     fn build_batch_call(
         spec: &CachedSpec,
         operation: &BatchOperation,
-    ) -> Result<(crate::invocation::OperationCall, Vec<String>), Error> {
+        provenance: Option<(&BatchOperation, &interpolation::VariableStore)>,
+    ) -> Result<BatchCall, Error> {
         Self::validate_batch_body_file_args(operation)?;
-        let command = generator::generate_batch_command_tree(spec, &operation.args)?;
-        let extra_body_file = operation
-            .body_file
-            .as_deref()
-            .map(|path| vec!["--body-file".to_string(), path.to_string()])
-            .unwrap_or_default();
-        let extra_headers = batch_header_arguments(&operation.headers)?;
-        let matches = command
-            .try_get_matches_from(
-                std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
-                    .chain(operation.args.clone())
-                    .chain(extra_body_file)
-                    .chain(extra_headers),
-            )
-            .map_err(|_| {
-                Error::invalid_command(
-                    crate::constants::CONTEXT_BATCH,
-                    "Invalid batch operation arguments",
-                )
-            })?;
+        let extra_body_file = batch_body_file_arguments(operation);
+        let matches = batch_operation_matches(spec, operation, &extra_body_file)?;
+        let mut resolved_headers = provenance
+            .map(|(authored, store)| {
+                header_provenance::resolve_headers(authored, store, &extra_body_file, &matches)
+            })
+            .transpose()?;
         let mut call = crate::cli::translate::matches_to_operation_call(spec, &matches)?;
         // Map headers precede explicit argument headers; translation sees both
         // before body preparation and the final overlay follows actual values.
         call.custom_headers.rotate_right(operation.headers.len());
+        header_provenance::overlay_map_headers(&mut resolved_headers, operation.headers.len());
         Self::validate_batch_response_type(spec, &call.operation_id)?;
         let server_vars = crate::cli::translate::extract_server_var_args(&matches);
-        Ok((call, server_vars))
+        Ok(BatchCall {
+            call,
+            server_var_args: server_vars,
+            resolved_headers,
+        })
     }
 
     /// Executes a single operation from a batch
@@ -905,10 +919,15 @@ impl BatchProcessor {
         suppress_output: bool,
         proxy_override: ProxyOverride,
         http_clients: crate::engine::executor::HttpClientPool,
+        provenance: Option<(&BatchOperation, &interpolation::VariableStore)>,
     ) -> Result<String, Error> {
         use crate::invocation::ExecutionContext;
 
-        let (call, server_var_args) = Self::build_batch_call(spec, operation)?;
+        let BatchCall {
+            call,
+            server_var_args,
+            resolved_headers,
+        } = Self::build_batch_call(spec, operation, provenance)?;
         let cache_config = Self::build_batch_cache_config(operation.use_cache)?;
         let retry_context = build_batch_retry_context(operation, global_config)?;
 
@@ -926,7 +945,13 @@ impl BatchProcessor {
             auto_paginate: false,
         };
 
-        let result = crate::engine::executor::execute(spec, call, ctx).await?;
+        let result = crate::engine::executor::execute_with_resolved_headers(
+            spec,
+            call,
+            ctx,
+            resolved_headers,
+        )
+        .await?;
 
         Self::render_batch_execution_result(
             &result,
@@ -936,6 +961,36 @@ impl BatchProcessor {
             operation,
         )
     }
+}
+
+fn batch_operation_matches(
+    spec: &CachedSpec,
+    operation: &BatchOperation,
+    extra_body_file: &[String],
+) -> Result<clap::ArgMatches, Error> {
+    let command = generator::generate_batch_command_tree(spec, &operation.args)?;
+    let extra_headers = batch_header_arguments(&operation.headers)?;
+    command
+        .try_get_matches_from(
+            std::iter::once(crate::constants::CLI_ROOT_COMMAND.to_string())
+                .chain(operation.args.clone())
+                .chain(extra_body_file.iter().cloned())
+                .chain(extra_headers),
+        )
+        .map_err(|_| {
+            Error::invalid_command(
+                crate::constants::CONTEXT_BATCH,
+                "Invalid batch operation arguments",
+            )
+        })
+}
+
+fn batch_body_file_arguments(operation: &BatchOperation) -> Vec<String> {
+    operation
+        .body_file
+        .as_deref()
+        .map(|path| vec!["--body-file".to_string(), path.to_string()])
+        .unwrap_or_default()
 }
 
 /// Validate map names and emit a stable overlay order before CLI translation.
@@ -1030,7 +1085,6 @@ fn resolve_retry_delay_ms(delay: Option<&str>, default_ms: u64) -> Result<u64, E
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn retry_delay_rejects_millisecond_overflow() {
         assert!(resolve_retry_delay_ms(Some("18446744073709552s"), 500).is_err());

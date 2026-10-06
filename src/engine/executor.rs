@@ -1339,6 +1339,51 @@ fn parse_custom_header(header_str: &str) -> Result<(HeaderName, HeaderValue), Er
     Ok((header_name, value))
 }
 
+/// Resolve only authored portions of a batch header, preserving captured bytes.
+pub(crate) fn parse_custom_header_segments(
+    segments: &[(String, bool)],
+) -> Result<(HeaderName, HeaderValue), Error> {
+    let raw: String = segments.iter().map(|(text, _)| text.as_str()).collect();
+    let (name, value) = raw
+        .split_once(':')
+        .ok_or_else(|| Error::invalid_header_format(&raw))?;
+    let header_name = parse_custom_header_name(name.trim())?;
+    let start = name.len() + 1 + value.len() - value.trim_start().len();
+    let end = raw.len() - value.len() + value.trim_end().len();
+    let (expanded, sensitive) = expand_header_segments(segments, start, end)?;
+    validate_header_value(name, &expanded)?;
+    let mut value = HeaderValue::from_str(&expanded)
+        .map_err(|e| Error::invalid_header_value(name, e.to_string()))?;
+    value.set_sensitive(sensitive);
+    Ok((header_name, value))
+}
+
+fn expand_header_segments(
+    segments: &[(String, bool)],
+    start: usize,
+    end: usize,
+) -> Result<(String, bool), Error> {
+    let mut expanded = String::new();
+    let mut sensitive = false;
+    let mut offset = 0;
+    for (text, authored) in segments {
+        let from = start.saturating_sub(offset).min(text.len());
+        let to = end.saturating_sub(offset).min(text.len());
+        if from < to {
+            let text = &text[from..to];
+            let (value, secret) = if *authored {
+                expand_header_environment(text)?
+            } else {
+                (text.to_string(), false)
+            };
+            expanded.push_str(&value);
+            sensitive |= secret;
+        }
+        offset += text.len();
+    }
+    Ok((expanded, sensitive))
+}
+
 fn parse_custom_header_name(name: &str) -> Result<HeaderName, Error> {
     if name.is_empty() {
         return Err(Error::empty_header_name());
@@ -1769,8 +1814,19 @@ pub async fn execute(
     call: crate::invocation::OperationCall,
     ctx: crate::invocation::ExecutionContext,
 ) -> Result<crate::invocation::ExecutionResult, Error> {
+    execute_with_resolved_headers(spec, call, ctx, None).await
+}
+
+/// Batch-only boundary: these headers have already resolved authored references.
+/// `HeaderValue` retains sensitivity through overlays and cloned execution contexts.
+pub(crate) async fn execute_with_resolved_headers(
+    spec: &CachedSpec,
+    call: crate::invocation::OperationCall,
+    ctx: crate::invocation::ExecutionContext,
+    custom_headers: Option<Vec<(HeaderName, HeaderValue)>>,
+) -> Result<crate::invocation::ExecutionResult, Error> {
     let max_response_bytes = effective_max_response_bytes(&ctx)?;
-    let prepared = prepare_execution(spec, call, &ctx)?;
+    let prepared = prepare_execution(spec, call, &ctx, custom_headers)?;
 
     if let Some(result) = resolve_pre_execution_result(PreExecutionInput {
         cache_context: prepared.cache_context.as_ref(),
@@ -1861,9 +1917,10 @@ fn prepare_execution<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
+    custom_headers: Option<Vec<(HeaderName, HeaderValue)>>,
 ) -> Result<PreparedExecution<'a>, Error> {
     let strict_pagination = ctx.auto_paginate || call.pagination_url.is_some();
-    let request = prepare_request(spec, call, ctx)?;
+    let request = prepare_request(spec, call, ctx, custom_headers)?;
     let runtime = prepare_runtime_context(spec, &request, ctx, strict_pagination)?;
 
     Ok(PreparedExecution {
@@ -1967,10 +2024,31 @@ fn prepare_transport(
     Ok((Some(result.client), result.diagnostics))
 }
 
+fn overlay_resolved_headers(
+    headers: &mut HeaderMap,
+    resolved: Option<Vec<(HeaderName, HeaderValue)>>,
+) {
+    if let Some(resolved) = resolved {
+        for (name, value) in resolved {
+            headers.insert(name, value);
+        }
+    }
+}
+
+fn operation_http_method(operation: &CachedCommand) -> Result<Method, Error> {
+    Method::from_str(&operation.method).map_err(|_| {
+        Error::invalid_http_method(&operation.method).omit_diagnostic_inputs(
+            "Invalid request HTTP method",
+            "Use a valid HTTP method in the operation definition.",
+        )
+    })
+}
+
 fn prepare_request<'a>(
     spec: &'a CachedSpec,
     call: crate::invocation::OperationCall,
     ctx: &'a crate::invocation::ExecutionContext,
+    custom_headers: Option<Vec<(HeaderName, HeaderValue)>>,
 ) -> Result<PreparedRequest<'a>, Error> {
     let operation = find_validated_operation(spec, &call)?;
     let url = pagination_request_url(spec, &call, ctx)?.to_string();
@@ -1980,18 +2058,18 @@ fn prepare_request<'a>(
         spec,
         operation,
         &call.header_params,
-        &call.custom_headers,
+        if custom_headers.is_some() {
+            &[]
+        } else {
+            &call.custom_headers
+        },
         call.body.is_some(),
         &spec.name,
         ctx.global_config.as_ref(),
     )?;
+    overlay_resolved_headers(&mut headers, custom_headers);
     add_idempotency_key(&mut headers, ctx.idempotency_key.as_ref())?;
-    let method = Method::from_str(&operation.method).map_err(|_| {
-        Error::invalid_http_method(&operation.method).omit_diagnostic_inputs(
-            "Invalid request HTTP method",
-            "Use a valid HTTP method in the operation definition.",
-        )
-    })?;
+    let method = operation_http_method(operation)?;
     let headers_clone = headers.clone();
 
     Ok(PreparedRequest {
@@ -2678,6 +2756,35 @@ mod tests {
                 "http://localhost/test"
             ));
         }
+    }
+
+    #[test]
+    fn batch_segments_do_not_reinterpret_either_expansion() {
+        let variable = "APERTURE_273_SEGMENT_TEST";
+        std::env::set_var(variable, "${UNRESOLVED_273}-{{capture}}");
+        let segments = vec![
+            (format!("X-Data: ${{{variable}}}-"), true),
+            ("${UNRESOLVED_273}-${}-{{other}}".to_string(), false),
+        ];
+        let (name, value) = parse_custom_header_segments(&segments).unwrap();
+        std::env::remove_var(variable);
+        assert_eq!(
+            value.as_bytes(),
+            b"${UNRESOLVED_273}-{{capture}}-${UNRESOLVED_273}-${}-{{other}}"
+        );
+        assert!(value.is_sensitive());
+        let mut headers = HeaderMap::new();
+        headers.insert(name.clone(), value);
+        let mut clone = headers.clone();
+        assert!(clone[&name].is_sensitive());
+        let (_, literal) = parse_custom_header_segments(&[
+            ("x-data: ".to_string(), true),
+            ("${UNRESOLVED_273}".to_string(), false),
+        ])
+        .unwrap();
+        clone.insert(name.clone(), literal);
+        assert!(!clone[&name].is_sensitive());
+        assert!(headers[&name].is_sensitive());
     }
 
     #[test]
