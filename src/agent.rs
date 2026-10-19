@@ -793,7 +793,10 @@ fn convert_cached_parameter_to_info(cached_param: &CachedParameter) -> Parameter
         } else {
             cached_param.format.clone()
         },
-        default_value: cached_param.default_value.clone(),
+        default_value: cached_param
+            .default_value
+            .clone()
+            .or_else(|| metadata.default.as_ref().map(serde_json::Value::to_string)),
         enum_values: metadata.enum_values,
         example: cached_param.example.clone(),
         constraints: metadata.constraints,
@@ -1221,7 +1224,7 @@ fn convert_openapi_parameter_to_info(param: &OpenApiParameter, spec: &OpenAPI) -
     }
 }
 
-/// Resolve the same top-level schema references used by the cached manifest path.
+/// Resolve the same schema positions used by the cached manifest path.
 fn parameter_schema_json(
     format: &openapiv3::ParameterSchemaOrContent,
     spec: &OpenAPI,
@@ -1229,13 +1232,9 @@ fn parameter_schema_json(
     let openapiv3::ParameterSchemaOrContent::Schema(schema) = format else {
         return None;
     };
-    match schema {
-        ReferenceOr::Item(schema) => serde_json::to_string(schema).ok(),
-        ReferenceOr::Reference { reference } => {
-            let schema = resolve_schema_reference(spec, reference).ok()?;
-            serde_json::to_string(&schema).ok()
-        }
-    }
+    let schema = serde_json::to_value(schema).ok()?;
+    let schema = crate::spec::parameter_schema::resolve(spec, schema).ok()?;
+    serde_json::to_string(&schema).ok()
 }
 
 /// Extracts security schemes directly from `OpenAPI` spec

@@ -209,3 +209,188 @@ fn help_shows_schema_fallback_and_length_bounds_in_each_location() {
         );
     }
 }
+
+#[test]
+fn all_of_reference_wrappers_preserve_metadata() {
+    let mut source = serde_json::to_value(spec()).unwrap();
+    source["components"]["schemas"]["Code"] = json!({
+        "type": "string", "description": "Referenced code.",
+        "minLength": 2, "maxLength": 8, "enum": ["ab", "cd"], "default": "ab"
+    });
+    source["paths"]["/items/{id}"]["get"]["parameters"] = json!([
+        {"name": "id", "in": "path", "required": true,
+         "schema": {"description": "Wrapper description.",
+                    "allOf": [{"$ref": "#/components/schemas/Code"}]}}
+    ]);
+    let spec = serde_json::from_value(source).unwrap();
+    let cached = SpecTransformer::new().transform("items", &spec).unwrap();
+    for manifest in [
+        generate_capability_manifest(&cached, None).unwrap(),
+        generate_capability_manifest_from_openapi("items", &spec, &cached, None).unwrap(),
+    ] {
+        let params = parameters(&manifest);
+        assert_eq!(params[0]["description"], "Wrapper description.");
+        assert_eq!(params[0]["min_length"], 2);
+        assert_eq!(params[0]["max_length"], 8);
+        assert_eq!(params[0]["enum_values"], json!(["ab", "cd"]));
+        assert_eq!(params[0]["default_value"], "\"ab\"");
+    }
+    let mut tree = generate_command_tree_with_flags(&cached, false);
+    let help = tree
+        .find_subcommand_mut("items")
+        .unwrap()
+        .find_subcommand_mut("list-items")
+        .unwrap()
+        .render_long_help()
+        .to_string();
+    assert!(help.contains("Wrapper description."));
+    assert!(help.contains("min length: 2"));
+    assert!(help.contains("possible values: ab, cd"));
+}
+
+#[test]
+fn boolean_metadata_does_not_change_flag_parsing() {
+    for location in ["query", "header"] {
+        let mut source = serde_json::to_value(spec()).unwrap();
+        source["paths"]["/items/{id}"]["get"]["parameters"] = json!([
+            {"name": "active", "in": location, "description": "Active items.",
+             "schema": {"type": "boolean", "enum": [true, false], "default": false}}
+        ]);
+        let spec = serde_json::from_value(source).unwrap();
+        let cached = SpecTransformer::new().transform("items", &spec).unwrap();
+        for manifest in [
+            generate_capability_manifest(&cached, None).unwrap(),
+            generate_capability_manifest_from_openapi("items", &spec, &cached, None).unwrap(),
+        ] {
+            let params = parameters(&manifest);
+            assert_eq!(params[0]["enum_values"], json!([true, false]));
+            assert_eq!(params[0]["default_value"], "false");
+        }
+        let tree = generate_command_tree_with_flags(&cached, false);
+        let arg = tree
+            .find_subcommand("items")
+            .unwrap()
+            .find_subcommand("list-items")
+            .unwrap()
+            .get_arguments()
+            .find(|arg| arg.get_id() == "active")
+            .unwrap();
+        assert_eq!(
+            arg.get_help().unwrap().to_string(),
+            "Active items. [possible values: true, false, default: false]"
+        );
+        for (args, expected) in [
+            (vec![], None),
+            (vec!["--active"], Some(true)),
+            (vec!["--active=true"], Some(true)),
+            (vec!["--active=false"], Some(false)),
+        ] {
+            let matches = tree
+                .clone()
+                .try_get_matches_from(["api", "items", "list-items"].into_iter().chain(args))
+                .unwrap();
+            let operation = matches.subcommand().unwrap().1.subcommand().unwrap().1;
+            assert_eq!(operation.get_one::<bool>("active").copied(), expected);
+        }
+        for args in [
+            vec!["--active=foo"],
+            vec!["--active="],
+            vec!["--active= "],
+            vec!["--active=none"],
+            vec!["--active=true", "--active=false"],
+            vec!["--unknown"],
+        ] {
+            assert!(tree
+                .clone()
+                .try_get_matches_from(["api", "items", "list-items"].into_iter().chain(args))
+                .is_err());
+        }
+    }
+}
+
+#[test]
+fn description_presence_takes_precedence_even_when_empty() {
+    for description in ["", " ", "Canonical description."] {
+        let mut source = serde_json::to_value(spec()).unwrap();
+        source["paths"]["/items/{id}"]["get"]["parameters"] = json!([
+            {"name": "id", "in": "path", "required": true, "description": description,
+             "schema": {"type": "string", "description": "Fallback.",
+                        "nullable": true, "enum": [null, "ab", "ab", "none", ""]}}
+        ]);
+        let spec = serde_json::from_value(source).unwrap();
+        let cached = SpecTransformer::new().transform("items", &spec).unwrap();
+        for manifest in [
+            generate_capability_manifest(&cached, None).unwrap(),
+            generate_capability_manifest_from_openapi("items", &spec, &cached, None).unwrap(),
+        ] {
+            let params = parameters(&manifest);
+            assert_eq!(params[0]["description"], description);
+            assert_eq!(
+                params[0]["enum_values"],
+                json!([null, "ab", "ab", "none", ""])
+            );
+        }
+        let tree = generate_command_tree_with_flags(&cached, false);
+        let operation = tree
+            .find_subcommand("items")
+            .unwrap()
+            .find_subcommand("list-items")
+            .unwrap();
+        let help = operation
+            .get_arguments()
+            .find(|arg| arg.get_id() == "id")
+            .unwrap()
+            .get_help()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            help,
+            format!("{description} [possible values: null, ab, ab, none, ]")
+        );
+        for value in ["", " ", "none", "unknown"] {
+            // No enum validation is introduced, even for empty or sentinel strings.
+            assert!(tree
+                .clone()
+                .try_get_matches_from(["api", "items", "list-items", "--id", value])
+                .is_ok());
+        }
+    }
+}
+
+#[test]
+fn boolean_path_flags_keep_existing_presence_semantics() {
+    let mut source = serde_json::to_value(spec()).unwrap();
+    source["paths"]["/items/{id}"]["get"]["parameters"] = json!([
+        {"name": "id", "in": "path", "required": true,
+         "schema": {"type": "boolean", "description": "Boolean identifier.", "default": true}}
+    ]);
+    let spec = serde_json::from_value(source).unwrap();
+    let cached = SpecTransformer::new().transform("items", &spec).unwrap();
+    for positional in [false, true] {
+        let tree = generate_command_tree_with_flags(&cached, positional);
+        let arg = tree
+            .find_subcommand("items")
+            .unwrap()
+            .find_subcommand("list-items")
+            .unwrap()
+            .get_arguments()
+            .find(|arg| arg.get_id() == "id")
+            .unwrap();
+        assert_eq!(
+            arg.get_help().unwrap().to_string(),
+            "Boolean identifier. [default: true]"
+        );
+        for (args, expected) in [(vec![], false), (vec!["--id"], true)] {
+            let matches = tree
+                .clone()
+                .try_get_matches_from(["api", "items", "list-items"].into_iter().chain(args))
+                .unwrap();
+            let operation = matches.subcommand().unwrap().1.subcommand().unwrap().1;
+            // Declared schema defaults are display metadata, not clap defaults.
+            assert_eq!(operation.get_one::<bool>("id"), Some(&expected));
+        }
+        assert!(tree
+            .try_get_matches_from(["api", "items", "list-items", "--id=false"])
+            .is_err());
+    }
+}
