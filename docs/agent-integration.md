@@ -87,6 +87,26 @@ aperture api my-api --describe-json
 }
 ```
 
+Parameter descriptions prefer the parameter-level `description`, falling back to
+`schema.description`. Generated operation help also displays declared defaults,
+allowed values, numeric bounds, string lengths, and patterns.
+
+Parameter manifest entries optionally include `minimum`, `maximum`,
+`exclusive_minimum`, `exclusive_maximum`, `min_length`, `max_length`, and `pattern`.
+Exclusive-bound flags are omitted when false. Integer and number `format` values
+use their OpenAPI spelling (for example, `int32`, `int64`, or `double`).
+`enum_values` contains native JSON values: `["small", "large"]` or `[10, 20]`,
+not JSON-encoded strings. Consumers that previously decoded each enum string
+should use these values directly. Existing `default_value` strings are unchanged.
+These metadata fields are informational; pre-send constraint validation is not
+implemented by this change, including in `--dry-run`.
+
+Metadata also follows single-branch `allOf` wrappers that only annotate a schema
+(for example, a description alongside a referenced schema). Compositions with
+multiple branches or sibling constraints are not flattened into scalar metadata.
+Exclusive-bound flags describe OpenAPI 3.0 boolean exclusivity; numeric exclusive
+bounds in OpenAPI 3.1 remain subject to the existing parser compatibility limits.
+
 The `batch` section describes the batch file schema and dependent workflow capabilities. Agents can query it directly:
 
 ```bash

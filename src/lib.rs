@@ -18,6 +18,7 @@ pub mod invocation;
 pub mod logging;
 pub mod output;
 pub mod pagination;
+mod parameter_metadata;
 pub mod resilience;
 pub mod response_cache;
 pub mod response_limit;

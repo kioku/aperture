@@ -7,7 +7,7 @@ use openapiv3::OpenAPI;
 use serde_json::Value;
 use std::collections::HashSet;
 
-pub(super) fn resolve(spec: &OpenAPI, schema: Value) -> Result<Value, Error> {
+pub fn resolve(spec: &OpenAPI, schema: Value) -> Result<Value, Error> {
     resolve_node(spec, schema, &mut HashSet::new(), 0)
 }
 

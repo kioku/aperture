@@ -68,6 +68,7 @@ aperture api petstore --describe-json
 - `commands` (`list-commands`) → terse structural tree
 - `docs` → deep operation reference before execution
 - `api --describe-json` → machine-readable capability manifest
+- Generated operation help and manifests include declared parameter descriptions, defaults, allowed values, and bounds.
 
 ### Structured Discovery Output
 

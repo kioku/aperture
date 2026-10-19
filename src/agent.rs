@@ -5,21 +5,13 @@ use crate::config::models::GlobalConfig;
 use crate::config::url_resolver::BaseUrlResolver;
 use crate::constants;
 use crate::error::Error;
+pub use crate::parameter_metadata::ParameterConstraints;
+use crate::parameter_metadata::ParameterMetadata;
 use crate::spec::{resolve_parameter_reference, resolve_schema_reference};
 use crate::utils::to_kebab_case;
 use openapiv3::{OpenAPI, Operation, Parameter as OpenApiParameter, ReferenceOr, SecurityScheme};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-/// Type alias for schema information extracted from a parameter
-/// Returns: (`schema_type`, `format`, `default_value`, `enum_values`, `example`)
-type ParameterSchemaInfo = (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Vec<String>,
-    Option<String>,
-);
 
 /// JSON manifest describing all available commands and parameters for an API context.
 /// This is output when the `--describe-json` flag is used.
@@ -323,10 +315,13 @@ pub struct ParameterInfo {
     pub default_value: Option<String>,
     /// Enumeration of valid values
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub enum_values: Vec<String>,
+    pub enum_values: Vec<serde_json::Value>,
     /// Example value
     #[serde(skip_serializing_if = "Option::is_none")]
     pub example: Option<String>,
+    /// Declared scalar constraints, omitted when absent.
+    #[serde(flatten, default)]
+    pub constraints: ParameterConstraints,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -779,6 +774,11 @@ fn convert_cached_command_to_info(cached_command: &CachedCommand) -> CommandInfo
 
 /// Converts a `CachedParameter` to `ParameterInfo` for the manifest
 fn convert_cached_parameter_to_info(cached_param: &CachedParameter) -> ParameterInfo {
+    let metadata = ParameterMetadata::from_schema(cached_param.schema.as_deref());
+    let numeric_format = matches!(
+        cached_param.schema_type.as_deref(),
+        Some("integer" | "number")
+    );
     ParameterInfo {
         name: cached_param.name.clone(),
         location: cached_param.location.clone(),
@@ -787,11 +787,19 @@ fn convert_cached_parameter_to_info(cached_param: &CachedParameter) -> Parameter
             .schema_type
             .clone()
             .unwrap_or_else(|| constants::SCHEMA_TYPE_STRING.to_string()),
-        description: cached_param.description.clone(),
-        format: cached_param.format.clone(),
-        default_value: cached_param.default_value.clone(),
-        enum_values: cached_param.enum_values.clone(),
+        description: cached_param.description.clone().or(metadata.description),
+        format: if numeric_format {
+            metadata.format.or_else(|| cached_param.format.clone())
+        } else {
+            cached_param.format.clone()
+        },
+        default_value: cached_param
+            .default_value
+            .clone()
+            .or_else(|| metadata.default.as_ref().map(serde_json::Value::to_string)),
+        enum_values: metadata.enum_values,
         example: cached_param.example.clone(),
+        constraints: metadata.constraints,
     }
 }
 
@@ -939,10 +947,10 @@ fn extract_operation_parameters(operation: &Operation, spec: &OpenAPI) -> Vec<Pa
         .parameters
         .iter()
         .filter_map(|param_ref| match param_ref {
-            ReferenceOr::Item(param) => Some(convert_openapi_parameter_to_info(param)),
+            ReferenceOr::Item(param) => Some(convert_openapi_parameter_to_info(param, spec)),
             ReferenceOr::Reference { reference } => resolve_parameter_reference(spec, reference)
                 .ok()
-                .map(|param| convert_openapi_parameter_to_info(&param)),
+                .map(|param| convert_openapi_parameter_to_info(&param, spec)),
         })
         .collect()
 }
@@ -1173,81 +1181,8 @@ fn extract_response_example(media_type: &openapiv3::MediaType) -> Option<serde_j
         .and_then(|ex| serde_json::to_value(ex).ok())
 }
 
-/// Extracts schema information from a parameter format
-fn extract_schema_info_from_parameter(
-    format: &openapiv3::ParameterSchemaOrContent,
-) -> ParameterSchemaInfo {
-    let openapiv3::ParameterSchemaOrContent::Schema(schema_ref) = format else {
-        return (
-            Some(constants::SCHEMA_TYPE_STRING.to_string()),
-            None,
-            None,
-            vec![],
-            None,
-        );
-    };
-
-    match schema_ref {
-        ReferenceOr::Item(schema) => {
-            let (schema_type, format, enums) =
-                extract_schema_type_from_schema_kind(&schema.schema_kind);
-
-            let default_value = schema
-                .schema_data
-                .default
-                .as_ref()
-                .map(|v| serde_json::to_string(v).unwrap_or_else(|_| v.to_string()));
-
-            (Some(schema_type), format, default_value, enums, None)
-        }
-        ReferenceOr::Reference { .. } => (
-            Some(constants::SCHEMA_TYPE_STRING.to_string()),
-            None,
-            None,
-            vec![],
-            None,
-        ),
-    }
-}
-
-fn serialize_enum_value(v: &String) -> String {
-    serde_json::to_string(v).unwrap_or_else(|_| v.clone())
-}
-
-/// Extracts type information from a schema kind
-fn extract_schema_type_from_schema_kind(
-    schema_kind: &openapiv3::SchemaKind,
-) -> (String, Option<String>, Vec<String>) {
-    let openapiv3::SchemaKind::Type(type_val) = schema_kind else {
-        return (constants::SCHEMA_TYPE_STRING.to_string(), None, vec![]);
-    };
-
-    extract_schema_type_from_openapi_type(type_val)
-}
-
-fn extract_schema_type_from_openapi_type(
-    type_val: &openapiv3::Type,
-) -> (String, Option<String>, Vec<String>) {
-    match type_val {
-        openapiv3::Type::String(string_type) => {
-            let enum_values: Vec<String> = string_type
-                .enumeration
-                .iter()
-                .filter_map(|v| v.as_ref())
-                .map(serialize_enum_value)
-                .collect();
-            (constants::SCHEMA_TYPE_STRING.to_string(), None, enum_values)
-        }
-        openapiv3::Type::Number(_) => (constants::SCHEMA_TYPE_NUMBER.to_string(), None, vec![]),
-        openapiv3::Type::Integer(_) => (constants::SCHEMA_TYPE_INTEGER.to_string(), None, vec![]),
-        openapiv3::Type::Boolean(_) => (constants::SCHEMA_TYPE_BOOLEAN.to_string(), None, vec![]),
-        openapiv3::Type::Array(_) => (constants::SCHEMA_TYPE_ARRAY.to_string(), None, vec![]),
-        openapiv3::Type::Object(_) => (constants::SCHEMA_TYPE_OBJECT.to_string(), None, vec![]),
-    }
-}
-
 /// Converts an `OpenAPI` parameter to `ParameterInfo` with full metadata
-fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo {
+fn convert_openapi_parameter_to_info(param: &OpenApiParameter, spec: &OpenAPI) -> ParameterInfo {
     let (param_data, location_str) = match param {
         OpenApiParameter::Query { parameter_data, .. } => {
             (parameter_data, constants::PARAM_LOCATION_QUERY)
@@ -1263,28 +1198,43 @@ fn convert_openapi_parameter_to_info(param: &OpenApiParameter) -> ParameterInfo 
         }
     };
 
-    // Extract schema information
-    let (schema_type, format, default_value, enum_values, example) =
-        extract_schema_info_from_parameter(&param_data.format);
-
-    // Extract example from parameter data
+    let schema = parameter_schema_json(&param_data.format, spec);
+    let metadata = ParameterMetadata::from_schema(schema.as_deref());
+    let schema_type = metadata
+        .schema_type
+        .unwrap_or_else(|| constants::SCHEMA_TYPE_STRING.to_string());
+    let numeric_format = matches!(schema_type.as_str(), "integer" | "number");
     let example = param_data
         .example
         .as_ref()
-        .map(|ex| serde_json::to_string(ex).unwrap_or_else(|_| ex.to_string()))
-        .or(example);
+        .map(serde_json::Value::to_string);
+    let default_value = metadata.default.as_ref().map(serde_json::Value::to_string);
 
     ParameterInfo {
         name: param_data.name.clone(),
         location: location_str.to_string(),
         required: param_data.required,
-        param_type: schema_type.unwrap_or_else(|| constants::SCHEMA_TYPE_STRING.to_string()),
-        description: param_data.description.clone(),
-        format,
+        param_type: schema_type,
+        description: param_data.description.clone().or(metadata.description),
+        format: numeric_format.then_some(metadata.format).flatten(),
         default_value,
-        enum_values,
+        enum_values: metadata.enum_values,
         example,
+        constraints: metadata.constraints,
     }
+}
+
+/// Resolve the same schema positions used by the cached manifest path.
+fn parameter_schema_json(
+    format: &openapiv3::ParameterSchemaOrContent,
+    spec: &OpenAPI,
+) -> Option<String> {
+    let openapiv3::ParameterSchemaOrContent::Schema(schema) = format else {
+        return None;
+    };
+    let schema = serde_json::to_value(schema).ok()?;
+    let schema = crate::spec::parameter_schema::resolve(spec, schema).ok()?;
+    serde_json::to_string(&schema).ok()
 }
 
 /// Extracts security schemes directly from `OpenAPI` spec

@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Surface declared parameter descriptions, defaults, enums and scalar constraints in generated help and capability manifests (#289).
+
+### Changed
+
+- Capability manifest `enum_values` now contains native JSON values rather than JSON-encoded strings. Consumers should no longer decode individual values (#289).
+
 ## [0.2.0] - 2026-10-06
 
 ### Bug Fixes
