@@ -391,11 +391,16 @@ fn effective_subcommand_name(command: &CachedCommand) -> String {
 fn create_arg_from_parameter(param: &CachedParameter, use_positional_args: bool) -> Arg {
     let is_boolean = param.schema_type.as_ref().is_some_and(|t| t == "boolean");
 
-    match param.location.as_str() {
+    let arg = match param.location.as_str() {
         "path" => create_path_parameter_arg(param, use_positional_args, is_boolean),
         "query" | "header" => create_scoped_parameter_arg(param, is_boolean),
         _ => create_generic_parameter_arg(param, is_boolean),
-    }
+    };
+    let mut metadata =
+        crate::parameter_metadata::ParameterMetadata::from_schema(param.schema.as_deref());
+    metadata.description = param.description.clone().or(metadata.description);
+    let fallback = arg.get_help().map(ToString::to_string).unwrap_or_default();
+    arg.help(metadata.help(&fallback))
 }
 
 fn create_path_parameter_arg(

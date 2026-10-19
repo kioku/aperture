@@ -330,7 +330,9 @@ fn test_comprehensive_manifest_generation() {
     assert!(!include_param.required);
     assert_eq!(include_param.default_value, Some("profile".to_string()));
     assert_eq!(include_param.enum_values.len(), 3);
-    assert!(include_param.enum_values.contains(&"profile".to_string()));
+    assert!(include_param
+        .enum_values
+        .contains(&serde_json::json!("profile")));
 
     // Find POST /users command
     let create_user = users_commands
@@ -605,7 +607,7 @@ fn test_manifest_from_openapi() {
     assert_eq!(cmd.parameters.len(), 1);
     let param = &cmd.parameters[0];
     assert_eq!(param.enum_values.len(), 2);
-    assert!(param.enum_values.contains(&"\"profile\"".to_string()));
+    assert!(param.enum_values.contains(&serde_json::json!("profile")));
 
     // Verify request body
     assert!(cmd.request_body.is_some());

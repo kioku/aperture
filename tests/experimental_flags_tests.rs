@@ -171,10 +171,7 @@ fn test_legacy_positional_help_text() {
     let help_text = id_arg
         .get_help()
         .expect("id argument should have help text");
-    assert!(
-        help_text.to_string().contains("id parameter"),
-        "Path parameter should have descriptive help text"
-    );
+    assert_eq!(help_text.to_string(), "User ID");
 }
 
 #[test]
