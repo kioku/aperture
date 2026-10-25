@@ -2277,7 +2277,14 @@ fn request_preparation_is_sensitive(
     call: &crate::invocation::OperationCall,
     ctx: &crate::invocation::ExecutionContext,
 ) -> bool {
-    logging::custom_headers_reference_environment(&call.custom_headers)
+    call.query_params
+        .keys()
+        .any(|name| logging::should_redact_query_param(name))
+        || call
+            .pagination_url
+            .as_ref()
+            .is_some_and(url_query_is_sensitive)
+        || logging::custom_headers_reference_environment(&call.custom_headers)
         || preparation_transport_is_sensitive(spec, ctx)
         || logging::operation_preparation_is_sensitive(
             spec,
@@ -2290,6 +2297,11 @@ fn request_preparation_is_sensitive(
         )
 }
 
+fn url_query_is_sensitive(url: &reqwest::Url) -> bool {
+    url.query_pairs()
+        .any(|(name, _)| logging::should_redact_query_param(&name))
+}
+
 /// Resolve the effective URL without constructing a client or reading secrets.
 pub(crate) fn pagination_request_url(
     spec: &CachedSpec,
@@ -2298,7 +2310,7 @@ pub(crate) fn pagination_request_url(
 ) -> Result<reqwest::Url, Error> {
     let operation = find_operation_by_id(spec, &call.operation_id)?;
     let sensitive = request_preparation_is_sensitive(spec, operation, call, ctx);
-    resolve_operation_request_url(spec, operation, call, ctx).map_err(|error| {
+    let url = resolve_operation_request_url(spec, operation, call, ctx).map_err(|error| {
         if sensitive {
             error.omit_diagnostic_inputs(
                 "Invalid request URL or URL parameters (input omitted)",
@@ -2307,7 +2319,14 @@ pub(crate) fn pagination_request_url(
         } else {
             error
         }
-    })
+    })?;
+    if !ctx.no_validate_parameters {
+        crate::parameter_validation::validate_query(operation, &url, call.pagination_url.is_some())
+            .map_err(|error| {
+                parameter_constraint_error(error, sensitive || url_query_is_sensitive(&url))
+            })?;
+    }
+    Ok(url)
 }
 
 fn resolve_operation_request_url(

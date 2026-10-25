@@ -13,7 +13,7 @@ pub fn validate(operation: &CachedCommand, call: &OperationCall) -> Result<(), E
     for parameter in &operation.parameters {
         let values = match parameter.location.as_str() {
             "path" => &call.path_params,
-            "query" => &call.query_params,
+            "query" if call.pagination_url.is_none() => &call.query_params,
             _ => continue,
         };
         let Some(value) = values.get(&parameter.name) else {
@@ -21,6 +21,49 @@ pub fn validate(operation: &CachedCommand, call: &OperationCall) -> Result<(), E
         };
         let metadata = ParameterMetadata::from_schema(parameter.schema.as_deref());
         validate_value(&parameter.name, value, &metadata)?;
+    }
+    Ok(())
+}
+
+/// Check decoded effective scalar values, including base-URL queries, serializer
+/// output and every repeated key. Never collect pairs into a last-wins map.
+pub fn validate_query(
+    operation: &CachedCommand,
+    url: &reqwest::Url,
+    link_target: bool,
+) -> Result<(), Error> {
+    for parameter in &operation.parameters {
+        if parameter.location != "query" {
+            continue;
+        }
+        let metadata = ParameterMetadata::from_schema(parameter.schema.as_deref());
+        if matches!(metadata.schema_type.as_deref(), Some("array" | "object")) {
+            validate_compound_link(&parameter.name, &metadata, link_target)?;
+            continue;
+        }
+        for (name, value) in url
+            .query_pairs()
+            .filter(|(name, _)| name == &parameter.name)
+        {
+            validate_value(&name, &value, &metadata)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_compound_link(
+    name: &str,
+    metadata: &ParameterMetadata,
+    link_target: bool,
+) -> Result<(), Error> {
+    // Original compound inputs are checked before serialization. Link targets
+    // have no original value and exploded objects may not retain their name.
+    // Do not guess an inverse serialization or silently validate one element as
+    // the whole value. Unconstrained compounds remain untouched.
+    if link_target && !metadata.enum_values.is_empty() {
+        return Err(Error::validation_error(format!(
+            "Parameter {name:?}: compound enum validation of a pagination URL is unsupported; use --no-validate-parameters to trust the server"
+        )));
     }
     Ok(())
 }
