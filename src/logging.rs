@@ -419,7 +419,7 @@ pub(crate) fn operation_preparation_is_sensitive<'a>(
 
 /// Checks if a query parameter name should be redacted
 #[must_use]
-fn should_redact_query_param(param_name: &str) -> bool {
+pub(crate) fn should_redact_query_param(param_name: &str) -> bool {
     let lower = param_name.to_lowercase();
     matches!(
         lower.as_str(),

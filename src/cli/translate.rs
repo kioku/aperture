@@ -425,6 +425,7 @@ pub fn cli_to_execution_context(
         max_response_bytes: None,
         http_clients: crate::engine::executor::HttpClientPool::default(),
         dry_run: execution.dry_run,
+        no_validate_parameters: execution.no_validate_parameters,
         idempotency_key: execution.idempotency_key.clone(),
         cache_config,
         retry_context,

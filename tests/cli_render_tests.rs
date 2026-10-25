@@ -108,3 +108,35 @@ fn render_result_handles_empty_result_without_error() {
     render_result(&ExecutionResult::Empty, &OutputFormat::Json, None)
         .expect("empty output should not fail");
 }
+
+#[test]
+fn render_and_capture_reject_duplicate_keys_for_success_and_cache() {
+    for cached in [false, true] {
+        let body = r#"{"private296":false,"private296":true}"#.to_string();
+        let result = if cached {
+            ExecutionResult::Cached {
+                body,
+                status: 200,
+                headers: HashMap::new(),
+                diagnostics_sensitive: false,
+            }
+        } else {
+            ExecutionResult::Success {
+                body,
+                status: 200,
+                headers: HashMap::new(),
+                diagnostics_sensitive: false,
+            }
+        };
+        for format in [OutputFormat::Json, OutputFormat::Yaml, OutputFormat::Table] {
+            let errors = [
+                render_result_to_string(&result, &format, None).unwrap_err(),
+                render_result(&result, &format, None).unwrap_err(),
+            ];
+            for error in errors {
+                assert!(error.to_string().contains("duplicate"));
+                assert!(!error.to_string().contains("private296"));
+            }
+        }
+    }
+}

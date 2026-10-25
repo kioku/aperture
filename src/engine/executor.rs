@@ -683,6 +683,11 @@ async fn send_request(
         );
     } else {
         let response_text = String::from_utf8_lossy(&response_bytes);
+        // Reject ambiguous success bodies before even trace diagnostics can
+        // expose their contents, as well as before caching or rendering.
+        if status.is_success() {
+            crate::response_json::parse_optional(&response_text)?;
+        }
         logging::log_operation_response(
             status.as_u16(),
             duration_ms,
@@ -1629,6 +1634,7 @@ async fn cached_execution_result(
     diagnostics_sensitive: bool,
 ) -> Result<Option<ExecutionResult>, Error> {
     if let Some(cached_response) = check_cache(cache_context, max_response_bytes).await? {
+        crate::response_json::parse_optional(&cached_response.body)?;
         return Ok(Some(ExecutionResult::Cached {
             body: cached_response.body,
             status: cached_response.status_code,
@@ -2006,9 +2012,20 @@ fn validate_operation_call_body(
 fn find_validated_operation<'a>(
     spec: &'a CachedSpec,
     call: &crate::invocation::OperationCall,
+    ctx: &crate::invocation::ExecutionContext,
+    resolved_headers_sensitive: bool,
 ) -> Result<&'a CachedCommand, Error> {
     let operation = find_operation_by_id(spec, &call.operation_id)?;
     validate_operation_call_body(operation, call.body.as_ref())?;
+    if !ctx.no_validate_parameters {
+        crate::parameter_validation::validate(operation, call).map_err(|error| {
+            parameter_constraint_error(
+                error,
+                resolved_headers_sensitive
+                    || request_preparation_is_sensitive(spec, operation, call, ctx),
+            )
+        })?;
+    }
     Ok(operation)
 }
 
@@ -2050,25 +2067,15 @@ fn prepare_request<'a>(
     ctx: &'a crate::invocation::ExecutionContext,
     custom_headers: Option<Vec<(HeaderName, HeaderValue)>>,
 ) -> Result<PreparedRequest<'a>, Error> {
-    let operation = find_validated_operation(spec, &call)?;
+    let resolved_headers_sensitive = custom_headers
+        .iter()
+        .flatten()
+        .any(|(_, value)| value.is_sensitive());
+    let operation = find_validated_operation(spec, &call, ctx, resolved_headers_sensitive)?;
     let url = pagination_request_url(spec, &call, ctx)?.to_string();
     let pagination = ctx.auto_paginate || call.pagination_url.is_some();
     let (client, proxy_diagnostics) = prepare_transport(ctx, pagination)?;
-    let mut headers = build_headers_from_params(
-        spec,
-        operation,
-        &call.header_params,
-        if custom_headers.is_some() {
-            &[]
-        } else {
-            &call.custom_headers
-        },
-        call.body.is_some(),
-        &spec.name,
-        ctx.global_config.as_ref(),
-    )?;
-    overlay_resolved_headers(&mut headers, custom_headers);
-    add_idempotency_key(&mut headers, ctx.idempotency_key.as_ref())?;
+    let headers = prepare_operation_headers(spec, operation, &call, ctx, custom_headers)?;
     let method = operation_http_method(operation)?;
     let headers_clone = headers.clone();
 
@@ -2211,14 +2218,79 @@ fn build_url_from_params(
     Ok(url.to_string())
 }
 
-/// Resolve the effective URL without constructing a client or reading secrets.
-pub(crate) fn pagination_request_url(
+fn prepare_operation_headers(
     spec: &CachedSpec,
+    operation: &CachedCommand,
     call: &crate::invocation::OperationCall,
     ctx: &crate::invocation::ExecutionContext,
-) -> Result<reqwest::Url, Error> {
-    let operation = find_operation_by_id(spec, &call.operation_id)?;
-    let sensitive = logging::custom_headers_reference_environment(&call.custom_headers)
+    custom_headers: Option<Vec<(HeaderName, HeaderValue)>>,
+) -> Result<HeaderMap, Error> {
+    let mut headers = build_headers_from_params(
+        spec,
+        operation,
+        &call.header_params,
+        custom_headers
+            .as_ref()
+            .map_or(call.custom_headers.as_slice(), |_| &[]),
+        call.body.is_some(),
+        &spec.name,
+        ctx.global_config.as_ref(),
+    )?;
+    overlay_resolved_headers(&mut headers, custom_headers);
+    add_idempotency_key(&mut headers, ctx.idempotency_key.as_ref())?;
+    validate_header_constraints(
+        operation,
+        &headers,
+        ctx.no_validate_parameters,
+        request_preparation_is_sensitive(spec, operation, call, ctx),
+    )?;
+    Ok(headers)
+}
+
+fn validate_header_constraints(
+    operation: &CachedCommand,
+    headers: &HeaderMap,
+    disabled: bool,
+    sensitive: bool,
+) -> Result<(), Error> {
+    if disabled {
+        return Ok(());
+    }
+    crate::parameter_validation::validate_headers(operation, headers).map_err(|error| {
+        parameter_constraint_error(
+            error,
+            sensitive || headers.values().any(HeaderValue::is_sensitive),
+        )
+    })
+}
+
+// Constraint errors are produced before the runtime SecretContext exists. Apply
+// the same conservative policy as URL preparation, including batch provenance.
+fn parameter_constraint_error(error: Error, sensitive: bool) -> Error {
+    if sensitive {
+        error.omit_diagnostic_inputs(
+            "Declared parameter constraint violation (input omitted)",
+            "Check declared parameter constraints or use --no-validate-parameters to trust the server.",
+        )
+    } else {
+        error
+    }
+}
+
+fn request_preparation_is_sensitive(
+    spec: &CachedSpec,
+    operation: &CachedCommand,
+    call: &crate::invocation::OperationCall,
+    ctx: &crate::invocation::ExecutionContext,
+) -> bool {
+    call.query_params
+        .keys()
+        .any(|name| logging::should_redact_query_param(name))
+        || call
+            .pagination_url
+            .as_ref()
+            .is_some_and(url_query_is_sensitive)
+        || logging::custom_headers_reference_environment(&call.custom_headers)
         || preparation_transport_is_sensitive(spec, ctx)
         || logging::operation_preparation_is_sensitive(
             spec,
@@ -2228,8 +2300,23 @@ pub(crate) fn pagination_request_url(
                     .iter()
                     .filter_map(|header| header.split_once(':').map(|(name, _)| name.trim())),
             ),
-        );
-    resolve_operation_request_url(spec, operation, call, ctx).map_err(|error| {
+        )
+}
+
+fn url_query_is_sensitive(url: &reqwest::Url) -> bool {
+    url.query_pairs()
+        .any(|(name, _)| logging::should_redact_query_param(&name))
+}
+
+/// Resolve the effective URL without constructing a client or reading secrets.
+pub(crate) fn pagination_request_url(
+    spec: &CachedSpec,
+    call: &crate::invocation::OperationCall,
+    ctx: &crate::invocation::ExecutionContext,
+) -> Result<reqwest::Url, Error> {
+    let operation = find_operation_by_id(spec, &call.operation_id)?;
+    let sensitive = request_preparation_is_sensitive(spec, operation, call, ctx);
+    let url = resolve_operation_request_url(spec, operation, call, ctx).map_err(|error| {
         if sensitive {
             error.omit_diagnostic_inputs(
                 "Invalid request URL or URL parameters (input omitted)",
@@ -2238,7 +2325,14 @@ pub(crate) fn pagination_request_url(
         } else {
             error
         }
-    })
+    })?;
+    if !ctx.no_validate_parameters {
+        crate::parameter_validation::validate_query(operation, &url, call.pagination_url.is_some())
+            .map_err(|error| {
+                parameter_constraint_error(error, sensitive || url_query_is_sensitive(&url))
+            })?;
+    }
+    Ok(url)
 }
 
 fn resolve_operation_request_url(
@@ -2507,8 +2601,8 @@ fn apply_custom_headers(headers: &mut HeaderMap, custom_headers: &[String]) -> R
 /// - The JQ filter expression is invalid
 /// - The filter execution fails
 pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
-    let json_value: Value = serde_json::from_str(response_text)
-        .map_err(|e| Error::jq_filter_error(filter, format!("Response is not valid JSON: {e}")))?;
+    let json_value = crate::response_json::parse_optional(response_text)?
+        .ok_or_else(|| Error::jq_filter_error(filter, "Response is not valid JSON"))?;
 
     apply_jq_filter_value(json_value, filter)
 }

@@ -196,6 +196,7 @@ fn render_api_context_landing(context: &str, spec: &CachedSpec) -> Result<(), Er
 const LANDING_INCOMPATIBLE_GLOBAL_FLAGS: &[&str] = &[
     "--json-errors",
     "--dry-run",
+    "--no-validate-parameters",
     "--idempotency-key",
     "--proxy",
     "--no-proxy",
@@ -249,6 +250,7 @@ async fn execute_api_runtime(
         .or(execution.jq.as_deref());
     let output_format = resolve_output_format(matches, &execution.format);
     let mut ctx = crate::cli::translate::cli_to_execution_context(execution, global_config)?;
+    ctx.no_validate_parameters |= matches.get_flag("no-validate-parameters");
     ctx.server_var_args = crate::cli::translate::extract_server_var_args(matches);
     let call =
         crate::cli::translate::matches_to_operation_call_with_context(spec, matches, Some(&ctx))?;
@@ -418,6 +420,7 @@ const RESERVED_EXECUTION_FLAGS: &[(&str, bool)] = &[
     ("--api", true),
     ("--describe-json", false),
     ("--dry-run", false),
+    ("--no-validate-parameters", false),
     ("--idempotency-key", true),
     ("--proxy", true),
     ("--no-proxy", false),
@@ -673,7 +676,8 @@ pub async fn execute_batch_operations(
         suppress_output: cli.json_errors,
     };
     let proxy_override = crate::cli::translate::proxy_override_from_execution_flags(execution);
-    let processor = BatchProcessor::new_with_proxy_override(batch_config, proxy_override);
+    let processor = BatchProcessor::new_with_proxy_override(batch_config, proxy_override)
+        .with_no_validate_parameters(execution.no_validate_parameters);
     let result = processor
         .execute_batch(
             spec,

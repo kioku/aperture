@@ -38,6 +38,7 @@ fn base_ctx() -> ExecutionContext {
         max_response_bytes: None,
         http_clients: aperture_cli::engine::executor::HttpClientPool::default(),
         dry_run: false,
+        no_validate_parameters: false,
         idempotency_key: None,
         cache_config: None,
         retry_context: None,

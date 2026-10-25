@@ -373,7 +373,7 @@ impl SpecTransformer {
         let request_body = operation
             .request_body
             .as_ref()
-            .and_then(Self::transform_request_body);
+            .and_then(|body| Self::transform_request_body(spec, body));
         let responses = Self::collect_operation_responses(spec, &operation.responses);
         let mut security_requirements =
             Self::resolve_security_requirements(operation, global_security_requirements);
@@ -773,13 +773,14 @@ impl SpecTransformer {
 
     /// Transforms a request body into cached format
     fn transform_request_body(
+        spec: &OpenAPI,
         request_body: &ReferenceOr<RequestBody>,
     ) -> Option<CachedRequestBody> {
         match request_body {
             ReferenceOr::Item(body) => {
                 let content_type = Self::preferred_request_body_content_type(body)?;
                 let media_type = body.content.get(content_type)?;
-                let schema = Self::request_body_schema(media_type);
+                let schema = Self::request_body_schema(spec, media_type);
                 let example = Self::request_body_example(media_type);
 
                 Some(CachedRequestBody {
@@ -824,14 +825,13 @@ impl SpecTransformer {
             })
     }
 
-    fn request_body_schema(media_type: &openapiv3::MediaType) -> String {
+    fn request_body_schema(spec: &OpenAPI, media_type: &openapiv3::MediaType) -> String {
+        // Use the same bounded, top-level resolution as response schemas. Nested
+        // references stay intact, including self-references within object properties.
         media_type
             .schema
             .as_ref()
-            .and_then(|schema_ref| match schema_ref {
-                ReferenceOr::Item(schema) => serde_json::to_string(schema).ok(),
-                ReferenceOr::Reference { .. } => None,
-            })
+            .and_then(|schema_ref| Self::resolve_and_serialize_schema(spec, schema_ref))
             .unwrap_or_else(|| "{}".to_string())
     }
 
