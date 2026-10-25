@@ -45,6 +45,12 @@ pub async fn execute_request(
         max_response_bytes: None,
         http_clients: crate::engine::executor::HttpClientPool::default(),
         dry_run,
+        no_validate_parameters: matches
+            .try_get_one::<bool>("no-validate-parameters")
+            .ok()
+            .flatten()
+            .copied()
+            .unwrap_or(false),
         idempotency_key: idempotency_key.map(String::from),
         cache_config: cache_config.cloned(),
         retry_context: retry_context.cloned(),

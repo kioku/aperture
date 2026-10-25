@@ -288,6 +288,14 @@ fn generate_tree_for_commands<'a>(
 /// Keep operation selection and execution on the same global-flag grammar.
 fn with_global_args(command: Command) -> Command {
     command
+        .arg(
+            Arg::new("no-validate-parameters")
+                .long("no-validate-parameters")
+                .global(true)
+                .hide(true)
+                .help("Skip declared parameter constraint validation")
+                .action(ArgAction::SetTrue),
+        )
         // Add global flags that should be available to all operations
         // These are hidden from subcommand help to reduce noise - they're documented in `aperture --help`
         .arg(

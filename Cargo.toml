@@ -44,6 +44,8 @@ jaq-json = { version = "2.0.3", features = ["serde"], optional = true }
 jaq-std = { version = "3.0.3", optional = true }
 oas3 = { version = "0.22", features = ["yaml-spec"], optional = true }
 openapiv3 = "2.2.0"
+# Unicode-aware ECMAScript parameter patterns, including surrogate escapes.
+regress = { version = "0.12", features = ["utf16"] }
 regex = "1"
 strsim = "0.11"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }

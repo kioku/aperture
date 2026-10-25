@@ -138,6 +138,7 @@ fn base_execution_flags() -> ExecutionFlags {
         max_response_bytes: None,
         describe_json: false,
         dry_run: false,
+        no_validate_parameters: false,
         idempotency_key: None,
         proxy: None,
         no_proxy: false,

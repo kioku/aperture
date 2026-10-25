@@ -931,3 +931,86 @@ fn accepted_retry_socket_waits_for_request_bytes() {
     assert_eq!(&bytes, b"request");
     writer.join().unwrap();
 }
+
+/// The executor must reject constraints before URL/transport/auth/cache/dry-run work.
+#[tokio::test]
+async fn declared_parameter_constraints_fail_before_execution() {
+    use serde_json::json;
+    let cases = [
+        (
+            json!({"type":"string", "enum":["small","large"]}),
+            "huge",
+            "enum",
+        ),
+        (json!({"type":"integer", "minimum":1}), "0", "minimum"),
+        (json!({"type":"number", "maximum":50}), "500", "maximum"),
+        (
+            json!({"type":"number", "minimum":1, "exclusiveMinimum":true}),
+            "1",
+            "exclusive minimum",
+        ),
+        (
+            json!({"type":"number", "maximum":2, "exclusiveMaximum":true}),
+            "2",
+            "exclusive maximum",
+        ),
+        (json!({"type":"string", "minLength":2}), "a", "minLength"),
+        (json!({"type":"string", "maxLength":2}), "abc", "maxLength"),
+        (
+            json!({"type":"string", "pattern":"^(?=a)[a-z]+$"}),
+            "bbb",
+            "pattern",
+        ),
+        (json!({"type":"boolean", "enum":[true]}), "false", "enum"),
+    ];
+    for (schema, value, constraint) in cases {
+        for location in ["path", "query", "header"] {
+            for dry_run in [false, true] {
+                assert_parameter_rejected(&schema, value, constraint, location, dry_run).await;
+            }
+        }
+    }
+}
+
+async fn assert_parameter_rejected(
+    schema: &serde_json::Value,
+    value: &str,
+    constraint: &str,
+    location: &str,
+    dry_run: bool,
+) {
+    let mut spec = test_spec();
+    // An unusable URL proves validation precedes even request preparation.
+    spec.base_url = Some("not a URL".into());
+    let parameter = &mut spec.commands[0].parameters[0];
+    parameter.location = location.into();
+    parameter.schema = Some(schema.to_string());
+    let mut call = user_by_id_call(value);
+    match location {
+        "query" => {
+            call.query_params.insert("id".into(), value.into());
+        }
+        "header" => {
+            call.header_params.insert("id".into(), value.into());
+        }
+        _ => {}
+    }
+    let error = execute(
+        &spec,
+        call,
+        ExecutionContext {
+            dry_run,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.to_json().error_type, "Validation");
+    let message = error.to_string();
+    for expected in ["id", value, constraint] {
+        assert!(
+            message.contains(expected),
+            "missing {expected:?}: {message}"
+        );
+    }
+}

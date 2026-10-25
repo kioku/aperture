@@ -199,10 +199,18 @@ pub struct BatchResult {
     pub failure_count: usize,
 }
 
+/// Request policy shared by dependent and concurrent batch execution.
+#[derive(Clone)]
+struct BatchRequestPolicy {
+    proxy_override: ProxyOverride,
+    no_validate_parameters: bool,
+}
+
 /// Batch processor for executing multiple API operations
 pub struct BatchProcessor {
     config: BatchConfig,
     proxy_override: ProxyOverride,
+    no_validate_parameters: bool,
     http_clients: crate::engine::executor::HttpClientPool,
     rate_limiter: Option<Arc<DefaultDirectRateLimiter>>,
     semaphore: Arc<Semaphore>,
@@ -242,9 +250,17 @@ impl BatchProcessor {
             config,
             http_clients: crate::engine::executor::HttpClientPool::default(),
             proxy_override,
+            no_validate_parameters: false,
             rate_limiter,
             semaphore,
         }
+    }
+
+    /// Opt out of declared parameter validation for every operation in this batch.
+    #[must_use]
+    pub const fn with_no_validate_parameters(mut self, disabled: bool) -> Self {
+        self.no_validate_parameters = disabled;
+        self
     }
 
     /// Parses a batch file from the given path
@@ -325,7 +341,10 @@ impl BatchProcessor {
                 dry_run,
                 output_format,
                 jq_filter,
-                self.proxy_override.clone(),
+                BatchRequestPolicy {
+                    proxy_override: self.proxy_override.clone(),
+                    no_validate_parameters: self.no_validate_parameters,
+                },
                 self.http_clients.clone(),
             )
             .await
@@ -338,7 +357,10 @@ impl BatchProcessor {
                 dry_run,
                 output_format,
                 jq_filter,
-                self.proxy_override.clone(),
+                BatchRequestPolicy {
+                    proxy_override: self.proxy_override.clone(),
+                    no_validate_parameters: self.no_validate_parameters,
+                },
                 self.http_clients.clone(),
             )
             .await
@@ -357,7 +379,7 @@ impl BatchProcessor {
         dry_run: bool,
         _output_format: &crate::cli::OutputFormat,
         _jq_filter: Option<&str>,
-        proxy_override: ProxyOverride,
+        request_policy: BatchRequestPolicy,
         http_clients: crate::engine::executor::HttpClientPool,
     ) -> Result<BatchResult, Error> {
         let start_time = std::time::Instant::now();
@@ -390,7 +412,7 @@ impl BatchProcessor {
                 base_url,
                 dry_run,
                 self.config.show_progress,
-                proxy_override.clone(),
+                request_policy.clone(),
                 http_clients.clone(),
             )
             .await;
@@ -437,7 +459,7 @@ impl BatchProcessor {
         base_url: Option<&str>,
         dry_run: bool,
         show_progress: bool,
-        proxy_override: ProxyOverride,
+        request_policy: BatchRequestPolicy,
         http_clients: crate::engine::executor::HttpClientPool,
     ) -> BatchOperationResult {
         let op_id = operation
@@ -468,7 +490,7 @@ impl BatchProcessor {
             global_config,
             base_url,
             dry_run,
-            proxy_override,
+            request_policy,
             http_clients,
         )
         .await
@@ -506,7 +528,7 @@ impl BatchProcessor {
         global_config: Option<&GlobalConfig>,
         base_url: Option<&str>,
         dry_run: bool,
-        proxy_override: ProxyOverride,
+        request_policy: BatchRequestPolicy,
         http_clients: crate::engine::executor::HttpClientPool,
     ) -> Result<String, Error> {
         // Suppress output and skip jq_filter: capture needs JSON text that
@@ -520,7 +542,7 @@ impl BatchProcessor {
             &crate::cli::OutputFormat::Json,
             None,
             true,
-            proxy_override,
+            request_policy,
             http_clients,
             Some((invocation.authored, invocation.store)),
         )
@@ -645,7 +667,7 @@ impl BatchProcessor {
         dry_run: bool,
         output_format: &crate::cli::OutputFormat,
         jq_filter: Option<&str>,
-        proxy_override: ProxyOverride,
+        request_policy: BatchRequestPolicy,
         http_clients: crate::engine::executor::HttpClientPool,
     ) -> Result<BatchResult, Error> {
         let start_time = std::time::Instant::now();
@@ -655,7 +677,7 @@ impl BatchProcessor {
         // Futures borrow one immutable spec. Poll at most N operations and refill
         // as any operation finishes, then restore the input order for callers.
         // Queued operations own no cloned spec, clap tree, or spawned task.
-        let proxy_override = &proxy_override;
+        let request_policy = &request_policy;
         let http_clients = &http_clients;
         let mut indexed_results = stream::iter(batch_file.operations.into_iter().enumerate())
             .map(|(index, operation)| async move {
@@ -672,7 +694,7 @@ impl BatchProcessor {
                     self.config.show_progress,
                     self.config.suppress_output,
                     index,
-                    proxy_override.clone(),
+                    request_policy.clone(),
                     http_clients.clone(),
                 )
                 .await;
@@ -744,7 +766,7 @@ impl BatchProcessor {
         show_progress: bool,
         suppress_output: bool,
         index: usize,
-        proxy_override: ProxyOverride,
+        request_policy: BatchRequestPolicy,
         http_clients: crate::engine::executor::HttpClientPool,
     ) -> BatchOperationResult {
         let _permit = semaphore
@@ -766,7 +788,7 @@ impl BatchProcessor {
             output_format,
             jq_filter,
             suppress_output,
-            proxy_override,
+            request_policy,
             http_clients,
             None,
         )
@@ -917,7 +939,7 @@ impl BatchProcessor {
         output_format: &crate::cli::OutputFormat,
         jq_filter: Option<&str>,
         suppress_output: bool,
-        proxy_override: ProxyOverride,
+        request_policy: BatchRequestPolicy,
         http_clients: crate::engine::executor::HttpClientPool,
         provenance: Option<(&BatchOperation, &interpolation::VariableStore)>,
     ) -> Result<String, Error> {
@@ -938,7 +960,8 @@ impl BatchProcessor {
             cache_config,
             retry_context,
             base_url: base_url.map(String::from),
-            proxy_override,
+            proxy_override: request_policy.proxy_override,
+            no_validate_parameters: request_policy.no_validate_parameters,
             http_clients,
             global_config: global_config.cloned(),
             server_var_args,
