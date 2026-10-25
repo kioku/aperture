@@ -733,6 +733,14 @@ Request bodies and array-item/object-property constraints are not covered by thi
 parameter validator; top-level array/object enums use JSON values.
 Unconstrained parameters retain their existing behavior.
 
+Query scalar constraints apply to decoded effective URL values on every page,
+including Link targets and every occurrence of a repeated name; the URL itself
+is not rewritten. Original compound inputs are validated before serialization.
+Constrained array/object enums on Link targets fail closed: reconstructing a
+compound value from server-issued query pairs is unsupported (exploded objects
+may not retain the parameter name). Use the opt-out to trust those Link targets.
+Unconstrained compound queries and server-issued extra parameters are preserved.
+
 Header constraints apply to the final, case-insensitive header values, including
 custom-header and batch overrides. Violations use the existing Validation error
 class, including with `--json-errors`, and identify the parameter, supplied value

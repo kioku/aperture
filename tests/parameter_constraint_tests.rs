@@ -375,3 +375,285 @@ async fn batch_header_overlays_validate_in_both_execution_paths() {
     }
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn effective_link_queries_are_checked_before_dispatch() {
+    use aperture_cli::cache::models::PaginationStrategy;
+    use aperture_cli::pagination::execute_paginated;
+    for (query, disabled, accepted) in [
+        ("limit=500", false, false),
+        ("%6cimit=%35%30%30", false, false),
+        ("limit=500&limit=10", false, false),
+        ("limit=10&limit=500", false, false),
+        ("limit=10&limit=20&cursor=a%2Bb&cursor=c", false, true),
+        ("limit=500", true, true),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::query_param("limit", "10"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header(
+                        "Link",
+                        format!("<{}/items?{query}>; rel=\"next\"", server.uri()),
+                    )
+                    .set_body_json(json!({"items":[{"id":1}]})),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items":[{"id":2}]})))
+            .with_priority(10)
+            .mount(&server)
+            .await;
+        let mut spec = SpecTransformer::new()
+            .transform("constraints", &source())
+            .unwrap();
+        spec.commands[0].pagination.strategy = PaginationStrategy::LinkHeader;
+        let mut output = Vec::new();
+        let result = execute_paginated(
+            &spec,
+            call("10", "aa"),
+            ExecutionContext {
+                base_url: Some(server.uri()),
+                auto_paginate: true,
+                no_validate_parameters: disabled,
+                ..Default::default()
+            },
+            &mut output,
+        )
+        .await;
+        assert_eq!(result.is_ok(), accepted, "{query}: {result:?}");
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), if accepted { 2 } else { 1 }, "{query}");
+        assert_eq!(
+            output
+                .split(|&b| b == b'\n')
+                .filter(|line| !line.is_empty())
+                .count(),
+            if accepted { 2 } else { 1 }
+        );
+        if accepted {
+            assert_eq!(requests[1].url.query(), Some(query));
+        } else {
+            assert_eq!(result.unwrap_err().to_json().error_type, "Validation");
+        }
+    }
+}
+
+#[tokio::test]
+async fn recognized_query_secrets_never_enter_sdk_errors() {
+    for name in [
+        "access_token",
+        "API_KEY",
+        "client_secret",
+        "password",
+        "signature",
+        "session_id",
+    ] {
+        let server = MockServer::start().await;
+        let mut spec = SpecTransformer::new()
+            .transform("constraints", &source())
+            .unwrap();
+        spec.commands[0].parameters[0].name = name.into();
+        spec.commands[0].parameters[0].schema =
+            Some(json!({"type":"string","maxLength":1}).to_string());
+        for (dry_run, link) in [(false, false), (false, true), (true, false), (true, true)] {
+            let mut invocation = call("10", "aa");
+            invocation.query_params.clear();
+            if link {
+                invocation.pagination_url = Some(
+                    format!("{}/items?{}=syntheticQuerySecret291", server.uri(), name)
+                        .parse()
+                        .unwrap(),
+                );
+            } else {
+                invocation
+                    .query_params
+                    .insert(name.into(), "syntheticQuerySecret291".into());
+            }
+            let error = execute(
+                &spec,
+                invocation,
+                ExecutionContext {
+                    base_url: Some(server.uri()),
+                    dry_run,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+            let rendered = format!(
+                "{error}\n{error:?}\n{}",
+                serde_json::to_string(&error.to_json()).unwrap()
+            );
+            assert!(!rendered.contains("syntheticQuerySecret291"), "{rendered}");
+            assert_eq!(error.to_json().error_type, "Validation");
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn link_validation_uses_effective_not_stale_query_in_dry_and_live_calls() {
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let spec = SpecTransformer::new()
+        .transform("constraints", &source())
+        .unwrap();
+    for dry_run in [false, true] {
+        for (original, target, accepted) in [("500", "10", true), ("10", "500", false)] {
+            let mut invocation = call(original, "aa");
+            invocation.pagination_url = Some(
+                format!("{}/items?limit={target}", server.uri())
+                    .parse()
+                    .unwrap(),
+            );
+            let result = execute(
+                &spec,
+                invocation,
+                ExecutionContext {
+                    base_url: Some(server.uri()),
+                    dry_run,
+                    ..Default::default()
+                },
+            )
+            .await;
+            assert_eq!(result.is_ok(), accepted, "{result:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn serialized_compound_properties_cannot_bypass_scalar_constraints() {
+    let server = MockServer::start().await;
+    let mut spec = SpecTransformer::new()
+        .transform("constraints", &source())
+        .unwrap();
+    let mut object = spec.commands[0].parameters[0].clone();
+    object.name = "filter".into();
+    object.schema_type = Some("object".into());
+    object.schema =
+        Some(json!({"type":"object","additionalProperties":{"type":"integer"}}).to_string());
+    spec.commands[0].parameters.push(object);
+    for dry_run in [false, true] {
+        let mut invocation = call("10", "aa");
+        invocation
+            .query_params
+            .insert("filter".into(), r#"{"limit":500}"#.into());
+        let error = execute(
+            &spec,
+            invocation,
+            ExecutionContext {
+                base_url: Some(server.uri()),
+                dry_run,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("maximum 50"), "{error}");
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn compound_enum_links_fail_closed_without_guessing_serialization() {
+    let server = MockServer::start().await;
+    let mut spec = SpecTransformer::new()
+        .transform("constraints", &source())
+        .unwrap();
+    let parameter = &mut spec.commands[0].parameters[0];
+    parameter.schema_type = Some("array".into());
+    parameter.schema =
+        Some(json!({"type":"array","items":{"type":"integer"},"enum":[[1,2]]}).to_string());
+    for (link, disabled, accepted) in [
+        (false, false, true),
+        (true, false, false),
+        (true, true, true),
+    ] {
+        let mut invocation = call("[1,2]", "aa");
+        if link {
+            invocation.pagination_url = Some(
+                format!("{}/items?limit=1&limit=2", server.uri())
+                    .parse()
+                    .unwrap(),
+            );
+        }
+        let result = execute(
+            &spec,
+            invocation,
+            ExecutionContext {
+                base_url: Some(server.uri()),
+                dry_run: true,
+                no_validate_parameters: disabled,
+                ..Default::default()
+            },
+        )
+        .await;
+        assert_eq!(result.is_ok(), accepted, "{result:?}");
+        if !accepted {
+            assert!(result.unwrap_err().to_string().contains("compound enum"));
+        }
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn anonymous_query_secret_errors_are_private_in_cli_and_batch() {
+    let server = MockServer::start().await;
+    let temp = tempfile::tempdir().unwrap();
+    let mut api = serde_json::to_value(source()).unwrap();
+    api["servers"] = json!([{"url":server.uri()}]);
+    api["paths"]["/items"]["get"]["parameters"][0] =
+        json!({"name":"access_token","in":"query","schema":{"type":"string","maxLength":1}});
+    let path = temp.path().join("private.json");
+    std::fs::write(&path, api.to_string()).unwrap();
+    aperture_cmd()
+        .env("APERTURE_CONFIG_DIR", temp.path())
+        .args(["config", "add", "private", path.to_str().unwrap()])
+        .assert()
+        .success();
+    let batch = temp.path().join("batch.json");
+    std::fs::write(&batch, json!({"operations":[{"args":["items","list-items","--access-token","syntheticQuerySecret291"]}]}).to_string()).unwrap();
+    for dry_run in [false, true] {
+        for batched in [false, true] {
+            let mut cmd = aperture_cmd();
+            cmd.env("APERTURE_CONFIG_DIR", temp.path()).args([
+                "--json-errors",
+                "api",
+                "private",
+                "--no-proxy",
+                "--retry",
+                "0",
+            ]);
+            if dry_run {
+                cmd.arg("--dry-run");
+            }
+            if batched {
+                cmd.args(["--batch-file", batch.to_str().unwrap()]);
+            } else {
+                cmd.args([
+                    "items",
+                    "list-items",
+                    "--access-token",
+                    "syntheticQuerySecret291",
+                ]);
+            }
+            let output = cmd.output().unwrap();
+            assert!(!output.status.success());
+            let rendered = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!rendered.contains("syntheticQuerySecret291"), "{rendered}");
+            assert!(rendered.contains("Validation"), "{rendered}");
+        }
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
