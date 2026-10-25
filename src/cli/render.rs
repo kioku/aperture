@@ -266,8 +266,7 @@ pub fn render_examples(api_name: &str, operation: &CachedCommand) -> Result<(), 
 
 /// Core formatting logic shared by `render_result` and `render_result_to_string`.
 fn render_json_output(processed_text: &str, capture_output: bool) -> Result<Option<String>, Error> {
-    let output = serde_json::from_str::<Value>(processed_text)
-        .ok()
+    let output = crate::response_json::parse_optional(processed_text)?
         .and_then(|json_value| serde_json::to_string_pretty(&json_value).ok())
         .unwrap_or_else(|| processed_text.to_string());
 
@@ -280,8 +279,7 @@ fn render_json_output(processed_text: &str, capture_output: bool) -> Result<Opti
 }
 
 fn render_yaml_output(processed_text: &str, capture_output: bool) -> Result<Option<String>, Error> {
-    let output = serde_json::from_str::<Value>(processed_text)
-        .ok()
+    let output = crate::response_json::parse_optional(processed_text)?
         .and_then(|json_value| serde_yaml::to_string(&json_value).ok())
         .unwrap_or_else(|| processed_text.to_string());
 
@@ -297,7 +295,7 @@ fn render_table_output(
     processed_text: &str,
     capture_output: bool,
 ) -> Result<Option<String>, Error> {
-    let Ok(json_value) = serde_json::from_str::<Value>(processed_text) else {
+    let Some(json_value) = crate::response_json::parse_optional(processed_text)? else {
         return output_or_capture(processed_text, capture_output);
     };
 

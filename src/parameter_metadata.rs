@@ -1,4 +1,4 @@
-//! Display-only metadata shared by generated help and capability manifests.
+//! Scalar schema metadata shared by help, capability manifests and validation.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};

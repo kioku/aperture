@@ -683,6 +683,11 @@ async fn send_request(
         );
     } else {
         let response_text = String::from_utf8_lossy(&response_bytes);
+        // Reject ambiguous success bodies before even trace diagnostics can
+        // expose their contents, as well as before caching or rendering.
+        if status.is_success() {
+            crate::response_json::parse_optional(&response_text)?;
+        }
         logging::log_operation_response(
             status.as_u16(),
             duration_ms,
@@ -1629,6 +1634,7 @@ async fn cached_execution_result(
     diagnostics_sensitive: bool,
 ) -> Result<Option<ExecutionResult>, Error> {
     if let Some(cached_response) = check_cache(cache_context, max_response_bytes).await? {
+        crate::response_json::parse_optional(&cached_response.body)?;
         return Ok(Some(ExecutionResult::Cached {
             body: cached_response.body,
             status: cached_response.status_code,
@@ -2006,9 +2012,13 @@ fn validate_operation_call_body(
 fn find_validated_operation<'a>(
     spec: &'a CachedSpec,
     call: &crate::invocation::OperationCall,
+    no_validate_parameters: bool,
 ) -> Result<&'a CachedCommand, Error> {
     let operation = find_operation_by_id(spec, &call.operation_id)?;
     validate_operation_call_body(operation, call.body.as_ref())?;
+    if !no_validate_parameters {
+        crate::parameter_validation::validate(operation, call)?;
+    }
     Ok(operation)
 }
 
@@ -2050,7 +2060,7 @@ fn prepare_request<'a>(
     ctx: &'a crate::invocation::ExecutionContext,
     custom_headers: Option<Vec<(HeaderName, HeaderValue)>>,
 ) -> Result<PreparedRequest<'a>, Error> {
-    let operation = find_validated_operation(spec, &call)?;
+    let operation = find_validated_operation(spec, &call, ctx.no_validate_parameters)?;
     let url = pagination_request_url(spec, &call, ctx)?.to_string();
     let pagination = ctx.auto_paginate || call.pagination_url.is_some();
     let (client, proxy_diagnostics) = prepare_transport(ctx, pagination)?;
@@ -2058,11 +2068,9 @@ fn prepare_request<'a>(
         spec,
         operation,
         &call.header_params,
-        if custom_headers.is_some() {
-            &[]
-        } else {
-            &call.custom_headers
-        },
+        custom_headers
+            .as_ref()
+            .map_or(call.custom_headers.as_slice(), |_| &[]),
         call.body.is_some(),
         &spec.name,
         ctx.global_config.as_ref(),
@@ -2507,8 +2515,8 @@ fn apply_custom_headers(headers: &mut HeaderMap, custom_headers: &[String]) -> R
 /// - The JQ filter expression is invalid
 /// - The filter execution fails
 pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
-    let json_value: Value = serde_json::from_str(response_text)
-        .map_err(|e| Error::jq_filter_error(filter, format!("Response is not valid JSON: {e}")))?;
+    let json_value = crate::response_json::parse_optional(response_text)?
+        .ok_or_else(|| Error::jq_filter_error(filter, "Response is not valid JSON"))?;
 
     apply_jq_filter_value(json_value, filter)
 }

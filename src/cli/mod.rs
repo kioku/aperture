@@ -55,6 +55,10 @@ pub struct ExecutionFlags {
     #[arg(long, help = "Show request details without executing")]
     pub dry_run: bool,
 
+    /// Skip declared path, query and header parameter constraint validation
+    #[arg(long)]
+    pub no_validate_parameters: bool,
+
     /// Set the Idempotency-Key header for safe retries
     #[arg(long, value_name = "KEY", help = "Set idempotency key header")]
     pub idempotency_key: Option<String>,

@@ -720,3 +720,30 @@ Shortcut execution (`run`, or its legacy alias `exec`) writes resolution
 information to stderr. Stdout contains only requested operation data, so JSON
 can be piped directly to a parser. `--quiet` and `--json-errors` suppress the
 resolution diagnostic.
+
+### Declared parameter constraints
+
+Aperture validates supplied path, query and header parameters before sending a
+request, including in `--dry-run` and batch execution. Validation enforces typed `enum`
+membership, `minimum`/`maximum` (including OpenAPI 3.0 exclusive bounds), Unicode
+character `minLength`/`maxLength`, and unanchored, Unicode-aware ECMAScript
+`pattern` matching (Unicode mode, without case-insensitive or multiline flags).
+Referenced schemas and annotation-only single-branch `allOf` wrappers are supported.
+Request bodies and array-item/object-property constraints are not covered by this
+parameter validator; top-level array/object enums use JSON values.
+Unconstrained parameters retain their existing behavior.
+
+Violations use the existing Validation error class, including with `--json-errors`,
+and identify the parameter, supplied value and constraint. If your server intentionally
+accepts values outside its specification (for example, it clamps page sizes), opt out
+for that invocation:
+
+```sh
+aperture api my-api --no-validate-parameters items list-items --limit 500
+aperture api my-api --dry-run --no-validate-parameters items list-items --limit 500
+aperture api my-api --no-validate-parameters --batch-file requests.json
+```
+
+The opt-out skips only declared parameter constraints, not URL, header or request-body
+safety checks. SDK callers can set `ExecutionContext::no_validate_parameters`;
+batch SDK callers can use `BatchProcessor::with_no_validate_parameters(true)`.

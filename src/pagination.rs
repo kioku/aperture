@@ -153,8 +153,7 @@ async fn process_paginated_page<W: std::io::Write + ?Sized>(
         return Ok(None);
     };
 
-    let json: Value = serde_json::from_str(&body)
-        .map_err(|e| Error::invalid_json_body(format!("Page response is not valid JSON: {e}")))?;
+    let json = crate::response_json::parse(&body)?;
 
     let (page_len, output_open) = emit_items(&json, writer)?;
     if !output_open {

@@ -40,6 +40,7 @@ const API_EXECUTION_FLAGS: &[&str] = &[
     "--help",
     "--describe-json",
     "--dry-run",
+    "--no-validate-parameters",
     "--idempotency-key",
     "--proxy",
     "--no-proxy",

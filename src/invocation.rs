@@ -84,6 +84,9 @@ pub struct ExecutionContext {
     /// If true, show the request that would be made without executing it.
     pub dry_run: bool,
 
+    /// Trust the server instead of enforcing declared parameter constraints.
+    pub no_validate_parameters: bool,
+
     /// Optional idempotency key for safe retries.
     pub idempotency_key: Option<String>,
 
