@@ -21,6 +21,7 @@ pub mod pagination;
 mod parameter_metadata;
 pub mod resilience;
 pub mod response_cache;
+pub mod response_json;
 pub mod response_limit;
 pub mod search;
 pub mod shortcuts;

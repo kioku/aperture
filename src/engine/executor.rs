@@ -1629,6 +1629,7 @@ async fn cached_execution_result(
     diagnostics_sensitive: bool,
 ) -> Result<Option<ExecutionResult>, Error> {
     if let Some(cached_response) = check_cache(cache_context, max_response_bytes).await? {
+        crate::response_json::parse_optional(&cached_response.body)?;
         return Ok(Some(ExecutionResult::Cached {
             body: cached_response.body,
             status: cached_response.status_code,
@@ -1728,6 +1729,7 @@ async fn finalize_execution_result(
     }
 
     let response_text = String::from_utf8_lossy(&response_bytes).into_owned();
+    crate::response_json::parse_optional(&response_text)?;
     store_in_cache(
         cache_context,
         &response_text,
@@ -2507,8 +2509,8 @@ fn apply_custom_headers(headers: &mut HeaderMap, custom_headers: &[String]) -> R
 /// - The JQ filter expression is invalid
 /// - The filter execution fails
 pub fn apply_jq_filter(response_text: &str, filter: &str) -> Result<String, Error> {
-    let json_value: Value = serde_json::from_str(response_text)
-        .map_err(|e| Error::jq_filter_error(filter, format!("Response is not valid JSON: {e}")))?;
+    let json_value = crate::response_json::parse_optional(response_text)?
+        .ok_or_else(|| Error::jq_filter_error(filter, "Response is not valid JSON"))?;
 
     apply_jq_filter_value(json_value, filter)
 }
