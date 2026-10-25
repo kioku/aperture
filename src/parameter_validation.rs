@@ -14,7 +14,6 @@ pub fn validate(operation: &CachedCommand, call: &OperationCall) -> Result<(), E
         let values = match parameter.location.as_str() {
             "path" => &call.path_params,
             "query" => &call.query_params,
-            "header" => &call.header_params,
             _ => continue,
         };
         let Some(value) = values.get(&parameter.name) else {
@@ -22,6 +21,28 @@ pub fn validate(operation: &CachedCommand, call: &OperationCall) -> Result<(), E
         };
         let metadata = ParameterMetadata::from_schema(parameter.schema.as_deref());
         validate_value(&parameter.name, value, &metadata)?;
+    }
+    Ok(())
+}
+
+/// Validate the actual wire headers after custom, security and batch overlays.
+/// `HeaderMap` supplies HTTP's case-insensitive lookup; validating the input map
+/// instead would miss overrides and could reject values that are never sent.
+pub fn validate_headers(
+    operation: &CachedCommand,
+    headers: &reqwest::header::HeaderMap,
+) -> Result<(), Error> {
+    for parameter in &operation.parameters {
+        if parameter.location != "header" {
+            continue;
+        }
+        let Some(value) = headers.get(&parameter.name) else {
+            continue;
+        };
+        let raw = std::str::from_utf8(value.as_bytes())
+            .map_err(|_| Error::validation_error("Declared header parameter is not valid UTF-8"))?;
+        let metadata = ParameterMetadata::from_schema(parameter.schema.as_deref());
+        validate_value(&parameter.name, raw, &metadata)?;
     }
     Ok(())
 }

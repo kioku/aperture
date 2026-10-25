@@ -733,8 +733,11 @@ Request bodies and array-item/object-property constraints are not covered by thi
 parameter validator; top-level array/object enums use JSON values.
 Unconstrained parameters retain their existing behavior.
 
-Violations use the existing Validation error class, including with `--json-errors`,
-and identify the parameter, supplied value and constraint. If your server intentionally
+Header constraints apply to the final, case-insensitive header values, including
+custom-header and batch overrides. Violations use the existing Validation error
+class, including with `--json-errors`, and identify the parameter, supplied value
+and constraint. Sensitive/authenticated invocations instead omit diagnostic inputs,
+following the existing credential-redaction policy. If your server intentionally
 accepts values outside its specification (for example, it clamps page sizes), opt out
 for that invocation:
 

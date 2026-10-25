@@ -932,7 +932,7 @@ fn accepted_retry_socket_waits_for_request_bytes() {
     writer.join().unwrap();
 }
 
-/// The executor must reject constraints before URL/transport/auth/cache/dry-run work.
+/// The executor must reject constraints before network/cache/dry-run results.
 #[tokio::test]
 async fn declared_parameter_constraints_fail_before_execution() {
     use serde_json::json;
@@ -980,8 +980,13 @@ async fn assert_parameter_rejected(
     dry_run: bool,
 ) {
     let mut spec = test_spec();
-    // An unusable URL proves validation precedes even request preparation.
-    spec.base_url = Some("not a URL".into());
+    // URL parameters are checked before URL preparation; header parameters use
+    // the final case-insensitive wire map after security/custom overlays.
+    spec.base_url = Some(if location == "header" {
+        "http://127.0.0.1:1".into()
+    } else {
+        "not a URL".into()
+    });
     let parameter = &mut spec.commands[0].parameters[0];
     parameter.location = location.into();
     parameter.schema = Some(schema.to_string());
