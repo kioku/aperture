@@ -683,6 +683,11 @@ async fn send_request(
         );
     } else {
         let response_text = String::from_utf8_lossy(&response_bytes);
+        // Reject ambiguous success bodies before even trace diagnostics can
+        // expose their contents, as well as before caching or rendering.
+        if status.is_success() {
+            crate::response_json::parse_optional(&response_text)?;
+        }
         logging::log_operation_response(
             status.as_u16(),
             duration_ms,
@@ -1729,7 +1734,6 @@ async fn finalize_execution_result(
     }
 
     let response_text = String::from_utf8_lossy(&response_bytes).into_owned();
-    crate::response_json::parse_optional(&response_text)?;
     store_in_cache(
         cache_context,
         &response_text,

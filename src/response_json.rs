@@ -1,6 +1,6 @@
 //! Decode response JSON without ever collapsing duplicate decoded object names.
 //!
-//! Text responses retain their historical fallback. Duplicate-key failures never
+//! Text responses retain their historical fallback. Rejection diagnostics never
 //! include keys, values, or serde diagnostics, which may contain private data.
 use crate::error::Error;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
@@ -74,7 +74,8 @@ impl<'de> Visitor<'de> for StrictVisitor {
 /// Parse JSON when present, preserving non-JSON text fallback.
 ///
 /// # Errors
-/// Returns a static, input-free error if an object repeats a decoded name.
+/// Returns input-free diagnostics for duplicates or JSON that cannot be safely
+/// decoded (for example, excessive nesting or out-of-range numbers).
 pub fn parse_optional(source: &str) -> Result<Option<Value>, Error> {
     match serde_json::from_str::<StrictValue>(source) {
         Ok(StrictValue(value)) => Ok(Some(value)),
@@ -83,6 +84,13 @@ pub fn parse_optional(source: &str) -> Result<Option<Value>, Error> {
         Err(error) if error.is_data() => Err(Error::invalid_json_body(
             "Response contains a duplicate JSON object key (response omitted)",
         )),
+        // IgnoredAny checks syntax without materializing a Value: it skips
+        // numbers without converting to f64 and traverses containers iteratively.
+        // Valid JSON must not become unchecked text merely because Value hit a
+        // numeric/depth limit before reaching a later duplicate name.
+        Err(_) if serde_json::from_str::<de::IgnoredAny>(source).is_ok() => Err(
+            Error::invalid_json_body("JSON response cannot be safely decoded (response omitted)"),
+        ),
         Err(_) => Ok(None),
     }
 }
@@ -112,6 +120,28 @@ mod tests {
     }
 
     #[test]
+    fn decoder_limits_fail_closed_before_later_duplicates() {
+        for source in [
+            r#"{"n":1e999,"a":1,"a":2}"#.to_string(),
+            format!("{}{{\"a\":1,\"a\":2}}{}", "[".repeat(130), "]".repeat(130)),
+            format!(
+                "{{\"deep\":{}0{},\"a\":1,\"a\":2}}",
+                "[".repeat(130),
+                "]".repeat(130)
+            ),
+            format!(
+                "{{\"n\":1e999,\"deep\":{}0{},\"a\":1,\"a\":2}}",
+                "[".repeat(130),
+                "]".repeat(130)
+            ),
+            "1e999".to_string(),
+            format!("{}0{}", "[".repeat(130), "]".repeat(130)),
+        ] {
+            assert!(parse_optional(&source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
     fn valid_json_and_text_are_preserved() {
         for source in [
             r#"{"left":{"a":1},"right":{"a":2}}"#,
@@ -123,6 +153,7 @@ mod tests {
             );
         }
         assert!(parse_optional("plain text").unwrap().is_none());
+        assert!(parse_optional("[INFO] plain text").unwrap().is_none());
         assert!(parse_optional("{}").unwrap().is_some());
         assert!(parse("{} trailing").is_err());
     }

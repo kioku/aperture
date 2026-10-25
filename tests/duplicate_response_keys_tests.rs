@@ -81,6 +81,76 @@ async fn wire_duplicates_fail_in_every_output_format() {
 }
 
 #[tokio::test]
+async fn rejected_bodies_are_omitted_even_at_trace_verbosity() {
+    let (server, dir) = fixture(r#"{"private296":"secret296","private296":"secret296"}"#).await;
+    let output = cli(
+        dir.path(),
+        &[
+            "-vv",
+            "api",
+            "probe",
+            "--no-proxy",
+            "--retry",
+            "3",
+            "probe",
+            "read-probe",
+        ],
+    );
+    assert_rejected(&output);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("secret296"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn decoder_limits_cannot_hide_later_duplicates() {
+    for body in [
+        r#"{"n":1e999,"private296":false,"private296":true}"#.to_string(),
+        format!(
+            "{}{{\"private296\":false,\"private296\":true}}{}",
+            "[".repeat(130),
+            "]".repeat(130)
+        ),
+        format!(
+            "{{\"deep\":{}0{},\"private296\":false,\"private296\":true}}",
+            "[".repeat(130),
+            "]".repeat(130)
+        ),
+    ] {
+        let (_server, dir) = fixture(&body).await;
+        for format in ["json", "yaml", "table"] {
+            let output = cli(
+                dir.path(),
+                &[
+                    "api",
+                    "probe",
+                    "--no-proxy",
+                    "--retry",
+                    "0",
+                    "--cache",
+                    "--format",
+                    format,
+                    "probe",
+                    "read-probe",
+                ],
+            );
+            assert!(!output.status.success(), "{output:?}");
+            assert!(output.stdout.is_empty(), "{output:?}");
+            let diagnostic = String::from_utf8_lossy(&output.stderr);
+            assert!(diagnostic.contains("response omitted"), "{output:?}");
+            assert!(!diagnostic.contains("private296"), "{output:?}");
+        }
+        let cache_dir = dir.path().join("config/.cache/responses");
+        if cache_dir.exists() {
+            assert!(!std::fs::read_dir(cache_dir).unwrap().any(|entry| entry
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "json")));
+        }
+    }
+}
+
+#[tokio::test]
 async fn separate_objects_can_repeat_names() {
     let (_server, dir) = fixture(r#"{"left":{"ready":false},"right":{"ready":true}}"#).await;
     let output = cli(
